@@ -195,6 +195,51 @@ async def test_projection_filters_internal_history_and_preserves_trusted_attribu
     assert body["active_turn_id"] is None
 
 
+@pytest.mark.parametrize(("entry_channel", "input_id", "turn_id"), [
+    ("weixin", "input:1234", None),
+    ("webui", "user:web-turn", "web-turn"),
+])
+async def test_channel_thread_replays_recorded_tool_activity(gateway, entry_channel, input_id, turn_id):
+    sessions, _, get = gateway
+    key = "weixin:with-tools"
+    session = sessions.get_or_create(key)
+    session.add_message("user", "Check the workspace", entry_channel=entry_channel, input_id=input_id, webui_turn_id=turn_id)
+    session.add_message("assistant", "private intermediate text", response_input_ids=[input_id], tool_calls=[
+        {"id": call_id, "type": "function", "function": {"name": name, "arguments": '{"secret":"private arguments"}'}}
+        for call_id, name in [("call-1", "exec"), ("call-2", "read_file"), ("call-3", "edit_file")]
+    ])
+    session.add_message("tool", "private output", tool_call_id="call-1", name="exec")
+    session.add_message("tool", "private file contents", tool_call_id="call-2", name="read_file")
+    session.add_message("tool", "Outcome unknown", tool_call_id="call-3", name="edit_file", _recovery_interrupted=True)
+    session.add_message("assistant", "Checked the workspace", response_input_ids=[input_id])
+    sessions.save(session)
+
+    response = await get(_session_path(key))
+    assert response.status_code == 200
+    assert b"private" not in response.body
+    body = json.loads(response.body)
+    user, activity, reply = body["events"]
+    assert user["text"] == "Check the workspace"
+    assert activity["event"] == "message" and activity["kind"] == "tool_hint"
+    assert activity["text"] == ""
+    assert activity["tool_events"] == [
+        {"name": "exec", "call_id": "call-1", "phase": "end"},
+        {"name": "read_file", "call_id": "call-2", "phase": "end"},
+    ]
+    assert activity.get("turn_id") == turn_id
+    if turn_id:
+        assert activity["turn_phase"] == "activity"
+    assert reply["text"] == "Checked the workspace"
+    assert body["completed_turn_ids"] == ([turn_id] if turn_id else [])
+
+    latest = json.loads((await get(_session_path(key, limit=1))).body)
+    older = json.loads((await get(_session_path(key, limit=1, before=latest["page"]["before_cursor"]))).body)
+    assert older["events"] == [activity]
+    assert older["completed_turn_ids"] == []
+    prompts = json.loads((await get(_session_path(key, "/webui-thread/prompts"))).body)["prompts"]
+    assert [prompt["answerPreview"] for prompt in prompts] == [reply["text"]]
+
+
 async def test_latest_etag_tracks_active_turn_and_new_canonical_reply(gateway, monkeypatch):
     sessions, _, get = gateway
     key = "telegram:active"

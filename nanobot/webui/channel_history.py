@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from collections import deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
@@ -37,11 +37,14 @@ from nanobot.webui.transcript import (
     rewrite_local_markdown_images,
 )
 
+_PROJECTION_VERSION = 2
 _DEFAULT_PAGE_LIMIT = 160
 _MAX_PAGE_LIMIT = 1000
 _MAX_PAGE_TEXT_CHARS = 4 * 1024 * 1024
 _MAX_PROMPTS = 1000
-_INPUT_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,256}")
+_MAX_TOOL_CALLS_PER_ROUND = 64
+_HISTORY_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,256}")
+_TOOL_NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
 _WEB_TURN_RE = re.compile(r"user:([A-Za-z0-9._:-]{1,128})")
 _IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:[/~]|[A-Za-z]:[\\/])[^\]\n]+\]\s*$")
 
@@ -109,7 +112,9 @@ def read_channel_history(
             return None
         version = sessions.read_session_version(key)
         assert version is not None  # Same committed snapshot as the visibility check.
-        digest = hashlib.sha256(json.dumps([key, version, variant], sort_keys=True).encode()).hexdigest()
+        # Invalidate cached projections after a display change even if the history is unchanged.
+        identity = [_PROJECTION_VERSION, key, version, variant]
+        digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         if not_modified(digest):
             return ChannelHistoryResult(digest)
         data = sessions.project_session_messages(key, lambda header, messages: project(header["generation"], messages))
@@ -152,8 +157,8 @@ class ChannelHistoryMedia:
             return text
 
 
-def _input_id(raw: object) -> str | None:
-    return raw if isinstance(raw, str) and _INPUT_ID_RE.fullmatch(raw) else None
+def _history_id(raw: object) -> str | None:
+    return raw if isinstance(raw, str) and _HISTORY_ID_RE.fullmatch(raw) else None
 
 
 def _web_turn(input_id: str) -> str | None:
@@ -176,57 +181,90 @@ def _text(content: object) -> str:
     return "\n".join(parts)
 
 
-def _channel_record(
-    key: str, chat_id: str, generation: str, index: int, message: dict[str, Any],
-) -> dict[str, Any] | None:
-    role = message.get("role")
-    if role not in ("user", "assistant") or message.get("_command") or is_hidden_history_message(message):
-        return None
-    if message.get("injected_event") == "subagent_result" or (role == "assistant" and message.get("tool_calls")):
-        return None
+def _recorded_tool_events(calls: object, finished_tools: Collection[str]) -> list[dict[str, str]]:
+    if not finished_tools or not isinstance(calls, list):
+        return []
+    events: list[dict[str, str]] = []
+    for value in cast(list[object], calls)[:_MAX_TOOL_CALLS_PER_ROUND]:
+        if not isinstance(value, dict):
+            continue
+        call = cast(dict[str, object], value)
+        call_id = _history_id(call.get("id"))
+        function = call.get("function")
+        if call_id is None or call_id not in finished_tools or not isinstance(function, dict):
+            continue
+        name = cast(dict[str, object], function).get("name")
+        if isinstance(name, str) and _TOOL_NAME_RE.fullmatch(name):
+            # A result was recorded, but canonical history does not retain its status.
+            # Never replay arguments, outputs, or provider-specific fields.
+            events.append({"name": name, "call_id": call_id, "phase": "end"})
+    return events
+
+
+def _annotate_assistant(row: dict[str, Any], message: dict[str, Any]) -> None:
+    if isinstance(refs := message.get("response_input_ids"), list):
+        input_ids = list(dict.fromkeys(
+            input_id for value in cast(list[object], refs) if (input_id := _history_id(value)) is not None
+        ))
+        row["response_input_ids"] = input_ids
+        web_turns = [turn for ref in input_ids if (turn := _web_turn(ref)) is not None]
+        if len(web_turns) == 1:
+            row.update(turn_id=web_turns[0], turn_phase="activity" if row.get("kind") == "tool_hint" else "answer")
+        if web_turns and len(web_turns) == len(input_ids):
+            row["entry_channel"] = "WebUI"
+    if isinstance(timestamp := message.get("timestamp"), str):
+        try:
+            row["created_at_ms"] = int(datetime.fromisoformat(timestamp).timestamp() * 1000)
+        except (ValueError, OverflowError, OSError):
+            pass
+
+
+def _channel_text_record(key: str, role: str, message: dict[str, Any]) -> dict[str, Any] | None:
     public = public_history_message(message)
     text = _text(public.get("content"))
     # Legacy multimodal inputs can contain local-path placeholders; attachments
     # below are projected independently through the workspace/media policy.
     text = "\n".join(line for line in text.split("\n") if not _IMAGE_BREADCRUMB_RE.fullmatch(line))
-    if role == "assistant":
-        text = _sanitize_assistant_replay_text(strip_think(text))
     paths = public.get("media")
     fields = {"role": role, "content": text, "timestamp": public.get("timestamp"), "media": [
         value for value in cast(list[object], paths) if isinstance(value, str) and value
     ] if isinstance(paths, list) else []}
-    if role == "user":
-        input_id = _input_id(public.get("input_id"))
-        title = entry_channel_title(public.get("entry_channel"))
-        if input_id is not None:
-            fields["input_id"] = input_id
-            turn_id = _web_turn(input_id)
-            if title == "WebUI" and turn_id is not None and turn_id == public.get(INBOUND_META_TURN_ID):
-                fields[INBOUND_META_TURN_ID] = turn_id
-        row = _session_user_event(key, fields)
-        if row is not None and title is not None:
-            row["entry_channel"] = title
-    else:
-        refs = public.get("response_input_ids")
-        if isinstance(refs, list):
-            fields["response_input_ids"] = list(dict.fromkeys(
-                input_id for value in cast(list[object], refs) if (input_id := _input_id(value)) is not None
-            ))
+    if role == "assistant":
+        fields["content"] = _sanitize_assistant_replay_text(strip_think(text))
         fields["latency_ms"] = public.get("latency_ms")
-        row = _session_assistant_event(key, fields)
-        if row is not None:
-            refs = row.get("response_input_ids", ())
-            web_turns = [turn for ref in refs if (turn := _web_turn(ref)) is not None]
-            if len(web_turns) == 1:
-                row.update(turn_id=web_turns[0], turn_phase="answer")
-            if web_turns and len(web_turns) == len(refs):
-                row["entry_channel"] = "WebUI"
-            if isinstance(timestamp := public.get("timestamp"), str):
-                try:
-                    row["created_at_ms"] = int(datetime.fromisoformat(timestamp).timestamp() * 1000)
-                except (ValueError, OverflowError, OSError):
-                    pass
+        return _session_assistant_event(key, fields)
+
+    input_id = _history_id(public.get("input_id"))
+    title = entry_channel_title(public.get("entry_channel"))
+    if input_id is not None:
+        fields["input_id"] = input_id
+        turn_id = _web_turn(input_id)
+        if title == "WebUI" and turn_id is not None and turn_id == public.get(INBOUND_META_TURN_ID):
+            fields[INBOUND_META_TURN_ID] = turn_id
+    row = _session_user_event(key, fields)
+    if row is not None and title is not None:
+        row["entry_channel"] = title
+    return row
+
+
+def _channel_record(
+    key: str, chat_id: str, generation: str, index: int, message: dict[str, Any],
+    *, finished_tools: Collection[str] = (),
+) -> dict[str, Any] | None:
+    role = message.get("role")
+    if role not in ("user", "assistant") or message.get("_command") or is_hidden_history_message(message):
+        return None
+    if message.get("injected_event") == "subagent_result":
+        return None
+    if role == "assistant" and (calls := message.get("tool_calls")):
+        if not (tools := _recorded_tool_events(calls, finished_tools)):
+            return None
+        row = {"event": "message", "kind": "tool_hint", "text": "", "tool_events": tools}
+    else:
+        row = _channel_text_record(key, role, message)
     if row is not None:
+        if role == "assistant":
+            _annotate_assistant(row, message)
         row["chat_id"] = chat_id
         row[_WEBUI_REPLAY_IDENTITY_KEY] = f"canonical:{key}:{generation}:{index}"
     return row
@@ -246,10 +284,24 @@ def build_channel_thread(
     selected: deque[tuple[int, dict[str, Any]]] = deque()
     text_chars = 0
     more_before = more_after = False
+    finished_tools: set[str] = set()
     for index, message in messages:
-        if page.before is not None and index >= page.before and more_after:
+        # In reverse order, the results of a round arrive just before the assistant's calls.
+        # Collect them even outside the visible page, since its cursor can split the round.
+        if message.get("role") == "tool":
+            if (
+                len(finished_tools) < _MAX_TOOL_CALLS_PER_ROUND
+                and (call_id := _history_id(message.get("tool_call_id"))) is not None
+                and not message.get("_recovery_interrupted")
+                and not is_hidden_history_message(message)
+            ):
+                finished_tools.add(call_id)
             continue
-        row = _channel_record(key, chat_id, generation, index, message)
+        if page.before is not None and index >= page.before and more_after:
+            finished_tools.clear()
+            continue
+        row = _channel_record(key, chat_id, generation, index, message, finished_tools=finished_tools)
+        finished_tools.clear()
         if row is None:
             continue
         if page.before is not None and index >= page.before:
@@ -279,10 +331,10 @@ def build_channel_thread(
             row, augment_user_media=media.attachments, augment_assistant_media=media.attachments,
             augment_assistant_text=media.assistant_text,
         )
-        assert event is not None  # Only input and final assistant records are selected.
+        assert event is not None  # Only input, tool activity, and final assistant records are selected.
         if title := row.get("entry_channel"):
             event["entry_channel"] = title
-        if event["event"] == "message":
+        if event["event"] == "message" and "kind" not in event:
             for ref in event.get("response_input_ids", ()):
                 if (turn := _web_turn(ref)) is not None and turn != active_turn_id:
                     completed[turn] = None
