@@ -35,6 +35,7 @@ from nanobot import optional_features as feature_support  # noqa: E402
 from nanobot.cli import terminal as cli_terminal  # noqa: E402
 from nanobot.cli.agent import agent  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
+from nanobot.cli.gateway_runtime import _run_gateway  # noqa: E402
 from nanobot.cli.log_control import _set_nanobot_logs  # noqa: E402
 from nanobot.cli.process_identity import set_cli_process_identity  # noqa: E402
 from nanobot.cli.provider import provider_app  # noqa: E402
@@ -351,6 +352,7 @@ app.add_typer(
         console=console,
         log_handler_id=_log_handler_id,
         load_runtime_config=_load_runtime_config,
+        run_gateway=_run_gateway,
         validate_startup_config=_validate_gateway_startup,
         prepare_webui_bundle=lambda config, mode: _prepare_webui_bundle_for_gateway(
             config,

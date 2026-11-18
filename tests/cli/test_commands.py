@@ -144,7 +144,6 @@ class _EmptyGatewaySessionManager:
     def state(self):
         return SimpleNamespace(
             list_sessions=AsyncMock(return_value=[]),
-            recovery_candidates=AsyncMock(return_value=[]),
             migrate_history=AsyncMock(),
             record_delivery=AsyncMock(),
             aclose=AsyncMock(),
@@ -3643,10 +3642,8 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         _fake_run_local_trigger_queue,
     )
 
-    from nanobot.cli.gateway_runtime import _run_gateway
-
     with pytest.raises(typer.Exit) as exc_info:
-        _run_gateway(
+        cli_commands._run_gateway(
             config,
             health_server_enabled=False,
             unconfigured_provider_error=setup_error,

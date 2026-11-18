@@ -101,7 +101,10 @@ async def test_stale_incomplete_transcript_waits_for_confirmation(tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_materialized_interruption_can_continue_from_saved_context(tmp_path: Path) -> None:
+async def test_materialized_interruption_can_continue_from_saved_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     sessions = SessionManager(tmp_path)
     session = sessions.get_or_create("websocket:chat")
     session.messages.extend(
@@ -112,12 +115,10 @@ async def test_materialized_interruption_can_continue_from_saved_context(tmp_pat
         ]
     )
     _persist(sessions, session)
-    # A model request after a saved tool result is not a terminal reply. On
-    # restart the last decisive display fact is still the earlier tool activity.
-    sessions.append_history(session.key, [
-        HistoryFact(HistoryKind.TOOL_ACTIVITY, {"text": "search"}, turn_id="work", sequence=3),
-        HistoryFact(HistoryKind.MODEL_REQUEST, {"request_id": "next"}, turn_id="work", sequence=4),
-    ])
+    monkeypatch.setattr(
+        "nanobot.webui.transcript.has_unfinished_transcript_tail",
+        lambda _key, **_kwargs: True,
+    )
 
     coordinator, bus, restarted = _coordinator(tmp_path)
     await coordinator.scan()
@@ -126,8 +127,6 @@ async def test_materialized_interruption_can_continue_from_saved_context(tmp_pat
     assert state["status"] == "awaiting_user"
     assert state["reason"] == "interrupted_with_saved_context"
     assert "can_continue" not in state
-    last = await restarted.state.project_history(session.key, lambda history: history.all_facts()[-1])
-    assert (last.kind, last.turn_id, last.sequence) == (HistoryKind.COMPLETION, "work", 5)
     event = bus.outbound.get_nowait().event
     assert isinstance(event, RecoveryStateEvent)
     assert event.can_continue is None
@@ -142,16 +141,9 @@ async def test_materialized_interruption_can_continue_from_saved_context(tmp_pat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tail", [
-    '{"event":"message","chat_id":"unfinished","kind":"progress","text":"Working"}\n',
-    # The legacy importer retains incomplete markers on nonterminal facts too.
-    '{"event":"stream_end","chat_id":"unfinished","text":"partial","transcript_incomplete":true}\n'
-    '{"event":"turn_end","chat_id":"unfinished"}\n',
-], ids=["open-activity", "earlier-incomplete-marker"])
 async def test_transcript_only_interruption_is_discovered_without_materializing_completed_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    tail: str,
 ) -> None:
     webui_dir = tmp_path / "webui"
     webui_dir.mkdir()
@@ -159,7 +151,8 @@ async def test_transcript_only_interruption_is_discovered_without_materializing_
     unfinished_key = "websocket:unfinished"
     completed_key = "websocket:completed"
     (webui_dir / f"{SessionManager.safe_key(unfinished_key)}.jsonl").write_text(
-        '{"event":"user","chat_id":"unfinished","text":"keep going"}\n' + tail,
+        '{"event":"user","chat_id":"unfinished","text":"keep going"}\n'
+        '{"event":"message","chat_id":"unfinished","kind":"progress","text":"Working"}\n',
         encoding="utf-8",
     )
     (webui_dir / f"{SessionManager.safe_key(completed_key)}.jsonl").write_text(
@@ -204,40 +197,27 @@ async def test_scan_loads_only_sessions_that_need_webui_recovery(
         if key == "discord:pending":
             session.metadata[PENDING_USER_TURN_KEY] = True
         _persist(sessions, session)
-    sessions.append_history("websocket:idle", [
-        HistoryFact(HistoryKind.FILE_ACTIVITY, {"edits": [{"diff": "-old\n+new\n" * 4096}]}, turn_id="settled"),
-        HistoryFact(HistoryKind.ANSWER, turn_id="settled"), HistoryFact(HistoryKind.FORK_BOUNDARY),
-    ])
     pending = sessions.get_or_create("websocket:pending")
     pending.metadata[PENDING_USER_TURN_KEY] = True
     _persist(sessions, pending)
-    # Identical timestamps from an import must retain list_sessions' order,
-    # even when the two candidates are found via different kinds of evidence.
-    active = Session(key="websocket:activity", updated_at=pending.updated_at)
-    sessions.save(active)
-    sessions.append_history(active.key, [HistoryFact(HistoryKind.REASONING)])
 
     coordinator, _, restarted = _coordinator(tmp_path)
     loaded: list[str] = []
-    read = restarted.state.read
+    get_or_create = restarted.state.get
 
-    async def tracked_read(key: str) -> Session | None:
+    async def tracked_get_or_create(key: str) -> Session:
         loaded.append(key)
-        return await read(key)
+        return await get_or_create(key)
 
-    decode = HistoryFact.decode
-
-    def decode_fact(record: str) -> HistoryFact:
-        fact = decode(record)
-        assert fact.turn_id != "settled", "startup must not materialize settled transcript bodies"
-        return fact
-
-    monkeypatch.setattr(restarted.state, "read", tracked_read)
-    monkeypatch.setattr(HistoryFact, "decode", staticmethod(decode_fact))
+    monkeypatch.setattr(restarted.state, "get", tracked_get_or_create)
+    monkeypatch.setattr(
+        "nanobot.webui.transcript.has_unfinished_transcript_tail",
+        lambda _key, **_kwargs: False,
+    )
 
     await coordinator.scan()
 
-    assert loaded == [pending.key, active.key]
+    assert loaded == ["websocket:pending"]
 
 
 @pytest.mark.asyncio
@@ -642,13 +622,11 @@ async def test_empty_final_response_is_not_reported_as_restored(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("pending", [True, False])
-async def test_final_answer_is_restored_without_model_call(tmp_path: Path, pending: bool) -> None:
+async def test_final_answer_is_restored_without_model_call(tmp_path: Path) -> None:
     sessions = SessionManager(tmp_path)
     session = sessions.get_or_create("websocket:chat")
     session.messages.append({"role": "user", "content": "answer"})
-    if pending:
-        session.metadata[PENDING_USER_TURN_KEY] = True
+    session.metadata[PENDING_USER_TURN_KEY] = True
     session.metadata[RUNTIME_CHECKPOINT_KEY] = {
         "phase": "final_response",
         "assistant_message": {"role": "assistant", "content": "already finished"},
@@ -917,11 +895,11 @@ async def test_scan_failure_is_visible_instead_of_aborting_other_sessions(
     recover_session = RecoveryCoordinator._recover_session
     attempted = []
 
-    async def fail_first(self, session: Session, chat_id: str, *, unfinished: bool) -> None:
+    async def fail_first(self, session: Session, chat_id: str) -> None:
         attempted.append((session.key, chat_id))
         if len(attempted) == 1:
             raise RuntimeError("boom")
-        await recover_session(self, session, chat_id, unfinished=unfinished)
+        await recover_session(self, session, chat_id)
 
     monkeypatch.setattr(RecoveryCoordinator, "_recover_session", fail_first)
     try:

@@ -152,13 +152,17 @@ class SubagentSessions:
 
     async def interrupt_pending(self) -> None:
         """Seal abandoned work after the gateway acquires execution ownership."""
-        for key, metadata in await self.sessions.state.typed_session_headers(SUBAGENT.name):
-            task_id = key.removeprefix("subagent:")
+        for row in self.sessions.list_sessions():
+            key = row["key"]
+            payload = self.sessions.read_session_metadata(key)
+            metadata = (payload or {}).get("metadata", {})
+            if metadata.get(SESSION_TYPE_KEY) != SUBAGENT.name:
+                continue
             owner = metadata.get(PARENT_SESSION_KEY)
-            if key != self.key(task_id) or not isinstance(owner, str):
+            if not isinstance(owner, str):
                 continue
             try:
-                status = self._status_from_metadata(task_id, owner, metadata)
+                status = self.status(key.removeprefix("subagent:"), owner)
                 if status is None or status.state not in _ACTIVE_STATES:
                     continue
                 status.state = status.phase = "interrupted"

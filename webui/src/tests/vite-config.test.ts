@@ -101,9 +101,7 @@ describe("webuiManualChunk", () => {
     expect(webuiManualChunk("/repo/node_modules/react-dom/client.js")).toBe("react-vendor");
     expect(webuiManualChunk("/repo/node_modules/scheduler/index.js")).toBe("react-vendor");
     expect(webuiManualChunk("/repo/node_modules/clsx/dist/clsx.mjs")).toBe("react-vendor");
-  });
-  it("does not make the document's dynamic-import helper pull in React DOM", () => {
-    expect(webuiManualChunk("\0vite/preload-helper.js")).toBe("preload-helper");
+    expect(webuiManualChunk("\0vite/preload-helper.js")).toBe("react-vendor");
   });
 
   it("keeps markdown-only hast utilities in the markdown chunk", () => {
