@@ -1509,6 +1509,7 @@ class TestCompactIdleSession:
             current_message="next project question",
             channel="websocket",
             workspace=project,
+            has_cron=False,
         )
 
         await loop.consolidator.compact_idle_session(

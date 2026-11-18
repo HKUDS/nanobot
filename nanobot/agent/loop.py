@@ -389,7 +389,7 @@ class AgentLoop:
         self.consolidator = Consolidator(
             store=self.context.memory,
             sessions=self.sessions,
-            build_messages=self.context.build_messages,
+            build_messages=self._build_compaction_messages,
             get_tool_definitions=self.tools.get_definitions,
             resolve_prompt_context=PersistedPromptContextResolver(
                 workspace_scopes=self.workspace_scopes,
@@ -661,6 +661,24 @@ class AgentLoop:
         registered = loader.load(ctx, self.tools)
 
         logger.info("Registered {} tools: {}", len(registered), registered)
+
+    def _build_compaction_messages(
+        self,
+        *,
+        history: list[dict[str, Any]],
+        current_message: str | None,
+        channel: str | None = None,
+        session_summary: SessionSummary | None = None,
+        workspace: Path | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.context.build_messages(
+            history=history,
+            current_message=current_message,
+            channel=channel,
+            session_summary=session_summary,
+            workspace=workspace,
+            has_cron=self.tools.has("cron"),
+        )
 
     def register_runtime_context_provider(
         self,

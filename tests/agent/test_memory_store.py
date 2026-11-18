@@ -302,7 +302,6 @@ class TestDreamCursor:
         dream_sha = store.git.auto_commit("dream: update")
         assert dream_sha is not None
 
-        store.write_memory("newer")
         store.set_last_dream_cursor(3)
 
         restore_sha = store.git.revert(dream_sha)
