@@ -48,7 +48,7 @@ def create_gateway_app(
     console: Console,
     log_handler_id: int,
     load_runtime_config: RuntimeConfigLoader,
-    run_gateway: GatewayRunner,
+    run_gateway: GatewayRunner | None = None,
     validate_startup_config: GatewayConfigValidator | None = None,
     runtime_factory: GatewayRuntimeFactory | None = None,
     service_factory: GatewayServiceFactory | None = None,
@@ -234,8 +234,15 @@ def create_gateway_app(
         unconfigured_provider_error = None
         if validate_startup_config is not None:
             unconfigured_provider_error = validate_startup_config(cfg)
+        # The WebUI launcher starts a separate gateway process. Load the agent runtime
+        # only in the process that actually serves requests, not when registering CLI commands.
+        runner = run_gateway
+        if runner is None:
+            from nanobot.cli.gateway_runtime import _run_gateway
+
+            runner = _run_gateway
         try:
-            run_gateway(
+            runner(
                 cfg,
                 port=port,
                 verbose=verbose,

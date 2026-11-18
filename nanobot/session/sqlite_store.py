@@ -514,6 +514,45 @@ class SqliteSessionStore:
             return {"key": key, "created_at": row[0], "updated_at": row[1],
                     "metadata": self._metadata(db, key, row[2])}
 
+    def recovery_candidates(self, key_prefix: str) -> list[tuple[str, bool]]:
+        """Return (key, unfinished display tail) in the same order as list_sessions.
+
+        The turn and entry primary keys locate the last ordinal and its last
+        decisive fact. Fork/telemetry facts do not settle activity. As in the
+        transcript reader, an incomplete marker *anywhere in that ordinal*
+        takes precedence, including on imported records. The append cursor's
+        `completed` flag alone cannot answer either question.
+        """
+        with self.transaction(write=False) as db:
+            rows = db.execute("""
+                WITH scan AS (
+                    SELECT s.key, s.updated_at, s.rowid AS tie,
+                           json_type(s.metadata, '$.pending_user_turn')='true'
+                           OR (json_extract(s.metadata, '$.webui_recovery.status')
+                                   IN ('resuming', 'awaiting_user', 'failed')
+                               AND json_type(s.metadata, '$.webui_recovery.recovery_id')='text')
+                           OR EXISTS (SELECT 1 FROM checkpoints WHERE session_key=s.key)
+                           OR EXISTS (SELECT 1 FROM pending_inputs WHERE session_key=s.key
+                                      AND kind='pending_user_followups') AS journaled,
+                           (SELECT CASE WHEN
+                                (SELECT e.kind NOT IN ('input', 'answer', 'completion')
+                                 FROM history_entries e WHERE e.session_key=t.session_key
+                                 AND e.turn_ordinal=t.ordinal
+                                 AND e.kind NOT IN ('fork_boundary', 'compaction', 'model_request')
+                                 ORDER BY e.position DESC LIMIT 1)
+                                THEN 1 ELSE EXISTS (
+                                    SELECT 1 FROM history_entries e WHERE e.session_key=t.session_key
+                                    AND e.turn_ordinal=t.ordinal
+                                    AND json_type(e.record, '$.content.transcript_incomplete')='true'
+                                ) END
+                            FROM history_turns t WHERE t.session_key=s.key
+                            ORDER BY t.ordinal DESC LIMIT 1) AS unfinished
+                    FROM sessions s WHERE s.key GLOB ?
+                )
+                SELECT key, unfinished FROM scan WHERE journaled OR unfinished ORDER BY updated_at DESC, tie
+            """, (f"{key_prefix}*",))
+            return [(key, bool(unfinished)) for key, unfinished in rows]
+
     def read_history_header(self, key: str) -> SessionHistoryPayload | None:
         """Read search identity and metadata without runtime checkpoints or inputs."""
         with self.transaction(write=False) as db:
@@ -754,6 +793,14 @@ class SqliteSessionStore:
                     AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text'
                     ORDER BY updated_at DESC""",
                 (parent_key,),
+            )]
+
+    def typed_session_headers(self, session_type: str) -> list[tuple[str, dict[str, Any]]]:
+        """Read just this owner's metadata, without rehydrating messages, checkpoints or inputs."""
+        with self.transaction(write=False) as db:
+            return [(key, _object(metadata)) for key, metadata in db.execute(
+                f"""SELECT key, metadata FROM sessions WHERE json_extract(metadata, '$.{SESSION_TYPE_KEY}')=?
+                    ORDER BY updated_at DESC, rowid""", (session_type,),
             )]
 
     def list_child_session_metadata(self, parent_key: str) -> list[SessionMetadataPayload]:

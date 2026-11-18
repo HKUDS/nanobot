@@ -47,11 +47,27 @@ function guardWebuiEntryChunk(): Plugin {
     apply: "build",
     generateBundle(_options, bundle) {
       for (const output of Object.values(bundle)) {
-        if (output.type !== "chunk" || !output.isEntry) continue;
-        const unexpected = entryLazyFeatureImports(output.imports);
+        if (output.type !== "chunk") continue;
+        // The external document entry starts the app and chat imports concurrently.
+        // Protect their real static closures too, not just the tiny dispatcher.
+        const isApp = output.facadeModuleId?.endsWith("/src/mount.tsx");
+        const isChat = output.facadeModuleId?.endsWith("/components/thread/ThreadShell.tsx");
+        if (!output.isEntry && !isApp && !isChat) continue;
+        const imports = new Set<string>();
+        const visit = (name: string) => {
+          if (imports.has(name)) return;
+          imports.add(name);
+          const dependency = bundle[name];
+          if (dependency?.type === "chunk") dependency.imports.forEach(visit);
+        };
+        output.imports.forEach(visit);
+        const unexpected = entryLazyFeatureImports([...imports]);
+        if (output.isEntry && output.facadeModuleId?.endsWith("/index.html")) {
+          unexpected.push(...[...imports].filter((name) => path.basename(name).startsWith("react-vendor-")));
+        }
         if (unexpected.length > 0) {
           throw new Error(
-            `WebUI entry chunk statically imports lazy features: ${unexpected.join(", ")}`,
+            `${output.fileName} statically imports deferred WebUI features: ${unexpected.join(", ")}`,
           );
         }
       }
@@ -97,12 +113,14 @@ export function webuiManualChunk(id: string): string | undefined {
     || (id.includes("node_modules/micromark-extension-math/") && id.endsWith("/html.js"))) {
     return "markdown-math";
   }
+  // The document entry uses dynamic imports before mounting. Keep their tiny helper
+  // independent: putting it in react-vendor makes the bootstrap wait for React DOM.
+  if (id.includes("vite/preload-helper")) return "preload-helper";
   if (
     id.includes("node_modules/react/")
     || id.includes("node_modules/react-dom/")
     || id.includes("node_modules/scheduler/")
     || id.includes("node_modules/clsx/")
-    || id.includes("vite/preload-helper")
   ) {
     return "react-vendor";
   }
