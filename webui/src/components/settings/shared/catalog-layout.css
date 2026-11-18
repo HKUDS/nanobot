@@ -8,10 +8,13 @@
 }
 .apps-catalog-layout > .catalog-section,
 .apps-catalog-layout > .catalog-section > .catalog-toolbar { display: contents; }
+.apps-catalog-layout { reading-flow: grid-rows; }
 .apps-catalog-layout > .catalog-tabs { justify-self: start; }
+.apps-catalog-layout > .catalog-search { order: 1; }
 .apps-catalog-layout > .catalog-section > :not(.catalog-toolbar),
 .apps-catalog-layout > .catalog-body {
   grid-column: 1 / -1;
+  order: 2;
   min-inline-size: 0;
   margin-block-start: 8px;
 }
@@ -40,10 +43,16 @@
 @container (width < 40rem) {
   .apps-catalog-layout, .catalog-toolbar { gap: 8px; }
   .apps-catalog-layout > .catalog-tabs { inline-size: 100%; }
-  .catalog-tabs > [role="tab"] { flex: 1 1 auto; }
+  .catalog-tabs > button { flex: 1 1 auto; }
   .catalog-controls > :last-child { margin-inline-start: auto; }
 }
 @container (width < 24rem) {
+  .catalog-tabs > button {
+    padding-inline: 0.25rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+  }
   .catalog-controls { flex-direction: column; align-items: start; gap: 4px; }
   .catalog-controls > :last-child { align-self: end; }
 }

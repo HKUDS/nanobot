@@ -10,7 +10,8 @@ import type { EditCompletion } from "@/components/settings/shared/useEditComplet
 import { SharedProxySetupDialog } from "@/components/settings/shared/SharedProxySetupDialog";
 import { SettingsSectionSkeleton } from "@/components/settings/shared/SettingsSectionSkeleton";
 
-import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
+import { SkillsCatalogPage, useSkillsCatalogSearch } from "@/components/settings/SkillsCatalogSettings";
+import { CatalogSearch } from "@/components/settings/shared/CatalogToolbar";
 import { ImageGenerationSettings } from "@/components/settings/capabilities/ImageGenerationSettings";
 import { AdvancedSettings } from "@/components/settings/capabilities/SecuritySettings";
 import { TranscriptionSettings } from "@/components/settings/capabilities/TranscriptionSettings";
@@ -100,6 +101,8 @@ export function SettingsPage({
   const { client, webuiCapabilities } = useClient();
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
   const [mcpSetupName, setMcpSetupName] = useState<string | null>(null);
+  const [channelsQuery, setChannelsQuery] = useState("");
+  const skillsSearch = useSkillsCatalogSearch();
   const presetDeletedCallback = useRef<(() => void) | null>(null);
   const [providerPanel, setProviderPanel] = useState<ProviderSettingsEntry | null>(null);
   const [proxySetupOpen, setProxySetupOpen] = useState(false);
@@ -495,6 +498,7 @@ export function SettingsPage({
       case "channels":
         return (
           <ChannelsSettings
+            query={channelsQuery}
             onBeforeCloseChange={registerChannelCompletion}
             onConfigureMcp={(name) => {
               setMcpSetupName(name);
@@ -611,13 +615,24 @@ export function SettingsPage({
           </div>
         );
       case "skills":
-        return <SkillsCatalogSettings skills={skills} loading={skillsLoading} error={skillsError} />;
+        return <SkillsCatalogPage skills={skills} loading={skillsLoading} error={skillsError} searchState={skillsSearch} />;
       default:
         return renderSettingsSection(section, embedded);
     }
   };
   // Appearance reads only browser-local preferences, not the gateway settings snapshot.
   const appsSection = isAppsSection(activeSection);
+  const catalogSearch = activeSection === "skills" ? skillsSearch.search
+    : activeSection === "channels" ? {
+      type: "search",
+      value: channelsQuery,
+      onChange: (event: React.ChangeEvent<HTMLInputElement>) => setChannelsQuery(event.target.value),
+      placeholder: t("settings.channels.search"),
+    } : activeSection === "apps" ? {
+      value: systemState.appsQuery,
+      onChange: (event: React.ChangeEvent<HTMLInputElement>) => systemState.setAppsQuery(event.target.value),
+      placeholder: t("settings.apps.searchPlaceholder"),
+    } : null;
   const localSection = activeSection === "appearance";
   const sectionReady = localSection || settings !== null || activeSection === "skills" || activeSection === "apps"
     || activeSection === "channels" || activeSection === "automations";
@@ -793,10 +808,9 @@ export function SettingsPage({
                 <SegmentedControl<AppsSectionKey>
                   value={activeSection}
                   onChange={selectSection}
-                  mode="tabs"
                   ariaLabel={t("settings.nav.apps")}
-                  className="catalog-tabs h-9 shrink-0 rounded-control"
-                  itemClassName="h-7 rounded-compact px-3 py-0"
+                  className="catalog-tabs min-h-9 shrink-0 rounded-control"
+                  itemClassName="min-h-7 rounded-compact px-3 py-0"
                   indicatorClassName="rounded-compact"
                   options={[
                     { value: "apps", label: t("settings.apps.featured") },
@@ -805,6 +819,7 @@ export function SettingsPage({
                   ]}
                 />
               ) : null}
+              {catalogSearch && <CatalogSearch {...catalogSearch} />}
               {renderSection(isCapabilitySection(activeSection) ? "capabilities" : activeSection)}
             </div>
           ) : null}

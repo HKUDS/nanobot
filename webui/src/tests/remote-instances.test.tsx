@@ -44,7 +44,7 @@ function LocalShell({ collapsed = false, initialRemote = false }) {
     return () => window.removeEventListener("hashchange", route);
   }, []);
   return <>
-  <Sidebar collapsed={collapsed} sessions={[]} activeKey={null} loading={false} newChatActive={false}
+  <Sidebar collapsed={collapsed} sessions={[]} activeKey={null} loading={false}
     onNewChat={() => { if (connections?.managing) connections.selectLocal(); window.location.hash = "/new"; setRemotePage(false); }} onSelect={noop} onRequestDelete={noop} onTogglePin={noop}
     onRequestRename={async () => {}} onToggleArchive={noop} onToggleGroup={noop}
     onRequestRenameProject={noop} onNewChatInProject={noop} onOpenSettings={noop}

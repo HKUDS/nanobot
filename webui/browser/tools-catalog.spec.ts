@@ -115,13 +115,19 @@ test("keeps Apps section controls usable on narrow screens in each locale", asyn
   await page.route("**/api/webui/skills/trending?**", route => route.fulfill({ json: { skills: [] } }));
   const controls = page.locator(".catalog-controls");
   async function expectControlsFit(locale: string, count: number) {
-    const targets = page.locator("[role=tab], .catalog-controls label");
+    const targets = page.locator(".catalog-tabs > button, .catalog-controls label");
     await expect(targets).toHaveCount(count);
     const geometry = await targets.evaluateAll(elements => elements.map(element => {
       const bounds = element.getBoundingClientRect();
-      return { left: bounds.left, right: bounds.right, fits: element.scrollWidth <= element.clientWidth };
+      return {
+        label: element.textContent,
+        left: bounds.left,
+        right: bounds.right,
+        fits: element.scrollWidth <= element.clientWidth
+          && (!element.matches("button") || element.scrollHeight <= element.clientHeight),
+      };
     }));
-    expect(geometry.every(item => item.left >= 0 && item.right <= width && item.fits), locale).toBe(true);
+    expect(geometry.filter(item => item.left < 0 || item.right > width || !item.fits), locale).toEqual([]);
   }
   for (const locale of ["en", "es", "fr", "id", "ja", "ko", "pt-BR", "vi", "zh-CN", "zh-TW"]) {
     await page.goto(`/browser/fixture.html?case=tools-catalog&lang=${locale}`);
@@ -145,7 +151,7 @@ test("keeps Apps section controls usable on narrow screens in each locale", asyn
     await expect(status).not.toBeChecked();
     await expect(status).toBeFocused();
 
-    const sections = page.getByRole("tab");
+    const sections = page.locator(".catalog-tabs").getByRole("button");
     await sections.nth(1).click();
     await expectControlsFit(locale, 8);
     const marketplace = controls.getByRole("radio").nth(1);
@@ -190,23 +196,35 @@ test("keeps navigation, control slots and full-width search stable when switchin
   await page.route("**/api/settings/nanobot-features", route => route.fulfill({ json: { features: [], enabled_count: 0 } }));
   await page.goto("/browser/fixture.html?case=tools-catalog");
   await page.route("**/api/webui/skills/trending?**", route => route.fulfill({ json: { skills: [] } }));
-  const tabs = page.getByRole("tablist", { name: "Apps" });
-  const selected = tabs.getByRole("tab", { selected: true });
+  const sections = page.getByRole("group", { name: "Apps" });
+  const selected = sections.getByRole("button", { pressed: true });
+  const tools = sections.getByRole("button", { name: "Tools" });
+  await tools.focus();
+  for (const key of ["ArrowRight", "ArrowLeft"]) {
+    await page.keyboard.press(key);
+    await expect(tools).toBeFocused();
+    await expect(tools).toHaveAttribute("aria-pressed", "true");
+  }
+  const field = page.locator(".catalog-search input");
+  await expect(field).toBeVisible();
+  const searchNode = (await field.elementHandle())!;
   for (const width of [1440, 800, 375, 320]) {
     await page.setViewportSize({ width, height: 900 });
-    await selected.focus();
+    await tools.click();
     const wide = width >= 800;
     let toolsSearch: Awaited<ReturnType<typeof catalogGeometry>>[0] | undefined;
-    for (const name of ["Tools", "Skills", "Channels"]) {
+    const names = ["Tools", "Skills", "Channels"];
+    for (const [index, name] of names.entries()) {
       await expect(selected).toHaveText(name);
       await expect(selected).toBeFocused();
-      await expect(page.locator(".catalog-search input")).toBeVisible();
+      await expect(field).toBeVisible();
+      expect(await searchNode.evaluate(element => element === document.querySelector(".catalog-search input"))).toBe(true);
       await page.locator("[data-testid=settings-section-transition]").evaluate(async element => {
         await Promise.all(element.getAnimations().map(animation => animation.finished));
       });
       const geometry = await catalogGeometry(page);
       const [search, controls] = geometry;
-      const navigation = (await tabs.boundingBox())!;
+      const navigation = (await sections.boundingBox())!;
       expect(search.x).toBe(navigation.x);
       expect(search.x + search.width).toBe(controls.x + controls.width);
       expect(search.y).toBe(controls.y + controls.height + (wide ? 12 : 8));
@@ -222,7 +240,6 @@ test("keeps navigation, control slots and full-width search stable when switchin
       expect(search.radius).toBe("12px");
       expect(geometry.every(control => control.x >= 0 && control.x + control.width <= width)).toBe(true);
       if (name === "Skills") {
-        const search = await page.locator(".catalog-search input").elementHandle();
         await selectRadio(page, "Skills views", "Marketplace");
         const sources = page.getByRole("radiogroup", { name: "Skill source" });
         await expect(sources.getByRole("radio", { name: "All", exact: true })).toBeChecked();
@@ -233,13 +250,17 @@ test("keeps navigation, control slots and full-width search stable when switchin
         await expect(sources.getByRole("radio", { name: "skills.sh" })).toBeChecked();
         await selectRadio(page, "Skill source", "All");
         expect(await catalogGeometry(page)).toEqual(geometry);
-        expect(await search!.evaluate(element => element === document.querySelector(".catalog-search input"))).toBe(true);
+        expect(await searchNode.evaluate(element => element === document.querySelector(".catalog-search input"))).toBe(true);
         await selectRadio(page, "Skills views", "Installed");
         await selected.focus();
       }
-      await selected.press("ArrowRight");
+      const next = names[index + 1];
+      if (next) {
+        await page.keyboard.press("Tab");
+        await expect(sections.getByRole("button", { name: next })).toBeFocused();
+        await page.keyboard.press("Enter");
+      }
     }
-    await expect(selected).toHaveText("Tools");
   }
 });
 
@@ -315,7 +336,7 @@ test("keeps channel names, local marks and click focus on a narrow viewport", as
   await page.keyboard.press("Enter");
   await expect(install).toBeFocused();
 
-  const skills = page.getByRole("tab", { name: "Skills" });
+  const skills = page.getByRole("group", { name: "Apps" }).getByRole("button", { name: "Skills" });
   await skills.click();
   await expect(page.getByLabel("Search installed skills")).toBeVisible();
   await expect(skills).toBeFocused();

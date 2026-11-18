@@ -5,6 +5,7 @@ html.dark .startup-shell { --startup-fill: hsl(0 0% 72% / .2); --startup-surface
 .startup-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .startup-block { height: 14px; border-radius: 4px; background: var(--startup-fill); }
 .startup-navigation { display: none; flex: 0 0 var(--startup-sidebar-width); padding: 20px 12px; background: var(--startup-nav); overflow: hidden; }
+.startup-shell[data-sidebar-expanded="false"] .startup-navigation { background: transparent; }
 .startup-nav-brand { width: 32px; height: 32px; margin-bottom: 28px; border-radius: 10px; }
 .startup-nav-row { display: flex; height: 40px; align-items: center; gap: 12px; padding: 0 8px; }
 .startup-nav-icon { flex: 0 0 16px; height: 16px; }

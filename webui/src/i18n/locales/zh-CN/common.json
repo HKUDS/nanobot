@@ -454,7 +454,7 @@
       "ariaLabel": "切换语言"
     },
     "apps": "应用",
-    "automations": "自动任务"
+    "automations": "任务"
   },
   "settings": {
     "timezoneNoMatches": "没有匹配的时区。",
@@ -819,7 +819,7 @@
       "runtime": "系统",
       "advanced": "高级",
       "apps": "应用",
-      "automations": "自动任务",
+      "automations": "任务",
       "skills": "技能",
       "memory": "记忆"
     },

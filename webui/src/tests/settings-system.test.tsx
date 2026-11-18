@@ -271,7 +271,7 @@ describe("Settings system domains", () => {
     renderSettingsView({ initialSection: "skills", initialSettings: settingsPayload(), showSidebar: false, mainNavigationExpanded: false });
     expect(screen.getByTestId("settings-section-transition")).toHaveAttribute("data-main-navigation-expanded", "false");
     expect(screen.getByRole("heading", { name: "Apps", level: 1 })).toBeVisible();
-    expect(screen.getByRole("tab", { name: "Skills" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("uses the inline section heading layout to align Apps titles and counts", async () => {

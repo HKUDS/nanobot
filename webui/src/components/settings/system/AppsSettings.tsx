@@ -119,7 +119,7 @@ export function AppsCatalogPage(props: Omit<ComponentProps<typeof AppsCatalogSet
     }
   }, [selection, hasReady, props.cliApps, props.mcpPresets]);
 
-  return <AppsCatalogSettings {...props} filter={filter} onFilterChange={setSelection} />;
+  return <AppsCatalogSettings {...props} filter={filter} onFilterChange={setSelection} showSearch={false} />;
 }
 
 export function AppsCatalogSettings({
@@ -131,6 +131,7 @@ export function AppsCatalogSettings({
   cliAppsLoading,
   mcpPresetsLoading,
   query,
+  showSearch = true,
   filter,
   cliActionKey,
   mcpActionKey,
@@ -177,6 +178,7 @@ export function AppsCatalogSettings({
   cliAppsLoading: boolean;
   mcpPresetsLoading: boolean;
   query: string;
+  showSearch?: boolean;
   filter: AppsCatalogFilter;
   cliActionKey: string | null;
   mcpActionKey: string | null;
@@ -278,11 +280,11 @@ export function AppsCatalogSettings({
     : "";
   return (
     <div className="catalog-section">
-      <CatalogToolbar search={{
+      <CatalogToolbar search={showSearch ? {
         value: query,
         onChange: (event) => onQueryChange(event.target.value),
-        placeholder: tx("settings.apps.searchPlaceholder", "Search Apps"),
-      }}>
+        placeholder: t("settings.apps.searchPlaceholder"),
+      } : undefined}>
         <CatalogControls>
           <CatalogFilter label={t("settings.apps.typeFilter")} value={filter.kind} options={kindOptions}
             onChange={(kind) => onFilterChange({ ...filter, kind })} />

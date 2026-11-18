@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { FilePreviewPanelView } from "@/components/FilePreviewPanelView";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { MarketplaceProviderFilter, SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
-import { CatalogControls, CatalogToolbar } from "@/components/settings/shared/CatalogToolbar";
+import { CatalogControls, CatalogSearch, CatalogToolbar } from "@/components/settings/shared/CatalogToolbar";
 import { ModelIdPicker } from "@/components/settings/shared/ModelControls";
 import { AppsCatalogSettings, DEFAULT_CUSTOM_MCP_FORM } from "@/components/settings/system/AppsSettings";
 import { ChannelsSettings } from "@/components/settings/system/ChannelsSettings";
@@ -58,11 +58,14 @@ export function SkeletonFixture({ surface, loading }: { surface: string; loading
       onMcpOAuthCallbackUrlChange={noop} onMcpOAuthComplete={noop} onDismissStatus={noop}
       onBackToChat={noop} onMcpFieldChange={noop} onCustomMcpFormChange={noop}
       onMcpConfigImportChange={noop} onSaveCustomMcp={noop} onImportMcpConfig={noop} onMcpToolsChange={noop}
-    /> : surface === "channels" ? <ChannelsSettings
-      token="fixture" nanobotFeatures={loading ? null : { features: names.map((name, index) => ({ ...feature, name: `channel-${index}`, display_name: name })), enabled_count: 6, requires_restart: false }}
-      loading={loading} actionKey={null} showBrandLogos={false} error={null} requiresRestartPending={false}
-      onAction={noop} onFeaturesUpdate={noop} onDismissStatus={noop}
-    /> : surface === "skills" ? <SkillsCatalogSettings loading={loading} skills={loading ? [] : names.map((name) => ({
+    /> : surface === "channels" ? <div className="apps-catalog-layout">
+      <CatalogSearch type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("settings.channels.search")} />
+      <ChannelsSettings query={query}
+        token="fixture" nanobotFeatures={loading ? null : { features: names.map((name, index) => ({ ...feature, name: `channel-${index}`, display_name: name })), enabled_count: 6, requires_restart: false }}
+        loading={loading} actionKey={null} showBrandLogos={false} error={null} requiresRestartPending={false}
+        onAction={noop} onFeaturesUpdate={noop} onDismissStatus={noop}
+      />
+    </div> : surface === "skills" ? <SkillsCatalogSettings loading={loading} skills={loading ? [] : names.map((name) => ({
       name, description: "Search, inspect and maintain the project.", source: "builtin", available: true, enabled: true,
     }))} /> : surface === "marketplace" ? <div className="catalog-section">
       <CatalogToolbar search={{ value: query, onChange: (event) => setQuery(event.target.value), placeholder: t("settings.skills.marketplaceSearchPlaceholder") }}>

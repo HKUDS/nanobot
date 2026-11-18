@@ -16,7 +16,7 @@ import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui
 type ChannelFilter = "all" | "enabled";
 
 export function ChannelsSettings({
-  token, nanobotFeatures, loading, actionKey, chatAppsDocsUrl, showBrandLogos,
+  token, nanobotFeatures, loading, actionKey, chatAppsDocsUrl, showBrandLogos, query,
   error, requiresRestartPending, onAction, onFeaturesUpdate, onDismissStatus,
   onRestart, isRestarting, onConfigureMcp, onBeforeCloseChange,
 }: {
@@ -26,6 +26,7 @@ export function ChannelsSettings({
   actionKey: string | null;
   chatAppsDocsUrl?: string;
   showBrandLogos: boolean;
+  query: string;
   error: string | null;
   requiresRestartPending: boolean;
   onAction: ChannelFeatureAction;
@@ -38,7 +39,6 @@ export function ChannelsSettings({
 }) {
   const { t } = useTranslation();
   const [selectedChannelName, setSelectedChannelName] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<ChannelFilter>("enabled");
   const [connectRequestId, setConnectRequestId] = useState(0);
   const filterInitializedRef = useRef(false);
@@ -102,12 +102,7 @@ export function ChannelsSettings({
 
   return (
     <div className="catalog-section">
-      <CatalogToolbar search={{
-        type: "search",
-        value: query,
-        onChange: (event) => setQuery(event.target.value),
-        placeholder: t("settings.channels.search"),
-      }}>
+      <CatalogToolbar>
         <CatalogControls>
           <CatalogToggle label={t("settings.channels.enabledOnly")} checked={filter === "enabled"}
             onChange={(enabled) => {

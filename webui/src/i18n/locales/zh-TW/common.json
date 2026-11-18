@@ -454,7 +454,7 @@
       "ariaLabel": "切換語言"
     },
     "apps": "應用程式",
-    "automations": "自動任務"
+    "automations": "任務"
   },
   "settings": {
     "timezoneNoMatches": "沒有符合的時區。",
@@ -640,7 +640,7 @@
       "cliApps": "CLI 應用",
       "mcp": "MCP",
       "apps": "應用程式",
-      "automations": "自動任務",
+      "automations": "任務",
       "skills": "技能"
     },
     "sections": {

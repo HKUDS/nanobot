@@ -37,22 +37,43 @@ import type { MarketplaceProvider, SkillDetail, SkillSummary } from "@/lib/types
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-export function SkillsCatalogSettings({ skills, loading = false, error = false }: {
+export function useSkillsCatalogSearch() {
+  const { t } = useTranslation();
+  const [view, setView] = useState<"installed" | "discover">("installed");
+  const [installedQuery, setInstalledQuery] = useState("");
+  const [marketplaceQuery, setMarketplaceQuery] = useState("");
+  return { view, setView, search: {
+    value: view === "installed" ? installedQuery : marketplaceQuery,
+    onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
+      (view === "installed" ? setInstalledQuery : setMarketplaceQuery)(event.target.value),
+    placeholder: t(view === "installed" ? "settings.skills.searchInstalled" : "settings.skills.marketplaceSearchPlaceholder"),
+  } };
+}
+
+type SkillsCatalogProps = {
   skills: SkillSummary[];
   loading?: boolean;
   error?: boolean;
+};
+
+export function SkillsCatalogSettings(props: SkillsCatalogProps) {
+  const searchState = useSkillsCatalogSearch();
+  return <SkillsCatalogPage {...props} searchState={searchState} showSearch />;
+}
+
+export function SkillsCatalogPage({ skills, loading = false, error = false, searchState, showSearch }: SkillsCatalogProps & {
+  searchState: ReturnType<typeof useSkillsCatalogSearch>;
+  showSearch?: boolean;
 }) {
   const { t } = useTranslation();
+  const { view, setView, search } = searchState;
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
-  const [view, setView] = useState<"installed" | "discover">("installed");
   const [installingSkill, setInstallingSkill] = useState("");
-  const [installedQuery, setInstalledQuery] = useState("");
-  const [marketplaceQuery, setMarketplaceQuery] = useState("");
   const [marketplaceProvider, setMarketplaceProvider] = useState<MarketplaceProvider>("all");
   const [installedFilter, setInstalledFilter] = useState<"all" | "enabled" | "disabled">(
     "all",
   );
-  const normalizedQuery = installedQuery.trim().toLowerCase();
+  const normalizedQuery = view === "installed" ? search.value.trim().toLowerCase() : "";
   const filteredSkills = skills.filter((skill) => {
     const enabled = skill.enabled !== false;
     if (installedFilter === "enabled" && !enabled) return false;
@@ -86,11 +107,7 @@ export function SkillsCatalogSettings({ skills, loading = false, error = false }
 
   return (
     <div className="catalog-section">
-      <CatalogToolbar search={{
-        value: view === "installed" ? installedQuery : marketplaceQuery,
-        onChange: (event) => (view === "installed" ? setInstalledQuery : setMarketplaceQuery)(event.target.value),
-        placeholder: t(view === "installed" ? "settings.skills.searchInstalled" : "settings.skills.marketplaceSearchPlaceholder"),
-      }}>
+      <CatalogToolbar search={showSearch ? search : undefined}>
         <CatalogControls>
           <CatalogFilter label={t("settings.skills.views")} value={view} onChange={setView}
             options={[
@@ -153,7 +170,7 @@ export function SkillsCatalogSettings({ skills, loading = false, error = false }
         </section>
       ) : (
         <SkillsMarketplace
-          query={marketplaceQuery}
+          query={search.value}
           provider={marketplaceProvider}
           installedSkills={skills}
           installing={installingSkill}

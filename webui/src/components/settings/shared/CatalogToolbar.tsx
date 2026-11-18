@@ -6,18 +6,23 @@ import { ToggleButton } from "@/components/ui/toggle-button";
 import { SETTINGS_SEARCH_INPUT_CLASS } from "@/components/settings/shared/SettingsControls";
 import { cn } from "@/lib/utils";
 
-export function CatalogToolbar({ search, children }: {
-  search: Omit<ComponentPropsWithRef<typeof SearchInput>, "className">;
-  children: ReactNode;
-}) {
+type CatalogSearchProps = Omit<ComponentPropsWithRef<typeof SearchInput>, "className">;
+
+export function CatalogSearch(props: CatalogSearchProps) {
+  return (
+    <div className="catalog-search">
+      <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+      <SearchInput aria-label={props.placeholder} {...props}
+        className={cn("h-9 rounded-control ps-9 text-ui-label", SETTINGS_SEARCH_INPUT_CLASS)} />
+    </div>
+  );
+}
+
+export function CatalogToolbar({ search, children }: { search?: CatalogSearchProps; children: ReactNode }) {
   return (
     <div className="catalog-toolbar">
       {children}
-      <div className="catalog-search">
-        <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-        <SearchInput aria-label={search.placeholder} {...search}
-          className={cn("h-9 rounded-control ps-9 text-ui-label", SETTINGS_SEARCH_INPUT_CLASS)} />
-      </div>
+      {search && <CatalogSearch {...search} />}
     </div>
   );
 }

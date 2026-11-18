@@ -266,7 +266,6 @@ interface ChatListProps {
   actionMenuPortalContainer?: HTMLElement | null;
   loading?: boolean;
   initialLoading?: boolean;
-  emptyLabel?: string;
 }
 
 export const ChatList = memo(function ChatList({
@@ -309,7 +308,6 @@ export const ChatList = memo(function ChatList({
   actionMenuPortalContainer,
   loading,
   initialLoading = loading,
-  emptyLabel,
 }: ChatListProps) {
   const { t } = useTranslation();
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_SESSIONS);
@@ -638,13 +636,7 @@ export const ChatList = memo(function ChatList({
     );
   }
 
-  if (sessions.length === 0 && temporarySessions.length === 0) {
-    return (
-      <div className="px-3 py-6 text-[12px] leading-5 text-sidebar-muted-foreground">
-        {emptyLabel ?? t("chat.noSessions")}
-      </div>
-    );
-  }
+  if (sessions.length === 0 && temporarySessions.length === 0) return null;
 
   const running = new Set(runningChatIds);
   const updated = new Set(updatedChatIds);
