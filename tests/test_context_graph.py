@@ -209,7 +209,7 @@ async def test_queued_skill_sources_reach_the_request(tmp_path: Path):
     runtime = loop.llm_runtime()
     request = RequestContext(channel='websocket', chat_id='skill-provenance', session_key=session.key,
                              runtime=runtime, original_user_text='$example')
-    blocks = await loop._resolve_runtime_context_for_request(request, loop.tools)
+    blocks = await loop._resolve_runtime_context_for_request(request, loop.tools, include_memory=True)
     assert await loop._persist_user_message_early(message, session, runtime_context_blocks=blocks)
     expected_path = str(skill / 'SKILL.md')
     from nanobot.events import EventSink

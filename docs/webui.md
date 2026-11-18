@@ -161,7 +161,7 @@ These controls appear when the connected host supports subagent tasks. See [Suba
 
 ## Temporary Chats
 
-Start **New topic → Temporary chat** for a conversation that should not be added to topic history or long-term memory.
+Start **New topic → Temporary chat** to work without saved agent profiles, long-term memory, or the memory skill in the model context. The conversation is not added to topic history or long-term memory. Native file readers and editors cannot access the agent profile or memory files in this mode; project instructions and ordinary workspace files remain available.
 
 You can keep more than one temporary chat open and switch between them under **Temporary chats** in the sidebar while the current WebUI connection remains open. Reloading or closing the page, restarting the gateway, or losing the WebSocket connection ends all of them. They cannot be recovered afterward.
 

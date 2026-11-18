@@ -71,6 +71,7 @@ class ContextBuilder:
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md"]
     _SKIPPABLE_DEFAULTS = {"AGENTS.md", "USER.md"}
+    _MEMORY_SKILLS = frozenset({"memory"})
 
     def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
         self.workspace = workspace
@@ -88,9 +89,9 @@ class ContextBuilder:
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
-        parts = [self._get_identity(channel=channel, workspace=root)]
+        parts = [self._get_identity(channel=channel, workspace=root, include_memory=include_memory)]
 
-        bootstrap = self._load_bootstrap_files(root)
+        bootstrap = self._load_bootstrap_files(root, include_memory=include_memory)
         if bootstrap:
             parts.append(bootstrap)
 
@@ -112,15 +113,16 @@ class ContextBuilder:
             elif self.memory.memory_file.is_file():
                 record_source(self.memory.memory_file, "", loaded=False)
 
+        excluded_skills: frozenset[str] = frozenset() if include_memory else self._MEMORY_SKILLS
         with self.skills.snapshot():
-            active_skills = self.skills.get_always_skills()
+            active_skills = self.skills.get_always_skills(exclude=excluded_skills)
             if active_skills:
                 active_content = self.skills.load_skills_for_context(active_skills)
                 if active_content:
                     parts.append(f"# Active Skills\n\n{active_content}")
 
             skills_summary = self.skills.build_skills_summary(
-                exclude=set(active_skills),
+                exclude=set(active_skills).union(excluded_skills),
                 workspace=root,
             )
         if skills_summary:
@@ -135,7 +137,9 @@ class ContextBuilder:
 
         return "\n\n---\n\n".join(parts)
 
-    def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
+    def _get_identity(
+        self, channel: str | None = None, workspace: Path | None = None, *, include_memory: bool = True,
+    ) -> str:
         root = workspace or self.workspace
         workspace_path = str(root.expanduser().resolve())
         agent_workspace_path = str(self.workspace.expanduser().resolve())
@@ -147,6 +151,7 @@ class ContextBuilder:
             track_source=True,
             workspace_path=workspace_path,
             agent_workspace_path=agent_workspace_path,
+            include_memory=include_memory,
             runtime=runtime,
             platform_policy=render_template("agent/platform_policy.md", system=system),
             channel=channel or "",
@@ -175,14 +180,11 @@ class ContextBuilder:
 
         return _to_blocks(left) + _to_blocks(right)
 
-    def _load_bootstrap_files(self, workspace: Path | None = None) -> str:
+    def _load_bootstrap_files(self, workspace: Path | None = None, *, include_memory: bool = True) -> str:
         parts: list[str] = []
-        project_root = workspace or self.workspace
-        sources = [
-            ("AGENTS.md", project_root),
-            ("SOUL.md", self.workspace),
-            ("USER.md", self.workspace),
-        ]
+        sources = [("AGENTS.md", workspace or self.workspace)]
+        if include_memory:
+            sources.extend([("SOUL.md", self.workspace), ("USER.md", self.workspace)])
 
         for filename, root in sources:
             file_path = root / filename
@@ -289,11 +291,17 @@ class ContextBuilder:
                 media=list(transcript.media) if transcript.media else None,
                 current_role=transcript.current_role,
                 runtime_context_blocks=transcript.runtime_context_blocks,
+                include_memory=include_memory,
             )
             if transcript.input_metadata:
                 current["_meta"] = {**current.get("_meta", {}), **transcript.input_metadata}
             messages.append(current)
             return messages
+
+    def build_explicit_skill_context(self, text: str, *, include_memory: bool) -> RuntimeContextBlock | None:
+        return self.skills.build_explicit_skill_runtime_context(
+            text, exclude=() if include_memory else self._MEMORY_SKILLS,
+        )
 
     def build_current_message(
         self,
@@ -302,13 +310,14 @@ class ContextBuilder:
         media: list[str] | None = None,
         current_role: str = "user",
         runtime_context_blocks: Sequence[RuntimeContextBlock] | None = None,
+        include_memory: bool = True,
     ) -> dict[str, Any]:
         """Build only the fresh turn message without merging it into history."""
         content = self.build_user_content(current_message, image_paths=media)
         blocks: list[RuntimeContextBlock] = []
         if current_role == "user":
             blocks.extend(runtime_context_blocks or ())
-            skill_context = self.skills.build_explicit_skill_runtime_context(current_message)
+            skill_context = self.build_explicit_skill_context(current_message, include_memory=include_memory)
             if skill_context is not None and skill_context not in blocks:
                 blocks.append(skill_context)
         merged, runtime_context_meta = append_runtime_context(content, blocks)
