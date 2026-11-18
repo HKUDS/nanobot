@@ -36,7 +36,6 @@ if TYPE_CHECKING:
 _T = TypeVar("_T")
 SESSION_CACHE_MAX_SIZE = 128
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
-_TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
 _SESSION_PREVIEW_MAX_CHARS = 120
 _FORK_VOLATILE_METADATA_KEYS = {
     "_stopped_at_iteration_limit",
@@ -53,16 +52,11 @@ _FORK_VOLATILE_METADATA_KEYS = {
 
 
 def _sanitize_assistant_replay_text(content: str) -> str:
-    """Remove internal replay artifacts that the model may have copied before.
-
-    These strings are useful as runtime/session metadata, but when they appear
-    in assistant examples they become demonstrations for the model to repeat.
-    """
+    """Remove copied local image breadcrumbs before reusing the text."""
     lines = [
         line
         for line in content.splitlines()
         if not _LOCAL_IMAGE_BREADCRUMB_RE.match(line)
-        and not _TOOL_CALL_ECHO_RE.match(line)
     ]
     return "\n".join(lines).strip()
 

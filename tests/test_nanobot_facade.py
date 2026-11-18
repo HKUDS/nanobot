@@ -284,6 +284,51 @@ async def test_run_returns_result(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_replays_literal_message_draft(tmp_path, monkeypatch):
+    from nanobot.providers.base import LLMResponse
+
+    draft = (
+        'message(content="Welcome aboard! We\'re delighted to have you join the team. '
+        "To get your desk set up, here are three stationery items we've picked for you: "
+        "a hardcover A5 notebook, a set of fine-tip black gel pens, and a pack of assorted "
+        'sticky notes. Let us know if you need anything else as you settle in.")'
+    )
+    provider = _fake_provider("test-model")
+    provider.aclose = AsyncMock()
+
+    def respond(*, messages, **_kwargs):
+        if provider.chat_stream_with_retry.await_count == 1:
+            return LLMResponse(content=draft)
+        previous = [m["content"] for m in messages if m["role"] == "assistant"]
+        return LLMResponse(content=previous[-1] if previous else "UNKNOWN")
+
+    provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda *_args: provider)
+    config_path = _write_config(tmp_path)
+    key = "purchase:welcome"
+    async with Nanobot.from_config(config_path, workspace=tmp_path / "workspace") as bot:
+        first = await bot.run(
+            "Draft a single Python message() call welcoming a new employee and listing "
+            "three stationery items you choose for their desk. Return only that call, "
+            "without Markdown, and do not execute tools.",
+            session_key=key,
+        )
+        second = await bot.run(
+            "Repeat the exact message() call you just drafted. Use your previous assistant "
+            "answer; if it is not present in this conversation, answer UNKNOWN.",
+            session_key=key,
+        )
+
+    assert first.error is None and second.error is None
+    assert not first.tools_used and not second.tools_used
+    assert first.content == draft
+    assert provider.chat_stream_with_retry.await_count == 2
+    second_input = provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
+    assert [m["content"] for m in second_input if m["role"] == "assistant"] == [draft]
+    assert second.content == draft
+
+
+@pytest.mark.asyncio
 async def test_run_with_hooks(tmp_path):
     from nanobot.agent.hook import AgentHook, AgentHookContext, SDKCaptureHook
     from nanobot.bus.events import OutboundMessage

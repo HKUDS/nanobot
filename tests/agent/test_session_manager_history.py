@@ -676,17 +676,19 @@ def test_get_history_does_not_paste_assistant_media_paths_into_replay():
     assert history == [{"role": "assistant", "content": "来了 🎨"}]
 
 
-def test_get_history_preserves_requested_message_time_text_and_filters_artifacts():
-    session = Session(key="test:polluted-assistant")
-    reply = "[Message Time: 2026-05-09 00:33:48]\n来了 🎨"
+def test_get_history_preserves_literal_examples_and_filters_local_image_breadcrumb():
+    session = Session(key="test:assistant-example")
+    reply = (
+        "[Message Time: 2026-05-09 00:33:48]\n"
+        "Here is the photo delivery example:\n"
+        'generate_image("16:9")\n'
+        'message("来了 🎨")'
+    )
     request = f"Generate a photo, then reply with exactly:\n{reply}"
     session.add_message("user", request)
     session.add_message(
         "assistant",
-        f"{reply}\n"
-        "[image: /home/user/.nanobot/media/generated/img_old.png]\n\n"
-        "generate_image(\"16:9\")\n"
-        "message(\"来了 🎨\")",
+        f"{reply}\n[image: /home/user/.nanobot/media/generated/img_old.png]",
     )
 
     history = session.get_history(max_messages=500)
