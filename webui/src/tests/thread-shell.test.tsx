@@ -6,6 +6,7 @@ import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
+import { ToastProvider } from "@/components/ui/toast";
 import i18n from "@/i18n";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
@@ -5598,7 +5599,7 @@ describe("ThreadShell", () => {
   it("disables offline goal cancellation and treats an unchanged goal after a control reply as a retryable failure", async () => {
     const client = makeClient();
     const chatId = "cancel-failure";
-    render(wrap(client, <ThreadShell session={session(chatId)} title="Goal" onToggleSidebar={() => {}} />));
+    render(<ToastProvider>{wrap(client, <ThreadShell session={session(chatId)} title="Goal" onToggleSidebar={() => {}} />)}</ToastProvider>);
     await act(async () => {});
     act(() => {
       client._emitChat(chatId, { event: "goal_state", chat_id: chatId, goal_state: { active: false, status: "blocked", objective: "Ship the release" } });

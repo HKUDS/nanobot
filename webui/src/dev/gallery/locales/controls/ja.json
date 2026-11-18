@@ -106,6 +106,15 @@
     "removed": "サンプルを削除しました。",
     "available": "サンプルは利用可能です。"
   },
+  "toast": {
+    "title": "トースト通知",
+    "description": "エラー、成功、取り消せる操作を短く知らせます。",
+    "options": "ToastProvider を配置し、useToast を使って通知を表示します。操作ボタン付きの通知は長めに表示されます。",
+    "showError": "エラーを表示",
+    "error": "サンプルを保存できませんでした。",
+    "pending": "サンプルを削除します。",
+    "restored": "サンプルを復元しました。"
+  },
   "sheet": {
     "title": "サイドパネル",
     "description": "表示領域の端に配置するモーダルパネル。",

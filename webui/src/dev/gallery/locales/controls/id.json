@@ -106,6 +106,15 @@
     "removed": "Contoh dihapus.",
     "available": "Contoh tersedia."
   },
+  "toast": {
+    "title": "Notifikasi singkat",
+    "description": "Notifikasi singkat untuk kesalahan, keberhasilan, dan tindakan yang dapat dibatalkan.",
+    "options": "Pasang ToastProvider dan gunakan useToast untuk menampilkan notifikasi. Tindakan opsional memberi waktu lebih lama untuk merespons.",
+    "showError": "Tampilkan kesalahan",
+    "error": "Contoh tidak dapat disimpan.",
+    "pending": "Contoh akan dihapus.",
+    "restored": "Contoh dipulihkan."
+  },
   "sheet": {
     "title": "Panel samping",
     "description": "Panel modal yang menempel pada tepi area tampilan.",

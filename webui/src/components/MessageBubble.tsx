@@ -25,6 +25,7 @@ import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
 import { HoverHint } from "@/components/ui/tooltip";
+import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatMessageEndTime } from "@/lib/format-time";
@@ -76,6 +77,7 @@ function ForkArrowIcon({ className }: { className?: string }) {
 
 function useMessageCopy(content: string) {
   const { t } = useTranslation();
+  const showToast = useToast();
   const [copied, setCopied] = useState(false);
   const copyResetRef = useRef<number | null>(null);
 
@@ -89,7 +91,10 @@ function useMessageCopy(content: string) {
 
   const onCopy = useCallback(() => {
     void copyTextToClipboard(content).then((ok) => {
-      if (!ok) return;
+      if (!ok) {
+        showToast?.({ message: t("fileActions.failed"), tone: "error", dedupeKey: "copy-failed" });
+        return;
+      }
       setCopied(true);
       if (copyResetRef.current !== null) {
         window.clearTimeout(copyResetRef.current);
@@ -99,7 +104,7 @@ function useMessageCopy(content: string) {
         copyResetRef.current = null;
       }, 1_500);
     });
-  }, [content]);
+  }, [content, showToast, t]);
 
   const label = copied ? t("message.copiedReply") : t("message.copyReply");
   return { copied, label, onCopy };

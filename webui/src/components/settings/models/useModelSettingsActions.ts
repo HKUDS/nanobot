@@ -17,6 +17,7 @@ import {
 } from "@/components/settings/models/providerForm";
 import type { ModelSettingsState } from "@/components/settings/models/useModelSettingsState";
 import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
+import { useToast } from "@/components/ui/toast";
 import {
   ApiError,
   cancelProviderOAuth,
@@ -86,6 +87,7 @@ export function useModelSettingsActions({
   installCapabilities,
   configuredModelProviderOptions,
 }: ModelSettingsActionsOptions) {
+  const showToast = useToast();
   const oauthMounted = useRef(true);
   useEffect(() => {
     oauthMounted.current = true;
@@ -117,6 +119,7 @@ export function useModelSettingsActions({
     setModelPresetEditingName,
     setModelPresetNameError,
     setModelPresetPendingDelete,
+    setModelPresetDeleteError,
     setProviderForms,
     setProviderOAuthCompleting,
     setProviderOAuthDialogError,
@@ -392,7 +395,15 @@ export function useModelSettingsActions({
       setError(null);
     } catch (err) {
       setModelCallOrder(previousOrder);
-      setError((err as Error).message);
+      if (showToast && err instanceof ApiError && (err.status === 503 || err.status === 504)) {
+        showToast({
+          tone: "error",
+          message: t("message.agentActivity.updateAgentSettingsFailed"),
+          dedupeKey: "settings:models:call-order",
+        });
+      } else {
+        setError((err as Error).message);
+      }
     } finally {
       setModelCallOrderSaving(false);
     }
@@ -423,14 +434,14 @@ export function useModelSettingsActions({
       return false;
     }
     setSaving(true);
+    setModelPresetDeleteError(null);
     try {
       const payload = await deleteModelConfiguration(client, modelPresetPendingDelete.name);
       applyPayload(payload, { preserveCapabilityForms: true });
       setModelPresetPendingDelete(null);
-      setError(null);
       return true;
     } catch (err) {
-      setError((err as Error).message);
+      setModelPresetDeleteError(err instanceof Error ? err.message : String(err));
       return false;
     } finally {
       setSaving(false);

@@ -106,6 +106,15 @@
     "removed": "Example removed.",
     "available": "Example available."
   },
+  "toast": {
+    "title": "Toasts",
+    "description": "Short notices for errors, success, and actions you can undo.",
+    "options": "Mount ToastProvider and call useToast to show a notice. An optional action gives the user more time to respond.",
+    "showError": "Show error",
+    "error": "Could not save the example.",
+    "pending": "Example will be removed.",
+    "restored": "Example restored."
+  },
   "sheet": {
     "title": "Side panels",
     "description": "A modal panel attached to an edge of the viewport.",

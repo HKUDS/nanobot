@@ -106,6 +106,15 @@
     "removed": "예제를 제거했습니다.",
     "available": "예제를 사용할 수 있습니다."
   },
+  "toast": {
+    "title": "토스트 알림",
+    "description": "오류, 성공, 실행 취소가 가능한 작업을 짧게 알립니다.",
+    "options": "ToastProvider를 마운트한 뒤 useToast를 사용해 알림을 표시합니다. 작업 버튼이 있는 알림은 더 오래 표시됩니다.",
+    "showError": "오류 표시",
+    "error": "예제를 저장하지 못했습니다.",
+    "pending": "예제가 삭제될 예정입니다.",
+    "restored": "예제를 복원했습니다."
+  },
   "sheet": {
     "title": "측면 패널",
     "description": "표시 영역의 가장자리에 붙는 모달 패널입니다.",

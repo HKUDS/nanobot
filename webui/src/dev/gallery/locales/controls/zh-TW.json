@@ -106,6 +106,15 @@
     "removed": "已移除範例。",
     "available": "範例可供使用。"
   },
+  "toast": {
+    "title": "浮動提示",
+    "description": "簡短提示錯誤、成功或可復原的操作。",
+    "options": "掛載 ToastProvider，再呼叫 useToast 顯示提示。附帶操作的提示會停留較久，方便使用者回應。",
+    "showError": "顯示錯誤",
+    "error": "無法儲存範例。",
+    "pending": "即將移除範例。",
+    "restored": "已還原範例。"
+  },
   "sheet": {
     "title": "側邊面板",
     "description": "貼靠檢視區邊緣的模態面板。",

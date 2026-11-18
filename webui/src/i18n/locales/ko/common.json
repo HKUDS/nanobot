@@ -1769,8 +1769,6 @@
   "deleteConfirm": {
     "title": "이 채팅을 삭제할까요?",
     "titleMany": "대화 {{count}}개를 삭제할까요?",
-    "description": "이 작업은 되돌릴 수 없습니다.",
-    "descriptionMany": "이 작업은 되돌릴 수 없습니다.",
     "cancel": "취소",
     "confirm": "삭제",
     "automationsDescription": "이 주제를 삭제하면 연결된 자동 작업도 삭제됩니다.",
@@ -2040,7 +2038,7 @@
         "tooLong": "녹음 시간이 너무 깁니다.",
         "tooShort": "음성을 녹음하려면 조금 더 길게 눌러 주세요.",
         "noInput": "마이크 입력이 감지되지 않았습니다.",
-        "noDevice": "마이크를 찾을 수 없습니다. 연결 후 다시 시도하세요.",
+        "noDevice": "녹음하려면 마이크를 연결하세요.",
         "failed": "오디오를 변환하지 못했습니다."
       },
       "slash": {
@@ -2537,6 +2535,19 @@
       "bsp": "BSP",
       "main-stack": "주 창과 보조 창"
     }
+  },
+  "toast": {
+    "undo": "실행 취소",
+    "pendingDeleteSingle": "대화가 곧 삭제됩니다",
+    "archivedSingle": "대화를 보관했습니다",
+    "archiveFailed": "보관 상태를 변경하지 못했습니다.",
+    "unarchivedSingle": "대화 보관을 해제했습니다",
+    "deleteFailedSingle": "대화를 삭제하지 못했습니다",
+    "deleteWindow": "{{seconds}}초 안에 삭제를 취소할 수 있습니다.",
+    "pendingDelete": "대화 {{count}}개가 곧 삭제됩니다",
+    "archived": "대화 {{count}}개를 보관했습니다",
+    "unarchived": "대화 {{count}}개의 보관을 해제했습니다",
+    "deleteFailed": "대화 {{count}}개를 삭제하지 못했습니다"
   },
   "common": {
     "retry": "다시 시도",

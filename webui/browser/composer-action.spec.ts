@@ -1,5 +1,29 @@
 import { expect, test } from "@playwright/test";
 
+test("missing microphone uses a short toast without resizing the mobile composer", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("/browser/fixture.html?case=composer-action&voiceError=noDevice");
+  const voice = page.getByRole("button", { name: "Voice input" });
+  const composer = page.locator(".thread-composer-form");
+  await expect(voice).toBeVisible();
+  await page.evaluate(async () => { await document.fonts.ready; });
+  await voice.hover();
+  // Compact controls can be visible before the footer's padding finishes transitioning.
+  await expect(composer).toHaveAttribute("data-compact-controls", "true");
+  const footer = composer.locator(".thread-composer-footer");
+  await expect.poll(() => footer.evaluate((element) => element.getAnimations().some((animation) =>
+    animation instanceof CSSTransition && animation.transitionProperty === "padding-bottom",
+  ))).toBe(false);
+  const bounds = await composer.boundingBox();
+  await voice.click();
+  const alert = page.locator('[data-toast-tone="error"]').getByRole("alert");
+  await expect(alert).toHaveText("Connect a microphone to record.");
+  expect(await alert.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await composer.boundingBox()).toEqual(bounds);
+  await expect(alert).toBeHidden();
+  await expect(voice).toBeEnabled();
+});
+
 for (const width of [1280, 390]) {
   for (const variant of ["hero", "thread"]) {
     test(`composer edge presses send and stop without losing the click (${width}px, ${variant})`, async ({ page }) => {

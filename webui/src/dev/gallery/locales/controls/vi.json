@@ -106,6 +106,15 @@
     "removed": "Đã xóa ví dụ.",
     "available": "Ví dụ khả dụng."
   },
+  "toast": {
+    "title": "Thông báo tạm thời",
+    "description": "Thông báo ngắn về lỗi, thành công và thao tác có thể hoàn tác.",
+    "options": "Gắn ToastProvider và dùng useToast để hiện thông báo. Nếu có nút thao tác, thông báo sẽ hiện lâu hơn.",
+    "showError": "Hiện lỗi",
+    "error": "Không thể lưu ví dụ.",
+    "pending": "Ví dụ sẽ bị xóa.",
+    "restored": "Đã khôi phục ví dụ."
+  },
   "sheet": {
     "title": "Bảng bên",
     "description": "Bảng dạng hộp thoại gắn vào một cạnh vùng hiển thị.",

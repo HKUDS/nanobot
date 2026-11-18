@@ -1769,8 +1769,6 @@
   "deleteConfirm": {
     "title": "¿Eliminar este chat?",
     "titleMany": "¿Eliminar {{count}} conversaciones?",
-    "description": "Esta acción no se puede deshacer.",
-    "descriptionMany": "Esta acción no se puede deshacer.",
     "cancel": "Cancelar",
     "confirm": "Eliminar",
     "automationsDescription": "Eliminar este tema también elimina sus tareas automáticas vinculadas.",
@@ -2040,7 +2038,7 @@
         "tooLong": "La grabación es demasiado larga.",
         "tooShort": "Mantén pulsado un poco más para grabar voz.",
         "noInput": "No se detectó entrada del micrófono.",
-        "noDevice": "No se encontró ningún micrófono. Conéctalo y vuelve a intentarlo.",
+        "noDevice": "Conecta un micrófono para grabar.",
         "failed": "No se pudo transcribir el audio."
       },
       "slash": {
@@ -2537,6 +2535,19 @@
       "bsp": "BSP",
       "main-stack": "Principal y pila"
     }
+  },
+  "toast": {
+    "undo": "Deshacer",
+    "pendingDeleteSingle": "La conversación se eliminará",
+    "archivedSingle": "Conversación archivada",
+    "archiveFailed": "No se pudo cambiar el estado de archivado.",
+    "unarchivedSingle": "Conversación desarchivada",
+    "deleteFailedSingle": "No se pudo eliminar la conversación",
+    "deleteWindow": "Tienes {{seconds}} segundos para deshacer la acción.",
+    "pendingDelete": "Se eliminarán {{count}} conversaciones",
+    "archived": "{{count}} conversaciones archivadas",
+    "unarchived": "{{count}} conversaciones desarchivadas",
+    "deleteFailed": "No se pudieron eliminar {{count}} conversaciones"
   },
   "common": {
     "retry": "Reintentar",

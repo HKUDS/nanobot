@@ -149,11 +149,13 @@ export function agentDraftFromPayload(
 export function ModelPresetDeleteDialog({
   preset,
   deleting,
+  error,
   onOpenChange,
   onConfirm,
 }: {
   preset: SettingsPayload["model_presets"][number] | null;
   deleting: boolean;
+  error?: string | null;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
@@ -161,8 +163,8 @@ export function ModelPresetDeleteDialog({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   return (
-    <Dialog open={preset !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[440px]">
+    <Dialog open={preset !== null} onOpenChange={(open) => { if (open || !deleting) onOpenChange(open); }}>
+      <DialogContent showCloseButton={!deleting} className="max-w-[440px]">
         <DialogHeader className="text-left">
           <DialogTitle>
             {tx("settings.models.deletePresetTitle", "Delete model preset?")}
@@ -175,6 +177,7 @@ export function ModelPresetDeleteDialog({
             )}
           </DialogDescription>
         </DialogHeader>
+        {error ? <p role="alert" className="break-words text-sm text-destructive">{error}</p> : null}
         <DialogFooter>
           <Button
             type="button"
