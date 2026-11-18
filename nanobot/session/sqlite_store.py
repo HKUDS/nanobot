@@ -795,6 +795,14 @@ class SqliteSessionStore:
                 (parent_key,),
             )]
 
+    def typed_session_headers(self, session_type: str) -> list[tuple[str, dict[str, Any]]]:
+        """Read just this owner's metadata, without rehydrating messages, checkpoints or inputs."""
+        with self.transaction(write=False) as db:
+            return [(key, _object(metadata)) for key, metadata in db.execute(
+                f"""SELECT key, metadata FROM sessions WHERE json_extract(metadata, '$.{SESSION_TYPE_KEY}')=?
+                    ORDER BY updated_at DESC, rowid""", (session_type,),
+            )]
+
     def list_child_session_metadata(self, parent_key: str) -> list[SessionMetadataPayload]:
         """Read child headers from one snapshot, excluding checkpoints and pending inputs."""
         with self.transaction(write=False) as db:
