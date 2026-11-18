@@ -26,7 +26,7 @@ from nanobot.providers.conversation_state import ProviderConversationStateContro
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
-from nanobot.utils.gitstore import GitStore
+from nanobot.utils.gitstore import MEMORY_CONTENT_PATHS, MEMORY_WIKI_PATH, GitStore
 from nanobot.utils.helpers import (
     atomic_write_lines,
     build_assistant_message,
@@ -54,10 +54,6 @@ class MemoryStore:
     """File I/O for the memory journal, resident memory, and on-demand wiki."""
 
     _DEFAULT_MAX_HISTORY = 1000
-    # Durable files whose real working-tree delta grounds Dream commit messages.
-    # Deliberately excludes memory/.dream_cursor so progress bookkeeping never
-    # appears as a durable-memory edit in the audit record.
-    _DREAM_CONTENT_PATHS = ("SOUL.md", "USER.md", "memory/MEMORY.md")
     _LEGACY_ENTRY_START_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}[^\]]*)\]\s*")
     _LEGACY_TIMESTAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]\s*")
     _LEGACY_RAW_MESSAGE_RE = re.compile(
@@ -69,7 +65,7 @@ class MemoryStore:
         self.max_history_entries = max_history_entries
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
-        self.wiki_dir = self.memory_dir / "wiki"
+        self.wiki_dir = workspace / MEMORY_WIKI_PATH
         self.history_file = workspace / MEMORY_JOURNAL_PATH
         self.legacy_history_file = self.memory_dir / "HISTORY.md"
         self.soul_file = workspace / "SOUL.md"
@@ -82,10 +78,7 @@ class MemoryStore:
         self._dream_prompt_oversize_logged = False
         self._append_lock = threading.Lock()
         self.dream_lock = asyncio.Lock()
-        self._git = GitStore(
-            workspace, tracked_files=list(self._DREAM_CONTENT_PATHS),
-            tracked_dirs=["memory/wiki"], tracked_state_files=(DREAM_CURSOR_PATH.as_posix(),),
-        )
+        self._git = GitStore.for_memory(workspace)
         self._maybe_migrate_legacy_history()
 
     @property
@@ -546,7 +539,7 @@ class MemoryStore:
         if not self._git.is_initialized():
             return ""
         return self._git.summarize_working_tree(
-            list(self._DREAM_CONTENT_PATHS), directories=["memory/wiki"],
+            list(MEMORY_CONTENT_PATHS), directories=[MEMORY_WIKI_PATH],
         )
 
     def build_dream_tools(self) -> ToolRegistry:

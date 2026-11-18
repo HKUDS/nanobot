@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 
+from nanobot.config.paths import DREAM_CURSOR_PATH
+
 if TYPE_CHECKING:
     from dulwich.objects import Blob, Commit, ObjectID, Tree
     from dulwich.refs import Ref
@@ -18,6 +20,8 @@ if TYPE_CHECKING:
 # are tiny in practice, but a pathological rewrite must not blow up the audit
 # record. The structured per-file summary is always emitted in full regardless.
 _WORKING_TREE_DIFF_MAX_CHARS = 6000
+MEMORY_CONTENT_PATHS = ("SOUL.md", "USER.md", "memory/MEMORY.md")
+MEMORY_WIKI_PATH = "memory/wiki"
 
 
 class GitStoreError(RuntimeError):
@@ -60,8 +64,18 @@ class GitStore:
     ):
         self._workspace = workspace
         self._content_files = tracked_files
+        self._state_files = tracked_state_files
         self._tracked_files = [*tracked_files, *tracked_state_files]
         self._tracked_dirs = [Path(path).as_posix() for path in tracked_dirs or []]
+
+    @classmethod
+    def for_memory(cls, workspace: Path) -> GitStore:
+        return cls(
+            workspace,
+            tracked_files=list(MEMORY_CONTENT_PATHS),
+            tracked_dirs=[MEMORY_WIKI_PATH],
+            tracked_state_files=(DREAM_CURSOR_PATH.as_posix(),),
+        )
 
     def is_initialized(self) -> bool:
         """Check if the git repo has been initialized."""
@@ -254,11 +268,10 @@ class GitStore:
                 self._directory_path(path)
             porcelain.add(
                 str(self._workspace),
-                paths=self._staging_paths(*extra_files, *self._tracked_files),
+                paths=self._staging_paths(*extra_files, *self._content_files),
             )
-            # Explicit grants must work even with a pre-wiki .gitignore. Stage
-            # individual files, never hand directory traversal to the Git backend.
-            repo.get_worktree().stage(sorted(paths))
+            # Older workspaces may ignore newly managed wiki and cursor files.
+            repo.get_worktree().stage(sorted(paths.union(self._state_files)))
 
     def _resolve_sha(self, short_sha: str) -> bytes | None:
         try:
