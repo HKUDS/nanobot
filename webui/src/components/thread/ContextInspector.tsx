@@ -26,8 +26,9 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
   snapshots: readonly ContextSnapshot[]; onOpenFile?: (path: string) => void; sidebar?: boolean; expandable?: boolean; onClose?: () => void;
 }) {
   const { t, i18n } = useTranslation();
-  const layoutId = useId();
+  const panelId = useId();
   const reducedMotion = useReducedMotion();
+  const layoutId = reducedMotion ? undefined : panelId;
   const [expanded, setExpanded] = useState(false);
   const [replay, setReplay] = useState<{ frames: readonly ContextSnapshot[]; index: number; startedAt: number; interval: number } | null>(null);
   const [readyGraph, setReadyGraph] = useState<ContextGraph | null>(null);
