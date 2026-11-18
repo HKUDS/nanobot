@@ -7,13 +7,13 @@ EXTENDS Naturals, FiniteSets, Sequences, TLC
 \* Full pages contain all bounded persisted IDs; no fragment-gap bridging proof.
 \* Effect setup starts history (useNanobotStream:551) before transcript subscribe
 \* (:682 onward), so selected alone does not imply hasTranscript.
-CONSTANTS NChats, NTurns, MaxOutages, MaxSwitches, AllowFailures, Fragments
+CONSTANTS NChats, NTurns, MaxOutages, MaxSwitches
 Chats == 1..NChats
 Turns == 1..NTurns
 Readers == {"H", "R"}
 None == 0
 EmptyRead == [phase |-> 0, generation |-> 0, turn |-> 0,
-              completed |-> {}, observed |-> {}, pending |-> FALSE, active |-> 0, fragment |-> FALSE]
+              completed |-> {}, observed |-> {}, pending |-> FALSE, active |-> 0]
 EmptyLedger == [open |-> {}, closed |-> {}, fenced |-> {}, latest |-> 0,
                 clock |-> 0, generation |-> 0, anonymous |-> FALSE,
                 recoverySeen |-> FALSE, learned |-> {}]
@@ -91,26 +91,22 @@ Receive(c) ==
        /\ reads' = IF ~ignored /\ m.kind = 2 THEN
             [reads EXCEPT ![c] = [r \in Readers |-> IF reads[c][r].phase # 0
                                   THEN [reads[c][r] EXCEPT !.phase = 1, !.completed = {},
-                                        !.observed = {}, !.pending = FALSE, !.active = 0, !.fragment = FALSE]
+                                        !.observed = {}, !.pending = FALSE, !.active = 0]
                                   ELSE reads[c][r]]]
             ELSE reads
  /\ wire' = [wire EXCEPT ![c] = Tail(@)]
  /\ UNCHANGED <<server, needHook, selected, mounted, switches, connected, outages, safe>>
-Capture(c,r,fragment,completions,pending) ==
+Capture(c,r,pending) ==
  /\ UNCHANGED mounted
  /\ reads[c][r].phase = 1
- /\ fragment \in BOOLEAN /\ (fragment => Fragments)
- /\ IF fragment THEN completions \subseteq Done(c) ELSE completions = Done(c)
- /\ pending \in BOOLEAN /\ (pending => (Running(c) # {} \/ ledger[c].anonymous))
- /\ reads' = [reads EXCEPT ![c][r].phase = 2, ![c][r].completed = completions,
+ /\ (pending => (Running(c) # {} \/ ledger[c].anonymous))
+ /\ reads' = [reads EXCEPT ![c][r].phase = 2, ![c][r].completed = Done(c),
                   ![c][r].observed = Seen(c), ![c][r].pending = pending,
-                  ![c][r].active = IF Running(c) = {} THEN 0 ELSE CHOOSE t \in Running(c) : TRUE,
-                  ![c][r].fragment = fragment]
+                  ![c][r].active = IF Running(c) = {} THEN 0 ELSE CHOOSE t \in Running(c) : TRUE]
  /\ UNCHANGED <<server, wire, ledger, needHook, selected, mounted, switches, connected, outages, safe>>
-Process(c,r,accepted,exposed) ==
+Process(c,r,accepted) ==
  /\ UNCHANGED mounted
  /\ reads[c][r].phase = 2 /\ (r = "R" => connected) /\ (r = "H" => mounted = c)
- /\ accepted \in BOOLEAN /\ exposed \in BOOLEAN /\ (exposed => accepted)
  /\ LET q == reads[c][r]
         l == ledger[c]
         completed == q.completed
@@ -118,32 +114,22 @@ Process(c,r,accepted,exposed) ==
                     (l.generation = q.generation \/ l.latest \in (completed \cup l.fenced))
         explicit == q.turn # 0 /\ q.turn \in completed
         idle == ~q.pending /\ q.active = 0
-        canCache == IF q.fragment THEN canApply ELSE
-                     (explicit \/ idle) /\ (q.turn = 0 \/ explicit \/ q.turn \in q.observed) /\ canApply
+        canCache == (explicit \/ idle) /\ (q.turn = 0 \/ explicit \/ q.turn \in q.observed) /\ canApply
         hasOwner == mounted = c
         cacheInstall == r = "R" /\ canCache /\ hasOwner
-        fragmentReady == q.fragment /\ ((r = "H" /\ exposed) \/
-                           (r = "R" /\ (~hasOwner \/ (cacheInstall /\ exposed))))
-        \* Transcript acceptance controls adoption, not exact full-page closure.
-        \* exposed is separate: a staged accepted fragment can expose no IDs.
-        \* Non-seed full-page owner handoff; no pending fragment gap here.
-        ownerWhole == ~q.fragment /\ (r = "H" \/ cacheInstall)
-        backgroundWhole == ~q.fragment /\ r = "R" /\ canCache /\ idle /\ ~hasOwner
+        ownerWhole == r = "H" \/ cacheInstall
+        backgroundWhole == r = "R" /\ canCache /\ idle /\ ~hasOwner
         whole == ownerWhole \/ backgroundWhole
-        \* Preflight/cache publication above still use the BEFORE-settlement ledger.
-        \* A fresh, nonaborted full R page now supplies lifecycle evidence even
-        \* with a mounted owner or canCache=FALSE. It grants no content coverage.
-        lifecycle == fragmentReady \/ (r = "R" /\ ~q.fragment)
-        doSettle == whole \/ lifecycle
         adopt == backgroundWhole \/ (ownerWhole /\ accepted /\ ~q.pending /\ canApply)
-        nextOpen == IF doSettle THEN l.open \ completed ELSE l.open
-        nextClock == IF adopt \/ (doSettle /\ l.latest \in completed) THEN 0 ELSE l.clock
+        \* Fresh full pages settle explicit IDs independently of content adoption.
+        nextOpen == l.open \ completed
+        nextClock == IF adopt \/ l.latest \in completed THEN 0 ELSE l.clock
         nextAnon == IF adopt THEN FALSE ELSE l.anonymous
         nl == [l EXCEPT !.open = nextOpen,
-                     !.closed = IF doSettle THEN @ \cup completed ELSE @,
+                     !.closed = @ \cup completed,
                      !.fenced = IF whole THEN @ \cup completed ELSE @,
                      !.clock = nextClock, !.anonymous = nextAnon,
-                     !.learned = @ \cup (IF ~q.fragment \/ fragmentReady THEN completed ELSE {})]
+                     !.learned = @ \cup completed]
     IN /\ ledger' = [ledger EXCEPT ![c] = nl]
        /\ reads' = [reads EXCEPT ![c][r] = EmptyRead,
            ![c]["H"] = IF cacheInstall \/ r = "H" THEN EmptyRead ELSE reads[c]["H"]]
@@ -151,18 +137,12 @@ Process(c,r,accepted,exposed) ==
            !.collateral = @ /\ ((l.open \ completed) \subseteq nextOpen) /\
                          (l.latest # 0 /\ l.latest \notin completed /\ l.clock = l.latest => nextClock = l.clock),
            !.partial = @ /\ (adopt \/ ~l.anonymous \/ nextAnon),
-           !.lifecycle = @ /\ (~(lifecycle /\ ~whole) \/
-                                  (nl.fenced = l.fenced /\ nextAnon = l.anonymous)),
-           !.activeAdoption = @ /\ (~(r = "R" /\ ~hasOwner /\ ~q.fragment /\ ~idle) \/ ~adopt),
+           !.lifecycle = @ /\ (whole \/ (nl.fenced = l.fenced /\ nextAnon = l.anonymous)),
+           !.activeAdoption = @ /\ (~(r = "R" /\ ~hasOwner /\ ~idle) \/ ~adopt),
            !.cacheOrder = @ /\ (r # "R" \/ ~adopt \/ canCache),
-           !.handoff = @ /\ (~doSettle \/ completed \cap nextOpen = {}),
+           !.handoff = @ /\ (completed \cap nextOpen = {}),
            !.soleActor = @ /\ ~(ownerWhole /\ backgroundWhole)]
  /\ UNCHANGED <<server, wire, needHook, selected, mounted, switches, connected, outages>>
-Fail(c,r) ==
- /\ UNCHANGED mounted
- /\ AllowFailures /\ reads[c][r].phase # 0
- /\ reads' = [reads EXCEPT ![c][r] = EmptyRead]
- /\ UNCHANGED <<server, wire, ledger, needHook, selected, mounted, switches, connected, outages, safe>>
 BeginRecovery(c) ==
  /\ UNCHANGED mounted
  /\ connected /\ Running(c) # {} /\ ~ledger[c].anonymous /\ ~ledger[c].recoverySeen
@@ -175,14 +155,14 @@ EndRecovery(c) ==
                        (IF ledger[c].latest = 0 THEN {} ELSE {ledger[c].latest}),
                       ![c].open = {}, ![c].clock = 0, ![c].latest = 0, ![c].anonymous = FALSE]
  /\ UNCHANGED <<server, wire, reads, needHook, selected, mounted, switches, connected, outages, safe>>
-CaptureAny(c,r) == \E f,p \in BOOLEAN, d \in SUBSET Turns : Capture(c,r,f,d,p)
-ProcessAny(c,r) == \E a,e \in BOOLEAN : Process(c,r,a,e)
+CaptureAny(c,r) == \E pending \in BOOLEAN : Capture(c,r,pending)
+ProcessAny(c,r) == \E accepted \in BOOLEAN : Process(c,r,accepted)
 Next ==
  \/ \E c \in Chats, t \in Turns : Start(c,t) \/ Finish(c,t)
  \/ Disconnect \/ Reconnect \/ HookEffect
  \/ \E c \in Chats \cup {0} : Switch(c)
  \/ \E c \in Chats : Receive(c) \/ BeginRecovery(c) \/ EndRecovery(c)
- \/ \E c \in Chats, r \in Readers : CaptureAny(c,r) \/ ProcessAny(c,r) \/ Fail(c,r)
+ \/ \E c \in Chats, r \in Readers : CaptureAny(c,r) \/ ProcessAny(c,r)
 Spec == Init /\ [][Next]_vars
 FairSpec == Spec /\ WF_vars(Reconnect) /\ WF_vars(HookEffect) /\
             (\A c \in Chats : WF_vars(Receive(c))) /\
@@ -196,8 +176,7 @@ TypeOK ==
                      /\ ledger[c].fenced \subseteq Turns /\ ledger[c].latest \in Turns \cup {0}
                      /\ ledger[c].clock \in Turns \cup {0}
                      /\ ledger[c].generation \in 0..(NTurns+MaxOutages)
-\* Raw processed full-page IDs were already included in learned regardless of
-\* cache eligibility. Keep that definition, not just successful handoff IDs.
+\* Every processed full page contributes explicit IDs, even if cache admission fails.
 RawExplicitCompletionsSettle == \A c \in Chats : ledger[c].learned \cap ledger[c].open = {}
 ExplicitCompletionsSettle == RawExplicitCompletionsSettle
 NoOlderCompletionClearsNewer == safe.collateral

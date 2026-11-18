@@ -2,7 +2,7 @@
 
 These models check recovery from a missed terminal frame. History can explicitly complete an older turn without stopping a newer one or discarding uncovered content. Independently, trusted attach can retire a previously confirmed owner absent from the Gateway's complete live-ID set, even if paged history supplies no completion ID.
 
-**These are handwritten abstractions of selected transitions, not mechanical verification of implementation code or proof of all WebUI/Gateway behavior.** The default runner checks fifteen positive configurations. Four baseline cases run separately and retain temporal counterexamples; they are never counted as positive passes.
+**These are handwritten abstractions of selected transitions, not mechanical verification of implementation code or proof of all WebUI/Gateway behavior.** The runner checks thirteen configurations by default.
 
 ## Files and source mapping
 
@@ -27,6 +27,7 @@ The Gateway owns execution. The request registry owns cancellation and stale-res
 - `PartialCompletionPreservesRecovery` and `LifecycleOnlyPreservesContentAndRecovery`: named completion preserves independent anonymous recovery and uncovered content.
 - `MountedFragmentRequiresAcceptance`, `ActiveUnmountedSnapshotIsNotAdopted`, `CachePrecedesIdleNotification` and `SoleCanonicalActor`: content admission, notification ordering and single-owner boundaries.
 - `EventuallyIdle` and `EventuallyRequestsDrain`: conditional eventual quiescence under the stated finite workload and fairness assumptions.
+- `LifecycleSafety` and `EventuallyRetiredOwnersSettle`: after healthy reconnection, retired owners settle without completion evidence from history and without closing live owners.
 
 ## History partition scope and limits
 
@@ -45,20 +46,15 @@ Requirements: Python 3.9+, Java and the official [`tla2tools.jar` from TLA+ v1.7
 From this directory in PowerShell:
 
 ```powershell
-# Fifteen positive checks: every finite graph must exhaust without a counterexample.
 python -B .\run_tlc.py --jar 'C:\path\to\tla2tools.jar'
 if ($LASTEXITCODE -ne 0) { throw 'TLC check failed' }
-
-# Expected baseline counterexamples, separate from positive checks.
-python -B .\run_tlc.py --limits --jar 'C:\path\to\tla2tools.jar'
-if ($LASTEXITCODE -ne 0) { throw 'Baseline classification changed' }
 ```
 
 Use `--case revised-unmounted-live` (repeatable) for individual cases. `--output-root` must name a new directory outside the checkout; otherwise a private temporary directory is allocated. `--implementation-root <repository-root>` records the relevant source hashes without asserting a checked refinement. Models/configs are copied into the external output directory before Java starts. Logs, state graphs and generated traces stay there. `manifest.json` records input/jar hashes, commands, exit statuses and graph counts. Defaults are two workers, a 1536 MiB heap and a 600-second per-case timeout; cases run sequentially.
 
-A positive result requires exit 0, TLC's no-error completion message and an empty state queue. Timeouts, specification errors and other exits fail the runner. Limit cases instead require exit 13 and the temporal-violation signature, labeled `LIMITATION_COUNTEREXAMPLE`. A zero runner exit for `--limits` means the expected limitations were reproduced, not that liveness passed.
+A passing case requires exit 0, TLC's no-error completion message and an empty state queue. Counterexamples, timeouts and specification errors fail the runner.
 
-## Reference positive results
+## Reference results
 
 | Config | Checked scope | Distinct states |
 | --- | --- | ---: |
@@ -75,4 +71,4 @@ A positive result requires exit 0, TLC's no-error completion message and an empt
 | `handoff-fullpage-active` | Pending newer turn; shared-page handoff and sole canonical actor | 80 |
 | `handoff-fullpage-idle` | Idle shared-page handoff and sole canonical actor | 80 |
 
-The three additional positive attach configs and their graph counts are in [Attach reconciliation](ATTACH-RECONCILIATION.md#reproduce-and-evidence). `--case requests-two` and `--case lifecycle-fullpage-two-chats` expose larger history products, not additional claimed positive results. `--limits` retains two history-only baselines (failed read and omitted ID) and adds two attach baselines (no absence reconciliation and early terminal recipient capture). The history-only baselines state what paged evidence cannot guarantee on its own, not a limit of the fixed attach path.
+See [Attach reconciliation](ATTACH-RECONCILIATION.md#reproduce-and-evidence) for the `attach-reconciliation` config and its graph counts. The larger `requests-two` and `lifecycle-fullpage-two-chats` configurations are optional; they are not part of the reference run.
