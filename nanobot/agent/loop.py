@@ -818,7 +818,8 @@ class AgentLoop:
         text = request.original_user_text or ""
         skill_context = (
             await self.runner.prepare_prompt(
-                self.context.build_explicit_skill_context, text, include_memory=include_memory,
+                self.context.build_explicit_skill_context, text,
+                include_memory=include_memory, has_cron=tools.has("cron"),
             )
             if "$" in text else None
         )
@@ -1140,11 +1141,14 @@ class AgentLoop:
             session_metadata=_prompt_scope_metadata(session.metadata) if session is not None else None,
         )
         include_memory = session is None or session.policy.persist
+        effective_tools = tools if tools is not None else self.tools
+        has_cron = effective_tools.has("cron")
         transcript_builder = partial(
             self.context.build_transcript,
             channel=request_ctx.channel,
             workspace=effective_scope.project_path,
             include_memory=include_memory,
+            has_cron=has_cron,
         )
         if initial_message is not None and turn_continuation.internal_continuation_inbound(initial_message.metadata):
             build_transcript = transcript_builder
@@ -1175,7 +1179,6 @@ class AgentLoop:
                 and (session is None or session.policy.persist)
             ),
         )
-        effective_tools = tools if tools is not None else self.tools
         with ExitStack() as turn_scope_stack:
             turn_scope_stack.callback(
                 reset_file_states, bind_file_states(self._file_state_store.for_session(active_session_key)),
@@ -1189,6 +1192,10 @@ class AgentLoop:
                     memory.soul_file, memory.user_file, memory.memory_dir,
                     skills.workspace_skills / "memory", skills.builtin_skills / "memory",
                 ))
+                if not has_cron:
+                    turn_scope_stack.enter_context(exclude_file_paths(
+                        self.workspace / "HEARTBEAT.md", writes_only=True,
+                    ))
             execution_scope: ExecutionScope | None = None
             if self.execution_policy is not None:
                 execution_scope = turn_scope_stack.enter_context(self.execution_policy.scope(
@@ -2144,6 +2151,7 @@ class AgentLoop:
                 media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
                 runtime_context_blocks=ctx.runtime_context_blocks,
                 include_memory=session.policy.persist,
+                has_cron=(ctx.tools if ctx.tools is not None else self.tools).has("cron"),
             )
             task_id = ctx.msg.metadata.get("subagent_task_id") if is_subagent else None
             already_staged = False

@@ -32,16 +32,18 @@ if TYPE_CHECKING:
 
 
 _FILE_EXCLUSIONS: ContextVar[tuple[Path, ...]] = ContextVar("file_exclusions", default=())
+_FILE_WRITE_EXCLUSIONS: ContextVar[tuple[Path, ...]] = ContextVar("file_write_exclusions", default=())
 
 
 @contextmanager
-def exclude_file_paths(*paths: Path) -> Generator[None]:
+def exclude_file_paths(*paths: Path, writes_only: bool = False) -> Generator[None]:
     """Exclude files or subtrees from native file tools in this request."""
-    token = _FILE_EXCLUSIONS.set((*_FILE_EXCLUSIONS.get(), *(resolve_path(path) for path in paths)))
+    exclusions = _FILE_WRITE_EXCLUSIONS if writes_only else _FILE_EXCLUSIONS
+    token = exclusions.set((*exclusions.get(), *(resolve_path(path) for path in paths)))
     try:
         yield
     finally:
-        _FILE_EXCLUSIONS.reset(token)
+        exclusions.reset(token)
 
 
 def _is_excluded(path: Path, exclusions: tuple[Path, ...]) -> bool:
@@ -561,6 +563,8 @@ class WorkspaceFiles:
             extra_allowed_files=self._write_files,
         )
         _require_visible(target, _FILE_EXCLUSIONS.get())
+        if _is_excluded(target, _FILE_WRITE_EXCLUSIONS.get()):
+            raise WorkspaceBoundaryError("This path is read-only to file tools in this session.")
         if self._workspace is not None:
             agent_workspace = resolve_path(self._workspace)
             for relative_path in (MEMORY_JOURNAL_PATH, MEMORY_CURSOR_PATH, DREAM_CURSOR_PATH):

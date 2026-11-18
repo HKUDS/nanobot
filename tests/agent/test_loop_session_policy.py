@@ -74,9 +74,9 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
     )
     key = f"websocket:{await temporary_chats.create(object(), trusted_webui=True)}"
 
-    await loop._process_message(_message(key, "first question $memory $helper"))
+    await loop._process_message(_message(key, "first question $memory $helper $cron"))
     await loop._process_message(_message(key, "second question"))
-    await loop.process_direct("ordinary question $memory $helper", session_key="cli:ordinary")
+    await loop.process_direct("ordinary question $memory $helper $cron", session_key="cli:ordinary")
 
     calls = loop.provider.chat_stream_with_retry.await_args_list
     private_markers = (
@@ -87,8 +87,15 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
         provider_context = str(call.kwargs["messages"])
         assert all(marker not in provider_context for marker in private_markers)
         assert "shared project guidance" in provider_context
-    assert "Project helper procedure" in str(calls[0].kwargs["messages"])
-    assert all(marker in str(calls[2].kwargs["messages"]) for marker in private_markers)
+    transient_messages = calls[0].kwargs["messages"]
+    ordinary_messages = calls[2].kwargs["messages"]
+    assert "Project helper procedure" in str(transient_messages)
+    assert all(marker in str(ordinary_messages) for marker in private_markers)
+    assert "Scheduling is unavailable" in transient_messages[0]["content"]
+    assert "cron/SKILL.md" not in transient_messages[0]["content"]
+    assert "## Update a Task" not in transient_messages[-1]["content"]
+    assert "cron/SKILL.md" in ordinary_messages[0]["content"]
+    assert "## Update a Task" in ordinary_messages[-1]["content"]
     tool_names = {item["function"]["name"] for item in calls[0].kwargs["tools"]}
     assert "read_session" in tool_names
     assert {"create_goal", "update_goal", "subagent", "cron"}.isdisjoint(tool_names)
@@ -142,8 +149,10 @@ async def test_transient_session_file_tools_keep_shared_memory_out_of_the_turn(t
     memory.wiki_dir.mkdir()
     (memory.wiki_dir / "project.md").write_text("Wiki contains Private Marker", encoding="utf-8")
     (tmp_path / "notes.txt").write_text("Project contains Private Marker", encoding="utf-8")
+    heartbeat = tmp_path / "HEARTBEAT.md"
+    heartbeat.write_text("Existing scheduled checks", encoding="utf-8")
     key = "websocket:private-files"
-    await loop.sessions.state.register_transient(key)
+    await loop.sessions.state.register_transient(key, disabled_tools={"cron"})
     try:
         loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
             LLMResponse(content="", tool_calls=[
@@ -151,6 +160,10 @@ async def test_transient_session_file_tools_keep_shared_memory_out_of_the_turn(t
                 ToolCallRequest(id="skill", name="read_file", arguments={"path": "skills/memory/SKILL.md"}),
                 ToolCallRequest(id="wiki", name="read_file", arguments={"path": "memory/wiki/project.md"}),
                 ToolCallRequest(id="listing", name="list_dir", arguments={"path": ".", "recursive": True}),
+                ToolCallRequest(id="read-heartbeat", name="read_file", arguments={"path": "HEARTBEAT.md"}),
+                ToolCallRequest(id="edit-heartbeat", name="edit_file", arguments={
+                    "path": "HEARTBEAT.md", "old_text": "Existing scheduled checks", "new_text": "New checks",
+                }),
                 ToolCallRequest(id="edit", name="edit_file", arguments={
                     "path": "USER.md", "old_text": "Private Marker", "new_text": "Remember this",
                 }),
@@ -170,15 +183,23 @@ async def test_transient_session_file_tools_keep_shared_memory_out_of_the_turn(t
         assert "USER.md" not in results["listing"]
         assert "project.md" not in results["listing"]
         assert memory.user_file.read_text(encoding="utf-8") == "Profile contains Private Marker"
+        assert "Existing scheduled checks" in results["read-heartbeat"]
+        assert "read-only to file tools in this session" in results["edit-heartbeat"]
+        assert heartbeat.read_text(encoding="utf-8") == "Existing scheduled checks"
         assert (tmp_path / "result.txt").read_text(encoding="utf-8") == "Project artifact"
 
         loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
-            LLMResponse(content="", tool_calls=[ToolCallRequest(id="read", name="read_file", arguments={
-                "path": "memory/wiki/project.md",
+            LLMResponse(content="", tool_calls=[
+                ToolCallRequest(id="read", name="read_file", arguments={"path": "memory/wiki/project.md"}),
+                ToolCallRequest(id="read-heartbeat", name="read_file", arguments={"path": "HEARTBEAT.md"}),
+            ]),
+            LLMResponse(content="", tool_calls=[ToolCallRequest(id="edit-heartbeat", name="edit_file", arguments={
+                "path": "HEARTBEAT.md", "old_text": "Existing scheduled checks", "new_text": "New checks",
             })]),
             LLMResponse(content="done"),
         ])
-        await loop.process_direct("Read project memory", session_key="cli:ordinary")
+        await loop.process_direct("Read project memory and update scheduled checks", session_key="cli:ordinary")
+        assert heartbeat.read_text(encoding="utf-8") == "New checks"
         request = loop.provider.chat_stream_with_retry.await_args.kwargs["messages"]
         assert any(row['role'] == 'tool' and "Wiki contains Private Marker" in row['content'] for row in request)
     finally:
