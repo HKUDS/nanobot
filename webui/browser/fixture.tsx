@@ -89,7 +89,7 @@ async function loadFixture() {
     }
     case "file-diff": {
       const { FileDiffFixture } = await import("./file-diff-fixture");
-      return <FileDiffFixture />;
+      return <FileDiffFixture shiki={parameters.has("shiki")} />;
     }
     case "file-edit-path": {
       const { FileEditPathFixture } = await import("./file-edit-path-fixture");
