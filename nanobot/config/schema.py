@@ -3,7 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 
-from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
@@ -155,6 +163,7 @@ class ModelPresetConfig(RequestOverrides):
     context_window_tokens: int = 200_000
     temperature: float = 0.1
     reasoning_effort: str | None = None
+    codex_fast_mode: StrictBool | Literal["ultrafast"] | None = None
     api: ModelAPIConfig | None = None
 
     def to_generation_settings(self) -> GenerationSettings:

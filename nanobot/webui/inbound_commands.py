@@ -13,11 +13,16 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
+from nanobot.bus.events import (
+    INBOUND_META_LOCAL_MEDIA,
+    INBOUND_META_MODEL_OPTIONS,
+    INBOUND_META_USER_SHELL,
+)
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.application import builtin_command_starts_agent_turn
 from nanobot.command.builtin import USER_SHELL_COMMAND
+from nanobot.providers.model_options import ModelOptions
 from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
@@ -728,6 +733,22 @@ class WebUICommandRouter:
         )
         if is_user_shell:
             metadata[INBOUND_META_USER_SHELL] = True
+        if "model_options" in envelope:
+            if not trusted_webui:
+                await self._transport.webui_send_event(
+                    connection, "error", detail="model_options requires a trusted WebUI message",
+                    **rejection_fields,
+                )
+                return
+            if not is_user_shell and builtin_command_starts_agent_turn(content):
+                try:
+                    options = ModelOptions.parse(envelope["model_options"])
+                except ValueError as exc:
+                    await self._transport.webui_send_event(
+                        connection, "error", detail=str(exc), **rejection_fields,
+                    )
+                    return
+                metadata[INBOUND_META_MODEL_OPTIONS] = options.to_dict()
         dispatch_content = (
             f"{USER_SHELL_COMMAND} {content[1:].lstrip()}" if is_user_shell else content
         )

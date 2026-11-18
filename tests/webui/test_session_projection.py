@@ -28,6 +28,7 @@ async def test_attach_fields_restore_session_runtime_metadata() -> None:
 
     assert await projection.attach_fields("websocket:chat-1") == {
         "model_preset": "Deep Research",
+        "model_options": {"reasoning_effort": None, "codex_fast_mode": None},
         "recovery_state": {
             "status": "recovered",
             "recovery_id": "recovery-1",
@@ -47,7 +48,10 @@ async def test_attach_fields_tolerate_missing_or_invalid_session_metadata() -> N
     log = MagicMock()
     projection = WebUISessionProjection(sessions, log=log)
 
-    assert await projection.attach_fields("websocket:invalid") == {"model_preset": None}
+    assert await projection.attach_fields("websocket:invalid") == {
+        "model_preset": None,
+        "model_options": {"reasoning_effort": None, "codex_fast_mode": None},
+    }
     log.warning.assert_called_once()
     assert await WebUISessionProjection(None).attach_fields("websocket:missing") == {}
 

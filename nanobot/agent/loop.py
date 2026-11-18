@@ -43,6 +43,7 @@ from nanobot.agent.turn_delivery import (
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import (
+    INBOUND_META_MODEL_OPTIONS,
     INBOUND_META_RUNTIME_CONTROL,
     INBOUND_META_USER_SHELL,
     RUNTIME_CONTROL_SESSION_DISCARD,
@@ -64,6 +65,7 @@ from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
 from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
+from nanobot.providers.model_options import ModelOptions
 from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -86,8 +88,8 @@ from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
 from nanobot.session.message_metadata import input_history_metadata, persisted_message
 from nanobot.session.model_selection import (
-    SESSION_MODEL_PRESET_METADATA_KEY,
-    model_preset_from_metadata,
+    SESSION_MODEL_KEYS,
+    SessionModelPreset,
 )
 from nanobot.session.recovery import (
     PENDING_FOLLOWUP_ID_KEY,
@@ -536,10 +538,10 @@ class AgentLoop:
     def _resolve_session_runtime(
         self,
         session: Session,
+        name: str | None,
         *,
         recover_removed: bool,
     ) -> LLMRuntime | None:
-        name = model_preset_from_metadata(session.metadata)
         if name is None:
             return self.llm_runtime()
         try:
@@ -552,7 +554,8 @@ class AgentLoop:
                 session.key,
                 name,
             )
-            session.metadata.pop(SESSION_MODEL_PRESET_METADATA_KEY, None)
+            for key in SESSION_MODEL_KEYS:
+                session.metadata.pop(key, None)
             return None
 
     async def runtime_for_session(
@@ -560,18 +563,25 @@ class AgentLoop:
         session: Session,
         *,
         recover_removed: bool = True,
+        input_metadata: Mapping[str, Any] | None = None,
     ) -> LLMRuntime:
-        """Resolve a session runtime without blocking on recovery persistence."""
-        runtime = self._resolve_session_runtime(session, recover_removed=recover_removed)
-        if runtime is not None:
-            return runtime
-        await self.sessions.state.update_metadata(
-            session.key,
-            {},
-            remove=(SESSION_MODEL_PRESET_METADATA_KEY,),
-            expected_generation=session.generation,
+        """Capture this input's choices independently of later session updates."""
+        selection = SessionModelPreset.from_metadata(session.metadata)
+        runtime = self._resolve_session_runtime(session, selection.base_preset, recover_removed=recover_removed)
+        if runtime is None:
+            await self.sessions.state.update_metadata(
+                session.key,
+                {},
+                remove=SESSION_MODEL_KEYS,
+                expected_generation=session.generation,
+            )
+            return self.llm_runtime()
+        options = (
+            ModelOptions.parse(input_metadata[INBOUND_META_MODEL_OPTIONS])
+            if input_metadata is not None and INBOUND_META_MODEL_OPTIONS in input_metadata
+            else selection.overrides
         )
-        return self.llm_runtime()
+        return runtime.with_model_options(options)
 
     async def set_session_model_preset(
         self,
@@ -582,7 +592,8 @@ class AgentLoop:
         runtime = self.runtime_resolver.resolve_preset(name)
         await self.sessions.state.update_metadata(
             session_key,
-            {SESSION_MODEL_PRESET_METADATA_KEY: runtime.model_preset},
+            SessionModelPreset(runtime.model_preset).metadata_update(),
+            remove=SESSION_MODEL_KEYS,
             create_if_missing=True,
         )
         return runtime
@@ -724,6 +735,14 @@ class AgentLoop:
             )
             if runtime_context_meta is not None:
                 extra[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
+            if INBOUND_META_MODEL_OPTIONS in msg.metadata:
+                # Save choices with their input, in the same order as preset commands.
+                selection = SessionModelPreset.from_metadata(session.metadata)
+                for key in SESSION_MODEL_KEYS:
+                    session.metadata.pop(key, None)
+                session.metadata.update(SessionModelPreset(
+                    selection.base_preset, ModelOptions.parse(msg.metadata[INBOUND_META_MODEL_OPTIONS]),
+                ).metadata_update())
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
             followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
@@ -2075,7 +2094,9 @@ class AgentLoop:
         session = ctx.require_session()
         runtime = ctx.runtime
         if runtime is None:
-            runtime = await self.runtime_for_session(session)
+            runtime = await self.runtime_for_session(
+                session, input_metadata=ctx.msg.metadata if ctx.kind is TurnKind.USER else None,
+            )
             ctx.runtime = runtime
         if ctx.session_key.startswith("dream:"):
             logger.info(

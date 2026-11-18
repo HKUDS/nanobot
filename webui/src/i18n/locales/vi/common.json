@@ -1009,7 +1009,7 @@
       "extraHeaders": "Header",
       "extraBody": "Tham số body",
       "extraQuery": "Tham số truy vấn",
-      "capabilityFastMode": "Chế độ nhanh",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "Phản hồi nhanh hơn, mức sử dụng cao hơn.",
       "capabilityXSearch": "Tìm kiếm X",
       "capabilityXSearchHelp": "Mô hình Grok được hỗ trợ có thể tìm kiếm X.\n\nCho phép các mô hình Grok được hỗ trợ dùng X Search do xAI lưu trữ. Hoạt động tìm kiếm được hiển thị trong cuộc trò chuyện.",
@@ -1769,8 +1769,6 @@
   "deleteConfirm": {
     "title": "Xóa cuộc trò chuyện này?",
     "titleMany": "Xóa {{count}} cuộc trò chuyện?",
-    "description": "Không thể hoàn tác thao tác này.",
-    "descriptionMany": "Không thể hoàn tác thao tác này.",
     "cancel": "Hủy",
     "confirm": "Xóa",
     "automationsDescription": "Xóa chủ đề này cũng xóa các tác vụ tự động liên quan.",
@@ -1965,6 +1963,13 @@
         "removeContext": "Xóa tệp đính kèm và văn bản trích dẫn trước khi chạy lệnh."
       },
       "chooseAI": "Chọn mô hình",
+      "modelOptions": {
+        "title": "Cho cuộc trò chuyện này",
+        "on": "Bật",
+        "off": "Tắt",
+        "codexFast": "Fast",
+        "ultrafast": "Siêu nhanh"
+      },
       "switchModel": "Đổi mô hình",
       "manageModels": "Quản lý bộ thiết lập",
       "fallbackNotice": "Phản hồi này đã sử dụng mô hình dự phòng: {{model}}.",
@@ -2033,7 +2038,7 @@
         "tooLong": "Bản ghi âm quá dài.",
         "tooShort": "Giữ lâu hơn một chút để ghi âm giọng nói.",
         "noInput": "Không phát hiện đầu vào micrô.",
-        "noDevice": "Không tìm thấy micrô. Hãy kết nối rồi thử lại.",
+        "noDevice": "Kết nối micrô để ghi âm.",
         "failed": "Không thể chép lời âm thanh."
       },
       "slash": {
@@ -2530,6 +2535,19 @@
       "bsp": "BSP",
       "main-stack": "Chính và phụ"
     }
+  },
+  "toast": {
+    "undo": "Hoàn tác",
+    "pendingDeleteSingle": "Sắp xóa cuộc trò chuyện",
+    "archivedSingle": "Đã lưu trữ cuộc trò chuyện",
+    "archiveFailed": "Không thể thay đổi trạng thái lưu trữ.",
+    "unarchivedSingle": "Đã bỏ lưu trữ cuộc trò chuyện",
+    "deleteFailedSingle": "Không thể xóa cuộc trò chuyện",
+    "deleteWindow": "Bạn có {{seconds}} giây để hoàn tác.",
+    "pendingDelete": "Sắp xóa {{count}} cuộc trò chuyện",
+    "archived": "Đã lưu trữ {{count}} cuộc trò chuyện",
+    "unarchived": "Đã bỏ lưu trữ {{count}} cuộc trò chuyện",
+    "deleteFailed": "Không thể xóa {{count}} cuộc trò chuyện"
   },
   "common": {
     "retry": "Thử lại",

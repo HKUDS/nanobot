@@ -34,6 +34,7 @@ from nanobot.providers.compaction import (
     provider_compaction_scope,
 )
 from nanobot.providers.generation import GenerationSettings as GenerationSettings
+from nanobot.providers.model_options import ModelOptions
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import sanitize_surrogates_deep
 
@@ -282,6 +283,7 @@ class ProviderCallContext:
     # None opts out (auxiliary calls); an empty name denotes an unnamed preset.
     response_preset: str | None = None
     response_is_fallback: bool = False
+    model_options: ModelOptions = ModelOptions()
     # A pre-request compactor must fit this budget before sending the pending input.
     compaction_input_budget: int | None = None
     # Owned by one retry chain, shared only by its provider attempts.

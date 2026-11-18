@@ -1219,7 +1219,7 @@
       "extraHeaders": "Cabeçalhos",
       "extraBody": "Parâmetros do corpo",
       "extraQuery": "Parâmetros de consulta",
-      "capabilityFastMode": "Modo rápido",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "Respostas mais rápidas, maior consumo.",
       "capabilityXSearch": "Pesquisa no X",
       "capabilityXSearchHelp": "Modelos Grok compatíveis podem pesquisar no X.\n\nPermite que modelos Grok compatíveis usem o X Search hospedado pela xAI. A atividade de pesquisa aparece no chat.",
@@ -1771,8 +1771,6 @@
   "deleteConfirm": {
     "title": "Excluir esta conversa?",
     "titleMany": "Excluir {{count}} conversas?",
-    "description": "Esta ação não pode ser desfeita.",
-    "descriptionMany": "Esta ação não pode ser desfeita.",
     "cancel": "Cancelar",
     "confirm": "Excluir",
     "automationsDescription": "Excluir este tópico também exclui suas automações vinculadas.",
@@ -1967,6 +1965,13 @@
         "removeContext": "Remova os anexos e o texto citado antes de executar um comando."
       },
       "chooseAI": "Escolher modelo",
+      "modelOptions": {
+        "title": "Para esta conversa",
+        "on": "Ativado",
+        "off": "Desativado",
+        "codexFast": "Fast",
+        "ultrafast": "Ultrarrápido"
+      },
       "switchModel": "Trocar modelo",
       "manageModels": "Gerenciar presets",
       "fallbackNotice": "Esta resposta usou um modelo alternativo: {{model}}.",
@@ -2035,7 +2040,7 @@
         "tooLong": "A gravação é longa demais.",
         "tooShort": "Segure um pouco mais para gravar voz.",
         "noInput": "Não foi detectada entrada do microfone.",
-        "noDevice": "Nenhum microfone encontrado. Conecte um e tente novamente.",
+        "noDevice": "Conecte um microfone para gravar.",
         "failed": "Não foi possível transcrever o áudio."
       },
       "slash": {
@@ -2532,6 +2537,19 @@
       "bsp": "BSP",
       "main-stack": "Principal e pilha"
     }
+  },
+  "toast": {
+    "undo": "Desfazer",
+    "pendingDeleteSingle": "A conversa será excluída",
+    "archivedSingle": "Conversa arquivada",
+    "archiveFailed": "Não foi possível alterar o status de arquivamento.",
+    "unarchivedSingle": "Conversa desarquivada",
+    "deleteFailedSingle": "Não foi possível excluir a conversa",
+    "deleteWindow": "Você tem {{seconds}} segundos para desfazer a ação.",
+    "pendingDelete": "{{count}} conversas serão excluídas",
+    "archived": "{{count}} conversas arquivadas",
+    "unarchived": "{{count}} conversas desarquivadas",
+    "deleteFailed": "Não foi possível excluir {{count}} conversas"
   },
   "common": {
     "retry": "Tentar novamente",

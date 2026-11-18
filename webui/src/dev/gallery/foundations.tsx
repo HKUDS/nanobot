@@ -3,6 +3,7 @@ import { SidebarPanel } from "@/components/ui/sidebar-panel";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { CodexSpeedControl } from "@/components/ui/codex-speed-control";
 import { Input, SearchInput } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleButton } from "@/components/ui/toggle-button";
@@ -21,6 +22,8 @@ import { ExpandableText } from "@/components/ui/expandable-text";
 import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { LoadingRing } from "@/components/ui/loading-ring";
 import { ImageViewport } from "@/components/ui/image-viewport";
+import { ToastProvider, useToast } from "@/components/ui/toast";
+import type { CodexFastMode } from "@/lib/types";
 import { Sample, type ComponentExample } from "./example";
 import { useGalleryTranslation } from "./i18n";
 
@@ -77,6 +80,11 @@ function Switches() {
       <ToggleButton checked={false} disabled onChange={() => {}} label={t("controls.toggle.unavailableOff")} />
     </div>
   </div>;
+}
+
+function CodexSpeedPreview() {
+  const [value, setValue] = useState<CodexFastMode>(false);
+  return <CodexSpeedControl value={value} onChange={setValue} ultrafastSupported />;
 }
 
 function Selects() {
@@ -158,6 +166,33 @@ function Alerts() {
       </AlertDialogContent>
     </AlertDialog>
     <p role="status" className="text-sm text-muted-foreground">{t(removed ? "controls.alert.removed" : "controls.alert.available")}</p>
+  </div>;
+}
+
+function ToastActions() {
+  const { t } = useGalleryTranslation();
+  const show = useToast();
+  const [removed, setRemoved] = useState(false);
+  const remove = () => {
+    setRemoved(true);
+    show?.({
+      tone: "pending",
+      message: t("controls.toast.pending"),
+      action: {
+        label: t("toast.undo", { ns: "common" }),
+        run: () => {
+          setRemoved(false);
+          show?.({ tone: "success", message: t("controls.toast.restored") });
+        },
+      },
+      onExpire: () => setRemoved(false),
+    });
+  };
+  return <div className="flex flex-wrap gap-3">
+    <Button variant="outline" onClick={() => show?.({ tone: "error", message: t("controls.toast.error"), dedupeKey: "example-error" })}>
+      {t("controls.toast.showError")}
+    </Button>
+    <Button variant="destructive" onClick={remove} disabled={removed}>{t("controls.alert.remove")}</Button>
   </div>;
 }
 
@@ -279,6 +314,9 @@ export const foundationExamples: ComponentExample[] = [
     description: "controls.textarea.description", options: "controls.textarea.options", code: '<Textarea aria-label="Notes" value={notes} onChange={event => setNotes(event.target.value)} />' },
   { title: "controls.toggle.title", files: ["toggle-button"], Preview: Switches,
     description: "controls.toggle.description", options: "controls.toggle.options", code: '<ToggleButton checked={enabled} onChange={setEnabled} label="Enable feature" />' },
+  { title: "controls.codexSpeed.title", files: ["codex-speed-control"], Preview: CodexSpeedPreview,
+    description: "controls.codexSpeed.description", options: "controls.codexSpeed.options",
+    code: 'const [value, setValue] = useState<CodexFastMode>(false);\n<CodexSpeedControl value={value} onChange={setValue} ultrafastSupported />' },
   { title: "controls.select.title", files: ["select"], Preview: Selects,
     description: "controls.select.description", options: "controls.select.options",
     code: '<Select value={value} onValueChange={setValue}>\n  <SelectTrigger aria-label="Model"><SelectValue /></SelectTrigger>\n  <SelectContent><SelectItem value="default">Default</SelectItem></SelectContent>\n</Select>' },
@@ -296,6 +334,9 @@ export const foundationExamples: ComponentExample[] = [
   { title: "controls.alert.title", files: ["alert-dialog"], Preview: Alerts,
     description: "controls.alert.description", options: "controls.alert.options",
     code: '<Button onClick={() => setOpen(true)}>Remove</Button>\n<AlertDialog open={open} onOpenChange={setOpen}>\n  <AlertDialogContent><AlertDialogTitle>Remove item?</AlertDialogTitle><AlertDialogDescription>This removes the item.</AlertDialogDescription><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={removeItem}>Remove</AlertDialogAction></AlertDialogContent>\n</AlertDialog>' },
+  { title: "controls.toast.title", files: ["toast"], Preview: () => <ToastProvider><ToastActions /></ToastProvider>,
+    description: "controls.toast.description", options: "controls.toast.options",
+    code: '<ToastProvider><ExampleActions /></ToastProvider>\n\n// Inside ExampleActions\nconst show = useToast();\nshow?.({ tone: "pending", message: "Example will be removed.",\n  action: { label: "Undo", run: restoreExample }, onExpire: removeExample });' },
   { title: "controls.sheet.title", files: ["sheet"], Preview: Sheets,
     description: "controls.sheet.description", options: "controls.sheet.options",
     code: '<Sheet><SheetTrigger asChild><Button>Details</Button></SheetTrigger><SheetContent side="right"><SheetTitle>Details</SheetTitle><SheetDescription>Additional information.</SheetDescription>{content}</SheetContent></Sheet>' },

@@ -80,6 +80,35 @@ describe("Settings system domains", () => {
     expect(restart).toHaveBeenCalledTimes(1);
   });
 
+  it("announces transient desktop utility failures once per action and keeps the exported path", async () => {
+    const openLogs = vi.fn().mockRejectedValue(new Error("Host could not open the folder"));
+    const exportDiagnostics = vi.fn().mockRejectedValueOnce(new Error("Host could not export"))
+      .mockResolvedValueOnce("/diagnostics/report.zip");
+    vi.stubGlobal("nanobotHost", { openLogs, exportDiagnostics });
+    renderSettingsView({ initialSection: "runtime", initialSettings: {
+      ...settingsPayload(), surface: "native",
+      runtime_capabilities: { can_restart_engine: false, can_open_logs: true, can_export_diagnostics: true },
+    } });
+
+    const open = screen.getByRole("button", { name: "Open" });
+    for (const attempts of [1, 2]) {
+      fireEvent.click(open);
+      await waitFor(() => expect(open).toBeEnabled());
+      expect(openLogs).toHaveBeenCalledTimes(attempts);
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not open logs folder.");
+      expect(screen.getAllByText("Could not open logs folder.")).toHaveLength(1);
+    }
+
+    const exportButton = screen.getByRole("button", { name: "Export" });
+    fireEvent.click(exportButton);
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toContain("Could not export diagnostics.");
+    expect(screen.getAllByText("Could not export diagnostics.")).toHaveLength(1);
+    fireEvent.click(exportButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Diagnostics" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Diagnostics exported to /diagnostics/report.zip.");
+  });
+
   it("leaves directly when no restart is pending", () => {
     const leave = vi.fn();
     renderSettingsView({ initialSection: "runtime", initialSettings: settingsPayload(), onBackToChat: leave });
@@ -572,6 +601,28 @@ describe("Settings system domains", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Agent Plugin" }));
     expect(screen.getByRole("dialog", { name: "Managed plugin" })).toBeVisible();
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/settings/cli-apps")).toHaveLength(1);
+  });
+
+  it("announces when copying an installed app's example prompt fails", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("Clipboard blocked"));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [{ ...installedAnyGen, installed: false }], installed_count: 0 });
+        }
+        if (String(input) === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        return jsonResponse(settingsPayload());
+      }));
+      requestMutationMock.mockResolvedValue({ apps: [installedAnyGen], installed_count: 1 });
+      renderSettingsView({ initialSection: "apps" });
+      fireEvent.click(await screen.findByRole("button", { name: "Install app" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Try @anygen" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Could not copy. Please try again.");
+      expect(writeText).toHaveBeenCalledWith("Ask nanobot to use @anygen for this task.");
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
   });
 
   it("shows a visible uninstall button for installed CLI apps and calls uninstall", async () => {

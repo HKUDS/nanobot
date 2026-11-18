@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { DisclosureContent } from "@/components/ui/disclosure";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useToast } from "@/components/ui/toast";
 import { useClient } from "@/providers/ClientProvider";
 import { groupRemoteProfiles, isCompatibilityError, remoteAction, type RemoteInspection, type RemoteProfile } from "@/lib/remote-instances";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,7 @@ export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChro
   const { t } = useTranslation();
   const { client } = useClient();
   const connections = useRemoteConnections();
+  const showToast = useToast();
   const [form, setForm] = useState(emptyProfile);
   const [editorOpen, setEditorOpen] = useState(false);
   const returnedPair = useSyncExternalStore(subscribePairReturn, readPairReturn);
@@ -190,6 +192,15 @@ export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChro
           if (wanted(attempt)) setFingerprint({ id, ...result, inspect });
         } catch (scanError) { if (wanted(attempt)) showError(scanError); }
       } else {
+        // Opening an alias of the local gateway needs no recovery. A dialog
+        // (including the pairing popup) can hide the shell's toast viewport.
+        if (reason instanceof Error && reason.message === "same_instance" && showToast
+          && !editorOpen && !fingerprint && !detailsOpen && page.current
+          && !page.current.closest("[hidden], [inert], [aria-hidden='true']")
+          && !document.querySelector(":is([role='dialog'], [role='alertdialog']):not([data-state='closed'])")) {
+          showToast({ message: t("remote.errors.same_instance"), tone: "error", dedupeKey: "remote-same-instance" });
+          return;
+        }
         if (!editorOpen) {
           const profile = directory?.profiles.find((item) => item.id === id);
           if (profile && !profile.paired) {

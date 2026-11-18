@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubble";
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
+import { ToastProvider } from "@/components/ui/toast";
 import { setAppLanguage } from "@/i18n";
 import { parseWebuiThreadPayload } from "@/lib/api";
 import * as clipboard from "@/lib/clipboard";
@@ -993,6 +994,22 @@ describe("MessageBubble", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument(),
     );
+  });
+
+  it("announces clipboard failure and leaves Copy available for another attempt", async () => {
+    const copy = vi.spyOn(clipboard, "copyTextToClipboard").mockResolvedValue(false);
+    try {
+      const message: UIMessage = { id: "copy-failed", role: "assistant", content: "A reply", createdAt: 1 };
+      const { container } = render(<MessageBlockMenuActions message={message} />, { wrapper: ToastProvider });
+      menuActions(container);
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+      const alert = await screen.findByRole("alert");
+      expect(alert.closest("[data-toast-tone=error]")).not.toBeNull();
+      expect(alert).toHaveTextContent("Could not copy. Please try again.");
+      expect(screen.getByRole("button", { name: "Copy" })).toBeEnabled();
+    } finally {
+      copy.mockRestore();
+    }
   });
 
   it("copies completed assistant replies with the textarea fallback", async () => {

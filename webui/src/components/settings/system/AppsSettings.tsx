@@ -55,8 +55,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/toast";
 import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { isGenericRepositoryLogoUrl, logoFallbackUrls } from "@/lib/provider-brand";
 import type {
   CliAppInfo,
@@ -1463,17 +1465,20 @@ function CliAppReadyPanel({
   onBackToChat: () => void;
 }) {
   const { t } = useTranslation();
+  const showToast = useToast();
   const [copied, setCopied] = useState(false);
   const prompt = t("settings.cliApps.readyPrompt", {
     name: app.name,
     defaultValue: "Use @{{name}} to inspect what this CLI can do.",
   });
-  const copyPrompt = () => {
-    if (!navigator.clipboard) return;
-    void navigator.clipboard.writeText(prompt).then(() => {
-      setCopied(true);
+  const copyPrompt = async () => {
+    const copied = await copyTextToClipboard(prompt);
+    setCopied(copied);
+    if (copied) {
       window.setTimeout(() => setCopied(false), 1400);
-    });
+    } else {
+      showToast?.({ tone: "error", message: t("fileActions.failed"), dedupeKey: "settings:apps:copy-prompt" });
+    }
   };
 
   return (

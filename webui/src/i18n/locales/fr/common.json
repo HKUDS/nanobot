@@ -1009,7 +1009,7 @@
       "extraHeaders": "En-têtes",
       "extraBody": "Paramètres du corps",
       "extraQuery": "Paramètres de requête",
-      "capabilityFastMode": "Mode rapide",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "Réponses plus rapides, consommation accrue.",
       "capabilityXSearch": "Recherche sur X",
       "capabilityXSearchHelp": "Les modèles Grok compatibles peuvent rechercher sur X.\n\nPermet aux modèles Grok compatibles d’utiliser X Search hébergé par xAI. L’activité de recherche apparaît dans le chat.",
@@ -1769,8 +1769,6 @@
   "deleteConfirm": {
     "title": "Supprimer cette discussion ?",
     "titleMany": "Supprimer {{count}} conversations ?",
-    "description": "Cette action est irréversible.",
-    "descriptionMany": "Cette action est irréversible.",
     "cancel": "Annuler",
     "confirm": "Supprimer",
     "automationsDescription": "Supprimer ce sujet supprime aussi ses tâches automatiques liées.",
@@ -1965,6 +1963,13 @@
         "removeContext": "Retirez les pièces jointes et le texte cité avant d’exécuter une commande."
       },
       "chooseAI": "Choisir le modèle",
+      "modelOptions": {
+        "title": "Pour cette discussion",
+        "on": "Activé",
+        "off": "Désactivé",
+        "codexFast": "Fast",
+        "ultrafast": "Ultrarapide"
+      },
       "switchModel": "Changer de modèle",
       "manageModels": "Gérer les préréglages",
       "fallbackNotice": "Cette réponse a utilisé un modèle de secours : {{model}}.",
@@ -2033,7 +2038,7 @@
         "tooLong": "L'enregistrement est trop long.",
         "tooShort": "Maintenez un peu plus longtemps pour enregistrer la voix.",
         "noInput": "Aucune entrée microphone détectée.",
-        "noDevice": "Aucun microphone trouvé. Connectez-en un, puis réessayez.",
+        "noDevice": "Branchez un micro pour enregistrer.",
         "failed": "Impossible de transcrire l'audio."
       },
       "slash": {
@@ -2530,6 +2535,19 @@
       "bsp": "BSP",
       "main-stack": "Principal et pile"
     }
+  },
+  "toast": {
+    "undo": "Annuler",
+    "pendingDeleteSingle": "La conversation va être supprimée",
+    "archivedSingle": "Conversation archivée",
+    "archiveFailed": "Impossible de modifier le statut d’archivage.",
+    "unarchivedSingle": "Conversation désarchivée",
+    "deleteFailedSingle": "Impossible de supprimer la conversation",
+    "deleteWindow": "Vous avez {{seconds}} secondes pour annuler.",
+    "pendingDelete": "{{count}} conversations vont être supprimées",
+    "archived": "{{count}} conversations archivées",
+    "unarchived": "{{count}} conversations désarchivées",
+    "deleteFailed": "Impossible de supprimer {{count}} conversations"
   },
   "common": {
     "retry": "Réessayer",

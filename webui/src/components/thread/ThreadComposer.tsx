@@ -1,3 +1,4 @@
+import type { ModelOptionsControlProps } from "@/components/thread/ModelOptionsControl";
 import { pastedFilePath, PastedPathRange, type LocalAttachment } from "../../../../packages/client-events/attachments";
 import {
   NewChatIcon,
@@ -65,6 +66,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 import { AttachmentCard, AttachmentTypeFace, attachmentCardActionClassName } from "@/components/AttachmentCard";
 import { ComposerActionIcon, type ComposerActionState } from "@/components/thread/ComposerActionIcon";
 import {
@@ -152,8 +154,6 @@ import {
 
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
-const VOICE_ERROR_VISIBLE_MS = 3_500;
-const VOICE_ERROR_FADE_MS = 500;
 type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
 
 function formatBytes(n: number): string {
@@ -231,6 +231,8 @@ interface ThreadComposerProps {
   modelDetail?: string | null;
   modelPreset?: string | null;
   modelPresets?: ModelPresetOption[];
+  modelOptionsControl?: ModelOptionsControlProps;
+  onModelMenuOpenChange?: (open: boolean) => void;
   onModelPresetChange?: (name: string) => void;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
@@ -559,6 +561,8 @@ export function ThreadComposer({
   modelDetail = null,
   modelPreset = null,
   modelPresets = [],
+  modelOptionsControl,
+  onModelMenuOpenChange,
   onModelPresetChange,
   modelProvider = null,
   modelProviderLabel = null,
@@ -616,6 +620,8 @@ export function ThreadComposer({
     end: number;
   } | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [voiceSetupError, setVoiceSetupError] = useState<VoiceRecorderErrorKey | null>(null);
+  const showToast = useToast();
   const [sendPending, setSendPending] = useState(false);
   const [pathInspection, setPathInspection] = useState<{
     generation: number; scope: string; range: PastedPathRange; attachment?: LocalAttachment;
@@ -708,7 +714,6 @@ export function ThreadComposer({
   useEffect(() => {
     if (queueSnapshot.error) setInlineError(queueSnapshot.error);
   }, [queueSnapshot.error]);
-  const [voiceErrorFading, setVoiceErrorFading] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [cliAppMenuDismissed, setCliAppMenuDismissed] = useState(false);
@@ -751,7 +756,6 @@ export function ThreadComposer({
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
   const voiceShortcutDownRef = useRef(false);
-  const voiceErrorFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHero = variant === "hero";
   const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
   const projectPickerAvailable =
@@ -813,6 +817,10 @@ export function ThreadComposer({
       const { rejected } = enqueue(files);
       if (rejected.length > 0) {
         const { reason, file } = rejected[0];
+        if (reason === "empty_file" || reason === "unsupported_type") {
+          showToast?.({ message: formatRejection(reason), tone: "error", dedupeKey: `attachment:${reason}` });
+          return;
+        }
         setInlineError(reason === "too_large"
           ? formatUploadTooLarge(file.size, acceptedAttachmentKind(file) === "video" ? MAX_VIDEO_BYTES : maxFileBytes)
           : formatRejection(reason));
@@ -820,7 +828,7 @@ export function ThreadComposer({
         setInlineError(null);
       }
     },
-    [enqueue, formatRejection, formatUploadTooLarge, interactionDisabled, maxFileBytes],
+    [enqueue, formatRejection, formatUploadTooLarge, interactionDisabled, maxFileBytes, showToast],
   );
 
   const {
@@ -1386,6 +1394,7 @@ export function ThreadComposer({
     previousPendingQueueKeyRef.current = pendingQueueKey;
     setValue("");
     setInlineError(null);
+    setVoiceSetupError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     setCursorPosition(0);
@@ -1402,42 +1411,26 @@ export function ThreadComposer({
     });
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
-    setInlineError(null);
     focusTextarea();
   }, [focusTextarea]);
 
-  const clearVoiceErrorTimers = useCallback(() => {
-    if (voiceErrorFadeTimerRef.current !== null) clearTimeout(voiceErrorFadeTimerRef.current);
-    voiceErrorFadeTimerRef.current = null;
-  }, []);
-  const clearInlineError = useCallback(() => {
-    clearVoiceErrorTimers();
-    setVoiceErrorFading(false);
-    setInlineError(null);
-  }, [clearVoiceErrorTimers]);
+  const clearVoiceSetupError = useCallback(() => setVoiceSetupError(null), []);
   const setVoiceError = useCallback((key: VoiceRecorderErrorKey) => {
-    clearVoiceErrorTimers();
-    setVoiceErrorFading(false);
-    setInlineError(t(`thread.composer.voiceErrors.${key}`));
-    voiceErrorFadeTimerRef.current = setTimeout(() => {
-      setVoiceErrorFading(true);
-      voiceErrorFadeTimerRef.current = setTimeout(() => {
-        setInlineError(null);
-        setVoiceErrorFading(false);
-        voiceErrorFadeTimerRef.current = null;
-      }, VOICE_ERROR_FADE_MS);
-    }, VOICE_ERROR_VISIBLE_MS);
-  }, [clearVoiceErrorTimers, t]);
+    // Setup blockers carry instructions users may need to keep in view while fixing them.
+    if (key === "insecureContext" || key === "permission" || key === "notConfigured") {
+      setVoiceSetupError(key);
+      return;
+    }
+    showToast?.({ message: t(`thread.composer.voiceErrors.${key}`), tone: "error", dedupeKey: "voice-input" });
+  }, [showToast, t]);
   const voiceRecorder = useVoiceRecorder({
     disabled: interactionDisabled,
-    onClearError: clearInlineError,
+    onClearError: clearVoiceSetupError,
     onError: setVoiceError,
     onTranscript: appendTranscription,
     onTranscribeAudio,
     wantsWav: transcriptionProvider === "xiaomi_mimo",
   });
-
-  useEffect(() => () => clearVoiceErrorTimers(), [clearVoiceErrorTimers]);
 
   useEffect(() => {
     if (!onTranscribeAudio) return;
@@ -1935,7 +1928,7 @@ export function ThreadComposer({
     : showStopButton ? "stop" : requiresModelSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
-    && value.length === 0 && images.length === 0 && !inlineError
+    && value.length === 0 && images.length === 0 && !inlineError && !(onTranscribeAudio && voiceSetupError)
     && !normalizedQuotedContext && !queuedPrompt
     && !isDragging && !sessionDragPreview && !voiceRecorder.isRecording && !showProjectPicker;
   useLayoutEffect(() => {
@@ -1988,6 +1981,8 @@ export function ThreadComposer({
       modelDetail={modelDetail}
       modelPreset={modelPreset}
       modelPresets={modelPresets}
+      modelOptionsControl={modelOptionsControl}
+      onMenuOpenChange={onModelMenuOpenChange}
       onPresetChange={onModelPresetChange}
       onManageModels={onManageModels}
       onRequestComposerFocus={() => textareaRef.current?.focus()}
@@ -2222,16 +2217,9 @@ export function ThreadComposer({
             )}
           />
         </div>
-        {inlineError ? (
-          <div
-            role="alert"
-            className={cn(
-              "mx-3 mb-1 max-h-24 overflow-hidden rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1",
-              "text-[11.5px] font-medium text-destructive transition-[max-height,margin,padding,opacity] [transition-duration:220ms] ease-out motion-reduce:transition-none",
-              voiceErrorFading && "mb-0 max-h-0 border-transparent py-0 opacity-0",
-            )}
-          >
-            {inlineError}
+        {inlineError || (onTranscribeAudio && voiceSetupError) ? (
+          <div role="alert" className="mx-3 mb-1 break-words rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1 text-[11.5px] font-medium text-destructive">
+            {inlineError ?? t(`thread.composer.voiceErrors.${voiceSetupError}`)}
           </div>
         ) : null}
         <div

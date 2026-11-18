@@ -6,6 +6,7 @@ import type { Window as HappyWindow } from "happy-dom";
 import i18n from "@/i18n";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import { useSessions } from "@/hooks/useSessions";
+import { TOAST_ACTION_MS } from "@/components/ui/toast";
 import type { NanobotClientOptions, RunState } from "@/lib/nanobot-client";
 import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
 import type {
@@ -48,6 +49,13 @@ const sidebarStateUpdateHandlers = new Set<(state: SidebarStatePayload) => void>
 const pairingChangeHandlers = new Set<() => void>();
 const readyHandlers = new Set<() => void>();
 let mockSessions: ChatSummary[] = [];
+
+async function confirmTopicDeletion(button: HTMLElement) {
+  fireEvent.click(button);
+  // Happy DOM delivers the modal's aria-hidden removal on a timer. Start
+  // measuring the Undo window after the observer makes the toast reachable.
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+}
 
 function setNavigatorPlatform(platform: string): void {
   Object.defineProperty(window.navigator, "platform", {
@@ -205,8 +213,8 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
         forkChat: async () => "fork-chat",
         getSessionAutomations: getSessionAutomationsSpy,
         deleteChat: async (key: string, options?: { deleteAutomations?: boolean }) => {
-          if (options === undefined) await deleteChatSpy(key);
-          else await deleteChatSpy(key, options);
+          const result = options === undefined ? await deleteChatSpy(key) : await deleteChatSpy(key, options);
+          if (result && !result.deleted) return result;
           setSessions((prev: ChatSummary[]) => prev.filter((s) => s.key !== key));
           return { deleted: true };
         },
@@ -321,6 +329,7 @@ import {
   BootstrapAuthRequiredError,
   deriveWsUrl,
   fetchBootstrap,
+  loadSavedSecret,
 } from "@/lib/bootstrap";
 import App from "@/App";
 import { mockBrowserFocus } from "./browser-focus";
@@ -437,9 +446,10 @@ describe("App layout", () => {
     expect(requestMutationSpy).not.toHaveBeenCalled();
   });
 
-  it("shows the auth form without an invalid-password error on first load", async () => {
+  it.each(["", "stale-password"])("shows a clean auth form when the initial automatic sign-in fails (saved password: %j)", async (savedPassword) => {
+    vi.mocked(loadSavedSecret).mockReturnValueOnce(savedPassword);
     vi.mocked(fetchBootstrap).mockRejectedValueOnce(
-      new Error("bootstrap failed: HTTP 401"),
+      new BootstrapAuthRequiredError("bootstrap failed: HTTP 401"),
     );
 
     render(<App />);
@@ -452,8 +462,10 @@ describe("App layout", () => {
       "autocomplete",
       "current-password",
     );
-    expect(password).not.toHaveAttribute("placeholder");
+    expect(password).toHaveValue("");
+    expect(password).toHaveFocus();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(fetchBootstrap).toHaveBeenCalledWith("", savedPassword);
     expect(connectSpy).not.toHaveBeenCalled();
   });
 
@@ -467,6 +479,7 @@ describe("App layout", () => {
 
     await user.type(await screen.findByLabelText("WebUI password"), "draft-password");
     await user.tab({ shift: true });
+    await user.tab({ shift: true });
     expect(screen.getByRole("combobox", { name: "Change language" })).toHaveFocus();
     await user.keyboard("{Enter}");
     await screen.findByRole("listbox");
@@ -474,7 +487,9 @@ describe("App layout", () => {
 
     expect(await screen.findByRole("heading", { name: "连接到 nanobot" }))
       .toBeInTheDocument();
-    expect(screen.getByLabelText("WebUI 密码")).toHaveValue("draft-password");
+    const password = screen.getByLabelText("WebUI 密码");
+    expect(password).toHaveValue("draft-password");
+    expect(password).toHaveAttribute("placeholder", "WebUI 密码");
     expect(screen.getByRole("button", { name: "连接" })).toBeEnabled();
     expect(document.documentElement.lang).toBe("zh-CN");
     expect(localStorage.getItem("nanobot.locale")).toBe("zh-CN");
@@ -482,7 +497,7 @@ describe("App layout", () => {
     expect(connectSpy).not.toHaveBeenCalled();
   });
 
-  it("reveals password setup help with the keyboard without submitting the form", async () => {
+  it("opens password help as a dialog without submitting or clearing the password draft", async () => {
     vi.mocked(fetchBootstrap).mockRejectedValueOnce(
       new Error("bootstrap failed: HTTP 401"),
     );
@@ -492,26 +507,25 @@ describe("App layout", () => {
 
     const password = await screen.findByLabelText("WebUI password");
     await user.type(password, "draft-password");
-    await user.tab();
-    await user.tab();
-    await user.tab();
-    const help = screen.getByRole("button", { name: "Where can I find the password?" });
+    await user.tab({ shift: true });
+    const helpTitle = "Where can I find the password?";
+    const help = screen.getByRole("button", { name: helpTitle });
     expect(help).toHaveFocus();
-    expect(help).toHaveAttribute("aria-expanded", "false");
-    const content = document.getElementById(help.getAttribute("aria-controls")!);
-    expect(content).toHaveAttribute("aria-hidden", "true");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(helpTitle);
 
     await user.keyboard("{Enter}");
 
-    expect(help).toHaveAttribute("aria-expanded", "true");
-    expect(content).not.toHaveAttribute("aria-hidden");
-    expect(content).toHaveTextContent("~/.nanobot/config.json");
-    expect(content).toHaveTextContent("channels.websocket.tokenIssueSecret");
-    expect(content).toHaveTextContent("If that value is empty, use channels.websocket.token.");
+    const dialog = await screen.findByRole("dialog", { name: helpTitle });
+    expect(dialog).toHaveFocus();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(dialog).toHaveTextContent("~/.nanobot/config.json");
+    expect(dialog).toHaveTextContent("channels.websocket.tokenIssueSecret");
+    expect(dialog).toHaveTextContent("If that value is empty, use channels.websocket.token.");
 
-    await user.keyboard(" ");
+    await user.keyboard("{Escape}");
 
-    expect(help).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(help).toHaveFocus());
+    expect(dialog).not.toBeInTheDocument();
     expect(password).toHaveValue("draft-password");
     expect(fetchBootstrap).toHaveBeenCalledTimes(1);
   });
@@ -557,17 +571,13 @@ describe("App layout", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Enter password",
     );
-    expect(password).toHaveAttribute("placeholder", "Enter password");
     expect(password).toHaveAttribute("aria-invalid", "true");
-    expect(password).toHaveAttribute(
-      "aria-describedby",
-      "webui-auth-error",
-    );
+    expect(password).toHaveAccessibleDescription("Enter password");
     expect(password).toHaveFocus();
     fireEvent.change(password, { target: { value: "   " } });
     fireEvent.click(connect);
     expect(password).toHaveValue("");
-    expect(password).toHaveAttribute("placeholder", "Enter password");
+    expect(password).toHaveAccessibleDescription("Enter password");
     expect(fetchBootstrap).toHaveBeenCalledTimes(1);
   });
 
@@ -586,34 +596,47 @@ describe("App layout", () => {
     expect(connectSpy).not.toHaveBeenCalled();
   });
 
-  it("shows an invalid-password error after a submitted password is rejected", async () => {
-    vi.mocked(fetchBootstrap).mockRejectedValue(
-      new Error("bootstrap failed: HTTP 401"),
-    );
+  it("keeps the sign-in form mounted during submission and refocuses it on rejection", async () => {
+    let rejectAttempt!: (error: Error) => void;
+    vi.mocked(fetchBootstrap)
+      .mockRejectedValueOnce(new Error("bootstrap failed: HTTP 401"))
+      .mockReturnValueOnce(new Promise((_, reject) => { rejectAttempt = reject; }));
+    const user = userEvent.setup();
 
     render(<App />);
 
     const password = await screen.findByLabelText("WebUI password");
-    fireEvent.change(password, { target: { value: "wrong-password" } });
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    const submit = screen.getByRole("button", { name: "Connect" });
+    await user.type(password, "wrong-password");
+    await user.click(screen.getByRole("button", { name: "Show password" }));
+    await user.click(submit);
 
-    const retryPassword = await screen.findByLabelText("WebUI password");
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Incorrect password",
-    );
-    expect(retryPassword).toHaveAttribute("placeholder", "Incorrect password");
-    expect(retryPassword).toHaveValue("");
-    expect(retryPassword).toHaveAttribute("aria-invalid", "true");
-    expect(retryPassword).toHaveFocus();
+    expect(screen.getByLabelText("WebUI password")).toBe(password);
+    expect(submit).toBeDisabled();
+    expect(submit).toHaveAttribute("aria-busy", "true");
+    expect(password).toHaveAttribute("readonly");
+    expect(fetchBootstrap).toHaveBeenCalledTimes(2);
     expect(fetchBootstrap).toHaveBeenLastCalledWith("", "wrong-password");
+
+    await act(async () => rejectAttempt(new Error("bootstrap failed: HTTP 401")));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect password");
+    expect(screen.getByLabelText("WebUI password")).toBe(password);
+    expect(submit).toBeEnabled();
+    expect(password).toHaveAccessibleDescription("Incorrect password");
+    expect(password).toHaveValue("");
+    expect(password).toHaveAttribute("type", "password");
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveFocus();
     expect(connectSpy).not.toHaveBeenCalled();
-    fireEvent.change(retryPassword, { target: { value: "retry-password" } });
-    expect(retryPassword).not.toHaveAttribute("placeholder");
-    expect(retryPassword).not.toHaveAttribute("aria-invalid");
+    await user.type(password, "retry-password");
+    expect(password).toHaveValue("retry-password");
+    expect(password).not.toHaveAccessibleDescription();
+    expect(password).not.toHaveAttribute("aria-invalid");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("clears auth feedback after three seconds without moving focus", async () => {
+  it("keeps auth errors on the password field while the user waits", async () => {
     vi.mocked(fetchBootstrap).mockRejectedValue(
       new Error("bootstrap failed: HTTP 401"),
     );
@@ -622,9 +645,9 @@ describe("App layout", () => {
     vi.useFakeTimers();
 
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    expect(password).toHaveAttribute("placeholder", "Enter password");
-    act(() => vi.advanceTimersByTime(3_000));
-    expect(password).not.toHaveAttribute("placeholder");
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter password");
+    expect(password).toHaveAccessibleDescription("Enter password");
     expect(password).toHaveFocus();
 
     await act(async () => {
@@ -632,13 +655,10 @@ describe("App layout", () => {
       fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     });
     const retryPassword = screen.getByLabelText("WebUI password");
-    expect(retryPassword).toHaveAttribute("placeholder", "Incorrect password");
-    act(() => vi.advanceTimersByTime(2_999));
-    expect(retryPassword).toHaveAttribute("placeholder", "Incorrect password");
-    act(() => vi.advanceTimersByTime(1));
-    expect(retryPassword).not.toHaveAttribute("placeholder");
-    expect(retryPassword).not.toHaveAttribute("aria-invalid");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect password");
+    expect(retryPassword).toHaveAccessibleDescription("Incorrect password");
+    expect(retryPassword).toHaveAttribute("aria-invalid", "true");
     expect(retryPassword).toHaveFocus();
   });
 
@@ -2468,23 +2488,27 @@ describe("App layout", () => {
     await waitFor(() =>
       expect(screen.getByText("Delete this topic?")).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-
-    await waitFor(() =>
-      expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a"),
-    );
-    await waitFor(() =>
-      expect(
-        within(sidebar).getByRole("button", { name: /^Second chat$/ }),
-      ).toBeInTheDocument(),
-    );
+    vi.useFakeTimers();
+    await confirmTopicDeletion(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByText("Topic will be deleted")).toBeVisible();
+    expect(within(sidebar).queryByRole("button", { name: /^First chat$/ })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS - 1); });
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    vi.useRealTimers();
+    expect(deleteChatSpy).toHaveBeenCalledTimes(1);
+    expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a");
+    expect(within(sidebar).getByRole("button", { name: /^Second chat$/ })).toBeInTheDocument();
     expect(screen.queryByText("Delete this topic?")).not.toBeInTheDocument();
     expect(document.body.style.pointerEvents).not.toBe("none");
 
     fireEvent.pointerDown(screen.getByLabelText("Topic actions for Second chat"), { button: 0 });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
-    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "56px" }));
+    const lastDelete = await screen.findByRole("alertdialog", { name: "Delete this topic?" });
+    vi.useFakeTimers();
+    await confirmTopicDeletion(within(lastDelete).getByRole("button", { name: "Delete" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "56px" });
   }, 15_000);
 
   it.each([false, true])("archives only persisted selected topics in one sidebar update (draft=%s)", async (includeDraft) => {
@@ -2523,7 +2547,66 @@ describe("App layout", () => {
     if (includeDraft) expect(within(sidebar).getByRole("button", { name: "Topic a" })).toBeInTheDocument();
     else expect(within(sidebar).queryByRole("button", { name: "Topic a" })).not.toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: "Topic b" })).not.toBeInTheDocument();
+    const fallback = window.location.hash;
+    const undo = await screen.findByRole("button", { name: "Undo" });
+    expect(screen.getByText(includeDraft ? "Topic archived" : "2 topics archived")).toBeVisible();
+    fireEvent.click(undo);
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledTimes(2));
+    expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+      archived_keys: [], pinned_keys: ["websocket:chat-a", "websocket:chat-b"],
+    }));
+    expect(within(sidebar).getByRole("button", { name: "Topic b" })).toBeInTheDocument();
+    expect(window.location.hash).toBe(fallback);
     expect(deleteChatSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the topic and reports archive failure instead of retrying it silently", async () => {
+    const key = "websocket:chat-a";
+    mockSessions = [{
+      key, channel: "websocket", chatId: "chat-a", title: "Review notes", preview: "",
+      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
+    }];
+    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: [key] } });
+    let rejectSave!: (error: Error) => void;
+    setSidebarStateSpy.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }));
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Review notes"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledTimes(1));
+    expect(within(sidebar).getByRole("button", { name: "Review notes" })).toBeVisible();
+    expect(screen.queryByText("Topic archived")).not.toBeInTheDocument();
+    await act(async () => rejectSave(new Error("Disk full")));
+    expect(await screen.findByText("Could not change archive status.")).toBeVisible();
+    expect(within(sidebar).getByRole("button", { name: "Review notes" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+    act(() => statusHandlers.forEach((handler) => { handler("reconnecting"); handler("open"); }));
+    expect(setSidebarStateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([["a", "b"], ["b", "a"]])("restores pin order when undoing archives in %s, %s order", async (first, second) => {
+    const keys = ["a", "b", "c"].map((id) => `websocket:chat-${id}`);
+    mockSessions = ["a", "b", "c"].map((id, index) => ({
+      key: keys[index], channel: "websocket", chatId: `chat-${id}`, title: `Topic ${id}`, preview: "",
+      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
+    }));
+    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: keys } });
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    for (const id of ["a", "b"]) {
+      fireEvent.pointerDown(await within(sidebar).findByLabelText(`Topic actions for Topic ${id}`), { button: 0 });
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+      await waitFor(() => expect(within(sidebar).queryByRole("button", { name: `Topic ${id}` })).not.toBeInTheDocument());
+    }
+    for (const id of [first, second]) {
+      const card = screen.getByText(`Topic ${id}`, { selector: '[role="status"] span' }).closest<HTMLElement>("[data-toast-tone]")!;
+      fireEvent.click(within(card).getByRole("button", { name: "Undo" }));
+      await within(sidebar).findByRole("button", { name: `Topic ${id}` });
+    }
+    expect(setSidebarStateSpy).toHaveBeenCalledTimes(4);
+    expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pinned_keys: keys, archived_keys: [] }));
   });
 
   it("deletes multiple selected topics through one confirmation", async () => {
@@ -2580,10 +2663,14 @@ describe("App layout", () => {
     getSessionAutomationsSpy.mockResolvedValue([]);
     fireEvent.click(within(sidebar).getByRole("button", { name: "Delete" }));
     expect(await screen.findByText("Delete 2 conversations?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    vi.useFakeTimers();
+    await confirmTopicDeletion(screen.getByRole("button", { name: "Delete" }));
     expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
-
-    await waitFor(() => expect(deleteChatSpy).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("2 topics will be deleted")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Undo" })).toHaveLength(1);
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(deleteChatSpy).toHaveBeenCalledTimes(2);
     expect(deleteChatSpy.mock.calls.map(([key]) => key)).toEqual([
       "websocket:chat-a",
       "websocket:chat-b",
@@ -2592,6 +2679,73 @@ describe("App layout", () => {
     expect(getSessionAutomationsSpy).toHaveBeenCalledWith("websocket:chat-b");
     expect(within(sidebar).getByRole("button", { name: "Third chat" }))
       .toBeInTheDocument();
+  }, 15_000);
+
+  it.each(["undo", "failure", "unmount"] as const)("handles pending topic deletion on %s", async (outcome) => {
+    mockSessions = ["Review notes", "Release notes"].map((title, index) => ({
+      key: `websocket:chat-${index}`,
+      channel: "websocket",
+      chatId: `chat-${index}`,
+      createdAt: "2026-04-16T10:00:00Z",
+      updatedAt: "2026-04-16T10:00:00Z",
+      title,
+      preview: "",
+    }));
+    if (outcome === "failure") deleteChatSpy.mockRejectedValueOnce(new Error("Offline"));
+    const { unmount } = render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Review notes"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(await screen.findByRole("alertdialog", { name: "Delete this topic?" })).toBeVisible();
+    vi.useFakeTimers();
+    await confirmTopicDeletion(screen.getByRole("button", { name: "Delete" }));
+    expect(within(sidebar).queryByRole("button", { name: "Review notes" })).not.toBeInTheDocument();
+    expect(screen.getByText("Topic will be deleted").closest('[role="status"]')).toHaveTextContent("Review notes");
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+
+    if (outcome === "undo") fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    if (outcome === "unmount") unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+
+    if (outcome === "failure") {
+      expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-0");
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not delete the topic");
+    } else {
+      expect(deleteChatSpy).not.toHaveBeenCalled();
+    }
+    if (outcome !== "unmount") {
+      expect(within(sidebar).getByRole("button", { name: "Review notes" })).toBeVisible();
+    }
+  });
+
+  it("asks again only for the topic whose automations appeared during the delete window", async () => {
+    mockSessions = ["a", "b"].map((id) => ({
+      key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`, title: `Topic ${id}`, preview: "",
+      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
+    }));
+    const job: SessionAutomationJob = {
+      id: "late-job", name: "Added during undo", enabled: true,
+      schedule: { kind: "every", every_ms: 86_400_000 }, payload: { message: "Check the repo" }, state: {},
+    };
+    deleteChatSpy.mockResolvedValueOnce({ deleted: true })
+      .mockResolvedValueOnce({ deleted: false, blocked_by_automations: true, automations: [job] });
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Topic a"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Topic b" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Delete" }));
+    const initial = await screen.findByRole("alertdialog", { name: "Delete 2 conversations?" });
+    vi.useFakeTimers();
+    await confirmTopicDeletion(within(initial).getByRole("button", { name: "Delete" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(deleteChatSpy.mock.calls).toEqual([["websocket:chat-a"], ["websocket:chat-b"]]);
+    const retry = screen.getByRole("alertdialog", { name: "Delete this topic?" });
+    expect(within(retry).getByText("Added during undo")).toBeVisible();
+    await confirmTopicDeletion(within(retry).getByRole("button", { name: "Delete" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(deleteChatSpy).toHaveBeenCalledTimes(3);
+    expect(deleteChatSpy).toHaveBeenLastCalledWith("websocket:chat-b", { deleteAutomations: true });
   }, 15_000);
 
   it("shows localized bound automations in the first delete confirmation", async () => {
@@ -2651,13 +2805,11 @@ describe("App layout", () => {
       screen.queryByText("Deleting this topic also deletes its linked automations."),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "删除" }));
-
-    await waitFor(() =>
-      expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a", {
-        deleteAutomations: true,
-      }),
-    );
+    vi.useFakeTimers();
+    await confirmTopicDeletion(screen.getByRole("button", { name: "删除" }));
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a", { deleteAutomations: true });
     expect(deleteChatSpy).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument();
   }, 15_000);
@@ -4427,15 +4579,18 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     expect(await within(sidebar).findByRole("button", { name: "Group: Research" }))
       .toBeInTheDocument();
+    expect((await screen.findByTestId("pane-grid")).children).toHaveLength(2);
     fireEvent.pointerDown(within(sidebar).getByRole("button", {
       name: "New topic pane actions",
     }), { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
     expect(await screen.findByText("Delete this topic?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    vi.useFakeTimers();
+    await confirmTopicDeletion(screen.getByRole("button", { name: "Delete" }));
 
-    await waitFor(() => expect(deleteChatSpy).toHaveBeenCalledWith("websocket:new-pane"));
-    await waitFor(() => expect(window.location.hash).toBe("#/chat/websocket%3Aalpha"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(deleteChatSpy).toHaveBeenCalledWith("websocket:new-pane");
+    expect(window.location.hash).toBe("#/chat/websocket%3Aalpha");
     expect(within(sidebar).getByRole("button", { name: "Group: Research" }))
       .toBeInTheDocument();
     expect(screen.getByTestId("pane-grid").children).toHaveLength(1);

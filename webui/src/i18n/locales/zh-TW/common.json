@@ -1009,7 +1009,7 @@
       "extraHeaders": "請求頭",
       "extraBody": "請求體引數",
       "extraQuery": "查詢引數",
-      "capabilityFastMode": "快速模式",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "回應更快，用量更高",
       "capabilityXSearch": "X 搜尋",
       "capabilityXSearchHelp": "支援的 Grok 模型可搜尋 X\n\n允許受支援的 Grok 模型使用 xAI 託管的 X Search，並在對話中展示搜尋過程。",
@@ -1769,8 +1769,6 @@
   "deleteConfirm": {
     "title": "刪除這個話題？",
     "titleMany": "刪除這 {{count}} 個對話？",
-    "description": "此操作無法復原。",
-    "descriptionMany": "此操作無法復原。",
     "cancel": "取消",
     "confirm": "刪除",
     "automationsDescription": "刪除話題也會刪除關聯的自動任務",
@@ -1965,6 +1963,13 @@
         "removeContext": "執行命令前，請移除附件和引用文字。"
       },
       "chooseAI": "選擇模型",
+      "modelOptions": {
+        "title": "目前對話",
+        "on": "開啟",
+        "off": "關閉",
+        "codexFast": "Fast",
+        "ultrafast": "極速"
+      },
       "switchModel": "切換模型",
       "manageModels": "管理預設",
       "fallbackNotice": "本次已使用備用模型：{{model}}。",
@@ -2033,7 +2038,7 @@
         "tooLong": "錄音時間太長。",
         "tooShort": "請延長錄音時間。",
         "noInput": "沒有偵測到麥克風輸入。",
-        "noDevice": "找不到可用的麥克風，請連接後重試。",
+        "noDevice": "找不到麥克風，請連接後重試。",
         "failed": "語音轉寫失敗。"
       },
       "slash": {
@@ -2530,6 +2535,19 @@
       "bsp": "BSP",
       "main-stack": "主次排列"
     }
+  },
+  "toast": {
+    "undo": "復原",
+    "pendingDeleteSingle": "即將刪除對話",
+    "archivedSingle": "已封存對話",
+    "archiveFailed": "無法變更封存狀態。",
+    "unarchivedSingle": "已取消封存",
+    "deleteFailedSingle": "無法刪除對話",
+    "deleteWindow": "可在 {{seconds}} 秒內復原。",
+    "pendingDelete": "即將刪除 {{count}} 個對話",
+    "archived": "已封存 {{count}} 個對話",
+    "unarchived": "已取消封存 {{count}} 個對話",
+    "deleteFailed": "無法刪除 {{count}} 個對話"
   },
   "common": {
     "retry": "重試",

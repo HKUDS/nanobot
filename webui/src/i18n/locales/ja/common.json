@@ -1009,7 +1009,7 @@
       "extraHeaders": "ヘッダー",
       "extraBody": "本文のパラメーター",
       "extraQuery": "クエリパラメーター",
-      "capabilityFastMode": "高速モード",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "応答が速くなり、使用量が増えます。",
       "capabilityXSearch": "X 検索",
       "capabilityXSearchHelp": "対応する Grok モデルが X を検索できます。\n\n対応する Grok モデルが xAI ホストの X Search を使用できるようにします。検索状況はチャットに表示されます。",
@@ -1769,8 +1769,6 @@
   "deleteConfirm": {
     "title": "このチャットを削除しますか？",
     "titleMany": "{{count}} 件の会話を削除しますか？",
-    "description": "この操作は元に戻せません。",
-    "descriptionMany": "この操作は元に戻せません。",
     "cancel": "キャンセル",
     "confirm": "削除",
     "automationsDescription": "このトピックを削除すると、関連する自動タスクも削除されます。",
@@ -1965,6 +1963,13 @@
         "removeContext": "コマンドを実行する前に、添付ファイルと引用テキストを削除してください。"
       },
       "chooseAI": "モデルを選択",
+      "modelOptions": {
+        "title": "このチャット",
+        "on": "オン",
+        "off": "オフ",
+        "codexFast": "Fast",
+        "ultrafast": "超高速"
+      },
       "switchModel": "モデルを切り替え",
       "manageModels": "プリセット管理",
       "fallbackNotice": "この応答では代替モデルを使用しました：{{model}}。",
@@ -2033,7 +2038,7 @@
         "tooLong": "録音が長すぎます。",
         "tooShort": "もう少し長く録音してください。",
         "noInput": "マイク入力が検出されませんでした。",
-        "noDevice": "マイクが見つかりません。接続して再試行してください。",
+        "noDevice": "録音するにはマイクを接続してください。",
         "failed": "音声を文字起こしできませんでした。"
       },
       "slash": {
@@ -2530,6 +2535,19 @@
       "bsp": "BSP",
       "main-stack": "メインとサブ"
     }
+  },
+  "toast": {
+    "undo": "元に戻す",
+    "pendingDeleteSingle": "会話を削除します",
+    "archivedSingle": "会話をアーカイブしました",
+    "archiveFailed": "アーカイブ状態を変更できませんでした。",
+    "unarchivedSingle": "会話のアーカイブを解除しました",
+    "deleteFailedSingle": "会話を削除できませんでした",
+    "deleteWindow": "{{seconds}} 秒以内なら元に戻せます。",
+    "pendingDelete": "{{count}} 件の会話を削除します",
+    "archived": "{{count}} 件の会話をアーカイブしました",
+    "unarchived": "{{count}} 件の会話のアーカイブを解除しました",
+    "deleteFailed": "{{count}} 件の会話を削除できませんでした"
   },
   "common": {
     "retry": "再試行",

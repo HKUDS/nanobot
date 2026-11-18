@@ -332,6 +332,7 @@ export function SettingsPage({
               }}
               onDeleteConfiguration={(preset, onDeleted) => {
                 presetDeletedCallback.current = onDeleted;
+                modelState.setModelPresetDeleteError(null);
                 modelState.setModelPresetPendingDelete(preset);
               }}
             />
@@ -604,9 +605,13 @@ export function SettingsPage({
               onAction={systemActions.handleAutomationAction}
               onRequestEdit={(job) => {
                 setAutomationDetailReturn(null);
+                systemState.setAutomationDialogError(null);
                 systemState.setAutomationPendingEdit(job);
               }}
-              onRequestDelete={systemState.setAutomationPendingDelete}
+              onRequestDelete={(job) => {
+                systemState.setAutomationDialogError(null);
+                systemState.setAutomationPendingDelete(job);
+              }}
               onChangeChat={systemActions.handleAutomationChat}
               onManageModels={() => selectSection("models")}
               returnToDetailJob={automationDetailReturn}
@@ -669,6 +674,7 @@ export function SettingsPage({
       <ModelPresetDeleteDialog
         preset={modelState.modelPresetPendingDelete}
         deleting={modelState.saving}
+        error={modelState.modelPresetPendingDelete ? modelState.modelPresetDeleteError : null}
         onOpenChange={(open) => {
           if (!open) {
             modelState.setModelPresetPendingDelete(null);
@@ -728,6 +734,7 @@ export function SettingsPage({
       <AutomationDeleteDialog
         job={systemState.automationPendingDelete}
         deleting={systemState.automationAction === `delete:${systemState.automationPendingDelete?.id ?? ""}`}
+        error={systemState.automationPendingDelete ? systemState.automationDialogError : null}
         onOpenChange={(open) => {
           if (!open) systemState.setAutomationPendingDelete(null);
         }}
@@ -737,6 +744,7 @@ export function SettingsPage({
       <AutomationEditDialog
         job={systemState.automationPendingEdit}
         saving={systemState.automationAction === `update:${systemState.automationPendingEdit?.id ?? ""}`}
+        error={systemState.automationPendingEdit ? systemState.automationDialogError : null}
         onOpenChange={(open) => {
           if (!open) systemState.setAutomationPendingEdit(null);
         }}

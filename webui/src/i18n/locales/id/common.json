@@ -1009,7 +1009,7 @@
       "extraHeaders": "Header",
       "extraBody": "Parameter body",
       "extraQuery": "Parameter kueri",
-      "capabilityFastMode": "Mode cepat",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "Respons lebih cepat, penggunaan meningkat.",
       "capabilityXSearch": "Pencarian X",
       "capabilityXSearchHelp": "Model Grok yang didukung dapat mencari di X.\n\nIzinkan model Grok yang didukung menggunakan X Search yang dihosting xAI. Aktivitas pencarian ditampilkan di chat.",
@@ -1769,8 +1769,6 @@
   "deleteConfirm": {
     "title": "Hapus obrolan ini?",
     "titleMany": "Hapus {{count}} percakapan?",
-    "description": "Tindakan ini tidak dapat dibatalkan.",
-    "descriptionMany": "Tindakan ini tidak dapat dibatalkan.",
     "cancel": "Batal",
     "confirm": "Hapus",
     "automationsDescription": "Menghapus topik ini juga menghapus tugas otomatis terkait.",
@@ -1965,6 +1963,13 @@
         "removeContext": "Hapus lampiran dan teks kutipan sebelum menjalankan perintah."
       },
       "chooseAI": "Pilih model",
+      "modelOptions": {
+        "title": "Untuk chat ini",
+        "on": "Aktif",
+        "off": "Nonaktif",
+        "codexFast": "Fast",
+        "ultrafast": "Ultracepat"
+      },
       "switchModel": "Ganti model",
       "manageModels": "Kelola preset",
       "fallbackNotice": "Respons ini menggunakan model cadangan: {{model}}.",
@@ -2033,7 +2038,7 @@
         "tooLong": "Rekaman terlalu panjang.",
         "tooShort": "Tahan sedikit lebih lama untuk merekam suara.",
         "noInput": "Tidak ada input mikrofon yang terdeteksi.",
-        "noDevice": "Mikrofon tidak ditemukan. Hubungkan mikrofon lalu coba lagi.",
+        "noDevice": "Hubungkan mikrofon untuk merekam.",
         "failed": "Tidak dapat mentranskripsi audio."
       },
       "slash": {
@@ -2530,6 +2535,19 @@
       "bsp": "BSP",
       "main-stack": "Utama dan tumpukan"
     }
+  },
+  "toast": {
+    "undo": "Urungkan",
+    "pendingDeleteSingle": "Percakapan akan dihapus",
+    "archivedSingle": "Percakapan diarsipkan",
+    "archiveFailed": "Tidak dapat mengubah status arsip.",
+    "unarchivedSingle": "Percakapan dikeluarkan dari arsip",
+    "deleteFailedSingle": "Gagal menghapus percakapan",
+    "deleteWindow": "Anda punya {{seconds}} detik untuk mengurungkan tindakan.",
+    "pendingDelete": "{{count}} percakapan akan dihapus",
+    "archived": "{{count}} percakapan diarsipkan",
+    "unarchived": "{{count}} percakapan dikeluarkan dari arsip",
+    "deleteFailed": "Gagal menghapus {{count}} percakapan"
   },
   "common": {
     "retry": "Coba lagi",

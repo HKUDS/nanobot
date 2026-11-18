@@ -6,6 +6,7 @@ import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
+import { ToastProvider } from "@/components/ui/toast";
 import i18n from "@/i18n";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
@@ -66,6 +67,7 @@ function makeClient() {
       return status;
     },
     defaultChatId: null as string | null,
+    preferenceScope: lifecycle.preferenceScope,
     onStatus: (handler: (nextStatus: ConnectionStatus) => void) => {
       statusHandlers.add(handler);
       handler(status);
@@ -466,6 +468,87 @@ function settingsWithFastPreset(): SettingsPayload {
 }
 
 describe("ThreadShell", () => {
+  function optionsSettings() {
+    const settings = settingsWithFastPreset();
+    for (const preset of settings.model_presets) preset.model_options = {
+      reasoning_effort: { default: "low", values: ["low", "high"] }, codex_fast_mode: { default: true },
+    };
+    settings.providers = settings.providers.map((provider) => ({ ...provider, model_catalog: "unsupported" }));
+    return settings;
+  }
+
+  async function changeOptions() {
+    fireEvent.click(await screen.findByRole("button", { name: "Default" }));
+    fireEvent.change(screen.getByRole("slider", { name: "Reasoning effort" }), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fast" }));
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Switch model" }), { key: "Escape" });
+  }
+
+  it("keeps model option choices local until sending, includes explicit false, and clears them on preset switch", async () => {
+    localStorage.clear();
+    const client = makeClient();
+    render(wrap(client, <ThreadShell session={session("model-options")} title="Options" onToggleSidebar={() => {}}
+      settingsSnapshot={optionsSettings()} />, null, "tok", ["webui.model-options.v1"]));
+    await changeOptions();
+    expect(client.sendMessage).not.toHaveBeenCalled();
+    expect(client.sendSystemCommand).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "selected options" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(client.sendMessage).toHaveBeenCalledWith("model-options", "selected options", undefined,
+      expect.objectContaining({ modelOptions: { reasoning_effort: "high", codex_fast_mode: false } })));
+    fireEvent.click(screen.getByRole("button", { name: "Default" }));
+    fireEvent.click(await screen.findByRole("option", { name: "fast" }));
+    fireEvent.click(screen.getByRole("button", { name: "fast" }));
+    expect(screen.getByRole("slider", { name: "Reasoning effort" })).toHaveAttribute("aria-valuetext", "low");
+    expect(screen.getByRole("button", { name: "Fast" })).toHaveAttribute("aria-pressed", "true");
+    expect(client.sendSystemCommand).toHaveBeenCalledWith("model-options", "/model fast");
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends and migrates the landing selection with the first ordinary message", async () => {
+    localStorage.clear();
+    const client = makeClient();
+    const settings = optionsSettings();
+    const view = (currentSession: ReturnType<typeof session> | null) => wrap(client, <ThreadShell session={currentSession}
+      title="Options" onToggleSidebar={() => {}} settingsSnapshot={settings} onCreateChat={async () => "options-created"} />,
+    null, "tok", ["webui.model-options.v1"]);
+    const rendered = render(view(null));
+    await changeOptions();
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "first selection" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await act(async () => {});
+    rendered.rerender(view(session("options-created")));
+    await waitFor(() => expect(client.sendMessage).toHaveBeenCalledWith("options-created", "first selection", undefined,
+      expect.objectContaining({ modelOptions: { reasoning_effort: "high", codex_fast_mode: false } })));
+    fireEvent.click(await screen.findByRole("button", { name: "Default" }));
+    expect(screen.getByRole("slider", { name: "Reasoning effort" })).toHaveAttribute("aria-valuetext", "high");
+    expect(screen.getByRole("button", { name: "Fast" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("sends edited queued prompts using current options, while cancelling the queue sends nothing", async () => {
+    localStorage.clear();
+    const client = makeClient();
+    const chatId = "options-queue";
+    render(wrap(client, <ThreadShell session={session(chatId)} title="Options" onToggleSidebar={() => {}}
+      settingsSnapshot={optionsSettings()} />, null, "tok", ["webui.model-options.v1"]));
+    await screen.findByLabelText("Message input");
+    act(() => client._emitChat(chatId, { event: "goal_status", chat_id: chatId, turn_id: "owner", status: "running", started_at: 1_000 }));
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "queued options" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Delete message" }));
+    expect(client.sendMessage).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "queued options again" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await changeOptions();
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+    fireEvent.change(input, { target: { value: "edited options" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    await waitFor(() => expect(client.sendMessage).toHaveBeenCalledWith(chatId, "edited options", undefined,
+      expect.objectContaining({ modelOptions: { reasoning_effort: "high", codex_fast_mode: false } })));
+  });
+
   beforeEach(() => {
     webuiThreadCache.clear();
     clearStoredComposerDrafts();
@@ -5516,7 +5599,7 @@ describe("ThreadShell", () => {
   it("disables offline goal cancellation and treats an unchanged goal after a control reply as a retryable failure", async () => {
     const client = makeClient();
     const chatId = "cancel-failure";
-    render(wrap(client, <ThreadShell session={session(chatId)} title="Goal" onToggleSidebar={() => {}} />));
+    render(<ToastProvider>{wrap(client, <ThreadShell session={session(chatId)} title="Goal" onToggleSidebar={() => {}} />)}</ToastProvider>);
     await act(async () => {});
     act(() => {
       client._emitChat(chatId, { event: "goal_state", chat_id: chatId, goal_state: { active: false, status: "blocked", objective: "Ship the release" } });

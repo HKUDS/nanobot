@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ComposerUsagePopover } from "@/components/thread/ComposerUsagePopover";
+import { ToastProvider } from "@/components/ui/toast";
 import { ComposerDraftStore } from "@/lib/composer-draft";
 import { encodeImage } from "@/lib/imageEncode";
 import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
@@ -889,7 +890,10 @@ describe("ThreadComposer", () => {
           + "Open this WebUI over HTTPS to use voice input.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveClass("max-h-24");
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: "Continue by typing" } });
+    expect(screen.getByRole("alert").closest("form")).toBe(input.closest("form"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Open this WebUI over HTTPS");
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 
@@ -898,11 +902,8 @@ describe("ThreadComposer", () => {
     vi.stubGlobal("isSecureContext", true);
     vi.stubGlobal("MediaRecorder", undefined);
     render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        onTranscribeAudio={vi.fn(async () => "unused")}
-        placeholder="Type your message..."
-      />,
+      <ThreadComposer onSend={vi.fn()} onTranscribeAudio={vi.fn(async () => "unused")} />,
+      { wrapper: ToastProvider },
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
@@ -988,24 +989,23 @@ describe("ThreadComposer", () => {
     await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("one recording"));
   });
 
-  it("distinguishes a missing microphone from a blocked permission", async () => {
+  it("shows microphone-not-found as one toast across repeated attempts", async () => {
     const { getUserMedia } = mockVoiceRecorder();
-    getUserMedia.mockRejectedValue(Object.assign(new Error("no microphone"), {
-      name: "NotFoundError",
-    }));
+    getUserMedia.mockRejectedValue(new DOMException("No microphone", "NotFoundError"));
     render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        onTranscribeAudio={vi.fn(async () => "unused")}
-        placeholder="Type your message..."
-      />,
+      <ThreadComposer onSend={vi.fn()} onTranscribeAudio={vi.fn(async () => "unused")} />,
+      { wrapper: ToastProvider },
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("No microphone was found. Connect a microphone and try again.")).toBeInTheDocument();
-    });
+    const retry = screen.getByRole("button", { name: "Voice input" });
+    fireEvent.click(retry);
+    const first = await screen.findByRole("alert");
+    expect(first.closest("[data-toast-tone=error]")).not.toBeNull();
+    expect(first).toHaveTextContent("Connect a microphone to record.");
+    fireEvent.click(retry);
+    await waitFor(() => expect(first).not.toBeInTheDocument());
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("alert")).toHaveTextContent("Connect a microphone to record.");
   });
 
   it("clears a previous voice error when retrying microphone access", async () => {
@@ -1022,7 +1022,9 @@ describe("ThreadComposer", () => {
 
     const voiceButton = screen.getByRole("button", { name: "Voice input" });
     fireEvent.click(voiceButton);
-    await waitFor(() => expect(screen.getByText("Allow microphone access in the address bar, then retry.")).toBeInTheDocument());
+    const permission = await screen.findByRole("alert");
+    expect(permission).toHaveTextContent("Allow microphone access in the address bar, then retry.");
+    expect(permission.closest("form")).not.toBeNull();
 
     fireEvent.click(voiceButton);
 
@@ -1152,11 +1154,8 @@ describe("ThreadComposer", () => {
     mockVoiceRecorder();
     const onTranscribeAudio = vi.fn(async () => "should not appear");
     render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        onTranscribeAudio={onTranscribeAudio}
-        placeholder="Type your message..."
-      />,
+      <ThreadComposer onSend={vi.fn()} onTranscribeAudio={onTranscribeAudio} />,
+      { wrapper: ToastProvider },
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Voice input" }));

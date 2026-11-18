@@ -52,6 +52,7 @@ export function useSystemSettingsState(toolsCatalog: ToolsCatalog) {
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [automationsError, setAutomationsError] = useState<string | null>(null);
+  const [automationDialogError, setAutomationDialogError] = useState<string | null>(null);
   const [automationAction, setAutomationAction] = useState<string | null>(null);
   const [automationPendingDelete, setAutomationPendingDelete] =
     useState<SessionAutomationJob | null>(null);
@@ -106,6 +107,8 @@ export function useSystemSettingsState(toolsCatalog: ToolsCatalog) {
     setAutomationPendingEdit,
     setAutomations,
     setAutomationsError,
+    automationDialogError,
+    setAutomationDialogError,
     setAutomationsFilter,
     setAutomationsLoading,
     setCliApps,

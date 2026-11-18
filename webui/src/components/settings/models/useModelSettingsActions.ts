@@ -17,6 +17,7 @@ import {
 } from "@/components/settings/models/providerForm";
 import type { ModelSettingsState } from "@/components/settings/models/useModelSettingsState";
 import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
+import { useToast } from "@/components/ui/toast";
 import {
   ApiError,
   cancelProviderOAuth,
@@ -86,6 +87,7 @@ export function useModelSettingsActions({
   installCapabilities,
   configuredModelProviderOptions,
 }: ModelSettingsActionsOptions) {
+  const showToast = useToast();
   const oauthMounted = useRef(true);
   useEffect(() => {
     oauthMounted.current = true;
@@ -117,6 +119,7 @@ export function useModelSettingsActions({
     setModelPresetEditingName,
     setModelPresetNameError,
     setModelPresetPendingDelete,
+    setModelPresetDeleteError,
     setProviderForms,
     setProviderOAuthCompleting,
     setProviderOAuthDialogError,
@@ -209,6 +212,7 @@ export function useModelSettingsActions({
           contextWindowTokens: form.contextWindowTokens,
           temperature: form.temperature,
           reasoningEffort: form.reasoningEffort || null,
+          codexFastMode: form.codexFastMode ?? undefined,
           supportsImages: form.supportsImages,
           api: form.api ?? undefined,
           ...(settings.model_request_overrides_supported ? {
@@ -273,6 +277,8 @@ export function useModelSettingsActions({
           form.temperature !== selectedPreset.temperature ? form.temperature : undefined,
         reasoningEffort:
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
+        codexFastMode: form.codexFastMode !== (selectedPreset.codex_fast_mode ?? null)
+          ? form.codexFastMode : undefined,
         supportsImages: form.supportsImages !== (selectedPreset.supports_images ?? true)
           ? form.supportsImages : undefined,
         api: modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
@@ -350,6 +356,7 @@ export function useModelSettingsActions({
       ),
       temperature: primaryPreset?.temperature ?? settings.agent.temperature,
       reasoningEffort: primaryPreset?.reasoning_effort ?? settings.agent.reasoning_effort ?? "",
+      codexFastMode: null,
     }));
     setModelPresetCreating(true);
   };
@@ -388,7 +395,15 @@ export function useModelSettingsActions({
       setError(null);
     } catch (err) {
       setModelCallOrder(previousOrder);
-      setError((err as Error).message);
+      if (showToast && err instanceof ApiError && (err.status === 503 || err.status === 504)) {
+        showToast({
+          tone: "error",
+          message: t("message.agentActivity.updateAgentSettingsFailed"),
+          dedupeKey: "settings:models:call-order",
+        });
+      } else {
+        setError((err as Error).message);
+      }
     } finally {
       setModelCallOrderSaving(false);
     }
@@ -419,14 +434,14 @@ export function useModelSettingsActions({
       return false;
     }
     setSaving(true);
+    setModelPresetDeleteError(null);
     try {
       const payload = await deleteModelConfiguration(client, modelPresetPendingDelete.name);
       applyPayload(payload, { preserveCapabilityForms: true });
       setModelPresetPendingDelete(null);
-      setError(null);
       return true;
     } catch (err) {
-      setError((err as Error).message);
+      setModelPresetDeleteError(err instanceof Error ? err.message : String(err));
       return false;
     } finally {
       setSaving(false);

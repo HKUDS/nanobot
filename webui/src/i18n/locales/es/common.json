@@ -1009,7 +1009,7 @@
       "extraHeaders": "Cabeceras",
       "extraBody": "Parámetros del cuerpo",
       "extraQuery": "Parámetros de consulta",
-      "capabilityFastMode": "Modo rápido",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "Respuestas más rápidas, mayor consumo.",
       "capabilityXSearch": "Búsqueda en X",
       "capabilityXSearchHelp": "Los modelos Grok compatibles pueden buscar en X.\n\nPermite que los modelos Grok compatibles usen X Search alojado por xAI. La actividad de búsqueda aparece en el chat.",
@@ -1769,8 +1769,6 @@
   "deleteConfirm": {
     "title": "¿Eliminar este chat?",
     "titleMany": "¿Eliminar {{count}} conversaciones?",
-    "description": "Esta acción no se puede deshacer.",
-    "descriptionMany": "Esta acción no se puede deshacer.",
     "cancel": "Cancelar",
     "confirm": "Eliminar",
     "automationsDescription": "Eliminar este tema también elimina sus tareas automáticas vinculadas.",
@@ -1965,6 +1963,13 @@
         "removeContext": "Elimina los archivos adjuntos y el texto citado antes de ejecutar un comando."
       },
       "chooseAI": "Elegir modelo",
+      "modelOptions": {
+        "title": "Para este chat",
+        "on": "Activado",
+        "off": "Desactivado",
+        "codexFast": "Fast",
+        "ultrafast": "Ultrarrápido"
+      },
       "switchModel": "Cambiar modelo",
       "manageModels": "Gestionar preajustes",
       "fallbackNotice": "Esta respuesta usó un modelo alternativo: {{model}}.",
@@ -2033,7 +2038,7 @@
         "tooLong": "La grabación es demasiado larga.",
         "tooShort": "Mantén pulsado un poco más para grabar voz.",
         "noInput": "No se detectó entrada del micrófono.",
-        "noDevice": "No se encontró ningún micrófono. Conéctalo y vuelve a intentarlo.",
+        "noDevice": "Conecta un micrófono para grabar.",
         "failed": "No se pudo transcribir el audio."
       },
       "slash": {
@@ -2530,6 +2535,19 @@
       "bsp": "BSP",
       "main-stack": "Principal y pila"
     }
+  },
+  "toast": {
+    "undo": "Deshacer",
+    "pendingDeleteSingle": "La conversación se eliminará",
+    "archivedSingle": "Conversación archivada",
+    "archiveFailed": "No se pudo cambiar el estado de archivado.",
+    "unarchivedSingle": "Conversación desarchivada",
+    "deleteFailedSingle": "No se pudo eliminar la conversación",
+    "deleteWindow": "Tienes {{seconds}} segundos para deshacer la acción.",
+    "pendingDelete": "Se eliminarán {{count}} conversaciones",
+    "archived": "{{count}} conversaciones archivadas",
+    "unarchived": "{{count}} conversaciones desarchivadas",
+    "deleteFailed": "No se pudieron eliminar {{count}} conversaciones"
   },
   "common": {
     "retry": "Reintentar",

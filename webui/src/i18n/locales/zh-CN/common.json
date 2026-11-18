@@ -1399,7 +1399,7 @@
       "extraHeaders": "请求头",
       "extraBody": "请求体参数",
       "extraQuery": "查询参数",
-      "capabilityFastMode": "快速模式",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "更快响应，用量更高",
       "capabilityXSearch": "X 搜索",
       "capabilityXSearchHelp": "支持的 Grok 模型可搜索 X\n\n允许受支持的 Grok 模型使用 xAI 托管的 X Search，并在对话中展示搜索过程。",
@@ -1951,8 +1951,6 @@
   "deleteConfirm": {
     "title": "删除这个话题？",
     "titleMany": "删除这 {{count}} 个对话？",
-    "description": "此操作无法撤销。",
-    "descriptionMany": "此操作无法撤销。",
     "cancel": "取消",
     "confirm": "删除",
     "automationsDescription": "删除话题也会删除关联的自动任务",
@@ -2147,6 +2145,13 @@
         "removeContext": "执行命令前，请移除附件和引用文本。"
       },
       "chooseAI": "选择模型",
+      "modelOptions": {
+        "title": "当前会话",
+        "on": "开启",
+        "off": "关闭",
+        "codexFast": "Fast",
+        "ultrafast": "极速"
+      },
       "switchModel": "切换模型",
       "manageModels": "管理预设",
       "fallbackNotice": "本次已使用备用模型：{{model}}。",
@@ -2215,7 +2220,7 @@
         "tooLong": "录音时间太长。",
         "tooShort": "请稍微多录一会儿。",
         "noInput": "没有检测到麦克风输入。",
-        "noDevice": "没有找到可用的麦克风。请连接麦克风后重试。",
+        "noDevice": "未找到麦克风，请连接后重试。",
         "failed": "语音转写失败。"
       },
       "slash": {
@@ -2712,6 +2717,19 @@
       "bsp": "BSP",
       "main-stack": "主次排列"
     }
+  },
+  "toast": {
+    "undo": "撤销",
+    "pendingDeleteSingle": "即将删除会话",
+    "archivedSingle": "已归档会话",
+    "archiveFailed": "无法更改归档状态。",
+    "unarchivedSingle": "已取消归档",
+    "deleteFailedSingle": "删除会话失败",
+    "deleteWindow": "可在 {{seconds}} 秒内撤销。",
+    "pendingDelete": "即将删除 {{count}} 个会话",
+    "archived": "已归档 {{count}} 个会话",
+    "unarchived": "已取消归档 {{count}} 个会话",
+    "deleteFailed": "{{count}} 个会话删除失败"
   },
   "common": {
     "retry": "重试",

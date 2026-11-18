@@ -2,6 +2,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, vi } from "vitest";
 import { SettingsView } from "@/components/settings/SettingsView";
+import { ToastProvider } from "@/components/ui/toast";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
 import type { NanobotClient } from "@/lib/nanobot-client";
@@ -164,6 +165,7 @@ export function renderSettingsView(options: SettingsViewTestOptions = {}) {
         onRestart={options.onRestart}
       />
     </ClientProvider>,
+    { wrapper: ToastProvider },
   );
 }
 

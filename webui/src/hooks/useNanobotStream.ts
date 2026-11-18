@@ -31,6 +31,7 @@ import type {
   OutboundMcpPresetMention,
   OutboundMedia,
   SessionMention,
+  SessionModelOptions,
   GoalStateWsPayload,
   MessageDeliveryStatus,
   RecoveryState,
@@ -63,6 +64,7 @@ export interface SendAttachment {
 }
 
 export interface SendOptions {
+  modelOptions?: SessionModelOptions;
   intent?: "create_automation";
   cliApps?: OutboundCliAppMention[];
   mcpPresets?: OutboundMcpPresetMention[];

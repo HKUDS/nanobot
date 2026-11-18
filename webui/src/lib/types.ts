@@ -488,6 +488,19 @@ export interface UIFileEdit {
   diff?: UIFileDiff;
 }
 
+export type CodexFastMode = boolean | "ultrafast";
+
+export interface SessionModelOptions {
+  /** Null explicitly inherits the preset/provider value. */
+  reasoning_effort: string | null;
+  codex_fast_mode: CodexFastMode | null;
+}
+
+export interface ModelOptionsCapability {
+  reasoning_effort: { default: string | null; values: string[] };
+  codex_fast_mode?: { default: CodexFastMode; ultrafast_supported?: boolean };
+}
+
 export interface ChatSummary {
   /** Server-side session key, e.g. ``websocket:abcd-...``. */
   key: string;
@@ -500,6 +513,7 @@ export interface ChatSummary {
   preview: string;
   /** Model preset persisted for this session; null means it still follows the global default. */
   modelPreset?: string | null;
+  modelOptions?: SessionModelOptions;
   /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
   /** Durable recovery state that needs attention after an interrupted turn. */
@@ -773,6 +787,8 @@ export interface SettingsPayload {
     temperature: number;
     reasoning_effort: string | null;
     reasoning_effort_values?: string[];
+    codex_fast_mode?: CodexFastMode | null;
+    model_options?: ModelOptionsCapability;
     supports_images?: boolean;
     api?: ModelAPIConfig | null;
     extra_headers?: Record<string, string> | null;
@@ -806,6 +822,8 @@ export interface SettingsPayload {
     request_apis?: ProviderRequestAPI[];
     adapter_request_apis?: ProviderRequestAPI[];
     provider_api_configurable?: boolean;
+    codex_fast_mode_supported?: boolean;
+    codex_ultrafast_models?: string[];
     api?: ModelAPIConfig | null;
     oauth_account?: string | null;
     oauth_expires_at?: number | null;
@@ -1410,6 +1428,7 @@ export interface ModelConfigurationCreate {
   contextWindowTokens?: number;
   temperature?: number;
   reasoningEffort?: string | null;
+  codexFastMode?: CodexFastMode | null;
   supportsImages?: boolean;
   api?: ModelAPIConfig | null;
   extraHeaders?: string;
@@ -1426,6 +1445,7 @@ export interface ModelConfigurationUpdate {
   contextWindowTokens?: number;
   temperature?: number;
   reasoningEffort?: string | null;
+  codexFastMode?: CodexFastMode | null;
   supportsImages?: boolean;
   api?: ModelAPIConfig | null;
   extraHeaders?: string;
@@ -1887,6 +1907,7 @@ export type Outbound =
       quoted_context?: string;
       intent?: "create_automation";
       user_shell?: true;
+      model_options?: SessionModelOptions;
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
       /** Marks messages sent by the embedded WebUI, without changing the

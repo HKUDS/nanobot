@@ -54,6 +54,11 @@
     "model": "範例模型",
     "disabledModel": "停用的模型選擇器"
   },
+  "codexSpeed": {
+    "title": "Codex 加速",
+    "description": "選擇 Fast 或極速，再按一次目前的選項即可關閉。",
+    "options": "只為支援的模型顯示極速選項。"
+  },
   "segmented": {
     "title": "分段選擇",
     "description": "一組簡短且持續顯示的選項。",
@@ -100,6 +105,15 @@
     "confirm": "確認移除",
     "removed": "已移除範例。",
     "available": "範例可供使用。"
+  },
+  "toast": {
+    "title": "浮動提示",
+    "description": "簡短提示錯誤、成功或可復原的操作。",
+    "options": "掛載 ToastProvider，再呼叫 useToast 顯示提示。附帶操作的提示會停留較久，方便使用者回應。",
+    "showError": "顯示錯誤",
+    "error": "無法儲存範例。",
+    "pending": "即將移除範例。",
+    "restored": "已還原範例。"
   },
   "sheet": {
     "title": "側邊面板",

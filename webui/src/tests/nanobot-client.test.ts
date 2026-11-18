@@ -70,6 +70,50 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it.each([
+    { reasoning_effort: "high", codex_fast_mode: true },
+    { reasoning_effort: null, codex_fast_mode: false },
+    { reasoning_effort: null, codex_fast_mode: null },
+  ])("transmits the whole model option selection without dropping false or null: %j", (modelOptions) => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    client.sendMessage("chat", "normal message", undefined, { modelOptions });
+    expect(JSON.parse(socket.sent.at(-1)!)).toMatchObject({ type: "message", model_options: modelOptions });
+    client.sendMessage("chat", "keep saved options");
+    expect(JSON.parse(socket.sent.at(-1)!)).not.toHaveProperty("model_options");
+    client.close();
+  });
+
+  it("omits model options for Temporary Chats and shell commands", async () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const created = client.newTemporaryChat();
+    socket.fakeMessage({ event: "attached", chat_id: "temporary-options", temporary: true, request_id: lastRequestId(socket) });
+    await created;
+    const modelOptions = { reasoning_effort: "high", codex_fast_mode: true };
+    client.sendMessage("temporary-options", "temporary message", undefined, { modelOptions });
+    expect(JSON.parse(socket.sent.at(-1)!)).not.toHaveProperty("model_options");
+    client.sendMessage("regular", "pwd", undefined, { modelOptions, userShell: true });
+    expect(JSON.parse(socket.sent.at(-1)!)).toMatchObject({ user_shell: true });
+    expect(JSON.parse(socket.sent.at(-1)!)).not.toHaveProperty("model_options");
+    client.close();
+  });
+
+  it("uses a stable host/path preference scope across token refresh, including custom host transports", () => {
+    const client = new NanobotClient({ url: "ws://host/ws?token=secret", reconnect: false });
+    expect(client.preferenceScope).toBe("ws://host/ws");
+    client.updateUrl("ws://host/ws?token=refreshed");
+    expect(client.preferenceScope).toBe("ws://host/ws");
+    client.updateUrl("nanobot-host://other-host/events?token=secret");
+    expect(client.preferenceScope).toBe("nanobot-host://other-host/events");
+  });
+
   const chatRequests = [
     { type: "new_chat", start: (client: NanobotClient, timeout: number) => client.newChat(timeout) },
     { type: "new_temporary_chat", start: (client: NanobotClient, timeout: number) => client.newTemporaryChat(timeout) },

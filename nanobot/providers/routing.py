@@ -118,6 +118,8 @@ def resolve_provider_route(
     for field in ("extra_headers", "extra_query", "extra_body"):
         if getattr(preset, field) and field not in request_override_fields(backend):
             raise ValueError(f"Model preset {field} is not supported by '{provider_name}'.")
+    if preset.codex_fast_mode is not None and backend != "openai_codex":
+        raise ValueError("Codex Fast mode is only supported by Codex presets.")
     provider_config = apply_request_overrides(provider_config, preset)
     if (
         provider_config
