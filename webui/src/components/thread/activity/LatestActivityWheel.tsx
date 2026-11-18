@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactElement } from "react";
-import { motion } from "motion/react";
+import { div as MotionDiv } from "motion/react-m";
+import { DeferredMotion } from "@/components/ui/deferred-motion";
 
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 
@@ -29,6 +30,7 @@ export function LatestActivityWheel({ row, visible }: { row: ReactElement; visib
   }, [canRoll, row]);
 
   const outgoing = canRoll && frame.key === row.key ? frame.previous : undefined;
+  const current = <div className={rowClass}>{row}</div>;
   return (
     <div
       aria-hidden
@@ -36,7 +38,7 @@ export function LatestActivityWheel({ row, visible }: { row: ReactElement; visib
       data-testid="latest-activity-wheel"
       className="relative h-6 min-w-0 overflow-hidden pe-1 max-sm:ms-6 sm:flex-1 [mask-image:linear-gradient(transparent,black_10%,black_90%,transparent)] [&_[data-activity-marker]]:self-center [&_[data-activity-marker]]:items-center [&_[data-activity-marker]]:pt-0"
     >
-      {canRoll ? <motion.div
+      {canRoll ? <DeferredMotion><MotionDiv
         key={frame.key}
         initial={outgoing ? { y: "100%" } : false}
         animate={{ y: 0 }}
@@ -46,8 +48,8 @@ export function LatestActivityWheel({ row, visible }: { row: ReactElement; visib
         }}
       >
         {outgoing ? <div className={`absolute inset-x-0 bottom-full ${rowClass}`}>{outgoing}</div> : null}
-        <div className={rowClass}>{row}</div>
-      </motion.div> : <div className={rowClass}>{row}</div>}
+        {current}
+      </MotionDiv></DeferredMotion> : current}
     </div>
   );
 }

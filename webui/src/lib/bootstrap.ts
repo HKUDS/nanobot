@@ -75,6 +75,7 @@ export async function fetchBootstrap(
   const res = await fetchWithTimeout(`${baseUrl}/webui/bootstrap`, {
     method: "GET",
     credentials: "same-origin",
+    cache: "no-store",
     headers,
   }, timeoutMs);
   if (!res.ok) {

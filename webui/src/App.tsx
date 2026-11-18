@@ -66,12 +66,10 @@ import { cn } from "@/lib/utils";
 import {
   BootstrapAuthRequiredError,
   clearSavedSecret,
-  consumeUrlBootstrapSecret,
   deriveWsUrl,
-  fetchBootstrap,
-  loadSavedSecret,
   saveSecret,
 } from "@/lib/bootstrap";
+import { requestBootstrap, type BootstrapRequest } from "@/lib/initial-bootstrap";
 import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
@@ -361,10 +359,6 @@ function writeShellRoute(route: ShellRoute, replace = false): void {
   }
 }
 
-function bootstrapTokenExpiresAt(expiresInSeconds: number): number {
-  return Date.now() + Math.max(0, expiresInSeconds) * 1000;
-}
-
 function tokenRefreshDelayMs(expiresAt: number): number {
   const remaining = Math.max(0, expiresAt - Date.now());
   const margin = Math.min(
@@ -616,24 +610,24 @@ function resolveRuntimeSurface(
   return surface ? toRuntimeSurface(surface) : fallback;
 }
 
-export default function App() {
+export default function App({ takeInitialBootstrap }: {
+  takeInitialBootstrap?: () => BootstrapRequest | undefined;
+}) {
   useAppViewport();
   useBrowserNotificationLifecycle();
   useReadingTypography();
   const { t } = useTranslation();
   const [state, setState] = useState<BootState>({ status: "loading" });
   const bootstrapSecretRef = useRef("");
+  const initialRequest = useRef<BootstrapRequest>();
 
   const refreshReadyClient = useCallback(
     async (client: NanobotClient, fallbackSurface: RuntimeSurface, signal?: AbortSignal) => {
-      const boot = await fetchBootstrap("", bootstrapSecretRef.current);
+      const { boot, tokenExpiresAt } = await requestBootstrap(bootstrapSecretRef.current);
       signal?.throwIfAborted();
       const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
       const runtimeSurface = resolveRuntimeSurface(boot.runtime_surface, fallbackSurface);
       const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
-      const tokenExpiresAt = boot.expires_in
-        ? bootstrapTokenExpiresAt(boot.expires_in)
-        : null;
       if (runtimeHost.socketFactory) {
         client.updateUrl(url, runtimeHost.socketFactory);
       } else {
@@ -658,14 +652,14 @@ export default function App() {
     [],
   );
 
-  const bootstrapWithSecret = useCallback(
-    (secret: string, onAuthRejected?: () => void) => {
+  const connectBootstrap = useCallback(
+    (request: BootstrapRequest, onAuthRejected?: () => void) => {
       let cancelled = false;
       if (readShellRoute().view === "chat") void loadThreadShell().catch(() => {});
       (async () => {
         if (!onAuthRejected) setState({ status: "loading" });
         try {
-          const boot = await fetchBootstrap("", secret);
+          const { boot, secret, tokenExpiresAt } = await request;
           if (cancelled) return;
           if (secret) saveSecret(secret);
           const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
@@ -691,9 +685,7 @@ export default function App() {
             status: "ready",
             client,
             token: boot.api_token ?? "",
-            tokenExpiresAt: boot.expires_in
-              ? bootstrapTokenExpiresAt(boot.expires_in)
-              : null,
+            tokenExpiresAt,
             modelName: boot.model_name ?? null,
             ingressLimits: boot.limits ?? null,
             runtimeSurface,
@@ -713,6 +705,8 @@ export default function App() {
               message: e instanceof Error ? e.message : String(e),
             });
           }
+        } finally {
+          if (initialRequest.current === request) initialRequest.current = undefined;
         }
       })();
       return () => {
@@ -741,15 +735,16 @@ export default function App() {
   }, [refreshReadyClient, state]);
 
   useEffect(() => {
-    const saved = consumeUrlBootstrapSecret() || loadSavedSecret();
-    return bootstrapWithSecret(saved);
-  }, [bootstrapWithSecret]);
+    // Direct App mounts have no document entry. Effect replays share the same pending attempt.
+    initialRequest.current ??= takeInitialBootstrap?.() ?? requestBootstrap();
+    return connectBootstrap(initialRequest.current);
+  }, [connectBootstrap, takeInitialBootstrap]);
 
   if (state.status === "loading") {
     return <StartupShell />;
   }
   if (state.status === "auth") {
-    return <AuthForm onSecret={bootstrapWithSecret} />;
+    return <AuthForm onSecret={(secret, rejected) => connectBootstrap(requestBootstrap(secret), rejected)} />;
   }
   if (state.status === "error") {
     return (
@@ -775,6 +770,7 @@ export default function App() {
     if (state.status === "ready") {
       state.client.close();
     }
+    bootstrapSecretRef.current = "";
     clearSavedSecret();
     clearReloadCache();
     clearStoredComposerDrafts();
