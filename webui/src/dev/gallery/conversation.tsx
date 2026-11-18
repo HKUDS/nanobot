@@ -366,7 +366,7 @@ export const conversationExamples: ComponentExample[] = [
   { title: "previews.modelPreset.title", files: ["thread/ModelPresetBadge"], Preview: ModelPresetPreview,
     description: "previews.modelPreset.description", options: "previews.modelPreset.options",
     code: '<ModelPresetBadge label={preset} modelPreset={preset} modelPresets={presets} onPresetChange={setPreset} isHero={false} />' },
-  { title: "previews.usage.title", files: ["thread/ComposerUsagePopover"], Preview: UsagePreview,
+  { title: "previews.usage.title", files: ["thread/ComposerUsagePopover", "thread/ContextInspector", "ui/deferred-motion"], Preview: UsagePreview,
     description: "previews.usage.description", options: "previews.usage.options",
     code: '<ComposerUsagePopover context={{ contextTokens: 18500, contextWindowTokens: 200000 }} rounds={rounds} showLabel />' },
   { title: "previews.workspace.title", files: ["thread/WorkspaceControls"], Preview: WorkspacePreview,
