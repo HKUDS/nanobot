@@ -9,6 +9,7 @@ import pytest
 from agent.runner_helpers import make_run_spec
 from agent.session_helpers import run_session, visible_message
 from nanobot.agent.context import TranscriptInput
+from nanobot.agent.session_inbox import SessionInbox
 from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -1084,8 +1085,8 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 
     loop = _make_loop(tmp_path)
 
-    pending = asyncio.Queue(maxsize=20)
-    loop._pending_queues["discord:c"] = pending
+    pending = SessionInbox(maxsize=20)
+    loop._pending_queues.install("discord:c", pending)
 
     run_task = asyncio.create_task(loop.run())
     msg = InboundMessage(channel="discord", sender_id="u", chat_id="c", content="follow-up")
@@ -1105,30 +1106,31 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
     from nanobot.bus.events import InboundMessage
 
+    pending = SessionInbox(maxsize=20)
+
+    async def admit(_msg):
+        assert pending.empty(), "follow-up queued before recovery admission"
+        return True
+
     admission = MagicMock()
-    admission.admit = AsyncMock(return_value=True)
+    admission.admit = AsyncMock(side_effect=admit)
     loop = _make_loop(tmp_path, recovery_admission=admission)
-
-    session_key = "websocket:chat"
-    pending = asyncio.Queue(maxsize=20)
-    loop._pending_queues[session_key] = pending
-
-    run_task = asyncio.create_task(loop.run())
+    loop._pending_queues.install("websocket:chat", pending)
     msg = InboundMessage(
         channel="websocket",
         sender_id="u",
         chat_id="chat",
         content="new request",
     )
-    await loop.bus.publish_inbound(msg)
 
-    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
-    admission.admit.assert_awaited_once_with(msg)
-    assert queued_msg.content == msg.content
-    assert queued_msg.metadata["_recovery_followup_id"]
-
-    loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
+    try:
+        await loop._dispatch_inbound(msg)
+        queued_msg = pending.get_nowait()
+        admission.admit.assert_awaited_once_with(msg)
+        assert queued_msg.content == msg.content
+        assert queued_msg.metadata["_recovery_followup_id"]
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.asyncio
@@ -1140,8 +1142,8 @@ async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_pa
     loop.turn_delivery_factory.route_policy = route_policy
 
     session_key = "websocket:chat-1"
-    pending = asyncio.Queue(maxsize=20)
-    loop._pending_queues[session_key] = pending
+    pending = SessionInbox(maxsize=20)
+    loop._pending_queues.install(session_key, pending)
 
     run_task = asyncio.create_task(loop.run())
     msg = InboundMessage(
@@ -1568,7 +1570,7 @@ async def test_session_worker_processes_leftovers_without_republishing(tmp_path)
 
     loop = _make_loop(tmp_path)
     session_key = "cli:c"
-    pending = asyncio.Queue()
+    pending = SessionInbox()
     processed: list[str] = []
 
     async def _process_message(msg, **_kwargs):
@@ -1583,7 +1585,7 @@ async def test_session_worker_processes_leftovers_without_republishing(tmp_path)
             chat_id="c",
             content=content,
         ))
-    loop._pending_queues[session_key] = pending
+    loop._pending_queues.install(session_key, pending)
 
     await loop._run_session_queue(session_key, pending)
 
