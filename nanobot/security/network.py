@@ -26,6 +26,7 @@ _BLOCKED_NETWORKS = [
 ]
 
 _URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
+_URL_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
 
 
@@ -95,6 +96,10 @@ def resolve_url_target(
     resolved_ips contains the public IPs that were validated for this URL, or
     is empty when an unresolved hostname is delegated to a trusted proxy.
     """
+    # urlparse silently strips some control characters.
+    if _URL_CONTROL_RE.search(url):
+        return False, "Invalid URL: control characters are not allowed", ()
+
     try:
         p = urlparse(url)
     except Exception as e:
@@ -108,6 +113,8 @@ def resolve_url_target(
     hostname = p.hostname
     if not hostname:
         return False, "Missing hostname", ()
+    if any(char.isspace() for char in hostname):
+        return False, "Invalid hostname: whitespace is not allowed", ()
 
     try:
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
