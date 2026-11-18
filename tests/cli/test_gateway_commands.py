@@ -123,7 +123,7 @@ def _test_app(
     fake_runtime = FakeRuntime(tmp_path)
     fake_service = FakeServiceInstaller(tmp_path)
     run_calls: list[
-        tuple[Config, int | None, str | None, str | None, GatewayInstance | None]
+        tuple[Config, int | None, str | None, GatewayInstance | None]
     ] = []
     prepare_calls: list[tuple[Config, str]] = []
 
@@ -140,14 +140,13 @@ def _test_app(
         *,
         port: int | None = None,
         verbose: bool = False,
-        webui_bundle_mode: str | None = None,
         unconfigured_provider_error: str | None = None,
         gateway_instance: GatewayInstance | None = None,
     ) -> None:
         if run_error is not None:
             raise run_error
         run_calls.append(
-            (config, port, webui_bundle_mode, unconfigured_provider_error, gateway_instance)
+            (config, port, unconfigured_provider_error, gateway_instance)
         )
 
     def prepare_webui_bundle(config: Config, mode: str) -> None:
@@ -183,8 +182,7 @@ def test_gateway_default_still_runs_foreground(tmp_path):
     assert result.exit_code == 0
     assert len(calls) == 1
     assert calls[0][1] == 18791
-    assert calls[0][2] == "warn"
-    assert calls[0][4] == GatewayInstance.resolve(
+    assert calls[0][3] == GatewayInstance.resolve(
         config_path=_resolved_config_selector(None)
     )
 
@@ -218,7 +216,7 @@ def test_config_workspace_does_not_split_the_foreground_instance(tmp_path: Path)
     result = runner.invoke(app, ["gateway"])
 
     assert result.exit_code == 0
-    assert calls[0][4] == GatewayInstance.resolve(
+    assert calls[0][3] == GatewayInstance.resolve(
         config_path=_resolved_config_selector(None)
     )
 
@@ -234,7 +232,7 @@ def test_gateway_foreground_passes_recoverable_provider_error_to_runner(tmp_path
 
     assert result.exit_code == 0
     assert len(calls) == 1
-    assert calls[0][3] == setup_error
+    assert calls[0][2] == setup_error
     assert len(_runtime.validated_configs) == 1
 
 

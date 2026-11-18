@@ -542,8 +542,8 @@ async def test_actual_gateway_exits_normally_before_installation_and_data_leases
     source = Path(__file__).resolve().parents[1]
     script = (
         f"import sys; sys.path.insert(0, {str(source)!r})\n"
-        "from nanobot.cli import gateway_runtime\n"
-        "gateway_runtime.warmup_token_encoding = lambda: None\n"
+        "from nanobot.gateway import application\n"
+        "application.warmup_token_encoding = lambda: None\n"
         "from nanobot.cli.entry import main\nmain()\n"
     )
     children = []

@@ -85,11 +85,6 @@ def create_gateway_app(
     def service_installer():
         return service_factory() if service_factory is not None else GatewayServiceInstaller()
 
-    def interactive_build_mode() -> BuildMode:
-        # `nanobot gateway` is often launched by tests, supervisors, or service managers.
-        # The higher-level `nanobot webui` command owns interactive first-run guidance.
-        return "warn"
-
     def start_options(
         *,
         port: int | None,
@@ -163,7 +158,7 @@ def create_gateway_app(
             if validate_startup_config is not None:
                 validate_startup_config(cfg)
             if prepare_webui_bundle is not None:
-                prepare_webui_bundle(cfg, interactive_build_mode())
+                prepare_webui_bundle(cfg, "warn")
             runtime = runtime_for_instance(workspace=workspace, config=config)
             result = runtime.start_background(
                 start_options(
@@ -239,7 +234,6 @@ def create_gateway_app(
                 cfg,
                 port=port,
                 verbose=verbose,
-                webui_bundle_mode=interactive_build_mode(),
                 unconfigured_provider_error=unconfigured_provider_error,
                 gateway_instance=instance,
             )
@@ -304,7 +298,7 @@ def create_gateway_app(
         if validate_startup_config is not None:
             validate_startup_config(cfg)
         if prepare_webui_bundle is not None:
-            prepare_webui_bundle(cfg, interactive_build_mode())
+            prepare_webui_bundle(cfg, "warn")
         runtime = runtime_for_instance(workspace=workspace, config=config)
         result = runtime.restart(
             start_options(

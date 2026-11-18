@@ -104,7 +104,7 @@ def run_gateway(directory: Path, participant: str) -> None:
         raise ValueError("Original gateway launch selectors are unavailable")
 
     from nanobot.cli.entry import configure_windows_console
-    from nanobot.cli.gateway_runtime import _run_gateway
+    from nanobot.cli.gateway_launch import run_gateway as launch_gateway
     from nanobot.cli.process_identity import set_cli_process_identity
     from nanobot.cli.runtime_config import _load_runtime_config
     from nanobot.config.home import set_home_path
@@ -122,8 +122,8 @@ def run_gateway(directory: Path, participant: str) -> None:
     set_home_path(Path(launch.home) if launch.home else None)
     config = _load_runtime_config(launch.config_path, launch.workspace)
     instance = GatewayInstance.resolve(config_path=get_config_path(), workspace=launch.workspace)
-    _run_gateway(config, port=previous.port, verbose=launch.verbose, gateway_instance=instance,
-                 update_startup=startup)
+    launch_gateway(config, port=previous.port, verbose=launch.verbose, gateway_instance=instance,
+                   update_startup=startup)
 
 
 def _start_gateway(directory: Path, previous: ProfileReceipt, grant: DataStartupGrant) -> None:

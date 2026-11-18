@@ -27,10 +27,10 @@ def test_updater_uses_process_contracts_not_agent_or_client_implementations() ->
         "from nanobot.gateway.runtime import GatewayRuntime", "nanobot.update_stop",
     ) == []
     assert find_violations(
-        "from nanobot.update_stop import watch_gateway_stop", "nanobot.cli.gateway_runtime",
+        "from nanobot.update_stop import watch_gateway_stop", "nanobot.gateway.application",
     ) == []
     assert find_violations(
-        "from nanobot.cli.gateway_runtime import _run_gateway", "nanobot.update_restart",
+        "from nanobot.cli.gateway_launch import run_gateway", "nanobot.update_restart",
     ) == []
     assert find_violations(
         "from nanobot.agent.loop import AgentLoop", "nanobot.update_restart",
@@ -105,6 +105,7 @@ def test_core_boundary_includes_type_dependencies(source: str) -> None:
         ("nanobot.session.recovery", "session-storage"),
         ("nanobot.security.workspace_policy", "security-primitives"),
         ("nanobot.agent.turn_delivery", "core-execution"),
+        ("nanobot.gateway.application", "gateway-composition"),
         ("nanobot.channels.notification_routes", "channel-routing-contracts"),
         ("nanobot.config.schema", "configuration-contracts"),
         ("nanobot.agent.tools.cli_apps_config", "tool-configuration-contracts"),
@@ -171,7 +172,7 @@ def test_configuration_imports_the_six_tool_owned_config_contracts() -> None:
         ("nanobot.agent.loop", "from nanobot.session.recovery import RecoveryAdmission"),
         ("nanobot.session.manager", "from nanobot.providers.base import ProviderConversationState"),
         ("nanobot.session.webui_turns", "from nanobot.webui import transcript"),
-        ("nanobot.cli.gateway_runtime", "from nanobot.agent.loop import AgentLoop"),
+        ("nanobot.gateway.application", "from nanobot.agent.loop import AgentLoop"),
         ("nanobot.channels.websocket.runtime", "from nanobot.webui import inbound_commands"),
         ("nanobot.agent.tools.cli_apps_config", "from nanobot.config_base import Base"),
         (
