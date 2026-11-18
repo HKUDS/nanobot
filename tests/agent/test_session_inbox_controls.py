@@ -583,100 +583,93 @@ async def test_cancel_preserves_followups_accepted_after_cancellation_started(lo
     )] == ["new followup"]
 
 
-@pytest.mark.parametrize("kind", ["cron", "local_trigger"])
-async def test_stop_does_not_strand_automation_submitted_during_cleanup(loop, monkeypatch, kind):
+@pytest.fixture
+def handoff_started(loop, monkeypatch):
+    """Exercise the real dispatcher and inbox without waiting on turn storage."""
     started = asyncio.Event()
+
+    async def process_message(msg, **_kwargs):
+        if msg.content == "original turn":
+            started.set()
+            await asyncio.Event().wait()
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="automation finished")
+
+    monkeypatch.setattr(loop.sessions.state, "read", AsyncMock(return_value=None))
+    monkeypatch.setattr(loop, "_process_message", process_message)
+    return started
+
+
+@pytest.mark.parametrize("kind", ["cron", "local_trigger"])
+async def test_stop_does_not_strand_automation_submitted_during_cleanup(
+    loop, monkeypatch, kind, handoff_started,
+):
     cleaning_exec = asyncio.Event()
     submit_turn = loop.submit_cron_turn if kind == "cron" else loop.submit_local_trigger_turn
     cancel_launches = loop._exec_session_manager._cancel_launches
 
-    async def chat(**_kwargs):
-        if not started.is_set():
-            started.set()
-            await asyncio.Event().wait()
-        return LLMResponse(content="automation finished")
-
     async def observe_launch_cleanup(launches):
-        # This child is already scheduled by the real exec cleanup's gather.
-        # Wake the submitter without introducing another suspension in /stop.
+        # Wake the submitter from the real exec cleanup without adding a
+        # suspension that could hide the late queue removal this test catches.
         cleaning_exec.set()
         return await cancel_launches(launches)
 
-    loop.provider.chat_stream_with_retry = chat
     monkeypatch.setattr(loop._exec_session_manager, "_cancel_launches", observe_launch_cleanup)
-    dispatcher = asyncio.create_task(loop.run())
-    submitted = None
-    try:
-        async with asyncio.timeout(5):
-            await loop.bus.publish_inbound(InboundMessage(
-                channel="websocket", sender_id="user", chat_id="test", content="original turn",
-            ))
-            await started.wait()
-            await loop.bus.publish_inbound(InboundMessage(
-                channel="websocket", sender_id="user", chat_id="test", content="/stop",
-            ))
-            await cleaning_exec.wait()
-            submitted = asyncio.create_task(submit_turn(_automation_message(kind, "new work")))
-            while True:
-                reply = await loop.bus.consume_outbound()
-                if reply.event is None and reply.content.startswith("Stopped "):
-                    break
-        result = await asyncio.wait_for(asyncio.shield(submitted), timeout=1)
+    async with asyncio.timeout(5), asyncio.TaskGroup() as tasks:
+        await loop._dispatch_inbound(InboundMessage(
+            channel="websocket", sender_id="user", chat_id="test", content="original turn",
+        ))
+        await handoff_started.wait()
+        stop = tasks.create_task(loop._dispatch_inbound(InboundMessage(
+            channel="websocket", sender_id="user", chat_id="test", content="/stop",
+        )))
+        await cleaning_exec.wait()
+        submitted = tasks.create_task(submit_turn(_automation_message(kind, "new work")))
+        await stop
+        while True:
+            reply = await loop.bus.consume_outbound()
+            if reply.event is None and reply.content.startswith("Stopped "):
+                break
+        result = await submitted
         assert result is not None and result.content == "automation finished"
-    finally:
-        if submitted is not None:
-            submitted.cancel()
-            await asyncio.gather(submitted, return_exceptions=True)
-        await stop_loop(loop, dispatcher, timeout=3)
 
 
-async def test_automation_arriving_during_queue_cancellation_is_not_stranded(loop):
-    started = asyncio.Event()
+async def test_automation_arriving_during_queue_cancellation_is_not_stranded(loop, handoff_started):
     notifying = asyncio.Event()
     release_notification = asyncio.Event()
-
-    async def chat(**_kwargs):
-        if not started.is_set():
-            started.set()
-            await asyncio.Event().wait()
-        return LLMResponse(content="automation finished")
 
     async def observe_completion(event):
         if event.context.metadata.get("message_id") == "queued-compact":
             notifying.set()
             await release_notification.wait()
 
-    loop.provider.chat_stream_with_retry = chat
     loop.bus.subscribe(observe_completion, TurnCompleted)
-    dispatcher = asyncio.create_task(loop.run())
-    submitted = None
-    try:
-        async with asyncio.timeout(5):
-            for content in ("original turn", "/compact", "/stop"):
-                await loop.bus.publish_inbound(InboundMessage(
-                    channel="websocket", sender_id="user", chat_id="test", content=content,
-                    metadata={"message_id": "queued-compact"} if content == "/compact" else {},
-                ))
-                if content == "original turn":
-                    await started.wait()
+    async with asyncio.timeout(5), asyncio.TaskGroup() as tasks:
+        await loop._dispatch_inbound(InboundMessage(
+            channel="websocket", sender_id="user", chat_id="test", content="original turn",
+        ))
+        await handoff_started.wait()
+        await loop._dispatch_inbound(InboundMessage(
+            channel="websocket", sender_id="user", chat_id="test", content="/compact",
+            metadata={"message_id": "queued-compact"},
+        ))
+        stop = tasks.create_task(loop._dispatch_inbound(InboundMessage(
+            channel="websocket", sender_id="user", chat_id="test", content="/stop",
+        )))
+        try:
             await notifying.wait()
             msg = _automation_message("cron", "after queue cancellation")
-            submitted = asyncio.create_task(loop.submit_cron_turn(msg))
+            submitted = tasks.create_task(loop.submit_cron_turn(msg))
             while "after queue cancellation" not in loop.pending_cron_job_ids_for_session(msg.session_key):
                 await asyncio.sleep(0)
+        finally:
             release_notification.set()
-            while True:
-                reply = await loop.bus.consume_outbound()
-                if reply.event is None and reply.content.startswith("Stopped "):
-                    break
-        result = await asyncio.wait_for(asyncio.shield(submitted), timeout=1)
+        await stop
+        while True:
+            reply = await loop.bus.consume_outbound()
+            if reply.event is None and reply.content.startswith("Stopped "):
+                break
+        result = await submitted
         assert result is not None and result.content == "automation finished"
-    finally:
-        release_notification.set()
-        if submitted is not None:
-            submitted.cancel()
-            await asyncio.gather(submitted, return_exceptions=True)
-        await stop_loop(loop, dispatcher, timeout=3)
 
 
 async def test_shutdown_rejects_automation_before_starting_cleanup(loop):
