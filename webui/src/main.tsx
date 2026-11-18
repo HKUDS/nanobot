@@ -1,5 +1,8 @@
+import ReactDOM from "react-dom/client";
+
+import App from "./App";
 import "./globals.css";
-import { preloadInitialBootstrap } from "./lib/initial-bootstrap";
+import { initializeI18n } from "./i18n";
 import { initializePairReturn } from "./lib/remote-pair-return";
 
 // `crypto.randomUUID` is only defined in secure contexts (HTTPS or localhost).
@@ -25,14 +28,6 @@ initializePairReturn();
 window.addEventListener("hashchange", initializePairReturn);
 
 async function renderWebui(container: HTMLElement) {
-  const takeInitialBootstrap = preloadInitialBootstrap();
-  const localeReady = import("./i18n").then(({ initializeI18n }) => initializeI18n());
-  const app = import("./mount");
-  // The HTML skeleton already resolved the initial route (including restart links).
-  // Warm only code: neither chat nor a socket mounts until App accepts the bootstrap.
-  if (container.querySelector('[data-startup-surface="chat"]')) {
-    void import("./components/thread/ThreadShell").catch(() => {});
-  }
   // The critical skeleton paints immediately; React must wait for the full stylesheet.
   const styles = [...document.querySelectorAll<HTMLLinkElement>("link[data-app-stylesheet]")]
     .map((link) => new Promise<void>((resolve, reject) => {
@@ -43,8 +38,9 @@ async function renderWebui(container: HTMLElement) {
       link.rel = "stylesheet";
       if (link.sheet) ready();
     }));
-  const [{ mountWebui }] = await Promise.all([app, localeReady, ...styles]);
-  mountWebui(container, takeInitialBootstrap);
+  await Promise.all([initializeI18n(), ...styles]);
+  /* StrictMode disabled: dev double-invokes state updaters; delta accumulation must stay pure — see useNanobotStream. */
+  ReactDOM.createRoot(container).render(<App />);
 }
 
 void renderWebui(root);
