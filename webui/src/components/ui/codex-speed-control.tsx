@@ -29,19 +29,19 @@ export function CodexSpeedControl({ value, onChange, ultrafastSupported }: {
               size="sm"
               aria-label={label}
               aria-pressed={selected}
-              className="group/speed h-8 w-8 rounded-lg p-0 max-sm:h-11 max-sm:w-11"
+              className="group/speed size-8 rounded-full p-0 hover:bg-transparent active:bg-transparent aria-pressed:bg-transparent max-sm:size-11"
               onClick={() => onChange(selected ? false : mode)}
             >
               <span aria-hidden className={cn(
-                "grid size-7 place-items-center rounded-md",
-                selected ? "bg-foreground text-background" : "bg-muted/65 text-muted-foreground group-hover/speed:text-foreground",
+                "grid size-[20px] place-items-center rounded-full",
+                selected ? "bg-foreground text-background" : "bg-foreground/[0.07] text-muted-foreground group-hover/speed:bg-foreground/[0.12] group-hover/speed:text-foreground",
               )}>
                 {ultra ? (
-                  <span className="relative size-[18px]">
-                    <Zap className="absolute left-0 top-0 size-3.5 opacity-60" />
-                    <Zap className="absolute bottom-0 right-0 size-3.5" />
+                  <span className="relative size-4">
+                    <Zap className="absolute left-0 top-0 size-3 opacity-60" />
+                    <Zap className="absolute bottom-0 right-0 size-3" />
                   </span>
-                ) : <Zap className="size-4" />}
+                ) : <Zap className="size-3.5" />}
               </span>
             </Button>
           </HoverHint>
