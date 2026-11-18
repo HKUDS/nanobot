@@ -1219,7 +1219,7 @@
       "extraHeaders": "Cabeçalhos",
       "extraBody": "Parâmetros do corpo",
       "extraQuery": "Parâmetros de consulta",
-      "capabilityFastMode": "Modo rápido",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "Respostas mais rápidas, maior consumo.",
       "capabilityXSearch": "Pesquisa no X",
       "capabilityXSearchHelp": "Modelos Grok compatíveis podem pesquisar no X.\n\nPermite que modelos Grok compatíveis usem o X Search hospedado pela xAI. A atividade de pesquisa aparece no chat.",
@@ -1967,6 +1967,13 @@
         "removeContext": "Remova os anexos e o texto citado antes de executar um comando."
       },
       "chooseAI": "Escolher modelo",
+      "modelOptions": {
+        "title": "Para esta conversa",
+        "on": "Ativado",
+        "off": "Desativado",
+        "codexFast": "Fast",
+        "ultrafast": "Ultrarrápido"
+      },
       "switchModel": "Trocar modelo",
       "manageModels": "Gerenciar presets",
       "fallbackNotice": "Esta resposta usou um modelo alternativo: {{model}}.",

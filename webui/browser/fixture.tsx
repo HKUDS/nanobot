@@ -22,6 +22,11 @@ async function withClient(fixture: ReactElement, webuiCapabilities?: string[]) {
 // Load and install only the selected scene's mocks before i18n and React mount.
 async function loadFixture() {
   switch (fixtureCase) {
+    case "model-options": {
+      const { ModelOptionsFixture, installModelOptionsPreviewApi } = await import("./model-options-fixture");
+      installModelOptionsPreviewApi();
+      return <ModelOptionsFixture />;
+    }
     case "session-transition": {
       const { installSessionTransitionPreviewApi, SessionTransitionFixture } = await import("./session-transition-fixture");
       if (parameters.has("preview")) installSessionTransitionPreviewApi();

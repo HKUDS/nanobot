@@ -54,6 +54,11 @@
     "model": "サンプルのモデル",
     "disabledModel": "無効化されたモデル選択"
   },
+  "codexSpeed": {
+    "title": "Codex の速度",
+    "description": "Fast または超高速を選びます。選択中のモードをもう一度選ぶと解除できます。",
+    "options": "対応モデルでは超高速を表示します。"
+  },
   "segmented": {
     "title": "セグメント選択",
     "description": "少数の選択肢を常に表示します。",

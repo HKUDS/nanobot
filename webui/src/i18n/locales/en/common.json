@@ -1399,7 +1399,7 @@
       "extraHeaders": "Headers",
       "extraBody": "Body parameters",
       "extraQuery": "Query parameters",
-      "capabilityFastMode": "Fast mode",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "Faster responses, increased usage.",
       "capabilityXSearch": "X Search",
       "capabilityXSearchHelp": "Supported Grok models can search X.\n\nAllow supported Grok models to use xAI-hosted X Search. Search activity appears in chat.",
@@ -2147,6 +2147,13 @@
         "removeContext": "Remove attachments and quoted text before running a command."
       },
       "chooseAI": "Choose model",
+      "modelOptions": {
+        "title": "For this chat",
+        "on": "On",
+        "off": "Off",
+        "codexFast": "Fast",
+        "ultrafast": "Ultrafast"
+      },
       "switchModel": "Switch model",
       "manageModels": "Manage presets",
       "fallbackNotice": "This response used a fallback model: {{model}}.",

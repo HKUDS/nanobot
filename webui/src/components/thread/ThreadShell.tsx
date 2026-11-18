@@ -11,6 +11,7 @@ import { FileActionsProvider } from "@/components/FileActions";
 import { createFilePreviewResource } from "@/lib/file-preview-resource";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
+import { useSessionModelOptions } from "@/hooks/useSessionModelOptions";
 import { usePromptHistory } from "@/hooks/usePromptHistory";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { SandboxNotice } from "@/components/thread/SandboxNotice";
@@ -828,12 +829,19 @@ export function ThreadShell({
       });
     });
   }, [activeModelPreset, chatId, client]);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const { data: modelOptionsData, select: selectModelOptions, reset: resetModelOptions,
+    sendValue: selectedModelOptions, moveToSession: moveModelOptionsToSession } = useSessionModelOptions({
+    sessionKey: session?.key ?? null, preset: activeModelPreset, settings,
+    open: modelMenuOpen, disabled: temporary, storedValue: session?.modelOptions,
+  });
   const handleModelPresetChange = useCallback((name: string) => {
+    resetModelOptions(name);
     setLocalModelPreset(name);
     if (chatId) {
       void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
     }
-  }, [chatId, client]);
+  }, [chatId, client, resetModelOptions]);
   const modelPresetOptions = useMemo(
     () => modelPresetOptionsFromSettings(settings),
     [settings],
@@ -853,13 +861,15 @@ export function ThreadShell({
     : modelBadge.label;
   const withWorkspaceScope = useCallback(
     (options?: SendOptions): SendOptions | undefined => {
-      if (!workspaceScope) return options;
+      const modelOptions = selectedModelOptions();
+      if (!workspaceScope && !modelOptions) return options;
       return {
         ...(options ?? {}),
-        workspaceScope,
+        ...(workspaceScope ? { workspaceScope } : {}),
+        ...(modelOptions ? { modelOptions } : {}),
       };
     },
-    [workspaceScope],
+    [selectedModelOptions, workspaceScope],
   );
 
   const refreshModelSettings = useCallback(async () => {
@@ -1049,13 +1059,14 @@ export function ThreadShell({
         setBooting(false);
         return false;
       }
+      moveModelOptionsToSession(`websocket:${newId}`, pendingFirstRef.current?.options?.modelOptions);
       if (localModelPreset) {
         await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
       }
       setPendingFirstTargetChatId(newId);
       return delivery;
     },
-    [booting, client, draftKey, draftStore, localModelPreset, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
+    [booting, client, draftKey, draftStore, localModelPreset, moveModelOptionsToSession, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
   );
 
   const inspectAttachment = useCallback(async (path: string) => {
@@ -1321,6 +1332,8 @@ export function ThreadShell({
           modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
+          modelOptionsControl={{ data: modelOptionsData, onChange: selectModelOptions }}
+          onModelMenuOpenChange={setModelMenuOpen}
           onModelPresetChange={handleModelPresetChange}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
@@ -1375,6 +1388,8 @@ export function ThreadShell({
           modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
+          modelOptionsControl={{ data: modelOptionsData, onChange: selectModelOptions }}
+          onModelMenuOpenChange={setModelMenuOpen}
           onModelPresetChange={handleModelPresetChange}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}

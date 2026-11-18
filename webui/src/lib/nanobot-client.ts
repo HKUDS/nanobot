@@ -9,6 +9,7 @@ import type {
   OutboundMcpPresetMention,
   OutboundMedia,
   SessionMention,
+  SessionModelOptions,
   SidebarStatePayload,
   GoalStateWsPayload,
   WorkspaceScopePayload,
@@ -286,6 +287,12 @@ export class NanobotClient {
 
   get defaultChatId(): string | null {
     return this.readyChatId;
+  }
+
+  /** Stable browser preference namespace without authentication or query parameters. */
+  get preferenceScope(): string {
+    const url = new URL(this.currentUrl, window.location.href);
+    return `${url.protocol}//${url.host}${url.pathname}`;
   }
 
   /** Swap the URL (e.g. after fetching a fresh token) then reconnect. */
@@ -819,6 +826,7 @@ export class NanobotClient {
       quotedContext?: string;
       intent?: "create_automation";
       userShell?: boolean;
+      modelOptions?: SessionModelOptions;
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
       /** False for side-channel or injected messages that do not own a lifecycle. */
@@ -841,6 +849,8 @@ export class NanobotClient {
       ...(options?.quotedContext?.trim() ? { quoted_context: options.quotedContext.trim() } : {}),
       ...(options?.intent === "create_automation" ? { intent: options.intent } : {}),
       ...(options?.userShell ? { user_shell: true } : {}),
+      ...(!temporary && !options?.userShell && options?.modelOptions
+        ? { model_options: options.modelOptions } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,

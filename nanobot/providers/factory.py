@@ -77,6 +77,7 @@ def _make_provider_core(
             default_model=model,
             proxy=proxy,
             extra_body=p.extra_body if p else None,
+            fast_mode=preset.codex_fast_mode,
             provider_name=provider_name,
         )
     elif backend == "xai_grok":
@@ -262,6 +263,7 @@ def _preset_provider_signature(
         preset.max_tokens,
         preset.temperature,
         preset.reasoning_effort,
+        preset.codex_fast_mode,
         preset.context_window_tokens,
         preset.api.model_dump_json() if preset.api is not None else None,
         config.network.resolve_proxy(provider_config.use_proxy) if provider_config else None,

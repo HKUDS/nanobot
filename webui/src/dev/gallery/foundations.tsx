@@ -3,6 +3,7 @@ import { SidebarPanel } from "@/components/ui/sidebar-panel";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { CodexSpeedControl } from "@/components/ui/codex-speed-control";
 import { Input, SearchInput } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleButton } from "@/components/ui/toggle-button";
@@ -21,6 +22,7 @@ import { ExpandableText } from "@/components/ui/expandable-text";
 import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { LoadingRing } from "@/components/ui/loading-ring";
 import { ImageViewport } from "@/components/ui/image-viewport";
+import type { CodexFastMode } from "@/lib/types";
 import { Sample, type ComponentExample } from "./example";
 import { useGalleryTranslation } from "./i18n";
 
@@ -77,6 +79,11 @@ function Switches() {
       <ToggleButton checked={false} disabled onChange={() => {}} label={t("controls.toggle.unavailableOff")} />
     </div>
   </div>;
+}
+
+function CodexSpeedPreview() {
+  const [value, setValue] = useState<CodexFastMode>(false);
+  return <CodexSpeedControl value={value} onChange={setValue} ultrafastSupported />;
 }
 
 function Selects() {
@@ -279,6 +286,9 @@ export const foundationExamples: ComponentExample[] = [
     description: "controls.textarea.description", options: "controls.textarea.options", code: '<Textarea aria-label="Notes" value={notes} onChange={event => setNotes(event.target.value)} />' },
   { title: "controls.toggle.title", files: ["toggle-button"], Preview: Switches,
     description: "controls.toggle.description", options: "controls.toggle.options", code: '<ToggleButton checked={enabled} onChange={setEnabled} label="Enable feature" />' },
+  { title: "controls.codexSpeed.title", files: ["codex-speed-control"], Preview: CodexSpeedPreview,
+    description: "controls.codexSpeed.description", options: "controls.codexSpeed.options",
+    code: 'const [value, setValue] = useState<CodexFastMode>(false);\n<CodexSpeedControl value={value} onChange={setValue} ultrafastSupported />' },
   { title: "controls.select.title", files: ["select"], Preview: Selects,
     description: "controls.select.description", options: "controls.select.options",
     code: '<Select value={value} onValueChange={setValue}>\n  <SelectTrigger aria-label="Model"><SelectValue /></SelectTrigger>\n  <SelectContent><SelectItem value="default">Default</SelectItem></SelectContent>\n</Select>' },

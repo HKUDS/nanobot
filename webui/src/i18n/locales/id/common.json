@@ -1009,7 +1009,7 @@
       "extraHeaders": "Header",
       "extraBody": "Parameter body",
       "extraQuery": "Parameter kueri",
-      "capabilityFastMode": "Mode cepat",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "Respons lebih cepat, penggunaan meningkat.",
       "capabilityXSearch": "Pencarian X",
       "capabilityXSearchHelp": "Model Grok yang didukung dapat mencari di X.\n\nIzinkan model Grok yang didukung menggunakan X Search yang dihosting xAI. Aktivitas pencarian ditampilkan di chat.",
@@ -1965,6 +1965,13 @@
         "removeContext": "Hapus lampiran dan teks kutipan sebelum menjalankan perintah."
       },
       "chooseAI": "Pilih model",
+      "modelOptions": {
+        "title": "Untuk chat ini",
+        "on": "Aktif",
+        "off": "Nonaktif",
+        "codexFast": "Fast",
+        "ultrafast": "Ultracepat"
+      },
       "switchModel": "Ganti model",
       "manageModels": "Kelola preset",
       "fallbackNotice": "Respons ini menggunakan model cadangan: {{model}}.",

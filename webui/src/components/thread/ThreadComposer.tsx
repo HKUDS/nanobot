@@ -1,3 +1,4 @@
+import type { ModelOptionsControlProps } from "@/components/thread/ModelOptionsControl";
 import { pastedFilePath, PastedPathRange, type LocalAttachment } from "../../../../packages/client-events/attachments";
 import {
   NewChatIcon,
@@ -231,6 +232,8 @@ interface ThreadComposerProps {
   modelDetail?: string | null;
   modelPreset?: string | null;
   modelPresets?: ModelPresetOption[];
+  modelOptionsControl?: ModelOptionsControlProps;
+  onModelMenuOpenChange?: (open: boolean) => void;
   onModelPresetChange?: (name: string) => void;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
@@ -559,6 +562,8 @@ export function ThreadComposer({
   modelDetail = null,
   modelPreset = null,
   modelPresets = [],
+  modelOptionsControl,
+  onModelMenuOpenChange,
   onModelPresetChange,
   modelProvider = null,
   modelProviderLabel = null,
@@ -1988,6 +1993,8 @@ export function ThreadComposer({
       modelDetail={modelDetail}
       modelPreset={modelPreset}
       modelPresets={modelPresets}
+      modelOptionsControl={modelOptionsControl}
+      onMenuOpenChange={onModelMenuOpenChange}
       onPresetChange={onModelPresetChange}
       onManageModels={onManageModels}
       onRequestComposerFocus={() => textareaRef.current?.focus()}

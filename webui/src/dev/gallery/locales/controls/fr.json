@@ -54,6 +54,11 @@
     "model": "Modèle d’exemple",
     "disabledModel": "Sélecteur de modèle désactivé"
   },
+  "codexSpeed": {
+    "title": "Vitesse de Codex",
+    "description": "Choisissez Fast ou Ultrarapide. Sélectionnez de nouveau le mode actif pour le désactiver.",
+    "options": "Affiche Ultrarapide pour les modèles compatibles."
+  },
   "segmented": {
     "title": "Choix segmentés",
     "description": "Un petit ensemble de choix toujours visibles.",

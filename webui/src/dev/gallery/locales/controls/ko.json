@@ -54,6 +54,11 @@
     "model": "예제 모델",
     "disabledModel": "비활성화된 모델 선택"
   },
+  "codexSpeed": {
+    "title": "Codex 속도",
+    "description": "Fast 또는 초고속을 선택합니다. 선택된 모드를 다시 누르면 해제됩니다.",
+    "options": "지원 모델에 초고속을 표시합니다."
+  },
   "segmented": {
     "title": "분할 선택",
     "description": "적은 수의 선택지를 항상 표시합니다.",
