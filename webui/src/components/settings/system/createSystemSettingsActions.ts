@@ -93,6 +93,7 @@ export function createSystemSettingsActions({
     nanobotFeatureActionRef,
     nanobotFeatures,
     setAutomationAction,
+    setAutomationDialogError,
     setAutomationPendingDelete,
     setAutomationPendingEdit,
     setAutomations,
@@ -230,8 +231,9 @@ export function createSystemSettingsActions({
     job: SessionAutomationJob,
   ) => {
     const key = `${action}:${job.id}`;
+    const reportError = action === "delete" ? setAutomationDialogError : setAutomationsError;
     setAutomationAction(key);
-    setAutomationsError(null);
+    reportError(null);
     try {
       const payload = await runAutomationAction(client, action, job.id);
       setAutomations(payload);
@@ -241,7 +243,7 @@ export function createSystemSettingsActions({
         window.setTimeout(() => void refreshAutomations(false), 4000);
       }
     } catch (err) {
-      setAutomationsError((err as Error).message);
+      reportError(err instanceof Error ? err.message : String(err));
     } finally {
       setAutomationAction(null);
     }
@@ -253,13 +255,13 @@ export function createSystemSettingsActions({
   ) => {
     const key = `update:${job.id}`;
     setAutomationAction(key);
-    setAutomationsError(null);
+    setAutomationDialogError(null);
     try {
       const payload = await updateAutomation(client, job.id, values);
       setAutomations(payload);
       setAutomationPendingEdit(null);
     } catch (err) {
-      setAutomationsError((err as Error).message);
+      setAutomationDialogError(err instanceof Error ? err.message : String(err));
     } finally {
       setAutomationAction(null);
     }

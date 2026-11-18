@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FileActions, FileActionsProvider } from "@/components/FileActions";
 import { FileReferenceChip } from "@/components/FileReferenceChip";
+import { ToastProvider } from "@/components/ui/toast";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import type { FileReferenceMetadata } from "@/lib/types";
 
@@ -82,6 +83,25 @@ describe("File actions", () => {
     await user.click(screen.getByRole("menuitem", { name: "Copy reference" }));
     expect(copyTextToClipboard).toHaveBeenCalledWith("missing.txt");
     expect(await screen.findByText("Could not copy. Please try again.")).toBeVisible();
+  });
+
+  it("coalesces repeated file copy success into one toast and makes the failure alert accessible", async () => {
+    const user = userEvent.setup();
+    render(<ToastProvider><FileActions path="notes.md" metadata={details}><button>notes.md</button></FileActions></ToastProvider>);
+    const reference = screen.getByRole("button", { name: "notes.md" });
+    for (let i = 0; i < 2; i++) {
+      fireEvent.contextMenu(reference);
+      await user.click(screen.getByRole("menuitem", { name: "Copy absolute path" }));
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      expect(screen.getAllByRole("status")).toHaveLength(1);
+      expect(screen.getByRole("status")).toHaveTextContent("Copied");
+    }
+    vi.mocked(copyTextToClipboard).mockResolvedValueOnce(false);
+    fireEvent.contextMenu(reference);
+    await user.click(screen.getByRole("menuitem", { name: "Copy absolute path" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not copy. Please try again.");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(reference).toHaveFocus();
   });
 
   it("ignores late metadata from a previous session", async () => {

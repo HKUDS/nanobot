@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { ToastProvider } from "@/components/ui/toast";
 import { ComposerDraftStore } from "@/lib/composer-draft";
 import type { EncodeResponse } from "@/lib/imageEncode";
 import type { WebUIIngressLimits } from "@/lib/types";
@@ -216,7 +217,7 @@ describe("ThreadComposer — attachments", () => {
     const file = new File([], "empty.csv", { type: "application/vnd.ms-excel" });
     const onSend = vi.fn();
 
-    render(<ThreadComposer onSend={onSend} />);
+    render(<ThreadComposer onSend={onSend} />, { wrapper: ToastProvider });
 
     const input = screen
       .getByLabelText(/message input/i)
@@ -227,7 +228,9 @@ describe("ThreadComposer — attachments", () => {
       fireEvent.change(input, { target: { files: [file] } });
     });
 
-    expect(screen.getByText("Empty files cannot be attached")).toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert.closest("[data-toast-tone=error]")).not.toBeNull();
+    expect(alert).toHaveTextContent("Empty files cannot be attached");
     expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
     expect(encodeImage).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();

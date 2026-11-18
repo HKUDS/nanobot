@@ -690,12 +690,14 @@ const AUTOMATION_EVERY_UNITS: Array<{ value: AutomationEveryUnit; ms: number }> 
 export function AutomationEditDialog({
   job,
   saving,
+  error,
   onOpenChange,
   onCancel,
   onSave,
 }: {
   job: SessionAutomationJob | null;
   saving: boolean;
+  error?: string | null;
   onOpenChange: (open: boolean) => void;
   onCancel?: (job: SessionAutomationJob) => void;
   onSave: (job: SessionAutomationJob, values: AutomationUpdatePayload) => void | Promise<void>;
@@ -879,6 +881,7 @@ export function AutomationEditDialog({
                 />
               ) : null}
 
+              {error ? <AutomationError message={error} /> : null}
               {validation ? (
                 <div id={validationId} className="rounded-control bg-destructive/8 px-3 py-2 text-[12px] text-destructive">
                   {validation}
@@ -910,11 +913,13 @@ export function AutomationEditDialog({
 export function AutomationDeleteDialog({
   job,
   deleting,
+  error,
   onOpenChange,
   onConfirm,
 }: {
   job: SessionAutomationJob | null;
   deleting: boolean;
+  error?: string | null;
   onOpenChange: (open: boolean) => void;
   onConfirm: (job: SessionAutomationJob) => void | Promise<void>;
 }) {
@@ -935,6 +940,7 @@ export function AutomationDeleteDialog({
             )}
           </DialogDescription>
         </DialogHeader>
+        {error ? <AutomationError message={error} /> : null}
         <DialogFooter>
           <Button
             type="button"

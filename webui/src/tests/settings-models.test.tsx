@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api";
 import type { ProviderModelsPayload, SettingsPayload } from "@/lib/types";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView as renderSettingsViewBase, openPopover, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
@@ -845,7 +846,8 @@ describe("Settings models", () => {
       await waitFor(() => expect(screen.queryByTestId("model-preset-editor")).not.toBeInTheDocument());
       expect(screen.queryByTestId("model-call-order-row-backup")).not.toBeInTheDocument();
     } else {
-      await waitFor(() => expect(within(confirmation).getByRole("button", { name: "Delete" })).toBeEnabled());
+      expect(await within(confirmation).findByRole("alert")).toHaveTextContent("Delete failed");
+      expect(within(confirmation).getByRole("button", { name: "Delete" })).toBeEnabled();
       expect(screen.getByTestId("model-preset-editor")).toBeInTheDocument();
     }
   });
@@ -1098,7 +1100,7 @@ describe("Settings models", () => {
     );
   });
 
-  it("restores the model call order when immediate persistence fails", async () => {
+  it("restores the model call order and announces a transient save failure", async () => {
     const { payload } = settingsPayloadWithBackup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -1112,7 +1114,7 @@ describe("Settings models", () => {
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
-    requestMutationMock.mockRejectedValueOnce(new Error("Order update failed"));
+    requestMutationMock.mockRejectedValueOnce(new ApiError(503, "WebUI connection is not open"));
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
@@ -1128,7 +1130,7 @@ describe("Settings models", () => {
       key: "ArrowUp",
     });
 
-    expect(await screen.findByText("Order update failed")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not update agent settings");
     expect(
       screen
         .getAllByTestId(/^model-call-order-row-/)

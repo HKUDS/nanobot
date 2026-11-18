@@ -149,11 +149,13 @@ export function agentDraftFromPayload(
 export function ModelPresetDeleteDialog({
   preset,
   deleting,
+  error,
   onOpenChange,
   onConfirm,
 }: {
   preset: SettingsPayload["model_presets"][number] | null;
   deleting: boolean;
+  error?: string | null;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
@@ -175,6 +177,7 @@ export function ModelPresetDeleteDialog({
             )}
           </DialogDescription>
         </DialogHeader>
+        {error ? <p role="alert" className="break-words text-sm text-destructive">{error}</p> : null}
         <DialogFooter>
           <Button
             type="button"

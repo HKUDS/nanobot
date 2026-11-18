@@ -2222,7 +2222,7 @@
         "tooLong": "Recording is too long.",
         "tooShort": "Hold a little longer to record voice.",
         "noInput": "No microphone input detected.",
-        "noDevice": "No microphone was found. Connect a microphone and try again.",
+        "noDevice": "Connect a microphone to record.",
         "failed": "Could not transcribe audio."
       },
       "slash": {
@@ -2719,6 +2719,18 @@
       "bsp": "BSP",
       "main-stack": "Main and stack"
     }
+  },
+  "toast": {
+    "undo": "Undo",
+    "pendingDeleteSingle": "Topic will be deleted",
+    "archivedSingle": "Topic archived",
+    "unarchivedSingle": "Topic unarchived",
+    "deleteFailedSingle": "Could not delete the topic",
+    "deleteWindow": "You have {{seconds}} seconds to undo.",
+    "pendingDelete": "{{count}} topics will be deleted",
+    "archived": "{{count}} topics archived",
+    "unarchived": "{{count}} topics unarchived",
+    "deleteFailed": "Could not delete {{count}} topics"
   },
   "common": {
     "retry": "Retry",

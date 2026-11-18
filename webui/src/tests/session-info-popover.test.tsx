@@ -156,7 +156,8 @@ describe("SessionInfoPopover", () => {
     expect(within(detail).getByRole("button", { name: "More actions" })).toHaveFocus();
   });
 
-  it("returns from the shared editor to the same task detail", async () => {
+  it("keeps a failed save and its draft inside the shared editor, then returns to the task on cancel", async () => {
+    requestMutation.mockRejectedValueOnce(new Error("Could not save schedule"));
     const user = userEvent.setup();
     render(
       <SessionInfoPopover
@@ -171,6 +172,12 @@ describe("SessionInfoPopover", () => {
     await user.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("dialog", { name: "Edit task" });
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    const name = within(editor).getByRole("textbox", { name: "Name" });
+    await user.clear(name);
+    await user.type(name, "Edited task name");
+    await user.click(within(editor).getByRole("button", { name: "Save" }));
+    expect(await within(editor).findByRole("alert")).toHaveTextContent("Could not save schedule");
+    expect(name).toHaveValue("Edited task name");
     await user.click(within(editor).getByRole("button", { name: "Cancel" }));
 
     expect(await screen.findByRole("dialog", { name: "Morning check" })).toBeVisible();

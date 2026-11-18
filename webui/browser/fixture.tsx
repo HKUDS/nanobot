@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initializeI18n, setAppLanguage } from "@/i18n";
-import { normalizeLocale } from "@/i18n/config";
+import { LOCALE_STORAGE_KEY, normalizeLocale } from "@/i18n/config";
 import "../src/globals.css";
 
 const parameters = new URLSearchParams(location.search);
@@ -26,6 +26,10 @@ async function loadFixture() {
       const { ModelOptionsFixture, installModelOptionsPreviewApi } = await import("./model-options-fixture");
       installModelOptionsPreviewApi();
       return <ModelOptionsFixture />;
+    }
+    case "toast": {
+      const { ToastFixture } = await import("./toast-fixture");
+      return <ToastFixture parameters={parameters} />;
     }
     case "session-transition": {
       const { installSessionTransitionPreviewApi, SessionTransitionFixture } = await import("./session-transition-fixture");
@@ -67,7 +71,8 @@ async function loadFixture() {
       return withClient(<MobileChatLayoutFixture parameters={parameters} />);
     }
     case "composer-action": {
-      const { ComposerActionFixture } = await import("./composer-action-fixture");
+      const { ComposerActionFixture, installMissingMicrophonePreview } = await import("./composer-action-fixture");
+      if (parameters.get("voiceError") === "noDevice") installMissingMicrophonePreview();
       return <ComposerActionFixture parameters={parameters} />;
     }
     case "workspace-alignment": {
@@ -214,6 +219,12 @@ async function loadFixture() {
 const fixture = await loadFixture();
 await initializeI18n();
 if (fixtureCase === "activity-wheel") await setAppLanguage("zh-CN");
+if (fixtureCase === "toast" && parameters.has("lang")) {
+  const previous = localStorage.getItem(LOCALE_STORAGE_KEY);
+  await setAppLanguage(normalizeLocale(parameters.get("lang")));
+  if (previous === null) localStorage.removeItem(LOCALE_STORAGE_KEY);
+  else localStorage.setItem(LOCALE_STORAGE_KEY, previous);
+}
 if ((["appearance", "session-transition", "tools-catalog"].includes(fixtureCase ?? "") || historyPreview) && parameters.has("lang")) {
   await setAppLanguage(normalizeLocale(parameters.get("lang")));
 }

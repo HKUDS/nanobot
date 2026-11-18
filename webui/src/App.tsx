@@ -9,7 +9,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { ArrowRight, ChevronDown, Eye, EyeOff } from "lucide-react";
+import { ArrowRight, CircleHelp, Eye, EyeOff, Loader2 } from "lucide-react";
 import { ThemeToggleIcon } from "@/components/icons/ThemeToggleIcon";
 import { Trans, useTranslation } from "react-i18next";
 import { ChannelPairing } from "@/components/pairing/ChannelPairing";
@@ -49,7 +49,7 @@ import {
   workbenchTabForPane,
   type WorkbenchState,
 } from "@/components/workbench/workbench-model";
-import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
+import { ToastProvider, useToast } from "@/components/ui/toast";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 import { useSessions } from "@/hooks/useSessions";
@@ -93,7 +93,8 @@ import type {
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Disclosure } from "@/components/ui/disclosure";
+import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { HoverHint } from "@/components/ui/hover-hint";
 import { fetchSettings, fetchWorkspaces } from "@/lib/api";
 import {
   createRuntimeHost,
@@ -109,7 +110,7 @@ import {
 type BootState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "auth"; failed?: boolean }
+  | { status: "auth" }
   | {
       status: "ready";
       client: NanobotClient;
@@ -372,31 +373,25 @@ function tokenRefreshDelayMs(expiresAt: number): number {
   return Math.max(TOKEN_REFRESH_MIN_DELAY_MS, remaining - margin);
 }
 
-function AuthForm({
-  failed,
-  onSecret,
-}: {
-  failed: boolean;
-  onSecret: (secret: string) => void;
+function AuthForm({ onSecret }: {
+  onSecret: (secret: string, onAuthRejected: () => void) => void;
 }) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [validationError, setValidationError] = useState<"required" | "invalid" | null>(
-    failed ? "invalid" : null,
-  );
-  const errorMessage = validationError ? t(`app.auth.${validationError}`) : null;
-
-  useEffect(() => {
-    if (!validationError) return;
-    const timeout = window.setTimeout(() => setValidationError(null), 3_000);
-    return () => window.clearTimeout(timeout);
-  }, [validationError]);
+  const [validationError, setValidationError] = useState<"required" | "invalid" | null>(null);
+  const helpTitle = t("app.auth.helpTitle");
+  const passwordLabel = t("app.auth.label");
+  const requiredMessage = t("app.auth.required");
+  const invalidMessage = t("app.auth.invalid");
+  const errorMessage = validationError === "required" ? requiredMessage
+    : validationError === "invalid" ? invalidMessage : null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     const secret = value.trim();
     if (!secret) {
       setValue("");
@@ -405,54 +400,91 @@ function AuthForm({
       return;
     }
     setSubmitting(true);
-    onSecret(secret);
+    onSecret(secret, () => {
+      setValue("");
+      setPasswordVisible(false);
+      setSubmitting(false);
+      setValidationError("invalid");
+      inputRef.current?.focus();
+    });
   };
 
   return (
     <main className="flex h-full w-full flex-col overflow-y-auto bg-background">
-      <div className="mx-5 mt-5 shrink-0 self-end sm:mx-8">
+      <div className="mx-5 mt-3.5 flex shrink-0 items-center gap-2 self-end sm:mx-8">
         <LanguageSwitcher className="h-8 min-w-0 gap-2 px-3 text-xs" />
+        <Dialog>
+          <HoverHint content={helpTitle} side="bottom" align="end">
+            <DialogTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={helpTitle}
+                className="h-11 w-11 rounded-full text-muted-foreground"
+              >
+                <CircleHelp className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+              </Button>
+            </DialogTrigger>
+          </HoverHint>
+          <DialogContent className="max-w-md gap-5">
+            <DialogTitle className="pe-8 leading-snug">{helpTitle}</DialogTitle>
+            <div className="min-w-0 space-y-4 text-sm leading-6 text-muted-foreground">
+              <div>
+                <DialogDescription className="leading-6">{t("app.auth.helpConfig")}</DialogDescription>
+                <code className="mt-2 block rounded-compact bg-muted px-3 py-2 font-mono text-xs leading-5 text-foreground [overflow-wrap:anywhere]">
+                  ~/.nanobot/config.json
+                </code>
+              </div>
+              <div>
+                <p>{t("app.auth.helpSecret")}</p>
+                <code className="mt-2 block rounded-compact bg-muted px-3 py-2 font-mono text-xs leading-5 text-foreground [overflow-wrap:anywhere]">
+                  channels.websocket.tokenIssueSecret
+                </code>
+              </div>
+              <p>
+                <Trans
+                  i18nKey="app.auth.helpFallback"
+                  components={{ code: <code className="font-mono text-xs text-foreground [overflow-wrap:anywhere]" /> }}
+                />
+              </p>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
-      <div className="flex flex-1 shrink-0 items-center justify-center px-6 pb-20 pt-8">
+      <div className="flex flex-1 shrink-0 items-center justify-center px-4 pb-14 pt-6 sm:px-6 sm:pb-20">
         <section
           aria-labelledby="webui-auth-title"
-          className="w-full max-w-xs"
+          className="w-full max-w-[27rem] rounded-modal border border-border/70 bg-muted/55 px-6 pb-6 pt-12 [background-image:radial-gradient(ellipse_at_50%_0%,hsl(var(--usage-token)/0.18),transparent_66%)] sm:px-12 sm:pb-8 sm:pt-14"
         >
           <div className="text-center">
-            <img
-              src="/brand/nanobot_mark.svg"
-              alt=""
-              width={56}
-              height={56}
-              draggable={false}
-              className="mx-auto mb-5 h-14 w-14 select-none"
-            />
-            <h1 id="webui-auth-title" className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-[1.75rem]">
+            <div className="mx-auto mb-7 grid h-24 w-24 place-items-center rounded-full bg-gradient-to-b from-card to-card/35 shadow-[0_16px_28px_hsl(var(--foreground)/0.10)] dark:shadow-[0_16px_28px_rgba(0,0,0,0.28)]">
+              <img src="/brand/nanobot_mark.svg" alt="" width={56} height={56}
+                draggable={false} className="h-14 w-14 select-none" />
+            </div>
+            <h1 id="webui-auth-title" className="text-balance text-2xl font-semibold tracking-tight text-foreground">
               {t("app.auth.title")}
             </h1>
           </div>
           <form onSubmit={handleSubmit} className="mt-8">
+            <label htmlFor="webui-access-password" className="sr-only">{passwordLabel}</label>
             <div className="relative">
               <Input
                 ref={inputRef}
                 id="webui-access-password"
                 name="webui-access-password"
-                aria-label={t("app.auth.label")}
                 type={passwordVisible ? "text" : "password"}
                 autoComplete="current-password"
+                placeholder={passwordLabel}
                 value={value}
                 onChange={(e) => {
                   setValue(e.target.value);
                   setValidationError(null);
                 }}
-                disabled={submitting}
+                readOnly={submitting}
                 aria-invalid={validationError ? true : undefined}
                 aria-describedby={validationError ? "webui-auth-error" : undefined}
-                placeholder={errorMessage ?? undefined}
-                className={cn(
-                  "h-12 rounded-full border-foreground/15 bg-muted/30 px-4 pr-24 text-base",
-                  validationError && "placeholder:text-[13px] placeholder:text-red-600 dark:placeholder:text-red-400",
-                )}
+                className="h-12 rounded-full border-border bg-background/85 ps-4 pe-14 text-base focus-visible:ring-0"
                 autoFocus
               />
               <Button
@@ -465,7 +497,7 @@ function AuthForm({
                 )}
                 aria-controls="webui-access-password"
                 onClick={() => setPasswordVisible((visible) => !visible)}
-                className="absolute right-12 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
+                className="absolute end-0.5 top-1/2 h-11 w-11 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
               >
                 {passwordVisible ? (
                   <EyeOff className="h-4 w-4" strokeWidth={1.75} aria-hidden />
@@ -473,50 +505,24 @@ function AuthForm({
                   <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden />
                 )}
               </Button>
-              <Button
-                type="submit"
-                variant="ghost"
-                size="icon"
-                disabled={submitting}
-                aria-label={t("app.auth.submit")}
-                title={t("app.auth.submit")}
-                className="absolute right-1 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full"
-              >
-                <ArrowRight className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-              </Button>
             </div>
-            {errorMessage ? (
-              <p id="webui-auth-error" role="alert" className="sr-only">
-                {errorMessage}
-              </p>
-            ) : null}
+            <div className="mt-2 grid px-4 text-[13px] leading-5 text-destructive">
+              <span aria-hidden="true" className="invisible col-start-1 row-start-1">{requiredMessage}</span>
+              <span aria-hidden="true" className="invisible col-start-1 row-start-1">{invalidMessage}</span>
+              {errorMessage ? (
+                <p id="webui-auth-error" role="alert" className="col-start-1 row-start-1">{errorMessage}</p>
+              ) : null}
+            </div>
+            <Button type="submit" size="lg" disabled={submitting} aria-busy={submitting || undefined}
+              className="relative mt-3 w-full rounded-full px-11">
+              {t("app.auth.submit")}
+              {submitting ? (
+                <Loader2 className="absolute end-4 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+              ) : (
+                <ArrowRight className="absolute end-4 h-4 w-4 rtl:rotate-180" strokeWidth={1.75} aria-hidden />
+              )}
+            </Button>
           </form>
-          <Disclosure
-            className="mt-4"
-            summaryClassName="flex min-h-11 items-center justify-center gap-1.5 rounded-compact text-[13px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            contentClassName="rounded-control bg-muted/50 p-4 text-sm leading-6 text-muted-foreground"
-            summary={(
-              <>
-                <span>{t("app.auth.helpTitle")}</span>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform group-data-[state=open]/disclosure:rotate-180 motion-reduce:transition-none" strokeWidth={1.5} aria-hidden />
-              </>
-            )}
-          >
-            <p>{t("app.auth.helpConfig")}</p>
-            <code className="mt-2 block rounded-compact bg-background px-3 py-2 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
-              ~/.nanobot/config.json
-            </code>
-            <p className="mt-4">{t("app.auth.helpSecret")}</p>
-            <code className="mt-2 block rounded-compact bg-background px-3 py-2 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
-              channels.websocket.tokenIssueSecret
-            </code>
-            <p className="mt-3">
-              <Trans
-                i18nKey="app.auth.helpFallback"
-                components={{ code: <code className="font-mono text-xs text-foreground [overflow-wrap:anywhere]" /> }}
-              />
-            </p>
-          </Disclosure>
         </section>
       </div>
     </main>
@@ -652,11 +658,11 @@ export default function App() {
   );
 
   const bootstrapWithSecret = useCallback(
-    (secret: string) => {
+    (secret: string, onAuthRejected?: () => void) => {
       let cancelled = false;
       if (readShellRoute().view === "chat") void loadThreadShell().catch(() => {});
       (async () => {
-        setState({ status: "loading" });
+        if (!onAuthRejected) setState({ status: "loading" });
         try {
           const boot = await fetchBootstrap("", secret);
           if (cancelled) return;
@@ -698,7 +704,8 @@ export default function App() {
             clearReloadCache();
             clearStoredComposerDrafts();
             webuiThreadCache.clear();
-            setState({ status: "auth", failed: !!secret });
+            if (onAuthRejected) onAuthRejected();
+            else setState({ status: "auth" });
           } else {
             setState({
               status: "error",
@@ -725,7 +732,7 @@ export default function App() {
           clearReloadCache();
           clearStoredComposerDrafts();
           webuiThreadCache.clear();
-          setState({ status: "auth", failed: !!bootstrapSecretRef.current });
+          setState({ status: "auth" });
         }
       }
     }, tokenRefreshDelayMs(state.tokenExpiresAt));
@@ -741,12 +748,7 @@ export default function App() {
     return <StartupShell />;
   }
   if (state.status === "auth") {
-    return (
-      <AuthForm
-        failed={!!state.failed}
-        onSecret={(s) => bootstrapWithSecret(s)}
-      />
-    );
+    return <AuthForm onSecret={bootstrapWithSecret} />;
   }
   if (state.status === "error") {
     return (
@@ -814,15 +816,22 @@ export default function App() {
       allowUpdateFlow={state.runtimeSurface !== "native"}
     >
       <BrowserNotifications client={state.client} />
-      <BackgroundProvider><RemoteInstances><Shell
+      <BackgroundProvider><RemoteInstances><ToastProvider><Shell
         runtimeSurface={state.runtimeSurface}
         onModelNameChange={handleModelNameChange}
         onLogout={handleLogout}
         onNativeEngineRestart={handleNativeEngineRestart}
-      /></RemoteInstances></BackgroundProvider>
+      /></ToastProvider></RemoteInstances></BackgroundProvider>
     </ClientProvider>
   );
 }
+
+type PendingDelete = {
+  items: SidebarDeleteItem[];
+  automations: SessionAutomationJob[];
+  automationKeys: Set<string>;
+  onDecision?: SidebarDeleteDecision;
+};
 
 function Shell({
   runtimeSurface,
@@ -836,6 +845,7 @@ function Shell({
   onNativeEngineRestart: () => Promise<string>;
 }) {
   const { t, i18n } = useTranslation();
+  const showToast = useToast();
   const remoteConnections = useRemoteConnections();
   const versionCheck = useVersionCheck();
   const updateFlow = useUpdateFlow();
@@ -924,12 +934,11 @@ function Shell({
   }, [updateSidebarState]);
   const lastActivePaneByTabRef = useRef(new Map<string, string>());
   const [creatingPane, setCreatingPane] = useState(false);
-  const topicSessions = sessions;
-  const [pendingDelete, setPendingDelete] = useState<{
-    items: SidebarDeleteItem[];
-    automations?: SessionAutomationJob[];
-    onDecision?: SidebarDeleteDecision;
-  } | null>(null);
+  const [deletingKeys, setDeletingKeys] = useState<Set<string>>(() => new Set());
+  const topicSessions = useMemo(() => deletingKeys.size === 0 ? sessions
+    : sessions.filter((session) => !deletingKeys.has(session.key)), [deletingKeys, sessions]);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const archiveUndoOwners = useRef(new Map<string, symbol>());
   const [pendingTabRename, setPendingTabRename] = useState<{
     key: string;
     label: string;
@@ -940,7 +949,6 @@ function Shell({
   } | null>(null);
   const restartSawDisconnectRef = useRef(false);
   const restartStartedAtRef = useRef(0);
-  const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
   const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
   const [updatedChatIds, setUpdatedChatIds] = useState<Set<string>>(readSessionUpdateChatIds);
@@ -1161,8 +1169,8 @@ function Shell({
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
     if (temporarySessions[activeKey]) return temporarySessions[activeKey];
-    return sessions.find((s) => s.key === activeKey) ?? null;
-  }, [sessions, activeKey, temporarySessions]);
+    return topicSessions.find((s) => s.key === activeKey) ?? null;
+  }, [topicSessions, activeKey, temporarySessions]);
   const activeTabMatch = useMemo(() => (
     activeKey && !temporarySessions[activeKey]
       ? workbenchTabForPane(workbenchState, activeKey)
@@ -1276,7 +1284,7 @@ function Shell({
       }, { replace: true });
       return;
     }
-    if (sessions.some((session) => session.key === activeKey)) return;
+    if (topicSessions.some((session) => session.key === activeKey)) return;
     // WebKit can commit the route before useSessions' optimistic insert.
     // Keep that just-created destination valid until the session list catches up.
     if (pendingCreatedKey === activeKey) return;
@@ -1289,7 +1297,7 @@ function Shell({
           },
       { replace: true },
     );
-  }, [activeKey, loading, navigate, sessions, temporarySessions]);
+  }, [activeKey, loading, navigate, sessions, temporarySessions, topicSessions]);
 
   useEffect(() => {
     return client.onSessionUpdate((chatId, scope, workspaceScope) => {
@@ -1547,6 +1555,7 @@ function Shell({
 
   const onSelectChat = useCallback(
     (key: string) => {
+      if (deletingKeys.has(key)) return;
       const selectedTemporary = temporarySessionsRef.current[key];
       const selected = selectedTemporary
         ?? sessions.find((session) => session.key === key);
@@ -1573,7 +1582,7 @@ function Shell({
       });
       setMobileSidebarOpen(false);
     },
-    [navigate, sessions],
+    [deletingKeys, navigate, sessions],
   );
 
   const onCloseTemporaryChat = useCallback((key: string) => {
@@ -1685,24 +1694,69 @@ function Shell({
     [pendingProjectRename, updateSidebarState],
   );
 
+  const titleForSession = useCallback((session: ChatSummary) => (
+    sidebarState.title_overrides[session.key]
+    || session.title
+    || deriveTitle(session.preview, t("chat.newChat"))
+  ), [sidebarState.title_overrides, t]);
+
   const onArchiveMany = useCallback(
     (keys: string[], archive: boolean) => {
-      const persistedKeys = new Set(sessions
+      if (sidebarStateLoading) return;
+      const persistedSessions = new Map(topicSessions
         .filter((session) => session.projectLocked !== false)
-        .map((session) => session.key));
-      const selected = new Set(keys.filter((key) => persistedKeys.has(key)));
-      if (selected.size === 0) return;
+        .map((session) => [session.key, session]));
+      const operation = Symbol();
+      const selected = new Set<string>();
+      let previousPins: string[] = [];
       void updateSidebarState((current) => {
         const archived = new Set(current.archived_keys);
-        for (const key of selected) {
+        for (const key of keys) {
+          if (!persistedSessions.has(key) || archived.has(key) === archive) continue;
+          selected.add(key);
+          archiveUndoOwners.current.set(key, operation);
           if (archive) archived.add(key);
           else archived.delete(key);
         }
+        if (!selected.size) return current;
+        previousPins = current.pinned_keys;
         return {
           ...current,
           pinned_keys: current.pinned_keys.filter((key) => !selected.has(key)),
           archived_keys: Array.from(archived),
         };
+      });
+      if (!selected.size) return;
+      const takeOwnedKeys = () => [...selected].filter((key) => {
+        if (archiveUndoOwners.current.get(key) !== operation) return false;
+        archiveUndoOwners.current.delete(key);
+        return true;
+      });
+      const singleTopic = selected.size === 1 ? persistedSessions.get([...selected][0]) : undefined;
+      showToast?.({
+        tone: "success",
+        detail: singleTopic ? titleForSession(singleTopic) : undefined,
+        message: archive
+          ? t(selected.size === 1 ? "toast.archivedSingle" : "toast.archived", { count: selected.size })
+          : t(selected.size === 1 ? "toast.unarchivedSingle" : "toast.unarchived", { count: selected.size }),
+        onExpire: () => { takeOwnedKeys(); },
+        action: { label: t("toast.undo"), run: () => {
+          const owned = takeOwnedKeys();
+          void updateSidebarState((current) => {
+            const archived = new Set(current.archived_keys);
+            const pins = [...current.pinned_keys];
+            const restoring = new Set(owned.filter((key) => archived.has(key) === archive));
+            if (!restoring.size) return current;
+            for (const key of restoring) {
+              if (archive) archived.delete(key);
+              else archived.add(key);
+            }
+            previousPins.forEach((key, index) => {
+              if (restoring.has(key) && !pins.includes(key)) pins.splice(index, 0, key);
+            });
+            return { ...current, archived_keys: [...archived], pinned_keys: pins };
+          });
+        } },
       });
       if (archive && activeKey && selected.has(activeKey)) {
         const archived = new Set([...sidebarState.archived_keys, ...selected]);
@@ -1714,7 +1768,7 @@ function Shell({
         });
       }
     },
-    [activeKey, navigate, sessions, sidebarState.archived_keys, topicSessions, updateSidebarState],
+    [activeKey, navigate, showToast, sidebarState.archived_keys, sidebarStateLoading, t, titleForSession, topicSessions, updateSidebarState],
   );
 
   const onToggleArchive = useCallback((key: string) => {
@@ -1985,8 +2039,7 @@ function Shell({
       const refreshGeneration = ++settingsRefreshGenerationRef.current;
       restartStartedAtRef.current = 0;
       setIsRestarting(false);
-      setRestartToast(t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }));
-      window.setTimeout(() => setRestartToast(null), 3_500);
+      showToast?.({ message: t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }), tone: "success", dedupeKey: "restart-completed" });
       refreshSettings(refreshGeneration);
     });
     return () => {
@@ -1994,111 +2047,107 @@ function Shell({
       unsubscribe();
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
-  }, [client, getToken, t]);
+  }, [client, getToken, showToast, t]);
 
   const onTurnEnd = useDeferredTitleRefresh(
     temporaryChatActive ? null : activePaneSession,
     refresh,
   );
 
-  const onConfirmDelete = useCallback(async () => {
-    if (!pendingDelete) return;
+  const onConfirmDelete = useCallback(() => {
+    if (!pendingDelete || !showToast) return;
+    const { items, automationKeys } = pendingDelete;
+    const batchKeys = new Set(items.map((item) => item.key));
     pendingDelete.onDecision?.(true);
-    const items = pendingDelete.items;
-    const deletingKeys = new Set(items.map((item) => item.key));
-    const hasAutomations = (pendingDelete.automations?.length ?? 0) > 0;
-    const deletingActive = activeKey !== null && deletingKeys.has(activeKey);
-    const currentIndex = topicSessions.findIndex((s) => s.key === activeKey);
-    const availableKeys = new Set(topicSessions.map((session) => session.key));
-    const siblingFallbackKey = deletingActive
-      ? activeTabState?.paneKeys.find((key) => (
-          !deletingKeys.has(key) && availableKeys.has(key)
-        )) ?? null
-      : null;
-    const fallbackKey = deletingActive
-      ? (
-          siblingFallbackKey
-          ?? topicSessions.slice(currentIndex + 1).find((session) => (
-            !deletingKeys.has(session.key)
-          ))?.key
-          ?? topicSessions.slice(0, Math.max(0, currentIndex)).reverse().find((session) => (
-            !deletingKeys.has(session.key)
-          ))?.key
-          ?? null
-        )
-      : activeKey;
-    try {
-      for (let index = 0; index < items.length; index += 1) {
-        const item = items[index];
-        const result = await deleteChat(
-          item.key,
-          hasAutomations ? { deleteAutomations: true } : undefined,
-        );
-        if (result.blocked_by_automations) {
-          setPendingDelete({
-            items: items.slice(index),
-            automations: result.automations ?? [],
-          });
-          return;
-        }
-        filePreviewStore.delete(item.key);
-        draftStore.delete(item.key);
-      }
-      setPendingDelete(null);
-      if (deletingActive) {
-        navigate({
-          view: "chat",
-          activeKey: fallbackKey,
-          settingsSection: "overview",
-        }, { replace: true });
-      }
-    } catch (e) {
-      console.error("Failed to delete session", e);
+    setPendingDelete(null);
+    setDeletingKeys((current) => new Set([...current, ...batchKeys]));
+
+    if (activeKey && batchKeys.has(activeKey)) {
+      const currentIndex = topicSessions.findIndex((session) => session.key === activeKey);
+      const available = new Set(topicSessions.filter((session) => !batchKeys.has(session.key)).map((session) => session.key));
+      const fallbackKey = activeTabState?.paneKeys.find((key) => available.has(key))
+        ?? topicSessions.slice(currentIndex + 1).find((session) => available.has(session.key))?.key
+        ?? topicSessions.slice(0, Math.max(0, currentIndex)).reverse().find((session) => available.has(session.key))?.key
+        ?? null;
+      navigate({ view: "chat", activeKey: fallbackKey, settingsSection: "overview" }, { replace: true });
     }
-  }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions, filePreviewStore, draftStore]);
+
+    const reveal = () => setDeletingKeys((current) => new Set([...current].filter((key) => !batchKeys.has(key))));
+    const commit = async () => {
+      let failed = 0;
+      try {
+        for (const item of items) {
+          try {
+            const result = await deleteChat(item.key, automationKeys.has(item.key) ? { deleteAutomations: true } : undefined);
+            if (result.deleted) {
+              filePreviewStore.delete(item.key);
+              draftStore.delete(item.key);
+            } else {
+              failed++;
+            }
+          } catch (error) {
+            console.error("Failed to delete session", error);
+            failed++;
+          }
+        }
+      } finally {
+        reveal();
+      }
+      if (failed) showToast({
+        message: t(failed === 1 ? "toast.deleteFailedSingle" : "toast.deleteFailed", { count: failed }),
+        tone: "error",
+      });
+    };
+    showToast({
+      message: t(items.length === 1 ? "toast.pendingDeleteSingle" : "toast.pendingDelete", { count: items.length }),
+      detail: items.length === 1 ? items[0].label : undefined,
+      tone: "pending",
+      action: { label: t("toast.undo"), run: reveal },
+      onExpire: () => { void commit(); },
+    });
+  }, [activeKey, activeTabState, deleteChat, draftStore, filePreviewStore, navigate, pendingDelete, showToast, t, topicSessions]);
 
   const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => {
-    const uniqueItems = Array.from(new Map(items.map((item) => [item.key, item])).values());
-    if (uniqueItems.length === 0) return;
-    const automationResults = await Promise.allSettled(
-      uniqueItems.map((item) => getSessionAutomations(item.key)),
-    );
-    const automations = automationResults.flatMap((result) => (
-      result.status === "fulfilled" ? result.value : []
-    ));
+    const uniqueItems = Array.from(new Map(items.filter((item) => !deletingKeys.has(item.key)).map((item) => [item.key, item])).values());
+    if (uniqueItems.length === 0) {
+      onDecision?.(false);
+      return;
+    }
+    const automationResults = await Promise.allSettled(uniqueItems.map((item) => getSessionAutomations(item.key)));
+    const automationKeys = new Set<string>();
+    const automations = automationResults.flatMap((result, index) => {
+      if (result.status !== "fulfilled" || !result.value.length) return [];
+      automationKeys.add(uniqueItems[index].key);
+      return result.value;
+    });
     let decision = onDecision;
     setPendingDelete({
       items: uniqueItems,
       automations,
+      automationKeys,
       onDecision: (confirmed) => {
         const notify = decision;
         decision = undefined;
         notify?.(confirmed);
       },
     });
-  }, [getSessionAutomations]);
+  }, [deletingKeys, getSessionAutomations]);
 
   const onRequestDelete = useCallback((key: string, label: string, onDecision?: SidebarDeleteDecision) => {
     void onRequestDeleteMany([{ key, label }], onDecision);
   }, [onRequestDeleteMany]);
-
-  const titleForSession = useCallback((session: ChatSummary) => (
-    sidebarState.title_overrides[session.key]
-    || session.title
-    || deriveTitle(session.preview, t("chat.newChat"))
-  ), [sidebarState.title_overrides, t]);
 
   const automaticSidebarSort = sidebarState.view.sort === "manual"
     ? "updated_desc"
     : sidebarState.view.sort;
   const orderedWorkbenchTabs = useMemo(() => {
     const orderedSessions = sortSessions(
-      sessions,
+      topicSessions,
       automaticSidebarSort,
       sidebarState.title_overrides,
       sidebarState.session_order,
     );
-    const updatedAtByKey = new Map(sessions.map((session) => [
+    const updatedAtByKey = new Map(topicSessions.map((session) => [
       session.key,
       session.updatedAt ?? session.createdAt,
     ]));
@@ -2109,7 +2158,7 @@ function Shell({
     );
   }, [
     automaticSidebarSort,
-    sessions,
+    topicSessions,
     sidebarState.session_order,
     sidebarState.title_overrides,
     workbenchState,
@@ -2119,7 +2168,7 @@ function Shell({
     [orderedWorkbenchTabs],
   );
   const sidebarTabPresentations = useMemo(() => {
-    const sessionsByKey = new Map(sessions.map((session) => [session.key, session]));
+    const sessionsByKey = new Map(topicSessions.map((session) => [session.key, session]));
     return orderedWorkbenchTabs.flatMap((tab) => {
       const anchorKey = tab.tab.paneKeys.find((key) => sessionsByKey.has(key))
         ?? tab.paneKeys[0];
@@ -2144,7 +2193,7 @@ function Shell({
           : anchor,
       }];
     });
-  }, [orderedWorkbenchTabs, sessions, titleForSession]);
+  }, [orderedWorkbenchTabs, topicSessions, titleForSession]);
   const sidebarTopicSessions = useMemo(
     () => sidebarTabPresentations.map((presentation) => presentation.session),
     [sidebarTabPresentations],
@@ -2157,7 +2206,7 @@ function Shell({
     : t("app.brand");
   const workbenchPaneSessions = useMemo(() => {
     if (!activeTabState) return [];
-    const byKey = new Map(sessions.map((session) => [session.key, session]));
+    const byKey = new Map(topicSessions.map((session) => [session.key, session]));
     const sortedPaneKeys = activeTabKey
       ? orderedWorkbenchTabsByKey.get(activeTabKey)?.paneKeys ?? activeTabState.paneKeys
       : activeTabState.paneKeys;
@@ -2168,7 +2217,7 @@ function Shell({
     return paneKeys
       .map((key) => byKey.get(key))
       .filter((session): session is ChatSummary => session !== undefined);
-  }, [activeTabKey, activeTabState, orderedWorkbenchTabsByKey, sessions]);
+  }, [activeTabKey, activeTabState, orderedWorkbenchTabsByKey, topicSessions]);
   const paneChromeEnabled = Boolean(
     activeKey && activeSession && !temporaryChatActive && activeTabState,
   );
@@ -2247,13 +2296,13 @@ function Shell({
   const onSelectSidebarTab = useCallback((tabKey: string) => {
     const tab = workbenchTab(workbenchState, tabKey);
     if (!tab) return;
+    const visiblePaneKeys = tab.paneKeys.filter((key) => !deletingKeys.has(key));
     const rememberedPaneKey = lastActivePaneByTabRef.current.get(tabKey);
-    onSelectChat(
-      rememberedPaneKey && tab.paneKeys.includes(rememberedPaneKey)
-        ? rememberedPaneKey
-        : tab.paneKeys[0],
-    );
-  }, [onSelectChat, workbenchState]);
+    const paneKey = rememberedPaneKey && visiblePaneKeys.includes(rememberedPaneKey)
+      ? rememberedPaneKey
+      : visiblePaneKeys[0];
+    if (paneKey) onSelectChat(paneKey);
+  }, [deletingKeys, onSelectChat, workbenchState]);
 
   const onSelectSidebarItem = useCallback((key: string) => {
     if (
@@ -2593,7 +2642,7 @@ function Shell({
                         return (
                           <ThreadShell
                             session={activeSession}
-                            sessions={sessions}
+                            sessions={topicSessions}
                             titleOverrides={sidebarState.title_overrides}
                             title={headerTitle}
                             temporary={temporaryChatRequested}
@@ -2644,7 +2693,7 @@ function Shell({
                       return (
                         <ThreadShell
                           session={paneSession}
-                          sessions={sessions}
+                          sessions={topicSessions}
                           titleOverrides={sidebarState.title_overrides}
                           title={pane.title}
                           temporaryChatIds={temporaryChatIds}
@@ -2788,19 +2837,6 @@ function Shell({
               onConfirm={onConfirmProjectRename}
             />
           </Suspense>
-        ) : null}
-        {restartToast ? (
-          <div className="fixed left-1/2 top-[calc(0.75rem+env(safe-area-inset-top))] z-50 flex w-[min(32rem,calc(100vw-1rem))] -translate-x-1/2 flex-col items-center gap-2">
-            <div
-              role="status"
-              className={cn(
-                floatingSurfaceElevationClassName,
-                "max-w-full rounded-full px-4 py-2 text-sm font-medium",
-              )}
-            >
-              {restartToast}
-            </div>
-          </div>
         ) : null}
         <ChannelPairing />
       </div>

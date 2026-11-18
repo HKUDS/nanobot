@@ -2222,7 +2222,7 @@
         "tooLong": "录音时间太长。",
         "tooShort": "请稍微多录一会儿。",
         "noInput": "没有检测到麦克风输入。",
-        "noDevice": "没有找到可用的麦克风。请连接麦克风后重试。",
+        "noDevice": "未找到麦克风，请连接后重试。",
         "failed": "语音转写失败。"
       },
       "slash": {
@@ -2719,6 +2719,18 @@
       "bsp": "BSP",
       "main-stack": "主次排列"
     }
+  },
+  "toast": {
+    "undo": "撤销",
+    "pendingDeleteSingle": "即将删除会话",
+    "archivedSingle": "已归档会话",
+    "unarchivedSingle": "已取消归档",
+    "deleteFailedSingle": "删除会话失败",
+    "deleteWindow": "可在 {{seconds}} 秒内撤销。",
+    "pendingDelete": "即将删除 {{count}} 个会话",
+    "archived": "已归档 {{count}} 个会话",
+    "unarchived": "已取消归档 {{count}} 个会话",
+    "deleteFailed": "{{count}} 个会话删除失败"
   },
   "common": {
     "retry": "重试",

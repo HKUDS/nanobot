@@ -2040,7 +2040,7 @@
         "tooLong": "L'enregistrement est trop long.",
         "tooShort": "Maintenez un peu plus longtemps pour enregistrer la voix.",
         "noInput": "Aucune entrée microphone détectée.",
-        "noDevice": "Aucun microphone trouvé. Connectez-en un, puis réessayez.",
+        "noDevice": "Branchez un micro pour enregistrer.",
         "failed": "Impossible de transcrire l'audio."
       },
       "slash": {
@@ -2537,6 +2537,18 @@
       "bsp": "BSP",
       "main-stack": "Principal et pile"
     }
+  },
+  "toast": {
+    "undo": "Annuler",
+    "pendingDeleteSingle": "La conversation va être supprimée",
+    "archivedSingle": "Conversation archivée",
+    "unarchivedSingle": "Conversation désarchivée",
+    "deleteFailedSingle": "Impossible de supprimer la conversation",
+    "deleteWindow": "Vous avez {{seconds}} secondes pour annuler.",
+    "pendingDelete": "{{count}} conversations vont être supprimées",
+    "archived": "{{count}} conversations archivées",
+    "unarchived": "{{count}} conversations désarchivées",
+    "deleteFailed": "Impossible de supprimer {{count}} conversations"
   },
   "common": {
     "retry": "Réessayer",

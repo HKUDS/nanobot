@@ -2040,7 +2040,7 @@
         "tooLong": "録音が長すぎます。",
         "tooShort": "もう少し長く録音してください。",
         "noInput": "マイク入力が検出されませんでした。",
-        "noDevice": "マイクが見つかりません。接続して再試行してください。",
+        "noDevice": "録音するにはマイクを接続してください。",
         "failed": "音声を文字起こしできませんでした。"
       },
       "slash": {
@@ -2537,6 +2537,18 @@
       "bsp": "BSP",
       "main-stack": "メインとサブ"
     }
+  },
+  "toast": {
+    "undo": "元に戻す",
+    "pendingDeleteSingle": "会話を削除します",
+    "archivedSingle": "会話をアーカイブしました",
+    "unarchivedSingle": "会話のアーカイブを解除しました",
+    "deleteFailedSingle": "会話を削除できませんでした",
+    "deleteWindow": "{{seconds}} 秒以内なら元に戻せます。",
+    "pendingDelete": "{{count}} 件の会話を削除します",
+    "archived": "{{count}} 件の会話をアーカイブしました",
+    "unarchived": "{{count}} 件の会話のアーカイブを解除しました",
+    "deleteFailed": "{{count}} 件の会話を削除できませんでした"
   },
   "common": {
     "retry": "再試行",
