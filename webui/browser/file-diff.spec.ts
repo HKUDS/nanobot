@@ -90,6 +90,15 @@ for (const dark of [false, true]) {
   }
 }
 
+test("a language without a built-in lexer receives its grammar in the diff worker", async ({ page }) => {
+  const worker = page.waitForEvent("worker");
+  await page.goto("/browser/fixture.html?case=file-diff&shiki");
+  await worker;
+  const config = page.getByRole("region", { name: "config.hjson", exact: true });
+  await expectTokenColor(config, "# shared settings", "--code-comment");
+  await expect(config.locator("[data-line][data-line-type=change-addition]")).toHaveText("host: localhost");
+});
+
 test("custom backgrounds remain visible through diff surfaces in both themes", async ({ page }) => {
   await page.goto("/browser/fixture.html?case=file-diff");
   const diff = page.getByRole("region", { name: "Status.tsx", exact: true }).getByTestId("file-edit-diff");
