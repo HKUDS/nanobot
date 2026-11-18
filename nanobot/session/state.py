@@ -13,6 +13,7 @@ from typing import Any, TypeVar, cast
 
 from nanobot.bus.events import InboundMessage
 from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
+from nanobot.session.history_replay import HistoryReplayBatch
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import (
     Session,
@@ -273,7 +274,8 @@ class SessionState:
     def _working(session: Session) -> Session:
         """Copy mutable headers and the list, sharing only owner-private message records."""
         return replace(session, _baseline=None, messages=list(session.messages),
-                       metadata=deepcopy(session.metadata), provider_state=deepcopy(session.provider_state))
+                       metadata=deepcopy(session.metadata), provider_state=deepcopy(session.provider_state),
+                       pending_history_replay=deepcopy(session.pending_history_replay))
 
     def _load(self, key: str, *, history: bool = True) -> Session | None:
         with self._cache_lock:
@@ -350,7 +352,8 @@ class SessionState:
             # Retain records already owned by this caller; copy only merged changes.
             messages = SessionState._copy_changed_messages(raw.messages, previous.messages)
             draft = replace(raw, messages=messages, metadata=deepcopy(raw.metadata),
-                            provider_state=deepcopy(raw.provider_state))
+                            provider_state=deepcopy(raw.provider_state),
+                            pending_history_replay=deepcopy(raw.pending_history_replay))
         draft._baseline = raw  # pyright: ignore[reportPrivateUsage]
         draft.persisted = present
         return draft
@@ -383,7 +386,7 @@ class SessionState:
             return None
         header = replace(
             session, messages=[], metadata=deepcopy(session.metadata),
-            provider_state=None, _baseline=None,
+            provider_state=None, pending_history_replay=[], _baseline=None,
         )
         header.last_archived = session.last_archived
         return header
@@ -573,6 +576,11 @@ class SessionState:
                     raise SessionConflictError(f"session {name} changed")
                 setattr(current, name, deepcopy(after))
         acknowledge_pending_followups(current, draft.consumed_followup_ids)
+        # The owner journal may contain deliveries newer than this turn's input snapshot.
+        current.pending_history_replay = [
+            batch for batch in current.pending_history_replay
+            if batch.id not in draft.consumed_history_replay_ids
+        ]
         current.policy = draft.policy
         current.updated_at = max(current.updated_at, draft.updated_at)
         return current, self._changed_start(before_messages, current.messages)
@@ -761,6 +769,7 @@ class SessionState:
             if session.generation != expected_generation:
                 raise SessionConflictError("delivery belongs to a replaced session")
             session.add_message("assistant", content, **values)
+            session.pending_history_replay.append(HistoryReplayBatch([deepcopy(session.messages[-1])]))
 
         await self._execute(
             key,
@@ -1148,6 +1157,8 @@ class SessionState:
             if require_empty and session.messages:
                 raise SessionConflictError("restore target is not empty")
             session.messages.extend(records)
+            if records:
+                session.pending_history_replay.append(HistoryReplayBatch(deepcopy(records)))
             session.metadata.update(values)
             session.updated_at = datetime.now()
             return session
