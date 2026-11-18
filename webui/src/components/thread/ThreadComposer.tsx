@@ -28,6 +28,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -58,6 +59,8 @@ import { SlashCommandText } from "@/components/SlashCommandText";
 import {
   CornerDownRight,
   Loader2,
+  Maximize2,
+  Minimize2,
   Quote,
   Trash2,
   X,
@@ -223,6 +226,7 @@ interface ThreadComposerProps {
   disabled?: boolean;
   placeholder?: string;
   inputAriaLabel?: string;
+  expandable?: boolean;
   compactWhenIdle?: boolean;
   isStreaming?: boolean;
   activeTurnId?: string | null;
@@ -537,12 +541,14 @@ function mcpPresetMentionPayload(preset: McpPresetInfo): OutboundMcpPresetMentio
 function autosizeTextarea(input: HTMLTextAreaElement) {
   const container = input.parentElement!;
   const previousMinHeight = container.style.minHeight;
+  const scrollTop = input.scrollTop;
   // Measuring the one-row textarea must not expand the sibling transcript and
   // clamp its native scroll offset, even temporarily before paint.
   container.style.minHeight = `${container.getBoundingClientRect().height}px`;
   try {
     input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 260)}px`;
+    input.style.height = `${input.scrollHeight}px`;
+    input.scrollTop = scrollTop;
   } finally {
     container.style.minHeight = previousMinHeight;
   }
@@ -553,6 +559,7 @@ export function ThreadComposer({
   disabled,
   placeholder,
   inputAriaLabel,
+  expandable = true,
   compactWhenIdle = false,
   isStreaming = false,
   activeTurnId = null,
@@ -633,6 +640,9 @@ export function ThreadComposer({
   useEffect(() => () => { pathCheckGeneration.current += 1; }, []);
   const [modelSetupAttentionRequest, setModelSetupAttentionRequest] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaId = useId();
+  const [draftExpanded, setDraftExpanded] = useState(false);
+  const [draftOverflows, setDraftOverflows] = useState(false);
   const focusTextarea = useCallback(() => {
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
@@ -731,27 +741,40 @@ export function ThreadComposer({
   const formRef = useRef<HTMLFormElement>(null);
   const [compactControls, setCompactControls] = useState(false);
 
+  const measureDraft = useCallback(() => {
+    const input = textareaRef.current;
+    if (!input) return;
+    autosizeTextarea(input);
+    if (expandable) setDraftOverflows(input.scrollHeight > input.clientHeight);
+    if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = input.scrollTop;
+  }, [expandable]);
+
   useLayoutEffect(() => {
     const form = formRef.current;
-    if (!form) return;
+    const input = textareaRef.current;
+    if (!form || !input) return;
     let previousWidth = 0;
     const update = () => {
       const width = form.getBoundingClientRect().width;
-      if (width <= 0 || width === previousWidth) return;
-      previousWidth = width;
-      setCompactControls(width <= 512);
-      const input = textareaRef.current;
-      if (input) autosizeTextarea(input);
+      if (width <= 0) return;
+      if (width !== previousWidth) {
+        previousWidth = width;
+        setCompactControls(width <= 512);
+        measureDraft();
+      } else if (expandable) {
+        setDraftOverflows(input.scrollHeight > input.clientHeight);
+      }
     };
     update();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
     observer?.observe(form);
+    if (expandable) observer?.observe(input);
     window.addEventListener("resize", update);
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, []);
+  }, [expandable, measureDraft]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
@@ -1376,17 +1399,15 @@ export function ThreadComposer({
   }, [filteredMentionCandidates.length, filteredSlashCommands.length, showAnyPalette]);
 
   useLayoutEffect(() => {
-    const el = textareaRef.current;
-    if (!el || mentionInput.isComposing) return;
-    autosizeTextarea(el);
-    if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = el.scrollTop;
-  }, [compactControls, mentionInput.isComposing, mentionInput.value]);
+    if (mentionInput.isComposing) return;
+    if (!mentionInput.value) setDraftExpanded(false);
+    measureDraft();
+  }, [compactControls, measureDraft, mentionInput.isComposing, mentionInput.value]);
 
   useEffect(() => {
     // The parent projects typography tokens in its layout effect; measure after it.
-    const input = textareaRef.current;
-    if (input) autosizeTextarea(input);
-  }, [readingTextSize, customReadingTextSize]);
+    measureDraft();
+  }, [readingTextSize, customReadingTextSize, measureDraft]);
 
   // Runs before paint so switching sessions never flashes stale draft text.
   useLayoutEffect(() => {
@@ -1998,8 +2019,8 @@ export function ThreadComposer({
   const usageControl = !voiceRecorder.isRecording
     ? renderContextUsage?.({ showLabel: usageInMeta, compactLabel: mobileWorkspaceControls }) : null;
   const inputTextClasses = cn(
-    // Keep the overlay's CJK/Latin spacing aligned with the native textarea caret.
-    "w-full resize-none bg-transparent text-composer [text-autospace:no-autospace]",
+    // The native input and its reference overlay must wrap and space text alike.
+    "inset-scrollbar w-full resize-none bg-transparent text-composer [scrollbar-gutter:stable] [text-autospace:no-autospace]",
     compactControls
       ? "min-h-[52px] px-4 pb-2 pt-3"
       : isHero
@@ -2010,6 +2031,16 @@ export function ThreadComposer({
         : "min-h-[50px] px-3.5 pb-1.5 pt-3 sm:px-4",
   );
   const paletteBeside = showAnyPalette && slashPaletteLayout.placement === "beside";
+  const draftResizeLabel = t(draftExpanded ? "thread.composer.collapseDraft" : "thread.composer.expandDraft");
+  const toggleDraftSize = () => {
+    const input = textareaRef.current;
+    if (!input) return;
+    const followCaret = draftExpanded && input.selectionStart === input.value.length
+      && input.scrollHeight - input.clientHeight - input.scrollTop <= 1;
+    setDraftExpanded(!draftExpanded);
+    input.focus({ preventScroll: true });
+    if (followCaret) requestAnimationFrame(() => { input.scrollTop = input.scrollHeight; });
+  };
 
   return (
     <form
@@ -2164,7 +2195,12 @@ export function ThreadComposer({
             </button>
           </div>
         ) : null}
-        <div className="thread-composer-input relative min-w-0">
+        <div
+          className="thread-composer-input relative min-w-0"
+          data-expandable={expandable || undefined}
+          data-expanded={draftExpanded || undefined}
+          data-overflowing={draftOverflows || undefined}
+        >
           {placeholder === undefined ? (
             <span className="pointer-events-none invisible absolute h-0 w-0 overflow-hidden">
               <span ref={placeholderMeasureRef} aria-hidden className="inline-block whitespace-pre text-composer [text-autospace:no-autospace]">{resolvedPlaceholder}</span>
@@ -2184,6 +2220,7 @@ export function ThreadComposer({
             />
           ) : null}
           <textarea
+            id={textareaId}
             ref={textareaRef}
             value={mentionInput.value}
             onFocus={() => {
@@ -2278,6 +2315,29 @@ export function ThreadComposer({
               isHero ? "gap-1.5" : "gap-2",
             )}
           >
+            {expandable && (draftExpanded || draftOverflows) ? (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="icon"
+                      disabled={interactionDisabled}
+                      aria-label={draftResizeLabel}
+                      aria-expanded={draftExpanded}
+                      aria-controls={textareaId}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={toggleDraftSize}
+                      className="thread-composer-action thread-composer-round-action touch-target h-[var(--composer-action-size)] w-[var(--composer-action-size)] shrink-0 rounded-xl text-muted-foreground hover:text-foreground"
+                    >
+                      {draftExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{draftResizeLabel}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : null}
             {modelControl}
             {!usageInMeta ? usageControl : null}
             <TooltipProvider>

@@ -1953,6 +1953,8 @@
       "cancelGoal": "Cancelar objetivo",
       "cancelGoalFailed": "Não foi possível cancelar. Tente novamente.",
       "cancelGoalOffline": "Reconecte-se para cancelar o objetivo.",
+      "expandDraft": "Expandir a área de edição",
+      "collapseDraft": "Recolher a área de edição",
       "send": "Enviar mensagem",
       "stop": "Parar resposta",
       "quotedContext": "Contexto citado",

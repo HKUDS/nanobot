@@ -88,6 +88,33 @@ for (const width of [390, 1280]) {
   });
 }
 
+test("a long preset list scrolls without moving the model controls in a short viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 380 });
+  await page.goto("/browser/fixture.html?case=model-options&many-presets&ultrafast");
+  await page.getByRole("button", { name: "Default", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Switch model", exact: true });
+  const list = dialog.getByRole("listbox");
+  const effort = dialog.getByRole("slider", { name: "Reasoning effort" });
+  const manage = dialog.getByRole("button", { name: "Manage presets" });
+  await dialog.evaluate((node) => Promise.all(node.getAnimations().map((animation) => animation.finished)));
+  await expect(manage).toBeInViewport({ ratio: 1 });
+  expect(await dialog.evaluate((node) => node.scrollHeight - node.clientHeight)).toBeLessThanOrEqual(1);
+  const effortBefore = await effort.boundingBox();
+  const manageBefore = await manage.boundingBox();
+  await list.hover();
+  await page.mouse.wheel(0, 100);
+  await expect.poll(() => list.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  expect(await effort.boundingBox()).toEqual(effortBefore);
+  expect(await manage.boundingBox()).toEqual(manageBefore);
+
+  await list.getByRole("option", { name: "default", exact: true }).press("End");
+  const last = list.getByRole("option", { name: "Example 12", exact: true });
+  await expect(last).toBeFocused();
+  await expect(last).toBeInViewport({ ratio: 0.9 });
+  await last.press("Enter");
+  await expect(page.getByRole("button", { name: "Example 12", exact: true })).toBeVisible();
+});
+
 test("Temporary Chats do not expose model option controls", async ({ page }) => {
   await page.goto("/browser/fixture.html?case=model-options&temporary");
   await page.getByRole("button", { name: "Default", exact: true }).click();

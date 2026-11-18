@@ -1951,6 +1951,8 @@
       "cancelGoal": "Hủy mục tiêu",
       "cancelGoalFailed": "Không thể hủy mục tiêu. Hãy thử lại.",
       "cancelGoalOffline": "Kết nối lại để hủy mục tiêu.",
+      "expandDraft": "Mở rộng ô soạn thảo",
+      "collapseDraft": "Thu gọn ô soạn thảo",
       "send": "Gửi tin nhắn",
       "stop": "Dừng phản hồi",
       "quotedContext": "Ngữ cảnh được trích dẫn",

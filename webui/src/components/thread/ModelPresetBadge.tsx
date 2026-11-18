@@ -433,7 +433,7 @@ export function ModelPresetBadge({
         }}
         className={cn(
           showsSpeedControl ? speedPickerWidthClassName : pickerWidthClassName,
-          "max-h-[var(--radix-popover-content-available-height)] overflow-y-auto",
+          "inset-scrollbar flex max-h-[var(--radix-popover-content-available-height)] flex-col overflow-y-auto",
           "origin-[var(--radix-popover-content-transform-origin)] p-1.5 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-bottom-1 data-[state=open]:slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none",
         )}
       >
@@ -451,7 +451,7 @@ export function ModelPresetBadge({
             event.preventDefault();
             options[wrapIndex(target, options.length)].focus();
           }}
-          className="max-h-[min(16rem,var(--radix-popover-content-available-height))] overflow-y-auto py-1 scrollbar-thin scrollbar-track-transparent"
+          className="inset-scrollbar min-h-11 max-h-64 overflow-y-auto py-1 [scrollbar-gutter:stable]"
         >
           {pickerPresets.map((preset) => (
             <PresetOption
@@ -465,7 +465,7 @@ export function ModelPresetBadge({
         </div>
         {modelOptionsControl ? <ModelOptionsControl {...modelOptionsControl} /> : null}
         {onManageModels ? (
-          <div className="mt-1 border-t border-border/55 pt-1">
+          <div className="mt-1 shrink-0 border-t border-border/55 pt-1">
             <button
               type="button"
               onClick={openModelSettings}

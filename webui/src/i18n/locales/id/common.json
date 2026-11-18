@@ -1951,6 +1951,8 @@
       "cancelGoal": "Batalkan tujuan",
       "cancelGoalFailed": "Tujuan gagal dibatalkan. Coba lagi.",
       "cancelGoalOffline": "Hubungkan kembali untuk membatalkan tujuan.",
+      "expandDraft": "Perluas kotak pesan",
+      "collapseDraft": "Perkecil kotak pesan",
       "send": "Kirim pesan",
       "stop": "Hentikan respons",
       "quotedContext": "Konteks kutipan",

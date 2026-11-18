@@ -1951,6 +1951,8 @@
       "cancelGoal": "目標を取り消す",
       "cancelGoalFailed": "取り消せませんでした。再試行してください。",
       "cancelGoalOffline": "再接続してから目標を取り消してください。",
+      "expandDraft": "入力欄を広げる",
+      "collapseDraft": "入力欄を折りたたむ",
       "send": "メッセージを送信",
       "stop": "応答を停止",
       "quotedContext": "引用したコンテキスト",

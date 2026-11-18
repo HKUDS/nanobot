@@ -248,6 +248,7 @@ export function AutomationsSettings({
                 "What would you like nanobot to automate?",
               )}
               variant="thread"
+              expandable={false}
               compactWhenIdle
               modelLabel={modelBadgeLabel}
               modelDetail={modelBadge.model}
