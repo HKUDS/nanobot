@@ -1045,6 +1045,8 @@ async def test_probe_ignores_shell_banners_without_exposing_them(monkeypatch, ba
 @pytest.mark.parametrize(("returncode", "stderr", "expected_error"), [
     (127, b"python3: not found", ""),
     (49, b"'python3' is not recognized as an internal or external command", ""),
+    (1, b"'python3' is not recognized as an internal or external command", ""),
+    (1, '"python3" 不是内部或外部命令'.encode(), ""),
     (1, b"FullyQualifiedErrorId : CommandNotFoundException", ""),
     (255, b"Permission denied (publickey).", "ssh_auth_failed"),
     (1, b"Traceback (most recent call last):", "probe_failed"),
