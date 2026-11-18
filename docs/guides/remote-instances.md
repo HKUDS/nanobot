@@ -51,8 +51,6 @@ After SSH signs in, a read-only check looks for the selected account's config an
 
 If nothing is found, the dialog confirms **SSH connected** and asks for the server's config path and optional service account. Docker, custom service names, user services and non-systemd deployments may need this manual step. Failure to find a config is not proof that nanobot is absent. Finding a config is also not proof that its WebUI is running: the normal authenticated gateway check still happens before opening.
 
-For an existing Windows SSH setup, make Python 3 available to the SSH login as `python` or `python3`. The server's nanobot configuration must be UTF-8 JSON. Windows support here does not extend to the quick-pairing command.
-
 SSH failures keep the entered address and offer **SSH login settings** for the local key path, SSH config and port. Connection refusal, name resolution, connection closure and authentication rejection have distinct messages. The application does not infer a missing key from a closed connection, nor change VPN, proxy or network-interface settings automatically. A custom SSH config outside standard locations must still be explicitly supplied by its owner.
 
 ## Find a server you already use
@@ -69,7 +67,7 @@ You can also paste a simple command, for example `ssh -p 2222 -i "~/.ssh/team ke
 
 - Run the local WebUI on a loopback address, using the system OpenSSH client.
 - For **existing SSH settings**, your key must already have access to the server. Encrypted keys should be unlocked in the system SSH agent. Interactive SSH passwords are not collected by this UI.
-- The remote server needs `python3` and an already running nanobot WebUI with a configured `tokenIssueSecret` (or `token`) in its configuration file.
+- For **existing SSH settings**, make Python 3 available to the SSH login as `python3` or `python`. A separate Linux service account still needs `python3` under `sudo`. The running nanobot WebUI needs a `tokenIssueSecret` (or `token`) in its UTF-8 JSON configuration.
 - The remote gateway must support the authenticated `/webui/terminal` identity probe and the supported WebUI client contract. The local installation must have its WebUI bundle; the remote host only needs the backend endpoints. The transport uses HTTP on the server's loopback address; SSH encrypts the connection. The **Use existing SSH settings** flow does not support a configured public WebSocket URL or trusted-proxy authentication.
 
 If this machine has never connected to the server, nanobot displays its SSH fingerprint. Compare it with the server console or your administrator before confirming in the same dialog. **Back** returns to the filled-in form when adding a server. The public key is pinned for this connection, without changing your system `known_hosts`. A **changed** host key is blocked, not automatically accepted. Jump-host-only or non-Ed25519 hosts can use a previously verified system SSH configuration instead of the in-app first-contact verifier.
