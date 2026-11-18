@@ -81,7 +81,7 @@ class PairingTarget(TypedDict):
 def metadata(config: Path) -> PairingTarget:
     """Read the fixed loopback target and its credential from the selected config."""
     try:
-        raw = json.loads(config.read_text())
+        raw = json.loads(config.read_text(encoding="utf-8"))
         ws = raw.get("channels", {}).get("websocket", {})
         secret = ws.get("tokenIssueSecret") or ws.get("token_issue_secret") or ws.get("token")
         if not ws.get("enabled") or not isinstance(secret, str) or not secret.strip() or "${" in secret:
