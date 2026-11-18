@@ -159,13 +159,13 @@ async def run_check(
                     await stop_process(process)
                 if process.returncode == 0:
                     break
-                # Windows sshd may report a missing command as 1. Match the
-                # quoted executable in cmd.exe's diagnostic, not its language.
-                first_line = stderr.partition(b"\n")[0]
+                # Windows sshd can return 1. Match the executable in cmd.exe's
+                # trailing one- or two-line diagnostic, after any login banner.
+                diagnostic = b"\n".join(stderr.splitlines()[-2:])
                 if not sudo and (process.returncode in {49, 127, 9009} or (
                     process.returncode == 1 and (
                         b"CommandNotFoundException" in stderr
-                        or any(f"{quote}{executable}{quote}".encode() in first_line for quote in ("'", '"'))
+                        or any(f"{quote}{executable}{quote}".encode() in diagnostic for quote in ("'", '"'))
                     )
                 )):
                     continue

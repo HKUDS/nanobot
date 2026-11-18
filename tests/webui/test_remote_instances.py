@@ -1046,10 +1046,13 @@ async def test_probe_ignores_shell_banners_without_exposing_them(monkeypatch, ba
     (127, b"python3: not found", ""),
     (49, b"'python3' is not recognized as an internal or external command", ""),
     (1, b"'python3' is not recognized as an internal or external command", ""),
+    (1, b"Authorized users only.\r\n'python3' is not recognized as an internal or external command,\r\n"
+        b"operable program or batch file.\r\n", ""),
     (1, '"python3" 不是内部或外部命令'.encode(), ""),
     (1, b"FullyQualifiedErrorId : CommandNotFoundException", ""),
     (255, b"Permission denied (publickey).", "ssh_auth_failed"),
-    (1, b"Traceback (most recent call last):", "probe_failed"),
+    (1, b"Use 'python3' for authorized jobs.\r\nTraceback (most recent call last):\r\n"
+        b"RuntimeError: probe failed\r\n", "probe_failed"),
 ])
 async def test_probe_only_retries_when_the_remote_interpreter_is_missing(monkeypatch, returncode, stderr, expected_error):
     data = {"port": 8765, "secret": "synthetic-root"}
