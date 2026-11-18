@@ -676,24 +676,25 @@ def test_get_history_does_not_paste_assistant_media_paths_into_replay():
     assert history == [{"role": "assistant", "content": "来了 🎨"}]
 
 
-def test_get_history_sanitizes_existing_assistant_replay_artifacts():
+def test_get_history_preserves_requested_message_time_text_and_filters_artifacts():
     session = Session(key="test:polluted-assistant")
-    session.messages.append(
-        {
-            "role": "assistant",
-            "content": (
-                "[Message Time: 2026-05-09 00:33:48]\n"
-                "来了 🎨\n"
-                "[image: /home/user/.nanobot/media/generated/img_old.png]\n\n"
-                "generate_image(\"16:9\")\n"
-                "message(\"来了 🎨\")"
-            ),
-        }
+    reply = "[Message Time: 2026-05-09 00:33:48]\n来了 🎨"
+    request = f"Generate a photo, then reply with exactly:\n{reply}"
+    session.add_message("user", request)
+    session.add_message(
+        "assistant",
+        f"{reply}\n"
+        "[image: /home/user/.nanobot/media/generated/img_old.png]\n\n"
+        "generate_image(\"16:9\")\n"
+        "message(\"来了 🎨\")",
     )
 
     history = session.get_history(max_messages=500)
 
-    assert history == [{"role": "assistant", "content": "来了 🎨"}]
+    assert history == [
+        {"role": "user", "content": request},
+        {"role": "assistant", "content": reply},
+    ]
 
 
 def test_get_history_respects_max_tokens(monkeypatch):
