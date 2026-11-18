@@ -73,6 +73,9 @@ const group = groups.find(({ id }) => id === params.get("group")) ?? groups[0]!;
 const base = loadCodexCatalog
   ? preset("Review", "openai_codex", "openai-codex/gpt-6.2-sol", "xhigh", ["low", "medium", "high"], { default: false, ultrafast_supported: true })
   : group.id === "oauth" ? (params.has("ultrafast") ? ultrafastCodex : standardCodex) : group.presets[0]!;
+const extraPresets = params.has("many-presets")
+  ? Array.from({ length: 12 }, (_, index) => preset(`Example ${index + 1}`, "openai_codex", "gpt-6.2-sol"))
+  : [];
 const settings: SettingsPayload = {
   ...baseSettings,
   agent: { ...baseSettings.agent, model: base.model, provider: base.provider, resolved_provider: base.provider,
@@ -80,8 +83,8 @@ const settings: SettingsPayload = {
   providers: Object.entries(providers).map(([name, provider]) => ({
     name, configured: true, model_catalog: loadCodexCatalog && name === "openai_codex" ? "hybrid" : "unsupported", ...provider,
   })),
-  model_presets: [{ ...base, name: "default", label: "Default", active: true, is_default: true }, ...group.presets],
-  model_call_order: group.presets.map(({ name }) => name),
+  model_presets: [{ ...base, name: "default", label: "Default", active: true, is_default: true }, ...group.presets, ...extraPresets],
+  model_call_order: [...group.presets, ...extraPresets].map(({ name }) => name),
 };
 
 function fixtureLink(groupId: string, settingsView: boolean) {

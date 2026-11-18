@@ -2133,6 +2133,8 @@
       "cancelGoal": "Cancel goal",
       "cancelGoalFailed": "Could not cancel goal. Try again.",
       "cancelGoalOffline": "Reconnect to cancel the goal.",
+      "expandDraft": "Expand editor",
+      "collapseDraft": "Collapse editor",
       "send": "Send message",
       "stop": "Stop response",
       "quotedContext": "Quoted context",

@@ -134,7 +134,7 @@ export function ModelOptionsControl({ data, onChange }: ModelOptionsControlProps
   const options = defaultEffort === null ? [null, ...values] : values;
   const mode = values.every((effort) => efforts.includes(effort)) ? "ordered" : effortsPending ? "pending" : "custom";
   return (
-    <div className="model-options-row mt-1 flex items-center gap-1 border-t border-border/55 px-2 py-1">
+    <div className="model-options-row mt-1 flex shrink-0 items-center gap-1 border-t border-border/55 px-2 py-1">
       {values.length > 0 ? (
         <ReasoningEffortControl options={options} selected={options.indexOf(effectiveEffort)}
           mode={mode}

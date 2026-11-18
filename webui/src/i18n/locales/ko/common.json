@@ -1951,6 +1951,8 @@
       "cancelGoal": "목표 취소",
       "cancelGoalFailed": "목표를 취소하지 못했습니다. 다시 시도하세요.",
       "cancelGoalOffline": "다시 연결한 후 목표를 취소하세요.",
+      "expandDraft": "입력창 펼치기",
+      "collapseDraft": "입력창 접기",
       "send": "메시지 보내기",
       "stop": "응답 중지",
       "quotedContext": "인용한 문맥",

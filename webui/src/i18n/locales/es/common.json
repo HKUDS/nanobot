@@ -1951,6 +1951,8 @@
       "cancelGoal": "Cancelar objetivo",
       "cancelGoalFailed": "No se pudo cancelar. Inténtalo de nuevo.",
       "cancelGoalOffline": "Vuelve a conectarte para cancelar el objetivo.",
+      "expandDraft": "Ampliar el área de escritura",
+      "collapseDraft": "Reducir el área de escritura",
       "send": "Enviar mensaje",
       "stop": "Detener respuesta",
       "quotedContext": "Contexto citado",

@@ -1951,6 +1951,8 @@
       "cancelGoal": "取消目標",
       "cancelGoalFailed": "取消失敗，請重試。",
       "cancelGoalOffline": "請重新連線後取消目標。",
+      "expandDraft": "展開編輯",
+      "collapseDraft": "收合編輯",
       "send": "送出訊息",
       "stop": "停止回覆",
       "quotedContext": "引用內容",

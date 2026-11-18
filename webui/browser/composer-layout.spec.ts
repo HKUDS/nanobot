@@ -88,6 +88,52 @@ test("autosizing still grows, caps and shrinks the real input", async ({ page })
   await expect.poll(() => scroller.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop)).toBeLessThanOrEqual(1);
 });
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 500 }]) {
+  test(`overflowing drafts can be expanded and collapsed in place at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const { input } = await openThread(page);
+    const expand = page.getByRole("button", { name: "Expand editor" });
+    const collapse = page.getByRole("button", { name: "Collapse editor" });
+    const footer = page.locator(".thread-composer-footer");
+    const selection = () => input.evaluate(node => {
+      const { selectionStart, selectionEnd } = node as HTMLTextAreaElement;
+      return [selectionStart, selectionEnd];
+    });
+    await expect(expand).not.toBeVisible();
+    const draft = ["Which warnings should I fix?", ...Array.from({ length: 11 }, (_, i) => `Line ${i + 1}: build output`)].join("\n");
+    await input.fill(draft);
+    await expect(expand).toBeVisible();
+    const smallHeight = await input.evaluate(node => node.clientHeight);
+    const footerBounds = await footer.boundingBox();
+    await input.press("Control+End");
+    await expect.poll(() => input.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+    expect(await footer.boundingBox()).toEqual(footerBounds);
+
+    await expand.click();
+    await expect(collapse).toHaveAttribute("aria-expanded", "true");
+    await expect(input).toBeFocused();
+    await expect.poll(() => input.evaluate(node => node.clientHeight)).toBeGreaterThan(smallHeight + 24);
+    expect(await selection()).toEqual([draft.length, draft.length]);
+    const expandedFooter = (await footer.boundingBox())!;
+    expect(expandedFooter.y + expandedFooter.height).toBeLessThanOrEqual(viewport.height);
+    expect(await input.evaluate(node => node.scrollHeight)).toBe(await input.evaluate(node => node.clientHeight));
+    await collapse.click();
+    await expect(expand).toBeVisible();
+    await expect.poll(() => input.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop)).toBeLessThanOrEqual(1);
+
+    await expand.click();
+    await input.press("Control+Home");
+    await input.press("Shift+End");
+    const firstLine = [0, draft.indexOf("\n")];
+    expect(await selection()).toEqual(firstLine);
+    await collapse.press("Enter");
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue(draft);
+    expect(await selection()).toEqual(firstLine);
+    await expect.poll(() => input.evaluate(node => node.clientHeight)).toBe(smallHeight);
+  });
+}
+
 test("Chromium IME composition and commit keep the transcript stationary", async ({ page }) => {
   const { input } = await openThread(page);
   const original = await input.inputValue();

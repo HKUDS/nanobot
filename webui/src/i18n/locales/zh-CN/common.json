@@ -2133,6 +2133,8 @@
       "cancelGoal": "取消目标",
       "cancelGoalFailed": "取消失败，请重试。",
       "cancelGoalOffline": "请重新连接后取消目标。",
+      "expandDraft": "展开编辑",
+      "collapseDraft": "收起编辑",
       "send": "发送消息",
       "stop": "停止响应",
       "quotedContext": "引用内容",
