@@ -583,6 +583,53 @@ async def test_cancel_preserves_followups_accepted_after_cancellation_started(lo
     )] == ["new followup"]
 
 
+@pytest.mark.parametrize("kind", ["cron", "local_trigger"])
+async def test_stop_does_not_strand_automation_submitted_during_cleanup(loop, monkeypatch, kind):
+    started = asyncio.Event()
+    cleaning_exec = asyncio.Event()
+    submit_turn = loop.submit_cron_turn if kind == "cron" else loop.submit_local_trigger_turn
+    cancel_launches = loop._exec_session_manager._cancel_launches
+
+    async def chat(**_kwargs):
+        if not started.is_set():
+            started.set()
+            await asyncio.Event().wait()
+        return LLMResponse(content="automation finished")
+
+    async def observe_launch_cleanup(launches):
+        # This child is already scheduled by the real exec cleanup's gather.
+        # Wake the submitter without introducing another suspension in /stop.
+        cleaning_exec.set()
+        return await cancel_launches(launches)
+
+    loop.provider.chat_stream_with_retry = chat
+    monkeypatch.setattr(loop._exec_session_manager, "_cancel_launches", observe_launch_cleanup)
+    dispatcher = asyncio.create_task(loop.run())
+    submitted = None
+    try:
+        async with asyncio.timeout(5):
+            await loop.bus.publish_inbound(InboundMessage(
+                channel="websocket", sender_id="user", chat_id="test", content="original turn",
+            ))
+            await started.wait()
+            await loop.bus.publish_inbound(InboundMessage(
+                channel="websocket", sender_id="user", chat_id="test", content="/stop",
+            ))
+            await cleaning_exec.wait()
+            submitted = asyncio.create_task(submit_turn(_automation_message(kind, "new work")))
+            while True:
+                reply = await loop.bus.consume_outbound()
+                if reply.event is None and reply.content.startswith("Stopped "):
+                    break
+        result = await asyncio.wait_for(asyncio.shield(submitted), timeout=1)
+        assert result is not None and result.content == "automation finished"
+    finally:
+        if submitted is not None:
+            submitted.cancel()
+            await asyncio.gather(submitted, return_exceptions=True)
+        await stop_loop(loop, dispatcher, timeout=3)
+
+
 @pytest.mark.parametrize("action", ["stop", "close"])
 async def test_cancel_before_worker_runs_completes_automation(loop, action):
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unused"))
