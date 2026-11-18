@@ -46,7 +46,8 @@ export function useSessionModelOptions({ sessionKey, preset, settings, open, dis
   const [, redraw] = useState(0);
   if (!entries.current.has(key)) entries.current.set(key, readPreference(key));
   const saved = entries.current.get(key);
-  const value = saved ? saved.preset === preset ? saved.options : INHERIT : storedValue ?? INHERIT;
+  const localOptions = saved?.preset === preset ? saved.options : undefined;
+  const value = localOptions ?? storedValue ?? INHERIT;
   const pending = useRef(new Map<string, Preference | null>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flush = useCallback(() => {
@@ -63,7 +64,7 @@ export function useSessionModelOptions({ sessionKey, preset, settings, open, dis
     redraw((revision) => revision + 1);
   }, [flush]);
   useEffect(() => {
-    if (enabled && saved && saved.preset !== preset) remember(key, { preset, options: INHERIT });
+    if (enabled && saved && saved.preset !== preset) remember(key, null);
   }, [enabled, key, preset, remember, saved]);
   useEffect(() => {
     window.addEventListener("pagehide", flush);
@@ -96,7 +97,8 @@ export function useSessionModelOptions({ sessionKey, preset, settings, open, dis
     flush();
   }, [enabled, flush, host, key, preset, remember, sessionKey]);
 
-  const sendValue = useCallback(() => enabled ? value : undefined, [enabled, value]);
+  // The Gateway owns persisted options. Omission preserves them; null fields explicitly clear them.
+  const sendValue = useCallback(() => enabled ? localOptions : undefined, [enabled, localOptions]);
   return {
     data: enabled && capability ? { value, capability, efforts } : null,
     select, reset, moveToSession, sendValue,

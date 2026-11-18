@@ -45,7 +45,8 @@ it("shares lazy settings recommendations and uses backend capability description
   expect(view.result.current.data?.capability.codex_fast_mode?.default).toBe(true);
   view.rerender({ ...initial, open: true });
   await waitFor(() => expect(view.result.current.data?.efforts).toEqual(reasoningEffortValues(payload, initial.settings.agent.model)));
-  expect(view.result.current.sendValue()).toEqual(inherit);
+  expect(view.result.current.data?.value).toEqual(inherit);
+  expect(view.result.current.sendValue()).toBeUndefined();
 });
 
 it("coalesces browser writes, immediately transmits false/null, and flushes pagehide without gateway mutations", () => {
@@ -76,13 +77,15 @@ it("reloads unsent preferences across token renewal and isolates hosts and sessi
   view.rerender({ ...initial });
   expect(view.result.current.sendValue()).toEqual(chosen);
   view.rerender({ ...initial, sessionKey: "websocket:b", storedValue: { reasoning_effort: "low", codex_fast_mode: true } });
-  expect(view.result.current.sendValue()).toEqual({ reasoning_effort: "low", codex_fast_mode: true });
+  expect(view.result.current.data?.value).toEqual({ reasoning_effort: "low", codex_fast_mode: true });
+  expect(view.result.current.sendValue()).toBeUndefined();
   act(() => view.result.current.select(inherit));
   view.rerender(initial);
   expect(view.result.current.sendValue()).toEqual(chosen);
   connection.client.updateUrl("ws://host-b/ws");
   view.rerender({ ...initial });
-  expect(view.result.current.sendValue()).toEqual(inherit);
+  expect(view.result.current.data?.value).toEqual(inherit);
+  expect(view.result.current.sendValue()).toBeUndefined();
   connection.client.updateUrl("ws://host-a/ws?token=again");
   view.unmount();
   const reloaded = renderHook(useSessionModelOptions, { wrapper: wrapper(connection), initialProps: initial });
@@ -109,6 +112,26 @@ it("waits for settings before reconciling a reloaded browser preference with the
   expect(localStorage.getItem(key)).toBe(saved);
 });
 
+it("shows the Gateway's last-used options after a preset rename without sending a replacement", () => {
+  const initial = props();
+  const wrap = wrapper();
+  const storedValue: SessionModelOptions = { reasoning_effort: "high", codex_fast_mode: "ultrafast" };
+  const previous = renderHook(useSessionModelOptions, { wrapper: wrap, initialProps: initial });
+  act(() => previous.result.current.select(storedValue));
+  previous.unmount();
+
+  initial.settings.model_presets[0].name = "renamed";
+  const renamed = { ...initial, preset: "renamed", storedValue };
+  const reopened = renderHook(useSessionModelOptions, { wrapper: wrap, initialProps: renamed });
+  expect(reopened.result.current.data?.value).toEqual(storedValue);
+  expect(reopened.result.current.sendValue()).toBeUndefined();
+  reopened.unmount();
+
+  const reloaded = renderHook(useSessionModelOptions, { wrapper: wrap, initialProps: renamed });
+  expect(reloaded.result.current.data?.value).toEqual(storedValue);
+  expect(reloaded.result.current.sendValue()).toBeUndefined();
+});
+
 it("migrates a draft snapshot to the first session, clears both choices on preset switch, and clears the draft", () => {
   const initial = { ...props(), sessionKey: null as string | null };
   const wrap = wrapper();
@@ -117,15 +140,21 @@ it("migrates a draft snapshot to the first session, clears both choices on prese
   act(() => view.result.current.moveToSession("websocket:created", chosen));
   view.rerender({ ...initial, sessionKey: "websocket:created" });
   expect(view.result.current.sendValue()).toEqual(chosen);
-  act(() => view.result.current.reset("other"));
-  view.rerender({ ...initial, sessionKey: "websocket:created", preset: "other" });
+  // ThreadShell resets options and selects the preset in the same action.
+  act(() => {
+    view.result.current.reset("other");
+    view.rerender({ ...initial, sessionKey: "websocket:created", preset: "other" });
+  });
   expect(view.result.current.sendValue()).toEqual(inherit);
-  act(() => view.result.current.reset("primary"));
-  view.rerender({ ...initial, sessionKey: "websocket:created" });
+  act(() => {
+    view.result.current.reset("primary");
+    view.rerender({ ...initial, sessionKey: "websocket:created" });
+  });
   expect(view.result.current.sendValue()).toEqual(inherit);
   view.unmount();
   const landing = renderHook(useSessionModelOptions, { wrapper: wrap, initialProps: initial });
-  expect(landing.result.current.sendValue()).toEqual(inherit);
+  expect(landing.result.current.data?.value).toEqual(inherit);
+  expect(landing.result.current.sendValue()).toBeUndefined();
 });
 
 it("preserves newer target choices made while draft creation was pending", () => {
