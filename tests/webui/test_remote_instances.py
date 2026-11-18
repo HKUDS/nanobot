@@ -1019,16 +1019,24 @@ async def test_cancellation_reaps_inflight_probe(monkeypatch):
     process.terminate.assert_called_once()
 
 
-@pytest.mark.parametrize("field", ["trustedProxyAuth", "trusted_proxy_auth"])
-def test_ssh_probe_rejects_trusted_assertion_bypass(tmp_path, field):
+@pytest.mark.parametrize(("overrides", "error"), [
+    ({"trustedProxyAuth": {"assertionHeader": "X-User", "trustedPeerCidrs": ["127.0.0.1/32"]}},
+     "incompatible_gateway"),
+    ({"trusted_proxy_auth": {"assertion_header": "X-User", "trusted_peer_cidrs": ["127.0.0.1/32"]}},
+     "incompatible_gateway"),
+    ({"sslCertfile": "/etc/nanobot/cert.pem", "sslKeyfile": "/etc/nanobot/key.pem"}, "incompatible_gateway"),
+    ({"ssl_certfile": "/etc/nanobot/cert.pem", "ssl_keyfile": "/etc/nanobot/key.pem"}, "incompatible_gateway"),
+    ({"tokenIssueSecret": ""}, "webui_auth_required"),
+])
+def test_ssh_probe_keeps_gateway_requirements_with_public_ws_url(tmp_path, overrides, error):
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"channels": {"websocket": {
         "enabled": True, "tokenIssueSecret": "synthetic-root",
-        field: {"assertionHeader": "Host", "trustedPeers": ["127.0.0.0/8"]},
+        "publicWsUrl": "wss://public.test/edge/ws", **overrides,
     }}}))
     result = subprocess.run([sys.executable, "-c", remote_ssh._PROBE, str(path)],
                             capture_output=True, text=True, check=True)
-    assert json.loads(result.stdout.split("NANOBOT_REMOTE:")[1]) == {"error": "incompatible_gateway"}
+    assert json.loads(result.stdout.split("NANOBOT_REMOTE:")[1]) == {"error": error}
 
 
 @pytest.mark.parametrize("banner", [b"", b"Welcome to the server\n", b"{\"port\": 1}\nWelcome without newline"])
@@ -1095,17 +1103,22 @@ def test_probe_reports_malformed_config_as_config_error(tmp_path, config):
     assert json.loads(result.stdout.split("NANOBOT_REMOTE:")[1]) == {"error": "config_invalid"}
 
 
-def test_probe_reads_config_as_utf8_independently_of_locale(tmp_path, monkeypatch):
+@pytest.mark.parametrize("field", ["publicWsUrl", "public_ws_url"])
+def test_ssh_probe_reads_utf8_config_with_public_ws_url(tmp_path, monkeypatch, field):
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"channels": {"websocket": {
-        "enabled": True, "token": "synthetic-root", "tokenIssuePath": "/测试",
+        "enabled": True, "token": "synthetic-root", "port": 8865, "tokenIssuePath": "/测试",
+        field: "wss://public.test/edge/ws",
     }}}, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setenv("PYTHONUTF8", "0")
     monkeypatch.setenv("PYTHONCOERCECLOCALE", "0")
     monkeypatch.setenv("LC_ALL", "C")
     result = subprocess.run([sys.executable, "-c", remote_ssh._PROBE, str(path)],
                             capture_output=True, text=True, check=True)
-    assert json.loads(result.stdout.split("NANOBOT_REMOTE:")[1])["token_issue_path"] == "/测试"
+    assert json.loads(result.stdout.split("NANOBOT_REMOTE:")[1]) == {
+        "port": 8865, "secret": "synthetic-root", "token_issue_path": "/测试",
+        "hostname": socket.gethostname(), "config_path": str(path),
+    }
 
 
 async def test_tunnel_refuses_an_existing_listener(monkeypatch):

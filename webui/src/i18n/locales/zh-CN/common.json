@@ -337,7 +337,6 @@
       "config_invalid": "无法读取服务器上的 nanobot 配置。请确认所选文件是有效的 UTF-8 JSON。",
       "webui_disabled": "服务器的 WebUI 尚未启用，请先在服务器上开启。",
       "webui_auth_required": "服务器需要在配置中设置 WebUI 登录密钥。这里不需要模型 Key。",
-      "public_ws_unsupported": "这台服务器设置了公网 WebSocket 地址。首版支持通过 SSH 连接回环地址上的 WebUI。",
       "remote_auth_failed": "服务器拒绝了 WebUI 登录凭据，请检查它实际运行的配置。",
       "incompatible_gateway": "该地址不是兼容的 nanobot gateway，请检查配置或更新服务器版本。",
       "webui_unavailable": "Gateway 在运行，但没有安装 WebUI。",
