@@ -19,7 +19,8 @@ async function openThread(page: Page) {
   await page.route("**/api/commands", route => route.fulfill({ json: { commands: [] } }));
   await page.route("**/api/sessions/*/webui-thread?*", route => route.fulfill({ json: history }));
   await page.goto("/browser/fixture.html?case=thread-loading");
-  await expect(page.getByRole("heading", { name: "Section 25", exact: true })).toBeVisible();
+  // Let the lazy Markdown renderer settle before measuring transcript geometry.
+  await page.getByRole("heading", { name: "Section 25", exact: true }).waitFor();
   await page.evaluate(() => document.fonts.ready);
   const input = page.getByRole("textbox", { name: "Message input", exact: true });
   await input.fill("Next steps:\n1. Check layout\n2. ");

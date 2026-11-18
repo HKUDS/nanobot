@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { supportedLocales } from "../src/i18n/config";
 
 async function selectRadio(page: Page, group: string, name: string) {
   const radio = page.getByRole("radiogroup", { name: group }).getByRole("radio", { name, exact: true });
@@ -106,36 +107,37 @@ test("reveals MCP tools hidden by Ready only without switching tool type", async
 });
 
 
-test("keeps Apps section controls usable on narrow screens in each locale", async ({ page }) => {
-  const width = 320;
-  await page.setViewportSize({ width, height: 800 });
-  await page.route("**/api/settings/cli-apps", route => route.fulfill({ json: { apps: [], installed_count: 0 } }));
-  await page.route("**/api/settings/mcp-presets", route => route.fulfill({ json: { presets: [], installed_count: 0 } }));
-  await page.route("**/api/settings/nanobot-features", route => route.fulfill({ json: { features: [], enabled_count: 0 } }));
-  await page.route("**/api/webui/skills/trending?**", route => route.fulfill({ json: { skills: [] } }));
-  const controls = page.locator(".catalog-controls");
-  async function expectControlsFit(locale: string, count: number) {
-    const targets = page.locator(".catalog-tabs > button, .catalog-controls label");
-    await expect(targets).toHaveCount(count);
-    const geometry = await targets.evaluateAll(elements => elements.map(element => {
-      const bounds = element.getBoundingClientRect();
-      return {
-        label: element.textContent,
-        left: bounds.left,
-        right: bounds.right,
-        fits: element.scrollWidth <= element.clientWidth
-          && (!element.matches("button") || element.scrollHeight <= element.clientHeight),
-      };
-    }));
-    expect(geometry.filter(item => item.left < 0 || item.right > width || !item.fits), locale).toEqual([]);
-  }
-  for (const locale of ["en", "es", "fr", "id", "ja", "ko", "pt-BR", "vi", "zh-CN", "zh-TW"]) {
+for (const { code: locale } of supportedLocales) {
+  test(`keeps Apps section controls usable on narrow screens in ${locale}`, async ({ page }) => {
+    const width = 320;
+    await page.setViewportSize({ width, height: 800 });
+    await page.route("**/api/settings/cli-apps", route => route.fulfill({ json: { apps: [], installed_count: 0 } }));
+    await page.route("**/api/settings/mcp-presets", route => route.fulfill({ json: { presets: [], installed_count: 0 } }));
+    await page.route("**/api/settings/nanobot-features", route => route.fulfill({ json: { features: [], enabled_count: 0 } }));
+    await page.route("**/api/webui/skills/trending?**", route => route.fulfill({ json: { skills: [] } }));
+    const controls = page.locator(".catalog-controls");
+    async function expectControlsFit(count: number) {
+      const targets = page.locator(".catalog-tabs > button, .catalog-controls label");
+      await expect(targets).toHaveCount(count);
+      const geometry = await targets.evaluateAll(elements => elements.map(element => {
+        const bounds = element.getBoundingClientRect();
+        return {
+          label: element.textContent,
+          left: bounds.left,
+          right: bounds.right,
+          fits: element.scrollWidth <= element.clientWidth
+            && (!element.matches("button") || element.scrollHeight <= element.clientHeight),
+        };
+      }));
+      expect(geometry.filter(item => item.left < 0 || item.right > width || !item.fits)).toEqual([]);
+    }
+
     await page.goto(`/browser/fixture.html?case=tools-catalog&lang=${locale}`);
     const types = page.getByRole("radiogroup").getByRole("radio");
     const status = controls.getByRole("switch");
     await expect(types).toHaveCount(4);
     await expect(status).not.toBeChecked();
-    await expectControlsFit(locale, 8);
+    await expectControlsFit(8);
     const cli = types.nth(1);
     await cli.locator("..").click();
     await expect(cli).toBeChecked();
@@ -153,20 +155,20 @@ test("keeps Apps section controls usable on narrow screens in each locale", asyn
 
     const sections = page.locator(".catalog-tabs").getByRole("button");
     await sections.nth(1).click();
-    await expectControlsFit(locale, 8);
+    await expectControlsFit(8);
     const marketplace = controls.getByRole("radio").nth(1);
     await marketplace.locator("..").click();
     await expect(marketplace).toBeFocused();
     await expect(marketplace).toBeChecked();
-    await expectControlsFit(locale, 8);
+    await expectControlsFit(8);
 
     await sections.nth(2).click();
-    await expectControlsFit(locale, 4);
+    await expectControlsFit(4);
     await status.locator("..").locator(":scope > span").click();
     await expect(status).toBeChecked();
     await expect(status).toBeFocused();
-  }
-});
+  });
+}
 
 
 test("opens the generated plugin from its CLI app", async ({ page }) => {
