@@ -8,9 +8,10 @@ test("About current-version feedback keeps its initial row height with wider sys
   for (const state of ["loaded", "loading"]) {
     await page.goto(`/browser/fixture.html?case=skeleton-additions&surface=settings&state=${state}&section=about`);
     await page.addStyleTag({ content: "body { font-family: monospace; }" });
-    if (state === "loaded") await expect(page.getByText("You're up to date", { exact: true })).toBeVisible();
+    // Wait for the lazy About panel before measuring the row.
+    if (state === "loaded") await page.getByText("You're up to date", { exact: true }).waitFor();
     const row = page.locator("[data-settings-section] .settings-list-row").first();
-    await expect(row).toBeVisible();
+    await row.waitFor();
     positions.push((await row.boundingBox())!.y);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   }
@@ -30,7 +31,7 @@ for (const state of ["loaded", "loading"]) {
     try {
       await page.goto(`/browser/fixture.html?case=skeleton-additions&surface=settings&state=${state}&section=about`, { waitUntil: "domcontentloaded" });
       const row = page.locator("[data-settings-section] .settings-list-row").first();
-      await expect(row).toBeVisible();
+      await row.waitFor();
       const before = await row.boundingBox();
       release();
       const wordmark = page.locator('img[alt="nanobot"]');
