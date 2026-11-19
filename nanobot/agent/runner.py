@@ -194,6 +194,20 @@ class AgentRunner:
         messages.extend(injections)
 
     @staticmethod
+    def _notify_inputs_taken(hook: AgentHook | None, inputs: list[dict[str, Any]]) -> None:
+        if hook is None:
+            return
+        ids: list[str] = []
+        for row in inputs:
+            metadata = row.get("_meta")
+            if row.get("role") == "user" and isinstance(metadata, dict):
+                input_id = cast(dict[str, object], metadata).get("input_id")
+                if isinstance(input_id, str) and input_id:
+                    ids.append(input_id)
+        if ids:
+            hook.on_inputs_taken(tuple(ids))
+
+    @staticmethod
     def _response_input_ids(messages: list[dict[str, Any]]) -> tuple[str, ...]:
         """Consecutive inputs share an answer; tool rounds keep their input owner."""
         identifiers: list[str] = []
@@ -230,6 +244,7 @@ class AgentRunner:
         if not injections:
             return False
         self._append_injected_messages(messages, injections)
+        self._notify_inputs_taken(spec.hook, injections)
         preview = "[content hidden]"
         if tool_log_content_allowed():
             preview = "\n\n".join(
@@ -310,6 +325,8 @@ class AgentRunner:
             try:
                 try:
                     messages, compaction = await self.prepare_prompt(self._initial_transcript_and_compaction, spec)
+                    if spec.transcript_input is not None and spec.transcript_input.current_message is not None:
+                        self._notify_inputs_taken(spec.hook, messages[compaction.raw_accepted_boundary:])
                     context.messages = await self._run_context_snapshot(hook, messages) if has_run_hooks else []
                     await hook.before_run(context)
                     result = await self._run_core(spec, hook, messages, compaction)

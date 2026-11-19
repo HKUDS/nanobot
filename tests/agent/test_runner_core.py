@@ -65,6 +65,25 @@ def test_initial_transcript_is_built_from_structured_turn_input() -> None:
     transcript_builder.assert_called_once_with(transcript_input)
 
 
+@pytest.mark.asyncio
+async def test_inputs_taken_does_not_report_a_failed_preparation() -> None:
+    from nanobot.agent.hook import AgentHook
+    from nanobot.agent.runner import AgentRunner
+
+    hook = MagicMock(spec=AgentHook)
+    spec = make_run_spec(
+        MagicMock(spec=LLMProvider), initial_messages=None, tools=MagicMock(), model="test-model",
+        max_iterations=1, max_tool_result_chars=_MAX_TOOL_RESULT_CHARS, hook=hook,
+        transcript_input=TranscriptInput(history=[], current_message="current", input_metadata={"input_id": "current"}),
+        transcript_builder=MagicMock(side_effect=ValueError("prompt preparation failed")),
+    )
+
+    with pytest.raises(ValueError, match="prompt preparation failed"):
+        await AgentRunner().run(spec)
+
+    hook.on_inputs_taken.assert_not_called()
+
+
 def test_usage_or_estimate_replaces_reported_zero_for_content(monkeypatch) -> None:
     from nanobot.agent.runner import AgentRunner
 

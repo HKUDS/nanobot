@@ -155,6 +155,28 @@ async def test_composite_error_isolation_before_iteration():
     assert calls == ["good"]
 
 
+@pytest.mark.parametrize("reraise", [False, True])
+def test_composite_on_inputs_taken_respects_error_policy(reraise):
+    received = []
+
+    class FailedObserver(AgentHook):
+        def on_inputs_taken(self, input_ids: tuple[str, ...]) -> None:
+            raise RuntimeError("observer failed")
+
+    class Observer(AgentHook):
+        def on_inputs_taken(self, input_ids: tuple[str, ...]) -> None:
+            received.append(input_ids)
+
+    hook = CompositeHook([FailedObserver(reraise=reraise), Observer()])
+    if reraise:
+        with pytest.raises(RuntimeError, match="observer failed"):
+            hook.on_inputs_taken(("a", "b"))
+        assert received == []
+    else:
+        hook.on_inputs_taken(("a", "b"))
+        assert received == [("a", "b")]
+
+
 @pytest.mark.asyncio
 async def test_composite_error_isolation_on_stream():
     calls: list[str] = []

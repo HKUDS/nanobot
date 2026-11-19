@@ -226,6 +226,8 @@ When changing tools, channels, file access, WebUI workspace behavior, or network
 
 Prefer existing registry/discovery patterns over ad hoc wiring.
 
+A turn hook can implement `AgentHook.on_inputs_taken(input_ids)` to observe identified user inputs as the runner takes them into the transcript. It receives an ordered tuple for the prepared current input or an appended follow-up batch, including follow-ups taken at the end of a response. It does not report inputs without IDs, replay the transcript history, or fire again on retries. The hook runs synchronously at handoff, before the next model request; enqueue work that needs I/O rather than doing it in the hook.
+
 ## Testing and Verification
 
 Common checks:
