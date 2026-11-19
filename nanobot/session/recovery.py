@@ -511,6 +511,7 @@ def recovery_state_from_metadata(metadata: Mapping[str, Any] | None) -> dict[str
     failure_error_kind = state.get("failure_error_kind")
     if isinstance(failure_error_kind, str) and failure_error_kind in {
         "authentication", "billing", "connection", "timeout", "rate_limit", "server", "unknown",
+        "unsupported_image", "image_request_rejected",
     }:
         payload["failure_error_kind"] = failure_error_kind
     if state.get("reply_preserved") is True:

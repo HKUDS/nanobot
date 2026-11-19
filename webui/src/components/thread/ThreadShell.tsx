@@ -38,6 +38,8 @@ import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { GoalIsland } from "@/components/thread/GoalIsland";
 import { ThreadLoadingSkeleton } from "@/components/thread/ThreadLoadingSkeleton";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
+import { useToast } from "@/components/ui/toast";
+import { isImageRequestFailure, resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
 import { execSessionCommands } from "@/components/thread/activity/exec-session-model";
@@ -261,6 +263,7 @@ interface ThreadShellProps {
   settingsSnapshot?: SettingsPayload | null;
   settingsLoading?: boolean;
   onOpenModelSettings?: () => void;
+  onInspectImagePreset?: (name: string) => void;
   onOpenSandboxSettings?: (target: "sandbox" | "sandbox-launcher") => void;
   skills?: SkillSummary[];
 }
@@ -401,10 +404,12 @@ export function ThreadShell({
   settingsSnapshot = null,
   settingsLoading = false,
   onOpenModelSettings,
+  onInspectImagePreset,
   onOpenSandboxSettings,
   skills = [],
 }: ThreadShellProps) {
   const { t } = useTranslation();
+  const showToast = useToast();
   const chatId = session?.chatId ?? null;
   const historyKey = temporary ? null : session?.key ?? null;
   const [visibleWindow, setVisibleWindow] = useState<{ key: string | null; turnIds: string[]; hasMessages: boolean } | null>(null);
@@ -802,6 +807,24 @@ export function ThreadShell({
     || settings?.agent.model_preset
     || "default"
   );
+  const imageInputBlocked = settings?.image_fallback_configured === false
+    && settings.model_presets.find((preset) => preset.name === activeModelPreset)?.supports_images === false;
+  const inspectImagePreset = useMemo(() => onInspectImagePreset
+    ? () => onInspectImagePreset(activeModelPreset)
+    : onOpenModelSettings, [activeModelPreset, onInspectImagePreset, onOpenModelSettings]);
+  const imageRequestError = streamError?.kind === "model_request_failed" && isImageRequestFailure(streamError.errorKind)
+    ? streamError
+    : null;
+  useEffect(() => {
+    if (!imageRequestError) return;
+    showToast?.({
+      message: resolveModelRequestFailureCopy(imageRequestError, t).title,
+      tone: "error",
+      dedupeKey: `image-request-failed:${imageRequestError.chatId}`,
+      action: inspectImagePreset ? { label: t("settings.models.viewPreset"), run: inspectImagePreset } : undefined,
+    });
+    dismissStreamError();
+  }, [dismissStreamError, imageRequestError, inspectImagePreset, showToast, t]);
   useEffect(() => {
     setModelFallback(null);
     if (!chatId) return;
@@ -1295,9 +1318,11 @@ export function ThreadShell({
           onContinue={continueRecovery}
           onDismiss={dismissRecovery}
           onOpenSettings={onOpenModelSettings}
+          onInspectImagePreset={inspectImagePreset}
+          imageInputBlocked={imageInputBlocked}
         />
       ) : null}
-      {streamError && !hasInlineDeliveryError(messages, streamError) ? (
+      {streamError && !imageRequestError && !hasInlineDeliveryError(messages, streamError) ? (
         <StreamErrorNotice
           error={streamError}
           onDismiss={dismissStreamError}
@@ -1322,6 +1347,8 @@ export function ThreadShell({
           draftStore={draftStore}
           persistDraft={persistDraft}
           onSend={handleThreadSend}
+          imageInputBlocked={imageInputBlocked}
+          onInspectImagePreset={inspectImagePreset}
           disabled={!chatId}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
@@ -1380,6 +1407,8 @@ export function ThreadShell({
           draftStore={draftStore}
           persistDraft={persistDraft}
           onSend={handleWelcomeSend}
+          imageInputBlocked={imageInputBlocked}
+          onInspectImagePreset={inspectImagePreset}
           disabled={booting}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}

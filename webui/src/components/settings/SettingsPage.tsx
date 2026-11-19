@@ -2,7 +2,7 @@ import { ChevronLeft } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogLayoutContext, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import type { SettingsExitGuard, SettingsFocusTarget } from "@/components/settings/contracts";
+import { imageInputPresetFromFocus, type SettingsExitGuard, type SettingsFocusTarget } from "@/components/settings/contracts";
 import { isAppsSection, isCapabilitySection, type AppsSectionKey, type SettingsSectionKey } from "@/components/settings/contracts";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
@@ -291,6 +291,7 @@ export function SettingsPage({
               form={modelState.form}
               setForm={modelState.setForm}
               editingPresetName={modelState.modelPresetEditingName}
+              imageInputPreset={imageInputPresetFromFocus(focusTarget)}
               presetNameError={modelState.modelPresetNameError}
               error={error}
               settings={settings}

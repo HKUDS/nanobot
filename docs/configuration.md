@@ -1518,6 +1518,8 @@ OpenAI Codex, xAI Grok subscriptions, and Azure OpenAI use Responses; Anthropic 
 
 Use the **Image input** switch in each preset to match the model's image capability. It is enabled by default; turn it off for text-only models. Requests containing images follow the configured primary and fallback order, using presets with **Image input** enabled. Text-only requests use the full configured order. If every candidate is text-only, nanobot returns an image-input error before sending the request.
 
+In WebUI, if **Image input** is off and no fallback accepts images, the composer keeps the draft. Select **View preset** in the toast to check the switch. Turning it on lets nanobot send images, but the model must support them. If the provider rejects a request containing images before any work is saved, the toast also takes you to the preset.
+
 For manual configuration, set `supportsImages` on a named preset, the implicit `agents.defaults` preset, or an inline fallback. Each defaults independently to `true`; use `false` for a text-only model. Transient retries preserve the original messages and images, and API validation errors are returned directly.
 
 ### Model Fallbacks

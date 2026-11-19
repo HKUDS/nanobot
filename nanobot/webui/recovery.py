@@ -18,6 +18,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.session import turn_continuation
 from nanobot.session.display_history import HistoryFact, HistoryKind, HistoryReader
+from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.recovery import (
     KNOWN_CHECKPOINT_PHASES,
@@ -169,19 +170,25 @@ class RecoveryCoordinator:
         if failure_kind == "model":
             # The turn has already saved its transcript and tool results. Use
             # that context, never resend the user's message or replay tools.
-            waiting = self._set_state(
+            reply_preserved = bool(session.messages and session.messages[-1].get("_interrupted") is True)
+            input_rejected = (
+                failure_error_kind in {"unsupported_image", "image_request_rejected"}
+                and not reply_preserved
+                and not self._has_saved_continuation_context(session, skip_hidden_user=True)
+            )
+            result = self._set_state(
                 session,
-                status="awaiting_user",
+                status="recovered" if input_rejected else "awaiting_user",
                 recovery_id=uuid4().hex,
                 attempts=cast(int, state.get("attempts", 0)) if state else 0,
-                reason="model_request_failed",
-                can_continue=any(message.get("role") == "user" for message in session.messages),
+                reason="input_rejected" if input_rejected else "model_request_failed",
+                can_continue=not input_rejected and any(message.get("role") == "user" for message in session.messages),
             )
-            waiting["failure_error_kind"] = failure_error_kind or "unknown"
-            if session.messages and session.messages[-1].get("_interrupted") is True:
-                waiting["reply_preserved"] = True
+            result["failure_error_kind"] = failure_error_kind or "unknown"
+            if reply_preserved:
+                result["reply_preserved"] = True
             await self.sessions.state.restore_interruption(session)
-            await self._publish(chat_id, waiting)
+            await self._publish(chat_id, result)
             return
         if not state or state["status"] != "resuming":
             return
@@ -494,13 +501,14 @@ class RecoveryCoordinator:
         return state
 
     @staticmethod
-    def _has_saved_continuation_context(session: Session) -> bool:
+    def _has_saved_continuation_context(session: Session, *, skip_hidden_user: bool = False) -> bool:
         """Whether an interrupted turn left model-visible context to continue from."""
         last_user = next(
             (
                 index
                 for index in range(len(session.messages) - 1, -1, -1)
                 if session.messages[index].get("role") == "user"
+                and not (skip_hidden_user and is_hidden_history_message(session.messages[index]))
             ),
             None,
         )

@@ -123,8 +123,20 @@ async def test_no_image_capable_candidate_fails_without_sending_or_stripping(str
     call = chain.chat_stream_with_retry if stream else chain.chat_with_retry
     response = await call(messages=[{"role": "user", "content": [_IMAGE]}])
     assert response.error_code == "unsupported_image"
+    assert LLMProvider.public_error_kind(response) == "unsupported_image"
     assert response.error_should_retry is False
     assert primary.calls == created == []
+
+
+async def test_image_capable_fallback_reports_its_own_failure():
+    primary = ImageProvider(False)
+    fallback = ImageProvider(response=LLMResponse(
+        "upstream rejection", finish_reason="error", error_status_code=401, error_code="unsupported_image",
+    ))
+    chain = FallbackProvider(primary, [ModelPresetConfig(model="vision")], lambda _: fallback)
+    response = await chain.chat_with_retry(messages=[{"role": "user", "content": [_IMAGE]}])
+    assert not primary.calls and len(fallback.calls) == 1
+    assert LLMProvider.public_error_kind(response) == "authentication"
 
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -139,9 +151,19 @@ async def test_declared_vision_does_not_hide_actual_upstream_rejection(stream):
     response = await call(messages=messages)
     assert response.content == upstream.content
     assert response.error_status_code == 400
+    assert LLMProvider.public_error_kind(response) == "image_request_rejected"
+    assert LLMProvider.public_error_kind(upstream) == "unknown"
     assert len(primary.calls) == 1
     assert created == []
     assert messages == before
+
+
+async def test_text_request_rejected_with_400_keeps_generic_diagnosis():
+    provider = ImageProvider(response=LLMResponse(
+        "invalid request", finish_reason="error", error_status_code=400,
+    ))
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hi"}])
+    assert LLMProvider.public_error_kind(response) == "unknown"
 
 
 def test_factory_resolves_independent_capabilities_and_refresh_signature():

@@ -5746,6 +5746,42 @@ describe("ThreadShell", () => {
     });
   });
 
+  it.each([
+    ["unsupported_image", "Image input is off for this preset"],
+    ["image_request_rejected", "The model rejected the image request"],
+  ])("shows %s as a preset action toast when there is no work to recover", async (errorKind, toastTitle) => {
+    const chatId = "chat-image-failure";
+    const client = makeClient();
+    const inspectPreset = vi.fn();
+    render(wrap(client, <ToastProvider>
+      <ThreadShell
+        session={{ ...session(chatId), modelPreset: "test-vision" }}
+        title="Chat image failure"
+        onToggleSidebar={() => {}}
+        onInspectImagePreset={inspectPreset}
+      />
+    </ToastProvider>));
+    await act(async () => {});
+
+    act(() => client._emitChat(chatId, {
+      event: "turn_end", chat_id: chatId, turn_id: "image-turn",
+      outcome: "failed", failure_kind: "model", failure_error_kind: errorKind,
+    }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    act(() => client._emitChat(chatId, {
+      event: "recovery_state", chat_id: chatId, recovery_id: "image-attempt",
+      status: "recovered", reason: "input_rejected", failure_error_kind: errorKind,
+    }));
+
+    const toast = await screen.findByRole("alert");
+    expect(toast.closest('[data-toast-tone="error"]')).not.toBeNull();
+    expect(toast).toHaveTextContent(toastTitle);
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View preset" }));
+    expect(inspectPreset).toHaveBeenCalledOnce();
+    expect(inspectPreset).toHaveBeenCalledWith("test-vision");
+  });
+
   it.each([false, true])("keeps one terminal model failure visible until the next user action (recovery: %s)", async (recoverable) => {
     const client = makeClient();
     await act(async () => {

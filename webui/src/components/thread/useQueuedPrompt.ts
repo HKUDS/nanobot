@@ -311,8 +311,7 @@ interface QueuedPromptDelivery {
     images?: SendAttachment[],
     options?: SendOptions,
   ) => boolean | void | Promise<boolean | void>;
-  validate: (prompt: QueuedPromptContent) => string | null;
-  onValidationError: (error: string) => void;
+  validate: (prompt: QueuedPromptContent) => boolean;
   onSendAttempt: () => void;
 }
 
@@ -320,7 +319,7 @@ interface QueuedPromptDelivery {
 export function useQueuedPrompt(
   pendingQueueKey: string | null,
   { isStreaming, activeTurnId, completedTurnIds = EMPTY_COMPLETED_TURN_IDS }: QueuedPromptRun,
-  { disabled, onSend, validate, onValidationError, onSendAttempt }: QueuedPromptDelivery,
+  { disabled, onSend, validate, onSendAttempt }: QueuedPromptDelivery,
 ) {
   const storageKey = queuedPromptsStorageKey(pendingQueueKey);
   const store = useMemo(() => queuedPromptStoreFor(storageKey), [storageKey]);
@@ -356,14 +355,10 @@ export function useQueuedPrompt(
   }, [activeTurnId, queuedPrompt]);
 
   const enqueue = useCallback((prompt: QueuedPrompt): boolean => {
-    const error = validate(prompt);
-    if (error) {
-      onValidationError(error);
-      return false;
-    }
+    if (!validate(prompt)) return false;
     setQueuedPrompt(prompt);
     return true;
-  }, [onValidationError, setQueuedPrompt, validate]);
+  }, [setQueuedPrompt, validate]);
 
   const clear = useCallback(() => {
     setQueuedPrompt(null);
@@ -376,10 +371,8 @@ export function useQueuedPrompt(
   const send = useCallback(
     (prompt: QueuedPrompt, extraOptions?: SendOptions) => {
       if (interactionDisabled) return;
-      const error = validate(prompt);
-      if (error) {
+      if (!validate(prompt)) {
         setQueuedPrompt(pauseQueuedPrompt(prompt));
-        onValidationError(error);
         return;
       }
       const text = prompt.text.trim();
@@ -401,7 +394,7 @@ export function useQueuedPrompt(
       ));
       onSendAttempt();
     },
-    [interactionDisabled, isStreaming, onSend, onSendAttempt, onValidationError, store, validate, setQueuedPrompt],
+    [interactionDisabled, isStreaming, onSend, onSendAttempt, store, validate, setQueuedPrompt],
   );
 
   useEffect(() => {

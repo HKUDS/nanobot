@@ -105,6 +105,7 @@ class ModelSettingsPayload(TypedDict):
     model_presets: list[dict[str, Any]]
     model_call_order: list[str]
     model_call_order_editable: bool
+    image_fallback_configured: bool
     model_configuration_migratable: bool
     model_api_resolution_supported: bool
     provider_api_configuration_supported: bool
@@ -1226,6 +1227,10 @@ def model_settings_payload(
         "model_request_overrides_supported": True,
         "model_call_order": model_call_order,
         "model_call_order_editable": model_call_order_editable,
+        "image_fallback_configured": any(
+            (config.model_presets[fallback] if isinstance(fallback, str) else fallback).supports_images
+            for fallback in defaults.fallback_models
+        ),
         "model_configuration_migratable": _legacy_model_configuration_migratable(
             config,
             oauth_status,

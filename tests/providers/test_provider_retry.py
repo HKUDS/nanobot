@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import random
+from dataclasses import replace
 
 import pytest
 
@@ -475,7 +476,7 @@ _IMAGE_MSG = [
         error_status_code=400, error_code="unsupported_image", error_should_retry=False,
     ),
 ])
-async def test_nontransient_image_error_returns_original_response(streaming, error) -> None:
+async def test_nontransient_image_error_reports_rejection_without_retry(streaming, error) -> None:
     provider = ScriptedProvider([error, LLMResponse(content="unexpected text-only answer")])
     messages = copy.deepcopy(_IMAGE_MSG)
     original = copy.deepcopy(messages)
@@ -483,10 +484,11 @@ async def test_nontransient_image_error_returns_original_response(streaming, err
 
     response = await call(messages=messages)
 
-    assert response is error
+    assert response == replace(error, error_kind="image_request_rejected")
     assert provider.calls == 1
     assert messages == original
-    assert LLMProvider.public_error_kind(response) == "unknown"
+    assert LLMProvider.public_error_kind(response) == "image_request_rejected"
+    assert LLMProvider.public_error_kind(error) == "unknown"
 
 
 @pytest.mark.asyncio
@@ -543,7 +545,10 @@ async def test_image_requests_preserve_native_context_and_compaction_budget(
         ),
     )
 
-    assert response is (success if transient else error)
+    if transient:
+        assert response is success
+    else:
+        assert response == replace(error, error_kind="image_request_rejected")
     assert provider.calls == (2 if transient else 1)
     assert messages == original
     assert state.to_private_record() == original_state
@@ -580,7 +585,7 @@ async def test_transient_then_terminal_image_error_preserves_input(monkeypatch, 
     call = provider.chat_stream_with_retry if streaming else provider.chat_with_retry
     response = await call(messages=messages, on_retry_status=status)
 
-    assert response is error
+    assert response == replace(error, error_kind="image_request_rejected")
     assert provider.calls == 2
     assert messages == original
     assert [event.state for event in statuses] == ["waiting", "cleared"]

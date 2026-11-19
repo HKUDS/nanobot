@@ -238,6 +238,8 @@ interface ThreadComposerProps {
   modelOptionsControl?: ModelOptionsControlProps;
   onModelMenuOpenChange?: (open: boolean) => void;
   onModelPresetChange?: (name: string) => void;
+  imageInputBlocked?: boolean;
+  onInspectImagePreset?: () => void;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
@@ -571,6 +573,8 @@ export function ThreadComposer({
   modelOptionsControl,
   onModelMenuOpenChange,
   onModelPresetChange,
+  imageInputBlocked = false,
+  onInspectImagePreset,
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
@@ -705,6 +709,22 @@ export function ThreadComposer({
     return null;
   }, [formatRejection, formatUploadTooLarge, ingressLimits, maxAttachments, maxFileBytes, maxTextBytes, t, textTooLargeMessage]);
 
+  const validatePrompt = useCallback((prompt: QueuedPromptContent): boolean => {
+    if (imageInputBlocked && prompt.images?.some(({ kind }) => kind === "image")) {
+      showToast?.({
+        message: t("errors.modelRequestFailed.imageInputTitle"),
+        tone: "error",
+        action: onInspectImagePreset
+          ? { label: t("settings.models.viewPreset"), run: onInspectImagePreset }
+          : undefined,
+      });
+      return false;
+    }
+    const error = queuedPromptError(prompt);
+    if (error) setInlineError(error);
+    return error === null;
+  }, [imageInputBlocked, onInspectImagePreset, queuedPromptError, showToast, t]);
+
   const {
     snapshot: queueSnapshot,
     collect: collectQueuedPrompt,
@@ -715,8 +735,7 @@ export function ThreadComposer({
   } = useQueuedPrompt(pendingQueueKey, { isStreaming, activeTurnId, completedTurnIds }, {
     disabled: !!disabled || sendPending,
     onSend,
-    validate: queuedPromptError,
-    onValidationError: setInlineError,
+    validate: validatePrompt,
     onSendAttempt: focusTextarea,
   });
   const queuedPrompt = queueSnapshot.prompt;
@@ -1711,11 +1730,7 @@ export function ThreadComposer({
       slashLifecycle === "finalize_active_turn";
     if (!isUserShell && !slashLifecycle) {
       const prompt = collectGuidancePrompt();
-      const error = queuedPromptError(prompt);
-      if (error) {
-        setInlineError(error);
-        return;
-      }
+      if (!validatePrompt(prompt)) return;
       if (queuedPrompt) {
         sendQueuedPrompt(prompt, options);
         if (draftKey) draftStore?.delete(draftKey);
@@ -1774,7 +1789,7 @@ export function ThreadComposer({
     clearComposerText,
     collectGuidancePrompt,
     queuedPrompt,
-    queuedPromptError,
+    validatePrompt,
     sendQueuedPrompt,
     clearQueuedPrompt,
     hasTouchPrimaryPointer,
