@@ -59,8 +59,8 @@ async function expectAnswerOrder(page: Page) {
 }
 
 for (const scenario of [
-  { locale: "en", width: 1440, waiting: /Connection failed\. Retrying in [1-9][0-9]*s/, retrying: "Connection failed. Retrying" },
-  { locale: "zh-CN", width: 390, waiting: /连接失败，[1-9][0-9]* 秒后重试/, retrying: "连接失败，正在重试" },
+  { locale: "en", width: 1440, working: /^Working for \d/, waiting: /Connection failed\. Retrying in [1-9][0-9]*s/, retrying: "Connection failed. Retrying" },
+  { locale: "zh-CN", width: 390, working: "正在处理", waiting: /连接失败，[1-9][0-9]* 秒后重试/, retrying: "连接失败，正在重试" },
 ]) {
   test(`shows retry progress in the live thread at ${scenario.width}px (${scenario.locale})`, async ({ page }, info) => {
     await page.setViewportSize({ width: scenario.width, height: 900 });
@@ -68,10 +68,9 @@ for (const scenario of [
     const { emit, errors } = await openThread(page, [], scenario.locale);
     emit({ event: "user_message", ...base, text: "Retry fixture", starts_turn: true, active_turn_id: turnId });
     await expect(page.getByText("Retry fixture", { exact: true })).toBeVisible();
-    emit(
-      { event: "goal_status", ...base, status: "running", started_at: Date.now() / 1000 },
-      { event: "retry_status", ...base, state: "waiting", attempt: 1, max_attempts: 4, error_kind: "connection", retry_after_s: 30 },
-    );
+    emit({ event: "goal_status", ...base, status: "running", started_at: Date.now() / 1000 });
+    await expect(page.getByRole("status", { name: scenario.working })).toHaveText(scenario.working);
+    emit({ event: "retry_status", ...base, state: "waiting", attempt: 1, max_attempts: 4, error_kind: "connection", retry_after_s: 30 });
     await expect(page.getByRole("status", { name: scenario.waiting })).toBeVisible();
     await page.screenshot({ path: info.outputPath("retry-waiting.png") });
     await page.clock.fastForward(30_000);

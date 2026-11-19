@@ -22,12 +22,9 @@ test("the collapsed row rolls with its icon and a burst lands on the latest acti
   const wheelBox = (await wheel.boundingBox())!;
   expect(wheelBox.x).toBeGreaterThan(headerBox.x + headerBox.width);
   expect(wheelBox.y + wheelBox.height / 2).toBeCloseTo(headerBox.y + headerBox.height / 2, 0);
-  const iconOffset = await wheel.evaluate((element) => {
-    const icon = element.querySelector("[data-activity-marker] svg")!.getBoundingClientRect();
-    const label = element.previousElementSibling!.querySelector("span")!.getBoundingClientRect();
-    return icon.top + icon.height / 2 - (label.top + label.height / 2);
-  });
-  expect(Math.abs(iconOffset)).toBeLessThan(0.2);
+  const icon = (await wheel.locator("[data-activity-marker] svg").boundingBox())!;
+  const label = (await toggle.locator("[data-sheen-text]").boundingBox())!;
+  expect(Math.abs(icon.y + icon.height / 2 - (label.y + label.height / 2))).toBeLessThan(0.2);
   const height = (await toggle.boundingBox())!.height;
 
   // This is a status update on the same tool, not a new row.
@@ -79,14 +76,16 @@ test("the collapsed row rolls with its icon and a burst lands on the latest acti
   await expect(wheel).toContainText("A better way to travel overnight");
 });
 
-test("narrow reduced-motion preview replaces the row without scrolling the page", async ({ page }) => {
+test("the narrow preview is a single tappable row and honors reduced motion", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 });
   const wheel = page.getByTestId("latest-activity-wheel");
   await expect(wheel).toContainText("brief.md");
   // Change the system preference while the wheel is already mounted.
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.getByRole("button", { name: "切换主题" }).click();
-  const toggle = page.getByRole("button", { name: /处理中/ });
+  const toggle = page.getByRole("button", { name: "正在处理", exact: true });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).toHaveText("");
   const next = page.getByRole("button", { name: "下一条" });
   await next.click({ clickCount: 2 });
   await expect(wheel).toContainText("夜间列车旅行指南");
@@ -111,9 +110,15 @@ test("narrow reduced-motion preview replaces the row without scrolling the page"
   })).toBeLessThan(1);
   const header = (await toggle.boundingBox())!;
   const row = (await wheel.boundingBox())!;
-  expect(row.y).toBeGreaterThanOrEqual(header.y + header.height - 0.2);
-  expect(row.width).toBeGreaterThan(header.width);
+  expect(row.y + row.height / 2).toBeCloseTo(header.y + header.height / 2, 0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(360);
+
+  // Tap where the tool summary is displayed, rather than on the activity icon.
+  await toggle.click({ position: { x: row.x - header.x + 48, y: header.height / 2 } });
+  const expanded = page.getByRole("button", { name: "正在处理, 收起处理过程", exact: true });
+  await expect(expanded).toHaveAttribute("aria-expanded", "true");
+  await expect(expanded).toHaveText("正在处理");
+  await expect(page.getByRole("link", { name: /Planning an overnight rail trip/ })).toBeVisible();
 });
 
 test("the elapsed label keeps a compact gap before the collapsed activity", async ({ page }) => {
@@ -141,19 +146,15 @@ test("the elapsed label keeps a compact gap before the collapsed activity", asyn
   }
 });
 
-test("the working label stays in place when activity is expanded and collapsed", async ({ page }) => {
+test("the activity disclosure stays anchored through resize and expansion", async ({ page }) => {
   for (const width of [960, 360]) {
     await page.setViewportSize({ width, height: 740 });
     // The responsive action row changes height; measure after that resize commits.
     await expect(page.locator("[data-message-mobile-actions]")).toHaveCount(width < 768 ? 1 : 0);
-    const toggle = page.getByRole("button", { name: /处理中/ });
-    const labelPosition = () => toggle.evaluate((button) => {
-      const label = button.querySelector("[data-sheen-text]")!;
-      const range = document.createRange();
-      range.selectNodeContents(label);
-      const { x, y } = range.getBoundingClientRect();
-      return { x, y, width: button.getBoundingClientRect().width };
-    });
+    const mobile = width < 640;
+    const toggle = page.getByRole("button", { name: mobile ? /^正在处理/ : /^处理中 \d/ });
+    const anchor = toggle.locator(mobile ? "svg.lucide-activity" : "[data-sheen-text]");
+    const labelPosition = async () => (await anchor.boundingBox())!;
     const collapsed = await labelPosition();
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
