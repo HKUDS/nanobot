@@ -989,6 +989,7 @@ async def test_remote_clients_cannot_open_local_file_picker(gateway, monkeypatch
     ))
     result = await gateway.http.dispatch_webui_mutation(connection, "remote.pick_file", {})
     assert result.status_code == 403
+    assert result.message == "remote_connections_local_only"
     choose.assert_not_awaited()
 
 

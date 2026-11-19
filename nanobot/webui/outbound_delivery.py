@@ -438,12 +438,17 @@ class WebUIOutboundDelivery:
             chat_id, persisted=persisted, metadata=metadata, phase=phase,
         )
 
+    async def _rewrite_markdown_images(self, text: str) -> str:
+        if "![" not in text:
+            return self._media.rewrite_local_markdown_images(text)
+        return await asyncio.to_thread(self._media.rewrite_local_markdown_images, text)
+
     async def _message_payload(self, msg: OutboundMessage, progress: ProgressEvent | None) -> dict[str, Any]:
         text = msg.content
         user_shell = msg.metadata.get(INBOUND_META_USER_SHELL) is True
         payload: MessageWirePayload = {
             "event": "message", "chat_id": msg.chat_id,
-            "text": text if user_shell else self._media.rewrite_local_markdown_images(text),
+            "text": text if user_shell else await self._rewrite_markdown_images(text),
         }
         if user_shell:
             payload["render_as"] = "text"
@@ -454,7 +459,7 @@ class WebUIOutboundDelivery:
             payload["media"] = msg.media
             urls: list[dict[str, str]] = []
             for entry in msg.media:
-                signed = self._media.sign_or_stage_media_path(Path(entry))
+                signed = await asyncio.to_thread(self._media.sign_or_stage_media_path, Path(entry))
                 if signed is not None:
                     urls.append(signed)
             if urls:
@@ -555,7 +560,7 @@ class WebUIOutboundDelivery:
             if delta:
                 buffered.chunks.append(delta)
             full_text = "".join(buffered.chunks)
-            rewritten = self._media.rewrite_local_markdown_images(full_text)
+            rewritten = await self._rewrite_markdown_images(full_text)
             completed_text = rewritten
             if delta or rewritten != full_text:
                 payload["text"] = rewritten

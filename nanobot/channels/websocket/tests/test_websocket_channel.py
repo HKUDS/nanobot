@@ -60,12 +60,6 @@ from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.session_handles import session_handle_for_name
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 from nanobot.webui.http_utils import (
-    http_error as _http_error,
-)
-from nanobot.webui.http_utils import (
-    http_json_response as _http_json_response,
-)
-from nanobot.webui.http_utils import (
     issue_route_secret_matches as _issue_route_secret_matches,
 )
 from nanobot.webui.http_utils import (
@@ -83,6 +77,7 @@ from nanobot.webui.metadata import (
     WEBUI_SYSTEM_COMMAND_TURN_PREFIX,
     WEBUI_TURN_METADATA_KEY,
 )
+from nanobot.webui.mutation import MutationResult
 from nanobot.webui.settings_api import settings_payload, update_provider_settings
 
 from .ws_test_client import http_get as _http_get
@@ -1259,9 +1254,8 @@ async def test_authenticated_webui_request_returns_correlated_success(bus: Magic
     conn = AsyncMock()
     channel._webui_connections.add(conn)
     channel.gateway.http.dispatch_webui_mutation = AsyncMock(
-        return_value=_http_json_response({"saved": True})
+        return_value=MutationResult.success({"saved": True})
     )
-
 
     await channel._dispatch_envelope(
         conn,
@@ -1301,12 +1295,12 @@ async def test_webui_mutations_preserve_request_and_response_order(bus: MagicMoc
         _connection: object,
         action: str,
         _payload: dict[str, object],
-    ) -> Any:
+    ) -> MutationResult:
         dispatch_order.append(action)
         if action == "settings.provider.update":
             first_started.set()
             await release_first.wait()
-        return _http_json_response({"action": action})
+        return MutationResult.success({"action": action})
 
     channel.gateway.http.dispatch_webui_mutation = dispatch
     await channel._dispatch_envelope(
@@ -1360,12 +1354,12 @@ async def test_webui_request_survives_disconnect_and_preserves_reconnect_order(
     release = asyncio.Event()
     dispatch_order: list[str] = []
 
-    async def mutate(_connection: object, action: str, _payload: dict[str, Any]) -> Any:
+    async def mutate(_connection: object, action: str, _payload: dict[str, Any]) -> MutationResult:
         dispatch_order.append(action)
         if action == "automation.run":
             started.set()
             await release.wait()
-        return _http_json_response({"action": action})
+        return MutationResult.success({"action": action})
 
     channel.gateway.http.dispatch_webui_mutation = AsyncMock(side_effect=mutate)
     envelope = {
@@ -1424,7 +1418,7 @@ async def test_webui_request_replays_completed_result_after_reconnect(bus: Magic
     retry_conn = AsyncMock()
     channel._webui_connections.update({first_conn, retry_conn})
     channel.gateway.http.dispatch_webui_mutation = AsyncMock(
-        return_value=_http_json_response({"installed": True})
+        return_value=MutationResult.success({"installed": True})
     )
     envelope = {
         "type": "webui_request",
@@ -1456,7 +1450,7 @@ async def test_webui_request_rejects_request_id_reuse_with_different_payload(
     retry_conn = AsyncMock()
     channel._webui_connections.update({first_conn, retry_conn})
     channel.gateway.http.dispatch_webui_mutation = AsyncMock(
-        return_value=_http_json_response({"ran": True})
+        return_value=MutationResult.success({"ran": True})
     )
 
     await channel._dispatch_envelope(
@@ -1546,9 +1540,6 @@ async def test_webui_request_returns_correlated_route_error(bus: MagicMock) -> N
     channel = _ch(bus)
     conn = AsyncMock()
     channel._webui_connections.add(conn)
-    channel.gateway.http.dispatch_webui_mutation = AsyncMock(
-        return_value=_http_error(400, "invalid settings payload")
-    )
 
     await channel._dispatch_envelope(
         conn,
@@ -1556,7 +1547,7 @@ async def test_webui_request_returns_correlated_route_error(bus: MagicMock) -> N
         {
             "type": "webui_request",
             "request_id": "request-2",
-            "action": "settings.agent.update",
+            "action": "session.delete",
             "payload": {},
         },
     )
@@ -1566,7 +1557,7 @@ async def test_webui_request_returns_correlated_route_error(bus: MagicMock) -> N
         "event": "webui_response",
         "request_id": "request-2",
         "ok": False,
-        "error": {"status": 400, "message": "invalid settings payload"},
+        "error": {"status": 400, "message": "missing session key"},
     }
 
 

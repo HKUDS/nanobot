@@ -5,7 +5,7 @@ import re
 from typing import Any, cast
 
 from nanobot.config.schema import ProviderConfig
-from nanobot.webui.settings_contracts import QueryParams, WebUISettingsError, query_first_alias
+from nanobot.webui.settings_contracts import QueryParams, WebUISettingsError, parameter_value
 
 _REDACTED_PROVIDER_SECRET = "••••••••"
 _PROVIDER_STRUCTURED_FIELDS = ("extra_headers", "extra_body", "extra_query")
@@ -45,13 +45,14 @@ def parse_request_object(
     snake: str,
     camel: str,
 ) -> dict[str, Any] | None:
-    raw = (query_first_alias(query, snake, camel) or "").strip()
-    if not raw:
+    value = parameter_value(query, snake if snake in query else camel)
+    if value is None or (isinstance(value, str) and not value.strip()):
         return None
-    try:
-        value: object = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise WebUISettingsError(f"{snake} must be a JSON object") from exc
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise WebUISettingsError(f"{snake} must be a JSON object") from exc
     if not isinstance(value, dict):
         raise WebUISettingsError(f"{snake} must be a JSON object")
     return cast(dict[str, Any], value) or None

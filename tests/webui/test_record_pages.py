@@ -10,7 +10,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.session.display_history import HistoryFact
 from nanobot.session.history_graph import history_record_size
-from nanobot.webui import transcript
+from nanobot.webui import transcript, transcript_replay
 from nanobot.webui.gateway_services import build_gateway_services
 from nanobot.webui.history import fact_from_record
 
@@ -594,3 +594,57 @@ async def test_http_fragment_recovery_reads_persisted_canonical_history(history,
     assert pages[-1]["completed_turn_ids"] == ["t"]
     assert pages[-1]["has_pending_tool_calls"] is False
     assert history.read(key) == original
+
+
+def test_selected_bytes_are_measured_once_for_the_compacted_source_page(history, monkeypatch):
+    key = "websocket:replay-metrics"
+    for record in (
+        {"event": "user", "text": "question"},
+        {"event": "delta", "text": "partial"},
+        {"event": "stream_end", "text": "answer 日本語"},
+        {"event": "turn_end"},
+    ):
+        history.append(key, record)
+
+    measured = []
+    measure = transcript_replay._records_bytes
+
+    def track_measure(records):
+        measured.append(records)
+        return measure(records)
+
+    monkeypatch.setattr(transcript_replay, "_records_bytes", track_measure)
+    stats = transcript.TranscriptReplayStats()
+    page = history.build(key, stats=stats)
+    assert page is not None
+    assert stats.parsed_records == 4
+    assert stats.selected_records == 3
+    assert stats.compacted_delta_records == 1
+    assert not measured
+    selected_bytes = stats.selected_bytes
+    assert stats.selected_bytes == selected_bytes > 0
+    assert len(measured) == 1
+    assert [record["event"] for record in measured[0]] == ["user", "stream_end", "turn_end"]
+    assert selected_bytes == sum(
+        len(json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 1
+        for record in measured[0]
+    )
+
+
+def test_cached_inline_trace_uses_message_augmentation(history):
+    key = "websocket:cached-trace-augmentation"
+    history.append(key, {"event": "user", "text": "question"})
+    history.append(key, {
+        "event": "message", "kind": "progress", "text": "",
+        "media": ["private.png"], "media_urls": [{"url": "/api/media/old", "name": "private.png"}],
+    })
+    history.append(key, {"event": "message", "kind": "progress", "text": "plain text", "render_as": "text"})
+
+    result = history.build(
+        key,
+        augment_assistant_text=lambda text: f"augmented:{text}",
+        augment_assistant_media=lambda _paths: [],
+    )
+    progress = [event for event in result["events"] if event.get("kind") == "progress"]
+    assert [event["text"] for event in progress] == ["augmented:", "plain text"]
+    assert "media_urls" not in progress[0]

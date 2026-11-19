@@ -1,9 +1,23 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
-QueryParams = dict[str, list[str]]
+HttpQuery = dict[str, list[str]]
+
+
+@dataclass(frozen=True, slots=True)
+class MutationParams:
+    """Original JSON fields, distinct from multi-valued HTTP query strings."""
+
+    values: dict[str, Any]
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.values
+
+
+QueryParams = HttpQuery | MutationParams
 
 
 @dataclass(frozen=True)
@@ -59,9 +73,28 @@ class WebUISettingsError(ValueError):
         self.status = status
 
 
-def query_first(query: QueryParams, key: str) -> str | None:
+def parameter_value(query: QueryParams, key: str) -> Any:
+    if isinstance(query, MutationParams):
+        return query.values.get(key)
     values = query.get(key)
     return values[0] if values else None
+
+
+def parameter_json(query: QueryParams, key: str, default: Any = None) -> Any:
+    value = parameter_value(query, key)
+    if value is None or value == "":
+        return default
+    return json.loads(value) if isinstance(value, str) else value
+
+
+def query_first(query: QueryParams, key: str) -> str | None:
+    value = parameter_value(query, key)
+    if value is None:
+        # An explicit null has historically meant a blank scalar.
+        return "" if isinstance(query, MutationParams) and key in query else None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value) if isinstance(value, (str, int, float)) else None
 
 
 def query_first_alias(query: QueryParams, snake: str, camel: str) -> str | None:

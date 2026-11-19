@@ -11,9 +11,7 @@ from nanobot.optional_features import (
     install_optional_feature_support,
     optional_features_payload,
 )
-from nanobot.webui.http_utils import query_first
-
-QueryParams = dict[str, list[str]]
+from nanobot.webui.settings_contracts import QueryParams, query_first
 
 
 def nanobot_features_payload(*, config_path: Path | None = None) -> dict[str, Any]:
