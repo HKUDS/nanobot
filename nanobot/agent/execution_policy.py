@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from contextlib import AbstractContextManager
 from typing import Protocol
 
+from nanobot.agent.tools.context import RequestContext
 from nanobot.bus.events import InboundMessage
 
 
@@ -23,3 +24,7 @@ class ExecutionPolicy(Protocol):
     def scope(
         self, session_key: str | None, generation: str | None, *, persistent: bool,
     ) -> AbstractContextManager[ExecutionScope]: ...
+
+    async def finish(
+        self, request: RequestContext, stop_reason: str, error_kind: str | None = None,
+    ) -> None: ...

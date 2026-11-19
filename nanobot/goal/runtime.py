@@ -2,13 +2,36 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.goal_permission import GoalInputScope
-from nanobot.session.goal_state import goal_state_runtime_lines, sustained_goal_active
+from nanobot.agent.tools.context import RequestContext
+from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventContext
+from nanobot.session.goal_state import (
+    GOAL_STATE_KEY,
+    discard_legacy_goal_state_key,
+    goal_state_raw,
+    goal_state_runtime_lines,
+    parse_goal_state,
+    sustained_goal_active,
+)
+from nanobot.session.sqlite_store import SessionConflictError
+from nanobot.utils.cancellation import shield_and_drain
 
 if TYPE_CHECKING:
+    from nanobot.bus.queue import MessageBus
     from nanobot.session.state import SessionState
+
+_FAILURE_RECAPS = {
+    "error": "The model request failed and automatic recovery has ended.",
+    "length": "The model reached its output limit and continuation attempts were exhausted.",
+    "empty_final_response": "The model returned no answer after recovery attempts were exhausted.",
+    "refusal": "The model refused the request.",
+    "content_filter": "The model request was stopped by a content filter.",
+    "tool_error": "Execution stopped after a terminal tool error.",
+    "exception": "Execution stopped because of an unexpected runtime error.",
+}
 
 GOAL_GENERATION_VOLATILE_KEYS = frozenset({
     "goal_state", "thread_goal", "_sustained_goal_continuation_rounds",
@@ -43,10 +66,53 @@ class GoalExecutionScope(GoalInputScope):
 
 
 class GoalExecutionPolicy:
-    def __init__(self, state: SessionState) -> None:
+    def __init__(self, state: SessionState, bus: MessageBus | None = None) -> None:
         self._state = state
+        self._bus = bus
 
     def scope(
         self, session_key: str | None, generation: str | None, *, persistent: bool,
     ) -> GoalExecutionScope:
         return GoalExecutionScope(self._state, session_key, generation, persistent=persistent)
+
+    async def finish(
+        self, request: RequestContext, stop_reason: str, error_kind: str | None = None,
+    ) -> None:
+        recap = _FAILURE_RECAPS.get(stop_reason)
+        if (
+            recap is None or not request.persist_session
+            or not request.session_key or not request.session_generation
+        ):
+            return
+
+        def block(metadata: dict[str, Any]) -> bool:
+            goal = parse_goal_state(goal_state_raw(metadata))
+            if goal is None or goal.get("status") != "active":
+                return False
+            metadata[GOAL_STATE_KEY] = {
+                **goal, "status": "blocked", "ended_at": datetime.now().isoformat(),
+                "blocked_reason": stop_reason, "recap": recap,
+            }
+            if error_kind is not None:
+                metadata[GOAL_STATE_KEY]["failure_error_kind"] = error_kind
+            discard_legacy_goal_state_key(metadata)
+            return True
+
+        context = RuntimeEventContext(
+            channel=request.channel, chat_id=request.chat_id,
+            session_key=request.session_key, session_generation=request.session_generation,
+            metadata=dict(request.metadata),
+        )
+
+        async def commit_and_publish() -> None:
+            changed, metadata = await self._state.mutate_metadata(
+                context.session_key, block, expected_generation=context.session_generation,
+            )
+            if changed and self._bus is not None:
+                await self._bus.publish(GoalStateChanged(context=context, session_metadata=metadata))
+
+        try:
+            await shield_and_drain(commit_and_publish())
+        except SessionConflictError:
+            # Reset/delete retired this execution; its failure belongs to the old generation.
+            return

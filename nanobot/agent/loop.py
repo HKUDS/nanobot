@@ -1893,6 +1893,9 @@ class AgentLoop:
                 return ctx.outbound
             await self._run_turn_stage(ctx, "build", self._build_turn)
             await self._run_turn_stage(ctx, "run", self._run_turn)
+            if self.execution_policy is not None:
+                assert ctx.request_context is not None and ctx.stop_reason is not None
+                await self.execution_policy.finish(ctx.request_context, ctx.stop_reason, ctx.failure_error_kind)
             await self._run_turn_stage(ctx, "save", self._persist_turn)
             await self._run_turn_stage(ctx, "respond", self._prepare_outbound)
             self._log_turn_completion(ctx)
@@ -1923,6 +1926,14 @@ class AgentLoop:
                 name,
                 duration_ms,
             )
+            if self.execution_policy is not None and ctx.session is not None:
+                request = ctx.request_context or RequestContext(
+                    channel=ctx.delivery.route.channel, chat_id=ctx.delivery.route.chat_id,
+                    session_key=ctx.session_key, session_generation=ctx.session.generation,
+                    metadata=dict(ctx.msg.metadata),
+                    persist_session=ctx.session.policy.persist and not ctx.ephemeral,
+                )
+                await self.execution_policy.finish(request, "exception")
             raise
         duration_ms = (time.perf_counter() - started_at) * 1000
         logger.bind(

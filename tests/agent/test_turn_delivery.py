@@ -494,3 +494,18 @@ async def test_cross_session_display_route_rejects_stale_lifetime(tmp_path):
     with pytest.raises(SessionConflictError):
         await policy.admit(delivery.route, source.key, source.generation)
     await sessions.state.aclose()
+
+
+@pytest.mark.parametrize("reason", ["length", "empty_final_response", "refusal", "content_filter"])
+async def test_terminal_model_responses_report_failed_turns_without_hiding_text(reason):
+    bus = MessageBus()
+    seen = []
+    bus.subscribe(seen.append, TurnCompleted)
+    msg = InboundMessage(channel="websocket", sender_id="user", chat_id="chat", content="Continue")
+    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+    delivery.record_stop_reason(reason)
+    response = OutboundMessage(channel="websocket", chat_id="chat", content="Partial response or failure notice.")
+    await delivery.complete(response, publish_completion=True)
+    assert seen[0].outcome == "failed"
+    assert seen[0].failure_kind == "model"
+    assert (await bus.consume_outbound()).content == response.content

@@ -163,7 +163,7 @@ async def test_runner_does_not_auto_continue_terminal_provider_response(run_spec
 
     result = await AgentRunner().run(run_spec)
 
-    assert result.stop_reason == ("error" if finish_reason == "error" else "completed")
+    assert result.stop_reason == finish_reason
     assert result.final_content == "Provider stopped this request."
     assert run_spec.runtime.provider.chat_stream_with_retry.await_count == 1
     run_spec.tools.execute.assert_not_awaited()

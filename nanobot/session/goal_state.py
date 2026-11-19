@@ -80,4 +80,7 @@ def goal_state_runtime_lines(metadata: Mapping[str, Any] | None) -> list[str]:
     hint = str(goal.get("ui_summary") or "").strip()
     if hint:
         out.append(f"Summary: {hint}")
+    recap = str(goal.get("recap") or "").strip()
+    if status == "blocked" and recap:
+        out.append(f"Blocked: {recap[:8000]}")
     return out

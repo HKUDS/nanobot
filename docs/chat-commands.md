@@ -74,6 +74,8 @@ Switching changes the model used for future replies in this conversation and kee
 
 ## Goals
 
+If a model request or execution fails after automatic recovery ends, nanobot marks an active goal **blocked** and records the reason. This includes exhausted output-limit continuations, repeated empty responses, and model refusals. Retrying a request or an ordinary tool error does not block the goal while work can still continue. `/stop` interrupts execution and keeps the goal active.
+
 Only you can cancel a goal: use `/cancel_goal`, or expand the goal in WebUI and select **Cancel goal**. Cancelling an active goal also stops its work; cancelling a blocked goal leaves unrelated replies running. Chat history is kept. Asking the agent to stop can block the goal, but does not cancel it.
 
 ## Local triggers

@@ -749,6 +749,14 @@ class AgentRunner:
                 )
                 context.streamed_content = True
 
+            if response.finish_reason in {"length", "refusal", "content_filter"}:
+                stop_reason = response.finish_reason
+                error = {
+                    "length": "Model output limit reached; continuation attempts were exhausted.",
+                    "refusal": "The model refused the request.",
+                    "content_filter": "The model request was stopped by a content filter.",
+                }[stop_reason]
+
             assistant_message: dict[str, Any] | None = None
             if response.finish_reason != "error" and not is_blank_text(clean):
                 assistant_message = build_assistant_message(
@@ -855,9 +863,10 @@ class AgentRunner:
                 failure_error_kind = LLMProvider.public_error_kind(response)
                 break
             if is_blank_text(clean):
-                final_content = EMPTY_FINAL_RESPONSE_MESSAGE
-                stop_reason = "empty_final_response"
-                error = final_content
+                final_content = error or EMPTY_FINAL_RESPONSE_MESSAGE
+                if error is None:
+                    stop_reason = "empty_final_response"
+                    error = final_content
                 self._append_final_message(messages, final_content, response_input_ids)
                 context.final_content = final_content
                 context.error = error
@@ -880,6 +889,7 @@ class AgentRunner:
                 final_content = clean
             context.final_content = final_content
             context.stop_reason = stop_reason
+            context.error = error
             await hook.after_iteration(context)
             break
         else:

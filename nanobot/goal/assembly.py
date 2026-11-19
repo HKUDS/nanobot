@@ -23,4 +23,4 @@ def install_goal(
     for tool in (CreateGoalTool.bind(sessions, bus), UpdateGoalTool.bind(sessions, bus)):
         if not tools.has(tool.name):
             tools.register(tool)
-    return GoalExecutionPolicy(sessions.state)
+    return GoalExecutionPolicy(sessions.state, bus)

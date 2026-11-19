@@ -325,7 +325,8 @@ async def test_goal_checkpoint_failure_finishes_visible_run_without_restarting(t
         loop.runner.run.assert_awaited_once()
         assert session.key not in loop._pending_queues
         saved = await loop.sessions.state.read(session.key)
-        assert saved.metadata[GOAL_STATE_KEY]["status"] == "active"
+        assert saved.metadata[GOAL_STATE_KEY]["status"] == "blocked"
+        assert saved.metadata[GOAL_STATE_KEY]["blocked_reason"] == "exception"
     finally:
         await loop.aclose()
 
