@@ -37,6 +37,14 @@
 
 🐈 **nanobot** is a lightweight, open-source, self-hosted personal AI agent written in Python. Chat with it from your browser, terminal, or favorite chat app to work with files, remember preferences, use tools, and run scheduled tasks—powered by any supported cloud or local AI model.
 
+## 💡 Why nanobot
+
+- **Lightweight & low footprint:** Small Python core with fast startup and low memory usage—runs comfortably on a personal laptop or a modest VPS without heavyweight infrastructure.
+- **Polished WebUI & native TUI out of the box:** Includes a clean, responsive browser workbench (multi-pane topics, live tool activity, inline file diffs, context usage, themes, and custom backgrounds) plus a matching terminal UI—no separate frontend build needed.
+- **Works where you already chat:** Connect seamlessly to 15+ chat apps including Telegram, Discord, Slack, Feishu, WeChat, WhatsApp, Email, Mattermost, and Linear.
+- **Real tools, memory & automations:** Reads images, PDFs, and Office files (`.docx`, `.xlsx`, `.pptx`), edits files, connects to MCP servers and plugins, builds long-term memory with [Dream](./docs/memory.md), and runs [scheduled tasks, local triggers, and sustained goals](./docs/automations.md).
+- **Model freedom & full control:** Use any cloud API (OpenRouter, Anthropic, OpenAI, Gemini, DeepSeek), OAuth subscription (OpenAI Codex, GitHub Copilot, xAI Grok), or local server (Ollama, vLLM, LM Studio)—self-hosted on your own machine.
+
 ## Start Here
 
 | What you want to do | Where to go |
@@ -49,14 +57,6 @@
 | Run nanobot continuously or on a server | [Deploy](#-deploy) · [Deployment Guide](./docs/deployment.md) |
 | Embed nanobot in Python | [Python SDK](./docs/python-sdk.md) |
 | Contribute or extend nanobot | [Architecture](./docs/architecture.md) · [Contributing](./CONTRIBUTING.md) |
-
-## 💡 Why nanobot
-
-- **Works where you chat:** Built-in browser WebUI, native terminal UI (TUI), and 15+ chat apps (Telegram, Discord, Slack, Feishu, WeChat, WhatsApp, Email, Mattermost, Linear, and more).
-- **Real local capabilities:** Reads images, PDFs, and Office files (`.docx`, `.xlsx`, `.pptx`), edits workspace files, runs shell commands, searches the web, generates images, and connects to MCP servers and plugins.
-- **Memory & automations:** Keeps conversation history, consolidates long-term memory with [Dream](./docs/memory.md), and runs [scheduled tasks, local triggers, and long-running goals](./docs/automations.md).
-- **Model freedom:** Works with OpenRouter, Anthropic, OpenAI, Gemini, DeepSeek, OAuth subscriptions (OpenAI Codex, GitHub Copilot, xAI Grok), and local servers (Ollama, vLLM, LM Studio).
-- **Own your stack:** Self-hosted, inspectable Python core with no giant platform lock-in.
 
 ## 📦 Install
 
