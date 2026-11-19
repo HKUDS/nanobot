@@ -1440,11 +1440,11 @@
   .thread-composer-surface, .context-inspector-surface, .user-message-surface, .side-panel-surface { outline: 1px solid CanvasText; }
   .user-message-surface-dashed { outline-style: dashed; }
   .pending-edge-overlay { display: none; }
-  :has(> .pending-edge-overlay[data-solid-tone="card"]:is([data-pending-edge-overlay="pending"], [data-pending-edge-overlay="cancelled"])) {
+  :has(> .pending-edge-overlay[data-solid-tone="card"][data-pending-edge-overlay="pending"]) {
     border-color: CanvasText;
     border-style: dashed;
   }
-  .pending-edge-overlay[data-solid-tone="media"]:is([data-pending-edge-overlay="pending"], [data-pending-edge-overlay="cancelled"]) {
+  .pending-edge-overlay[data-solid-tone="media"][data-pending-edge-overlay="pending"] {
     display: block;
     & .pending-edge-layer-dashed {
       border-color: CanvasText;

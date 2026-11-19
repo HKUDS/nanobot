@@ -24,7 +24,6 @@ from nanobot.events import (
     AgentEvent,
     ContextCompactionEvent,
     EventSink,
-    ModelRequestEvent,
     ResponseInputsEvent,
     ResponseSource,
     ResponseSourceEvent,
@@ -474,9 +473,6 @@ class TurnDelivery:
             self._response_source = event.source
             self._response_content = event.content
             return
-        if isinstance(event, ModelRequestEvent) and event.phase == "started" and event.response_input_ids:
-            if (generation := self.delivery_message.session_generation) is not None:
-                self.bus.finish_inputs(self.session_key, generation, event.response_input_ids)
         if isinstance(event, RetryStatusEvent):
             self._retry_status = event if event.state == "exhausted" else None
         if isinstance(event, StreamDeltaEvent | StreamEndEvent):

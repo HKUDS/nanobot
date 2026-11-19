@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { InputProcessingStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export type PendingEdgeState = "solid" | "pending" | "cancelled" | "sealing";
+export type PendingEdgeState = "solid" | "pending" | "sealing";
 
 const SEAL_FALLBACK_MS = 560;
 
@@ -45,11 +45,9 @@ export function usePendingEdgeState(
     ? "solid"
     : processingStatus === "pending"
       ? "pending"
-      : processingStatus === "cancelled"
-        ? "cancelled"
-        : tracked.sealing
-          ? "sealing"
-          : "solid";
+      : tracked.sealing
+        ? "sealing"
+        : "solid";
 
   const completeSeal = useCallback(() => {
     setTracked((prev) => (prev.sealing ? { ...prev, sealing: false } : prev));

@@ -2185,7 +2185,6 @@
     "streaming": "transmitindo",
     "delivery": {
       "waiting": "Aguardando processamento",
-      "cancelled": "Cancelado",
       "sending": "Enviando",
       "failed": "Não enviada"
     },

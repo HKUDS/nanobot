@@ -2365,7 +2365,6 @@
     "streaming": "流式输出中",
     "delivery": {
       "waiting": "等待处理",
-      "cancelled": "已取消",
       "sending": "发送中",
       "failed": "未发送"
     },

@@ -743,15 +743,6 @@ class SessionState:
             operation_name="append_history",
         )
 
-    async def cancel_history_inputs(
-        self, key: str, input_ids: tuple[str, ...], *, expected_generation: str,
-    ) -> tuple[str, ...]:
-        return await self._execute(
-            key,
-            lambda: self._store.cancel_history_inputs(key, input_ids, expected_generation=expected_generation),
-            operation_name="settle_history_inputs",
-        )
-
     async def record_delivery(
         self,
         key: str,

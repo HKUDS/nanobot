@@ -231,7 +231,7 @@ During a response, desktop Enter appends input to one waiting message, preservin
 
 Automatic sending continues across topic switches and short reconnects while the page stays live. Reloading, reopening, leaving the page, or the browser freezing it restores waiting content for manual sending; choose **Send now** or edit and send it when ready.
 
-In a regular chat, a dashed edge replaces the usual message edge while a message is waiting for the model. When the model request that answers it begins, the usual edge returns without waiting for the reply. Messages discarded by stopping a response keep the dashed edge.
+When you send a follow-up while the agent is busy, a dashed edge shows that the message is waiting for the model. The usual edge returns when the request that answers that message begins. This live hint is cleared on Stop or disconnect and is not restored from history.
 
 For image generation, configure an image provider first and then use the WebUI image mode from the composer. See [`image-generation.md`](./image-generation.md) for provider setup and output behavior.
 

@@ -16,7 +16,6 @@ from websockets.asyncio.server import ServerConnection
 from nanobot.bus.events import (
     INBOUND_META_LOCAL_MEDIA,
     INBOUND_META_MODEL_OPTIONS,
-    INBOUND_META_PENDING_INPUT_GENERATION,
     INBOUND_META_USER_SHELL,
 )
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
@@ -249,6 +248,7 @@ class WebUICommandRouter:
         *,
         turn_id: str | None,
         starts_turn: bool,
+        waiting_for_model: bool,
         media: list[dict[str, Any]],
         cli_apps: list[dict[str, Any]],
         mcp_presets: list[dict[str, Any]],
@@ -263,6 +263,8 @@ class WebUICommandRouter:
         if turn_id is not None:
             body["turn_id"] = turn_id
             body["input_id"] = f"user:{turn_id}"
+        if waiting_for_model:
+            body["waiting_for_model"] = True
         if media:
             body["media_urls"] = media
         if cli_apps:
@@ -813,10 +815,11 @@ class WebUICommandRouter:
             if queued_owner is not None:
                 metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
-        track_processing = (
-            is_webui and self._transcripts.sessions is not None and temporary_policy is None
+        # Live presentation only: a follow-up accepted while another turn owns the chat.
+        waiting_for_model = (
+            is_webui and temporary_policy is None and turn_id is not None
             and not restart_control and not is_user_shell and not content.lstrip().startswith("/")
-            and turn_id is not None
+            and queued_owner is None and websocket_turn_id(chat_id) is not None
         )
         accepted = False
         session_generation: str | None = None
@@ -843,7 +846,7 @@ class WebUICommandRouter:
             if session_generation is not None:
                 metadata[HISTORY_GENERATION_METADATA_KEY] = session_generation
             if is_webui and not restart_control and temporary_policy is None:
-                recorded = await self._transcripts.append_user_message(
+                await self._transcripts.append_user_message(
                     chat_id,
                     content,
                     metadata=metadata,
@@ -852,8 +855,6 @@ class WebUICommandRouter:
                     mcp_presets=mcp_presets or None,
                     session_mentions=session_mentions or None,
                 )
-                if track_processing and recorded and session_generation is not None:
-                    metadata[INBOUND_META_PENDING_INPUT_GENERATION] = session_generation
             if trusted_webui:
                 context_blocks: list[RuntimeContextBlock] = []
                 if not is_user_shell and envelope.get("intent") == "create_automation":
@@ -913,6 +914,7 @@ class WebUICommandRouter:
                 content,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
+                waiting_for_model=waiting_for_model,
                 media=media,
                 cli_apps=cli_apps,
                 mcp_presets=mcp_presets,
@@ -927,6 +929,7 @@ class WebUICommandRouter:
                 chat_id=chat_id,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
+                **({"waiting_for_model": True} if waiting_for_model else {}),
                 **({"media_urls": media} if media else {}),
                 **(
                     {"active_turn_id": active_turn_id}

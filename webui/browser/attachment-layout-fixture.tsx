@@ -59,7 +59,7 @@ const samples: { label: string; message: UIMessage }[] = [
 ];
 
 export function AttachmentLayoutFixture() {
-  const processingSamples: typeof samples = (["pending", "cancelled", "consumed"] as const).map((status) => ({
+  const processingSamples: typeof samples = (["pending", "consumed"] as const).map((status) => ({
     label: `Attachments: ${status}`,
     message: {
       id: `attachments-${status}`, role: "user", content: "", createdAt: 8, processingStatus: status,

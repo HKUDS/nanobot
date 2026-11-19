@@ -1489,8 +1489,6 @@ def _client_projection_event(
             "text": record.get("text") if isinstance(record.get("text"), str) else "",
             "starts_turn": True,
         }
-        if record.get("processing_status") == "cancelled":
-            projected["processing_status"] = "cancelled"
         raw_paths = record.get("media_paths")
         paths = [
             str(path)

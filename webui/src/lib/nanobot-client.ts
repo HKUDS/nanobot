@@ -1182,18 +1182,6 @@ export class NanobotClient {
     this.receipts.close();
     this.socket = null;
     this.clearTemporaryChats();
-    // Input revisions belong to one gateway connection, not the transcript replay.
-    for (const [chatId, events] of this.pendingInboundByChat) {
-      const durable = events.flatMap((ev): InboundEvent[] => {
-        if (ev.event === "input_processing") return [];
-        if (ev.event === "attached" && ev.input_revision !== undefined) {
-          return [{ ...ev, input_revision: undefined, pending_input_ids: undefined }];
-        }
-        return [ev];
-      });
-      if (durable.length) this.pendingInboundByChat.set(chatId, durable);
-      else this.pendingInboundByChat.delete(chatId);
-    }
     const willReconnect = !this.intentionallyClosed && this.shouldReconnect;
     this.rejectPendingChat("socket closed");
     this.rejectAllTranscriptions("socket closed");

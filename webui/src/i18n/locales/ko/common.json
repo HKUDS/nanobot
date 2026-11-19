@@ -2183,7 +2183,6 @@
     "streaming": "생성 중",
     "delivery": {
       "waiting": "처리 대기 중",
-      "cancelled": "취소됨",
       "sending": "전송 중",
       "failed": "전송되지 않음"
     },

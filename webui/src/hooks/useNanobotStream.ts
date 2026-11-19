@@ -186,8 +186,8 @@ export function useNanobotStream(
   const [liveInputs, setLiveInputs] = useState<{
     chatId: string;
     client: typeof client;
-    pending: ReadonlySet<string>;
-    consumed: readonly string[];
+    waiting: ReadonlySet<string>;
+    consumed: ReadonlySet<string>;
   } | null>(null);
   const [execSourceMessages, setExecSourceMessages] = useState<UIMessage[]>(initialTranscript.messages);
   const [modelRequests, setModelRequests] = useState(initialTranscript.modelRequests);
@@ -195,9 +195,7 @@ export function useNanobotStream(
   // Keep received state ahead of React's batched render: navigation can unmount
   // this hook after a stream flush but before the queued render commits.
   const setMessages = useCallback<React.Dispatch<React.SetStateAction<UIMessage[]>>>((update) => {
-    const next = transcriptRef.current.mergeInputCancellations(
-      typeof update === "function" ? update(messagesRef.current) : update,
-    );
+    const next = typeof update === "function" ? update(messagesRef.current) : update;
     messagesRef.current = next;
     transcriptRef.current.projection = { ...transcriptRef.current.projection, messages: next };
     setRenderedMessages(next);
@@ -694,7 +692,8 @@ export function useNanobotStream(
   useEffect(() => {
     if (!chatId) return;
 
-    let inputRevision = -1;
+    // A request may start before its acceptance frame reaches this tab.
+    const startedInputs = new Set<string>();
     const handle = (ev: InboundEvent) => {
       if (ev.event === "error") {
         if (ev.detail === "message_too_big") {
@@ -725,22 +724,14 @@ export function useNanobotStream(
       if (turnId) {
         setMessages((prev) => transitionTurnDelivery(prev, turnId, "accepted"));
       }
-      if (ev.event === "input_processing") {
-        const { input_ids: ids, processing_status: status, input_revision: revision } = ev;
-        if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return;
-        if (status === "cancelled") setMessages(transcriptRef.current.markInputsCancelled(ids));
-        // An attach snapshot already includes all queue changes through its revision.
-        if (!Number.isSafeInteger(revision) || revision <= inputRevision) return;
-        inputRevision = revision;
-        setLiveInputs((prev) => {
-          const pending = new Set(prev?.chatId === chatId && prev.client === client ? prev.pending : []);
-          for (const id of ids) {
-            if (status === "pending") pending.add(id);
-            else pending.delete(id);
-          }
-          return { chatId, client, pending, consumed: status === "consumed" ? ids : [] };
-        });
-        return;
+      if ((ev.event === "message_accepted" || ev.event === "user_message") && ev.waiting_for_model === true) {
+        const id = ev.event === "user_message" ? ev.input_id : `user:${ev.turn_id}`;
+        if (id && !startedInputs.has(id)) {
+          setLiveInputs((prev) => {
+            const current = prev?.chatId === chatId && prev.client === client ? prev : null;
+            return { chatId, client, waiting: new Set([...(current?.waiting ?? []), id]), consumed: new Set() };
+          });
+        }
       }
       if (ev.event === "message_accepted") {
         if (ev.media_urls?.length) {
@@ -758,6 +749,16 @@ export function useNanobotStream(
         return;
       }
       if (ev.event === "model_request") {
+        if (ev.phase === "started" && Array.isArray(ev.response_input_ids)) {
+          const ids = ev.response_input_ids;
+          ids.forEach((id) => startedInputs.add(id));
+          setLiveInputs((prev) => {
+            if (prev?.chatId !== chatId || prev.client !== client) return prev;
+            const consumed = new Set(ids.filter((id) => prev.waiting.has(id)));
+            if (!consumed.size) return prev;
+            return { ...prev, waiting: new Set([...prev.waiting].filter((id) => !consumed.has(id))), consumed };
+          });
+        }
         flushPendingStreamEvents();
         applyProjectionEvent(ev);
         return;
@@ -870,6 +871,9 @@ export function useNanobotStream(
       }
 
       if (ev.event === "turn_end") {
+        if (!sideChannelEvent && (ev.outcome === "cancelled" || ev.outcome === "failed" || ev.outcome === "interrupted")) {
+          setLiveInputs(null);
+        }
         if (typeof ev.turn_id === "string") transcriptRef.current.sideChannelTurnIds.delete(ev.turn_id);
         if ("goal_state" in ev && ev.goal_state != null && typeof ev.goal_state === "object") {
           setGoalState(ev.goal_state);
@@ -934,10 +938,6 @@ export function useNanobotStream(
       }
 
       if (ev.event === "attached") {
-        if (typeof ev.input_revision === "number" && ev.input_revision >= inputRevision) {
-          inputRevision = ev.input_revision;
-          setLiveInputs({ chatId, client, pending: new Set(ev.pending_input_ids), consumed: [] });
-        }
         setRecoveryState(ev.recovery_state ?? null);
         if (
           ev.recovery_state?.reason === "model_request_failed"
@@ -970,15 +970,13 @@ export function useNanobotStream(
     };
 
     const unsubStatus = client.onStatus((status) => {
-      if (status !== "open") {
-        inputRevision = -1;
-        setLiveInputs(null);
-      }
+      if (status !== "open") setLiveInputs(null);
     });
     const unsub = client.onTranscript(chatId, handle);
     return () => {
       unsubStatus();
       unsub();
+      setLiveInputs(null);
       // Navigation may happen before the throttled paint. Snapshot the pending
       // deltas synchronously while they still belong to this subscription.
       const pending = pendingStreamEventsRef.current;
@@ -1098,6 +1096,7 @@ export function useNanobotStream(
   const stop = useCallback(() => {
     if (!chatId) return;
     flushPendingStreamEvents();
+    setLiveInputs(null);
     setRetryStatus(null);
     setMessages((prev) => {
       const settled = prev.map((m) => ({ ...m, isStreaming: false }));
@@ -1136,12 +1135,11 @@ export function useNanobotStream(
 
   const visibleMessages = useMemo(() => {
     if (!liveInputs || liveInputs.chatId !== messageScope.chatId || liveInputs.client !== messageScope.client
-      || (!liveInputs.pending.size && !liveInputs.consumed.length)) return messages;
-    const consumed = new Set(liveInputs.consumed);
+      || (!liveInputs.waiting.size && !liveInputs.consumed.size)) return messages;
     return messages.map((row): UIMessage => {
-      if (!row.inputId || row.processingStatus === "cancelled") return row;
-      if (liveInputs.pending.has(row.inputId)) return { ...row, processingStatus: "pending" };
-      if (consumed.has(row.inputId)) return { ...row, processingStatus: "consumed" };
+      if (row.role !== "user" || !row.inputId) return row;
+      if (liveInputs.waiting.has(row.inputId)) return { ...row, processingStatus: "pending" };
+      if (liveInputs.consumed.has(row.inputId)) return { ...row, processingStatus: "consumed" };
       return row;
     });
   }, [liveInputs, messageScope, messages]);

@@ -150,7 +150,7 @@ for (const width of [1024, 360]) {
   }
 }
 
-test("attachment-only pending and cancelled messages keep static dashed edges in forced colors", async ({ page }) => {
+test("attachment-only pending messages keep static dashed edges in forced colors", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
   await page.emulateMedia({ forcedColors: "active", reducedMotion: "no-preference", colorScheme: "dark" });
   await page.goto("/browser/fixture.html?case=attachments&processing");
@@ -160,20 +160,18 @@ test("attachment-only pending and cancelled messages keep static dashed edges in
   await expect(solid.locator(fileSurface)).toHaveCSS("border-top-style", "solid");
   await expect(solid.locator("[data-pending-edge-overlay]")).toHaveCount(0);
 
-  for (const status of ["pending", "cancelled"]) {
-    const region = page.getByRole("region", { name: `Attachments: ${status}` });
-    const card = region.locator(fileSurface);
-    await expect(card).toHaveCSS("border-top-style", "dashed");
-    await expect(card.locator("[data-pending-edge-overlay]")).toBeHidden();
-    const box = await bounds(card);
-    expect({ width: box.width, height: box.height }).toEqual({ width: 96, height: 96 });
-    const mediaEdges = region.locator('[data-solid-tone="media"] > .pending-edge-layer-dashed');
-    await expect(mediaEdges).toHaveCount(2);
-    for (const edge of await mediaEdges.all()) {
-      await expect(edge).toBeVisible();
-      await expect(edge).toHaveCSS("border-top-style", "dashed");
-      await expect(edge).toHaveCSS("animation-name", "none");
-    }
+  const region = page.getByRole("region", { name: "Attachments: pending" });
+  const card = region.locator(fileSurface);
+  await expect(card).toHaveCSS("border-top-style", "dashed");
+  await expect(card.locator("[data-pending-edge-overlay]")).toBeHidden();
+  const box = await bounds(card);
+  expect({ width: box.width, height: box.height }).toEqual({ width: 96, height: 96 });
+  const mediaEdges = region.locator('[data-solid-tone="media"] > .pending-edge-layer-dashed');
+  await expect(mediaEdges).toHaveCount(2);
+  for (const edge of await mediaEdges.all()) {
+    await expect(edge).toBeVisible();
+    await expect(edge).toHaveCSS("border-top-style", "dashed");
+    await expect(edge).toHaveCSS("animation-name", "none");
   }
 });
 

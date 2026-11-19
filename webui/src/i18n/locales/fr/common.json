@@ -2183,7 +2183,6 @@
     "streaming": "en cours de génération",
     "delivery": {
       "waiting": "En attente de traitement",
-      "cancelled": "Annulé",
       "sending": "Envoi",
       "failed": "Non envoyé"
     },

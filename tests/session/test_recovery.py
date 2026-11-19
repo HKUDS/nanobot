@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.bus.events import INBOUND_META_PENDING_INPUT_GENERATION, InboundMessage
+from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import RecoveryStateEvent, SessionUpdatedEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import ProviderConversationState
@@ -251,7 +251,7 @@ async def test_restart_closes_interrupted_turn_before_requeuing_followup(
     session.metadata[PENDING_USER_TURN_KEY] = True
     record_pending_followup(session, InboundMessage(
         channel="websocket", sender_id="user", chat_id="chat", content="new request",
-        metadata={"webui": True, "webui_turn_id": "queued", INBOUND_META_PENDING_INPUT_GENERATION: session.generation},
+        metadata={"webui": True, "webui_turn_id": "queued"},
     ))
     _persist(sessions, session)
     facts = [HistoryFact(HistoryKind.INPUT, {"text": "old request"}, turn_id="original", phase="user")]
@@ -272,7 +272,6 @@ async def test_restart_closes_interrupted_turn_before_requeuing_followup(
     assert interrupted_turn in {fact.turn_id for fact in ended}
     assert "queued" not in {fact.turn_id for fact in ended}
     assert all(fact.content["outcome"] == "interrupted" for fact in ended)
-    assert bus.pending_input_snapshot(session.key, session.generation)["pending_input_ids"] == ["user:queued"]
     queued = bus.inbound.get_nowait()
     assert queued.metadata["webui_turn_id"] == "queued"
     assert await coordinator.admit(queued)

@@ -11,10 +11,6 @@ import { joinThreadFragments } from "./thread-page-fragments";
 import { ThreadProjectionIndex } from "./thread-projection-index";
 import type { ThreadProjectionEvent, UIMessage, WebuiThreadPersistedPayload } from "./types";
 
-function markCancelled(row: UIMessage): UIMessage {
-  return row.processingStatus === "cancelled" ? row : { ...row, processingStatus: "cancelled" };
-}
-
 type Ranges = Array<[number, number]>;
 type Members = Map<string, Ranges>;
 interface TextSource {
@@ -249,7 +245,6 @@ export class ThreadTranscript {
   private pendingFragmentGap: PendingFragmentGap | null = null;
   private withdrawnSources = new Set<string>();
   fragmentCompletedTurnIds: string[] = [];
-  private readonly earlyCancellations = new Set<string>();
   private readonly recordLiveContributions: boolean;
   private revision = 0;
   private order = 0;
@@ -282,16 +277,6 @@ export class ThreadTranscript {
   get messages(): UIMessage[] { return this.projection.messages; }
   get modelRequests() { return this.projection.modelRequests; }
   get hasPendingFragmentGap(): boolean { return this.pendingFragmentGap !== null; }
-
-  mergeInputCancellations(rows: UIMessage[]): UIMessage[] {
-    if (this.earlyCancellations.size === 0) return rows;
-    return rows.map((row) => row.inputId && this.earlyCancellations.delete(row.inputId) ? markCancelled(row) : row);
-  }
-
-  markInputsCancelled(inputIds: string[]): UIMessage[] {
-    for (const id of inputIds) this.earlyCancellations.add(id);
-    return this.mergeInputCancellations(this.messages);
-  }
 
   private installUnit(unit: Unit): void {
     this.order = Math.max(this.order, unit.order + 1);
@@ -780,7 +765,7 @@ export class ThreadTranscript {
       }
       return { ...row, activitySegmentId: segment };
     });
-    let nextMessages = [...prefix];
+    const nextMessages = [...prefix];
     let previous = prefix.length;
     for (const row of mappedRows) {
       const anchor = anchors.get(candidate.byRow.get(row.id)!);
@@ -792,18 +777,6 @@ export class ThreadTranscript {
     }
     if (keepSuffix) nextMessages.push(...this.messages.slice(previous)
       .filter((row) => !replaced.has(this.byRow.get(row.id)!)));
-    const cancelledInputs = new Set<string>();
-    if (!replacedHistory) for (const row of this.messages) {
-      if (row.inputId && row.processingStatus === "cancelled") cancelledInputs.add(row.inputId);
-    }
-    for (const event of body?.events ?? []) {
-      if (event.event === "user_message" && event.input_id && event.processing_status === "cancelled") {
-        cancelledInputs.add(event.input_id);
-      }
-    }
-    nextMessages = this.mergeInputCancellations(cancelledInputs.size === 0 ? nextMessages : nextMessages.map((row) => (
-      row.inputId && cancelledInputs.has(row.inputId) ? markCancelled(row) : row
-    )));
     const modelRequests = new Map(this.modelRequests);
     for (const [turn, snapshot] of candidate.modelRequests) {
       modelRequests.set(turn, reconcileModelRequest(modelRequests.get(turn), snapshot));

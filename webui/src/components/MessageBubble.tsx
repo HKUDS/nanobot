@@ -460,7 +460,7 @@ export function MessageBubble({
     const showDeliveryStatus =
       message.deliveryStatus === "sending" || message.deliveryStatus === "failed";
     const processingStatus = message.processingStatus;
-    const showProcessingStatus = !temporary && (processingStatus === "pending" || processingStatus === "cancelled");
+    const showProcessingStatus = !temporary && processingStatus === "pending";
     const mediaEdgeState: PendingEdgeState = !hasText ? edgeState : "solid";
     const mediaSealEnd = !hasText ? completeSeal : undefined;
     const userMedia = hasImages
@@ -532,7 +532,7 @@ export function MessageBubble({
         ) : null}
         {!showDeliveryStatus && showProcessingStatus ? (
           <span role="status" className="sr-only">
-            {t(processingStatus === "pending" ? "message.delivery.waiting" : "message.delivery.cancelled")}
+            {t("message.delivery.waiting")}
           </span>
         ) : null}
         {showDeliveryStatus ? (

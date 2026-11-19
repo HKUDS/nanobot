@@ -10,7 +10,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.execution_policy import ExecutionControlError
-from nanobot.bus.events import INBOUND_META_PENDING_INPUT_GENERATION, InboundMessage
+from nanobot.bus.events import InboundMessage
 
 
 @dataclass
@@ -23,8 +23,6 @@ class PendingInputs:
     session_key: str | None = None
     running_subagents: Callable[[], int] | None = None
     terminal_wait_seconds: float = 300.0
-    # A drained input may still be waiting for its request to start.
-    tracked_inputs: list[InboundMessage] = field(default_factory=list, init=False, repr=False)
     _terminal_wait_deadline: float | None = field(default=None, init=False, repr=False)
 
     async def drain(
@@ -50,10 +48,6 @@ class PendingInputs:
                 except Exception as exc:
                     raise ExecutionControlError("could not accept consumed inputs") from exc
             consumed = len(converted)
-            self.tracked_inputs.extend(
-                message for message in pending[:consumed]
-                if INBOUND_META_PENDING_INPUT_GENERATION in message.metadata
-            )
             return converted
         finally:
             # Conversion or authorization failure returns the entire snapshot.

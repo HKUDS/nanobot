@@ -2183,7 +2183,6 @@
     "streaming": "串流輸出中",
     "delivery": {
       "waiting": "等待處理",
-      "cancelled": "已取消",
       "sending": "傳送中",
       "failed": "未傳送"
     },

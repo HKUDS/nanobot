@@ -7,7 +7,6 @@ import threading
 from collections.abc import Callable, Generator, Iterator, Sequence
 from concurrent.futures import CancelledError
 from contextlib import contextmanager, suppress
-from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeVar, cast
@@ -507,13 +506,13 @@ class SqliteSessionStore:
             row = db.execute("SELECT generation, revision FROM sessions WHERE key=?", (key,)).fetchone()
             return (str(row[0]), int(row[1])) if row is not None else None
 
-    def read_metadata(self, key: str) -> SessionHistoryPayload | None:
+    def read_metadata(self, key: str) -> SessionMetadataPayload | None:
         with self.transaction(write=False) as db:
-            row = db.execute("SELECT created_at, updated_at, metadata, generation FROM sessions WHERE key=?", (key,)).fetchone()
+            row = db.execute("SELECT created_at, updated_at, metadata FROM sessions WHERE key=?", (key,)).fetchone()
             if row is None:
                 return None
             return {"key": key, "created_at": row[0], "updated_at": row[1],
-                    "metadata": self._metadata(db, key, row[2]), "generation": row[3]}
+                    "metadata": self._metadata(db, key, row[2])}
 
     def recovery_candidates(self, key_prefix: str) -> list[tuple[str, bool]]:
         """Return (key, unfinished display tail) in the same order as list_sessions.
@@ -710,30 +709,6 @@ class SqliteSessionStore:
             if appended:
                 db.execute("UPDATE history_heads SET revision=revision+1 WHERE session_key=?", (key,))
         return errors
-
-    def cancel_history_inputs(
-        self, key: str, input_ids: tuple[str, ...], *, expected_generation: str,
-    ) -> tuple[str, ...]:
-        with self.transaction() as db:
-            rows = db.execute(
-                """SELECT turn_ordinal, position, record FROM history_entries WHERE session_key=? AND kind='input'
-                   AND (SELECT generation FROM sessions WHERE key=?)=?
-                   AND json_extract(record, '$.content.processing_status') IS NOT 'cancelled'
-                   AND json_extract(record, '$.content.input_id') IN (SELECT value FROM json_each(?))""",
-                (key, key, expected_generation, _encode(input_ids)),
-            ).fetchall()
-            changed: list[str] = []
-            for ordinal, position, record in rows:
-                fact = HistoryFact.decode(record)
-                encoded = replace(fact, content={**fact.content, "processing_status": "cancelled"}).encode()
-                db.execute("UPDATE history_entries SET record=? WHERE session_key=? AND turn_ordinal=? AND position=?",
-                           (encoded, key, ordinal, position))
-                db.execute("UPDATE history_turns SET byte_count=byte_count+? WHERE session_key=? AND ordinal=?",
-                           (history_record_size(encoded) - history_record_size(record), key, ordinal))
-                changed.append(str(fact.content["input_id"]))
-            if changed:
-                db.execute("UPDATE history_heads SET revision=revision+1 WHERE session_key=?", (key,))
-            return tuple(changed)
 
     def copy_history_prefix(self, source_key: str, target: Session, before_input: int) -> bool:
         """Copy a display prefix alongside its canonical fork, in the caller's transaction."""

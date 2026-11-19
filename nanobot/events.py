@@ -29,18 +29,6 @@ class ModelRequestEvent(AgentEvent):
     response_input_ids: tuple[str, ...] = ()
 
 
-InputProcessingOutcome = Literal["consumed", "cancelled", "released"]
-
-
-@dataclass(frozen=True)
-class InputProcessingEvent(AgentEvent):
-    """A change in which display inputs are still waiting for the agent."""
-
-    input_ids: tuple[str, ...]
-    status: InputProcessingOutcome | Literal["pending"]
-    revision: int
-
-
 @dataclass(frozen=True)
 class ResponseInputsEvent(AgentEvent):
     """Identify the inputs being answered by the next model request."""

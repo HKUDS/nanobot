@@ -426,7 +426,7 @@ describe("MessageBubble", () => {
     expect(container.querySelector("[data-pending-edge-overlay]")).not.toBeInTheDocument();
 
     const pending: UIMessage = {
-      id: "u-cancelled",
+      id: "u-waiting",
       role: "user",
       content: "Never picked up",
       createdAt: Date.now(),
@@ -435,9 +435,8 @@ describe("MessageBubble", () => {
     rerender(<MessageBubble message={pending} />);
     expect(container.querySelector("[data-pending-edge-overlay='pending']")).toBeInTheDocument();
 
-    rerender(<MessageBubble message={{ ...pending, processingStatus: "cancelled" }} />);
-    expect(container.querySelector("[data-pending-edge-overlay='cancelled']")).toBeInTheDocument();
-    expect(container.querySelector("[data-pending-edge-overlay='sealing']")).not.toBeInTheDocument();
+    rerender(<MessageBubble message={{ ...pending, processingStatus: undefined }} />);
+    expect(container.querySelector("[data-pending-edge-overlay]")).not.toBeInTheDocument();
   });
 
   it("seals media-only waiting user messages when consumed", () => {

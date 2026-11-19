@@ -14,7 +14,6 @@ from nanobot.webui.goal_state import goal_state_ws_blob
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
-    from nanobot.bus.queue import MessageBus
 
 
 class SessionMetadataReader(Protocol):
@@ -32,12 +31,10 @@ class WebUISessionProjection:
         sessions: SessionMetadataReader | None,
         *,
         subagent_manager: SubagentManager | None = None,
-        bus: MessageBus | None = None,
         log: Any = default_logger,
     ) -> None:
         self._sessions = sessions
         self._subagents = subagent_manager
-        self._bus = bus
         self._log = log
 
     def subagent_task(self, session_key: str, task_id: str) -> dict[str, object] | None:
@@ -66,9 +63,6 @@ class WebUISessionProjection:
             "model_preset": selection.base_preset,
             "model_options": selection.overrides.to_dict(),
         }
-        if self._bus is not None:
-            generation = snapshot.get("generation") if snapshot is not None else None
-            fields.update(self._bus.pending_input_snapshot(session_key, generation))
         if metadata is None:
             return fields
 

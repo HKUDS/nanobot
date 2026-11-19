@@ -2365,7 +2365,6 @@
     "streaming": "streaming",
     "delivery": {
       "waiting": "Waiting to be processed",
-      "cancelled": "Cancelled",
       "sending": "Sending",
       "failed": "Not sent"
     },

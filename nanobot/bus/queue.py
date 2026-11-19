@@ -2,18 +2,13 @@ import asyncio
 import contextlib
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Literal, TypeVar, overload
+from typing import Any, TypeVar, overload
 
 from loguru import logger
 
-from nanobot.bus.events import (
-    INBOUND_META_PENDING_INPUT_GENERATION,
-    INBOUND_META_TURN_ID,
-    InboundMessage,
-    OutboundMessage,
-)
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import outbound_message_for_event
-from nanobot.events import AgentEvent, InputProcessingEvent, InputProcessingOutcome
+from nanobot.events import AgentEvent
 from nanobot.runtime_admission import RuntimeAdmission
 
 _EventT = TypeVar("_EventT", bound=AgentEvent)
@@ -39,62 +34,12 @@ class MessageBus:
         self._handlers: list[EventHandler] = []
         self._pending: set[asyncio.Task[None]] = set()
         self.outbound_recorder: Callable[[OutboundMessage], None] | None = None
-        self._waiting_inputs: dict[tuple[str, str], set[str]] = {}
-        self._input_revision = 0
-
-    @staticmethod
-    def _input_identity(msg: InboundMessage) -> tuple[str, str] | None:
-        generation = msg.metadata.get(INBOUND_META_PENDING_INPUT_GENERATION)
-        turn_id = msg.metadata.get(INBOUND_META_TURN_ID)
-        if msg.channel == "websocket" and isinstance(generation, str) and isinstance(turn_id, str):
-            return generation, f"user:{turn_id}"
-        return None
-
-    def pending_input_snapshot(self, session_key: str, generation: str | None) -> dict[str, Any]:
-        """Attach reads live state, never the durable follow-up journal."""
-        ids = self._waiting_inputs.get((session_key, generation), ()) if generation is not None else ()
-        return {"pending_input_ids": sorted(ids), "input_revision": self._input_revision}
-
-    def _report_inputs(
-        self, session_key: str, generation: str, ids: tuple[str, ...],
-        status: InputProcessingOutcome | Literal["pending"],
-    ) -> None:
-        self._input_revision += 1
-        self.outbound.put_nowait(outbound_message_for_event(
-            channel="websocket", chat_id=session_key.removeprefix("websocket:"),
-            event=InputProcessingEvent(ids, status, self._input_revision),
-            metadata={INBOUND_META_PENDING_INPUT_GENERATION: generation},
-        ))
-
-    def finish_inputs(
-        self, session_key: str, generation: str, input_ids: tuple[str, ...],
-        status: InputProcessingOutcome = "consumed",
-    ) -> None:
-        key = (session_key, generation)
-        waiting = self._waiting_inputs.get(key)
-        if not waiting or not (removed := waiting.intersection(input_ids)):
-            return
-        waiting.difference_update(removed)
-        if not waiting:
-            del self._waiting_inputs[key]
-        self._report_inputs(session_key, generation, tuple(sorted(removed)), status)
-
-    def release_input(self, msg: InboundMessage, *, cancelled: bool = False) -> None:
-        if identity := self._input_identity(msg):
-            generation, input_id = identity
-            self.finish_inputs(msg.session_key, generation, (input_id,), "cancelled" if cancelled else "released")
 
     async def publish_inbound(self, msg: InboundMessage) -> None:
         """Publish a message from a channel to the agent."""
         self.admission.check()
-        # Admission, enqueue and the live projection must not yield apart.
+        # This queue is unbounded. Admission and enqueue must not yield apart.
         self.inbound.put_nowait(msg)
-        if identity := self._input_identity(msg):
-            generation, input_id = identity
-            waiting = self._waiting_inputs.setdefault((msg.session_key, generation), set())
-            if input_id not in waiting:
-                waiting.add(input_id)
-                self._report_inputs(msg.session_key, generation, (input_id,), "pending")
 
     async def consume_inbound(self) -> InboundMessage:
         """Consume the next inbound message (blocks until available)."""

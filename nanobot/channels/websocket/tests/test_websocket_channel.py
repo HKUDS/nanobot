@@ -5379,147 +5379,6 @@ async def test_authorized_webui_turn_is_acked_after_bus_acceptance(history,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", ["stop_queued", "stop_preparing", "prepared", "rejected"])
-async def test_pending_input_waits_for_its_own_model_request(history, tmp_path, monkeypatch, outcome):
-    from nanobot.agent.context_governance import ContextWindowExceededError
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.providers.base import GenerationSettings, LLMResponse
-
-    bus = MessageBus()
-    channel = _ch(bus, session_manager=history.sessions)
-    chat = "processing-chat"
-    key = f"websocket:{chat}"
-    peer = AsyncMock()
-    peer.remote_address = ("127.0.0.1", 50123)
-    channel._attach(peer, chat)
-    entered_model = asyncio.Event()
-    finish_first = asyncio.Event()
-    preparing_followup = asyncio.Event()
-    resume_preparation = asyncio.Event()
-
-    async def reply(**_kwargs):
-        if entered_model.is_set():
-            await asyncio.Future()
-        entered_model.set()
-        await finish_first.wait()
-        return LLMResponse(content="first answer")
-
-    provider = MagicMock(aclose=AsyncMock(), generation=GenerationSettings())
-    provider.get_default_model.return_value = "test-model"
-    provider.can_resume_conversation_state.return_value = False
-    provider.chat_stream_with_retry = AsyncMock(side_effect=reply)
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model", session_manager=history.sessions)
-    prepare = loop.runner._prepare_model_request
-
-    async def prepare_request(*args, **kwargs):
-        if entered_model.is_set():
-            preparing_followup.set()
-            await resume_preparation.wait()
-            if outcome == "rejected":
-                raise ContextWindowExceededError(session_key=key, estimated_tokens=2, input_budget=1, source="test")
-        return await prepare(*args, **kwargs)
-
-    monkeypatch.setattr(loop.runner, "_prepare_model_request", prepare_request)
-    worker = asyncio.create_task(loop.run())
-
-    async def send(turn_id, content="identical prompts"):
-        await channel._dispatch_envelope(peer, "webui-client", {
-            "type": "message", "chat_id": chat, "turn_id": turn_id, "content": content, "webui": True,
-        })
-
-    try:
-        await send("picked-up")
-        await asyncio.wait_for(entered_model.wait(), 5)
-        await send("waiting")
-        if outcome != "stop_queued":
-            finish_first.set()
-            await asyncio.wait_for(preparing_followup.wait(), 5)
-        await channel._dispatch_envelope(peer, "webui-client", {"type": "attach", "chat_id": chat})
-        attached = next(frame for frame in _sent_ws_payloads(peer) if frame["event"] == "attached")
-        assert attached["pending_input_ids"] == ["user:waiting"]
-
-        if outcome.startswith("stop_"):
-            await send("stop", "/stop")
-            status = "cancelled"
-        else:
-            resume_preparation.set()
-            status = "consumed" if outcome == "prepared" else "released"
-        async with asyncio.timeout(5):
-            while not any(f.get("input_ids") == ["user:waiting"] and f.get("processing_status") == status
-                          for f in _sent_ws_payloads(peer)):
-                await channel.send(await bus.consume_outbound())
-            if outcome == "prepared":
-                while not any(f.get("phase") == "started" and f.get("response_input_ids") == ["user:waiting"]
-                              for f in _sent_ws_payloads(peer)):
-                    await channel.send(await bus.consume_outbound())
-        await channel._dispatch_envelope(peer, "webui-client", {"type": "attach", "chat_id": chat})
-        assert [f["pending_input_ids"] for f in _sent_ws_payloads(peer) if f["event"] == "attached"][-1] == []
-    finally:
-        worker.cancel()
-        await asyncio.gather(worker, return_exceptions=True)
-
-    frames = [frame for frame in _sent_ws_payloads(peer) if frame["event"] == "input_processing"]
-    assert [(frame["input_ids"], frame["processing_status"]) for frame in frames] == [
-        (["user:picked-up"], "pending"), (["user:picked-up"], "consumed"),
-        (["user:waiting"], "pending"), (["user:waiting"], status),
-    ]
-    states = {row.get("input_id"): row.get("processing_status") for row in history.build(key)["events"]
-              if row["event"] == "user_message"}
-    assert states["user:picked-up"] is None
-    assert states["user:waiting"] == ("cancelled" if status == "cancelled" else None)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("fails_before_take", [True, False])
-async def test_failed_or_orphaned_input_does_not_stay_queued(history, tmp_path, monkeypatch, fails_before_take):
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.webui import history as history_module
-    from nanobot.webui.recovery import RecoveryCoordinator
-
-    webui_dir = tmp_path / "isolated-webui"
-    webui_dir.mkdir()
-    monkeypatch.setattr(history_module, "get_webui_dir", lambda: webui_dir)
-    bus = MessageBus()
-    chat = "failed-input"
-    key = f"websocket:{chat}"
-    peer = AsyncMock()
-    peer.remote_address = ("127.0.0.1", 50123)
-    channel = _ch(bus, session_manager=history.sessions)
-    provider = MagicMock(aclose=AsyncMock())
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model", session_manager=history.sessions)
-    try:
-        await channel._dispatch_envelope(peer, "webui-client", {
-            "type": "message", "chat_id": chat, "turn_id": "first", "content": "hello", "webui": True,
-        })
-        msg = bus.inbound.get_nowait()
-        await channel._dispatch_envelope(peer, "webui-client", {"type": "attach", "chat_id": chat})
-        assert [f["pending_input_ids"] for f in _sent_ws_payloads(peer) if f["event"] == "attached"] == [["user:first"]]
-        if fails_before_take:
-            monkeypatch.setattr(loop, "runtime_for_session", AsyncMock(side_effect=ValueError("setup failed")))
-            await loop._dispatch_one(msg, asyncio.Queue())
-            while bus.outbound_size:
-                await channel.send(bus.outbound.get_nowait())
-            assert any(f.get("processing_status") == "released" for f in _sent_ws_payloads(peer))
-            await channel._dispatch_envelope(peer, "webui-client", {"type": "attach", "chat_id": chat})
-            assert [f["pending_input_ids"] for f in _sent_ws_payloads(peer) if f["event"] == "attached"][-1] == []
-    finally:
-        await loop.aclose()
-
-    restarted = SessionManager(tmp_path)
-    new_bus = MessageBus()
-    try:
-        await RecoveryCoordinator(restarted, new_bus).scan()
-        new_channel = _ch(new_bus, session_manager=restarted)
-        await new_channel._dispatch_envelope(peer, "webui-client", {"type": "attach", "chat_id": chat})
-        assert [f["pending_input_ids"] for f in _sent_ws_payloads(peer) if f["event"] == "attached"][-1] == []
-        assert new_bus.inbound_size == 0
-        inputs = [row for row in history.build(key)["events"] if row["event"] == "user_message"]
-        assert [(row["input_id"], row.get("processing_status")) for row in inputs] == [("user:first", None)]
-    finally:
-        await restarted.state.aclose()
-
-
-@pytest.mark.asyncio
 async def test_user_messages_fan_out_to_other_clients_on_the_same_chat(
     bus: MagicMock,
 ) -> None:
@@ -5575,6 +5434,7 @@ async def test_user_messages_fan_out_to_other_clients_on_the_same_chat(
         "chat_id": "shared-chat",
         "text": "one more detail",
         "starts_turn": False,
+        "waiting_for_model": True,
         "turn_id": "steer-a",
         "input_id": "user:steer-a",
         "active_turn_id": "turn-a",
@@ -5587,12 +5447,13 @@ async def test_user_messages_fan_out_to_other_clients_on_the_same_chat(
             payload["turn_id"],
             payload["starts_turn"],
             payload["active_turn_id"],
+            payload.get("waiting_for_model"),
         )
         for payload in origin_payloads
         if payload["event"] == "message_accepted"
     ] == [
-        ("message_accepted", "turn-a", True, "turn-a"),
-        ("message_accepted", "steer-a", False, "turn-a"),
+        ("message_accepted", "turn-a", True, "turn-a", None),
+        ("message_accepted", "steer-a", False, "turn-a", True),
     ]
     outsider.send.assert_not_awaited()
     assert bus.publish_inbound.await_count == 2

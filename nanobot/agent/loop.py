@@ -1257,8 +1257,6 @@ class AgentLoop:
                 ),
                 terminal_wait_seconds=_SUBAGENT_TERMINAL_WAIT_SECONDS,
             ) if pending_queue is not None else None
-            if pending_inputs is not None:
-                turn_scope_stack.callback(self._release_drained_inputs, pending_inputs)
             hook = build_agent_turn_hook(AgentTurnHookSpec(
                 events=events,
                 streaming=streaming,
@@ -1407,18 +1405,13 @@ class AgentLoop:
                     try:
                         await self._dispatch_inbound(msg)
                     except SessionExecutionClosedError:
-                        self.bus.release_input(msg)
                         break
                     except (SessionOperationQueueFullError, SessionConflictError, ExecutionControlError) as exc:
-                        self.bus.release_input(msg)
                         key = msg.session_key
                         logger.warning("Session input rejected for {}: {}", key, exc)
                         if msg.is_user_input:
                             delivery = self.turn_delivery_factory.unrouted(msg, key)
                             await delivery.fail(publish_completion=key not in self._pending_queues)
-                    except BaseException:
-                        self.bus.release_input(msg)
-                        raise
         finally:
             await self.aclose()
 
@@ -1432,7 +1425,6 @@ class AgentLoop:
             msg.require_existing_session
             and await self.sessions.state.read_metadata(key) is None
         ):
-            self.bus.release_input(msg)
             return
         if msg.is_user_input:
             await self.runtime_event_publisher.user_input_accepted(msg, key)
@@ -1446,7 +1438,6 @@ class AgentLoop:
             and self._recovery_admission is not None
             and not await self._recovery_admission.admit(msg)
         ):
-            self.bus.release_input(msg)
             return
         if (
             key in self._pending_queues
@@ -1508,7 +1499,6 @@ class AgentLoop:
         self.bus.admission.check()
         session_key = msg.session_key
         if not self.subagents.accepts_result(msg, session_key):
-            self.bus.release_input(msg)
             return
 
         pending = self._pending_queues.get(session_key)
@@ -1571,28 +1561,11 @@ class AgentLoop:
         # callbacks can yield to another submitter for the same session key.
         self._pending_queues.detach(session_key, pending)
         for item in pending.drain():
-            self._release_interrupted_input(item)
             for coordinator in self._automation_turn_coordinators:
                 coordinator.complete(item, error=error)
             if item.channel != "system" and self.commands.requires_session_queue(command_text(item)):
                 delivery = self.turn_delivery_factory.unrouted(item, session_key)
                 await delivery.complete(None, publish_completion=True)
-
-    def _release_drained_inputs(self, pending: PendingInputs) -> None:
-        # These messages no longer live in the inbox. Started requests already
-        # removed their IDs; close out any remaining waiters on turn exit.
-        for message in pending.tracked_inputs:
-            self._release_interrupted_input(message)
-
-    def _release_interrupted_input(self, message: InboundMessage) -> None:
-        self.bus.release_input(
-            message,
-            cancelled=(
-                not self._preserve_inflight_turns_on_shutdown
-                and self._pending_queues.is_stopping(message.session_key)
-                and not self._pending_queues.is_discarding(message.session_key)
-            ),
-        )
 
     async def _dispatch_one(
         self,
@@ -1647,7 +1620,6 @@ class AgentLoop:
                         coordinator.complete(msg, response=response)
                 except asyncio.CancelledError as exc:
                     logger.info("Task cancelled for session {}", session_key)
-                    self._release_interrupted_input(msg)
                     if not processing:
                         if self.commands.requires_session_queue(command_text(msg)):
                             await delivery.complete(None, publish_completion=True)
@@ -1697,7 +1669,6 @@ class AgentLoop:
                     await delivery.cancelled()
                     raise exc
                 except Exception as exc:
-                    self.bus.release_input(msg)
                     if isinstance(exc, SessionConflictError):
                         current = await self.sessions.state.read_header(session_key)
                         generation = delivery.delivery_message.session_generation
@@ -1715,7 +1686,6 @@ class AgentLoop:
                     if (processing or delivery.completed) and not skip_idle:
                         await delivery.idle()
         finally:
-            self.bus.release_input(msg)
             if (
                 recovery_task_registered
                 and current_task is not None
