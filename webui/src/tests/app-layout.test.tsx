@@ -4812,6 +4812,28 @@ describe("App layout", () => {
     unmount();
   });
 
+  it("does not apply a timed credential refresh after signing out", async () => {
+    vi.mocked(fetchBootstrap).mockResolvedValueOnce({
+      token: "old", api_token: "old-api", ws_path: "/", expires_in: 0.001,
+    });
+    let complete!: (boot: Awaited<ReturnType<typeof fetchBootstrap>>) => void;
+    vi.mocked(fetchBootstrap).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
+    vi.mocked(deriveWsUrl).mockImplementation((_path, token) => `ws://test?token=${token}`);
+
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    window.history.replaceState(null, "", "/#/settings");
+    await import("@/components/settings/SettingsView");
+    render(<App />);
+    const signOut = await screen.findByRole("button", { name: "Sign out" }, { timeout: 4_000 });
+    await waitFor(() => expect(fetchBootstrap).toHaveBeenCalledTimes(2), { timeout: 8_000 });
+    fireEvent.click(signOut);
+    await screen.findByLabelText("WebUI password");
+
+    await act(async () => complete({ token: "late", api_token: "late-api", ws_path: "/" }));
+    expect(updateUrlSpy).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("WebUI password")).toBeInTheDocument();
+  }, 10_000);
+
   it("refreshes the bootstrap token before REST settings auth expires", async () => {
     vi.useFakeTimers();
     vi.mocked(fetchBootstrap)

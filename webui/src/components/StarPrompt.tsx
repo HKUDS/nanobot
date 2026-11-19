@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { StarLinkView, StarPromptView } from "@/components/StarPromptView";
 import { starPromptAction } from "@/lib/api";
+import { hasAnyDialogMounted } from "@/lib/dom-overlays";
 import { useClient } from "@/providers/ClientProvider";
 
 export function StarLink({ onSaved, fullWidth = false }: {
@@ -43,10 +44,10 @@ export function StarPrompt({ ready }: { ready: boolean }) {
       if (status !== "open" || attempted.current) return;
       attempted.current = true;
       if (interacted.current || document.visibilityState !== "visible"
-        || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+        || hasAnyDialogMounted()) return;
       void starPromptAction(client, "claim").then(({ show }) => {
         if (cancelled || !show || interacted.current || document.visibilityState !== "visible"
-          || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+          || hasAnyDialogMounted()) return;
         previousFocus.current = document.activeElement instanceof HTMLElement
           ? document.activeElement : null;
         setOpen(true);

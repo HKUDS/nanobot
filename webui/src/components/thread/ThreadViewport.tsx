@@ -13,6 +13,7 @@ import { ArrowDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { PromptRail } from "@/components/thread/PromptRail";
+import { matchHistoryRow, type HistoryRowIdentity } from "@/components/thread/history-row-identity";
 import { SubagentThreadMessages } from "@/components/thread/SubagentTaskResults";
 import { DiagramScope } from "@/components/markdown-diagrams/context";
 import { DiffViewportContext } from "./activity/DiffViewportContext";
@@ -93,24 +94,12 @@ export const INITIAL_HISTORY_WINDOW = 120;
 export const HISTORY_WINDOW_INCREMENT = 120;
 
 interface HistoryScrollAnchor {
-  sources: string[];
-  fallback?: string;
+  identity: HistoryRowIdentity;
   offsetTop: number;
   scrollTop: number;
 }
 
 const THREAD_DISPLAY_UNIT_SELECTOR = "[data-thread-display-unit]";
-
-function scrollSourceKind(source: string): string {
-  return (JSON.parse(source) as string[])[1];
-}
-
-function scrollSourcesDisagree(left: string[], right: string[], kind: string): boolean {
-  const leftKeys = left.filter((source) => scrollSourceKind(source) === kind);
-  const rightKeys = right.filter((source) => scrollSourceKind(source) === kind);
-  return leftKeys.length > 0 && rightKeys.length > 0
-    && !leftKeys.some((source) => rightKeys.includes(source));
-}
 
 function promptTopInset(scroller: HTMLElement): number {
   const padding = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop);
@@ -333,6 +322,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const contentRef = useRef<HTMLDivElement>(null);
   const messageRegionRef = useRef<HTMLDivElement | null>(null);
   const messageContentRef = useRef<HTMLDivElement>(null);
+  const [historyRows] = useState(() => new WeakMap<HTMLElement, HistoryRowIdentity>());
   const diffViewport = useMemo(() => ({ scroller: messageRegionRef, content: messageContentRef }), []);
   const emptyStateRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -558,26 +548,20 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     }
     const viewport = scroller.getBoundingClientRect();
     const element = visibleHistoryUnit(content, viewport);
-    if (!element?.dataset.threadScrollSources) {
-      historyScrollAnchorRef.current = null;
-      return false;
-    }
-    const sources = JSON.parse(element.dataset.threadScrollSources) as string[];
-    const fallback = element.dataset.threadScrollFallback;
-    if (sources.length === 0 && !fallback) {
+    const identity = element ? historyRows.get(element) : undefined;
+    if (!element || !identity || (identity.sources.length === 0 && !identity.fallback)) {
       historyScrollAnchorRef.current = null;
       return false;
     }
     historyScrollAnchorRef.current = {
-      sources,
-      fallback,
+      identity,
       scrollTop: scroller.scrollTop,
       // Normalize out the reveal lease, even when reading above its inline slot.
       offsetTop: element.getBoundingClientRect().top - viewport.top
         - (historySlotRef.current ? HISTORY_HOLD_PX : 0),
     };
     return true;
-  }, []);
+  }, [historyRows]);
 
   const reconcileHistoryScrollAnchor = useCallback(() => {
     const scroller = scrollRef.current;
@@ -588,26 +572,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (Math.abs(scroller.scrollTop - Math.min(anchor.scrollTop, maxScrollTop)) >= 0.5) {
       return captureHistoryScrollAnchor();
     }
-    const candidates = Array.from(content.querySelectorAll<HTMLElement>(THREAD_DISPLAY_UNIT_SELECTOR));
-    const bySource = new Map<string, { element: HTMLElement; sources: string[] }>();
-    for (const candidate of candidates) {
-      const sources = JSON.parse(candidate.dataset.threadScrollSources ?? "[]") as string[];
-      for (const source of sources) bySource.set(source, { element: candidate, sources });
-    }
-    let element: HTMLElement | undefined;
-    for (const source of anchor.sources) {
-      const candidate = bySource.get(source);
-      if (!candidate) continue;
-      const kind = scrollSourceKind(source);
-      // An index-generated replay id can be reused by a different message.
-      if (kind !== "stream" && scrollSourcesDisagree(anchor.sources, candidate.sources, "stream")) continue;
-      if (kind === "id" && scrollSourcesDisagree(anchor.sources, candidate.sources, "sequence")) continue;
-      element = candidate.element;
-      break;
-    }
-    if (!element && anchor.fallback) {
-      element = candidates.find((candidate) => candidate.dataset.threadScrollFallback === anchor.fallback);
-    }
+    const element = matchHistoryRow(
+      anchor.identity, content.querySelectorAll<HTMLElement>(THREAD_DISPLAY_UNIT_SELECTOR), historyRows,
+    );
     if (!element) {
       historyScrollAnchorRef.current = null;
       return false;
@@ -626,7 +593,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     // A clamped layout is the new reading position, not space owed by a later prepend.
     anchor.offsetTop += requestedTop - nextTop;
     return true;
-  }, [captureHistoryScrollAnchor]);
+  }, [captureHistoryScrollAnchor, historyRows]);
 
   const resetHistoryHeader = useCallback(() => {
     setHistorySlotKey(null);
@@ -1342,6 +1309,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                 <DiffViewportContext.Provider value={diffViewport}>
                 <DiagramScope identity={conversationKey}>
                 <SubagentThreadMessages
+                  historyRows={historyRows}
                   key={messagesKey}
                   messages={visibleMessages}
                   topInset={PROMPT_TOP_INSET_PX}

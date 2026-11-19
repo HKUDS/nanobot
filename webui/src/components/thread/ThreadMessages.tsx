@@ -8,6 +8,7 @@ import {
   completedActivityDurationMs,
   formatActivityDuration,
 } from "@/components/thread/AgentActivityCluster";
+import { sameHistoryRowIdentity, type HistoryRowIdentity, type HistoryRowSource } from "@/components/thread/history-row-identity";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -22,6 +23,7 @@ import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
+  historyRows?: WeakMap<HTMLElement, HistoryRowIdentity>;
   messages: UIMessage[];
   beforeMessages?: ReactNode;
   beforeUnit?: { key: string; content: ReactNode };
@@ -82,6 +84,7 @@ export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
 }
 
 export function ThreadMessages({
+  historyRows,
   messages,
   beforeMessages,
   beforeUnit,
@@ -257,6 +260,7 @@ export function ThreadMessages({
             key={unitKeys[index]}
             unitKey={unitKeys[index]}
             scrollAnchor={scrollAnchors[index]}
+            historyRows={historyRows}
             unit={unit}
             mobileActions={mobileActions}
             marginTop={prelude ? "" : marginTop}
@@ -370,7 +374,8 @@ function pendingTurnProjection(
 interface ThreadDisplayUnitProps {
   mobileActions: boolean;
   unitKey: string;
-  scrollAnchor: ScrollAnchorIdentity;
+  scrollAnchor: HistoryRowIdentity;
+  historyRows?: WeakMap<HTMLElement, HistoryRowIdentity>;
   unit: DisplayUnit;
   marginTop: string;
   userPromptId?: string;
@@ -574,6 +579,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   mobileActions,
   unitKey,
   scrollAnchor,
+  historyRows,
   unit,
   marginTop,
   userPromptId,
@@ -607,6 +613,12 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
 }: ThreadDisplayUnitProps) {
   const { t } = useTranslation();
   const elementRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = elementRef.current;
+    if (!element || !historyRows) return;
+    historyRows.set(element, scrollAnchor);
+    return () => { historyRows.delete(element); };
+  }, [historyRows, scrollAnchor]);
   const activityDetailsId = useId();
   const heightRef = useRef(0);
   const [nearViewport, setNearViewport] = useState(true);
@@ -699,8 +711,6 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
           onContextBlockActiveChange(contextBlockKey ?? null);
         }}
         data-thread-display-unit={unitKey}
-        data-thread-scroll-sources={scrollAnchor.sources}
-        data-thread-scroll-fallback={scrollAnchor.fallback}
         data-user-prompt-id={userPromptId}
         data-message-context-block={contextBlockKey}
         data-context-block-active={contextBlockActive || undefined}
@@ -793,8 +803,8 @@ function threadDisplayUnitPropsEqual(
 ): boolean {
   return (
     displayUnitsEqual(previous.unit, next.unit)
-    && previous.scrollAnchor.sources === next.scrollAnchor.sources
-    && previous.scrollAnchor.fallback === next.scrollAnchor.fallback
+    && previous.historyRows === next.historyRows
+    && sameHistoryRowIdentity(previous.scrollAnchor, next.scrollAnchor)
     && previous.mobileActions === next.mobileActions
     && previous.marginTop === next.marginTop
     && previous.userPromptId === next.userPromptId
@@ -956,39 +966,34 @@ export function unitKeysForDisplay(units: DisplayUnit[]): string[] {
   });
 }
 
-interface ScrollAnchorIdentity {
-  sources: string;
-  fallback?: string;
-}
-
-function scrollAnchorsForUnits(units: DisplayUnit[]): ScrollAnchorIdentity[] {
+function scrollAnchorsForUnits(units: DisplayUnit[]): HistoryRowIdentity[] {
   const sourceKeys = units.map((unit) => {
     const messages = unit.type === "message" ? [unit.message] : unit.messages;
     // Either edge of an activity cluster can survive when the other grows.
     const edges = messages.length > 1 ? [messages[0], messages[messages.length - 1]] : messages;
-    const streams: string[] = [];
-    const sequences: string[] = [];
-    const ids: string[] = [];
+    const streams: HistoryRowSource[] = [];
+    const sequences: HistoryRowSource[] = [];
+    const ids: HistoryRowSource[] = [];
     for (const message of edges) {
       const stream = unit.type === "message" ? message.streamId : message.reasoningStreamId;
-      if (message.turnId && stream) streams.push(JSON.stringify([unit.type, "stream", message.turnId, stream]));
+      if (message.turnId && stream) streams.push({ kind: "stream", key: JSON.stringify([unit.type, "stream", message.turnId, stream]) });
       const sequence = message.projectionStartSeq ?? message.turnSeq;
       if (message.turnId && Number.isFinite(sequence)) {
-        sequences.push(JSON.stringify([unit.type, "sequence", message.turnId, sequence]));
+        sequences.push({ kind: "sequence", key: JSON.stringify([unit.type, "sequence", message.turnId, sequence]) });
       }
-      ids.push(JSON.stringify([unit.type, "id", message.id]));
+      ids.push({ kind: "id", key: JSON.stringify([unit.type, "id", message.id]) });
     }
-    return [...new Set([...streams, ...sequences, ...ids])];
+    return Array.from(new Map([...streams, ...sequences, ...ids].map((source) => [source.key, source])).values());
   });
   const sourceCounts = new Map<string, number>();
   const bases = units.map(unitKeyBase);
   const baseCounts = new Map<string, number>();
   for (const sources of sourceKeys) for (const source of sources) {
-    sourceCounts.set(source, (sourceCounts.get(source) ?? 0) + 1);
+    sourceCounts.set(source.key, (sourceCounts.get(source.key) ?? 0) + 1);
   }
   for (const base of bases) baseCounts.set(base, (baseCounts.get(base) ?? 0) + 1);
   return sourceKeys.map((sources, index) => ({
-    sources: JSON.stringify(sources.filter((source) => sourceCounts.get(source) === 1)),
+    sources: sources.filter((source) => sourceCounts.get(source.key) === 1),
     // A sole turn/phase row can keep its live identity when replay replaces
     // both its source id and sequence. Occurrence keys are unsafe otherwise.
     ...(bases[index].startsWith("turn-") && baseCounts.get(bases[index]) === 1

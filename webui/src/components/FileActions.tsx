@@ -6,6 +6,7 @@ import { floatingItemClassName, floatingItemFocusClassName, floatingSurfaceClass
 import { useFloatingPortal } from "@/components/ui/floating-portal";
 import { useToast } from "@/components/ui/toast";
 import { copyTextToClipboard } from "@/lib/clipboard";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import type { FileReferenceMetadata, FilePreviewPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +42,7 @@ export function FileActions({
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
   const resolveMetadata = context?.resolveMetadata;
   const portal = useFloatingPortal();
+  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("overlay");
   const point = useRef({ x: 0, y: 0 });
   const anchor = useRef({ getBoundingClientRect: () => new DOMRect(point.current.x, point.current.y, 0, 0) });
   const opener = useRef<HTMLElement | null>(null);
@@ -112,7 +114,7 @@ export function FileActions({
         {children}
       </span>
       <Menu.Portal container={portal ?? undefined}>
-        <Menu.Content aria-label={t("fileActions.menu", { name: path.split(/[\\/]/).pop() || path })}
+        <Menu.Content ref={surfaceRef} aria-label={t("fileActions.menu", { name: path.split(/[\\/]/).pop() || path })}
           align="start" sideOffset={4} collisionPadding={12}
           className={cn(floatingSurfaceClassName, floatingSurfaceMotionClassName, "min-w-40 origin-[var(--radix-popper-transform-origin)] rounded-control p-1 [&_[role=menuitem]]:py-1.5")}
           onClick={(event) => event.stopPropagation()}

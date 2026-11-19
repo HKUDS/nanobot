@@ -6,6 +6,7 @@ import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Button } from "@/components/ui/button";
 import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import type { PairingRequestInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +28,7 @@ export function PairingCodePopup({
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const attemptedCode = useRef<string | null>(null);
+  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("dialog");
   const normalizedCode = normalizePairingCode(value);
   const matchedRequest = useMemo(
     () => requests.find((request) => request.code === normalizedCode) ?? null,
@@ -74,6 +76,7 @@ export function PairingCodePopup({
 
   return (
     <div
+      ref={surfaceRef}
       role="dialog"
       aria-live="polite"
       aria-label={t("app.pairing.title", { defaultValue: "Pair a chat user" })}

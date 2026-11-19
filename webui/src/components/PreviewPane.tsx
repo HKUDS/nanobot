@@ -1,5 +1,5 @@
 import { surfaceFocusProps } from "@/lib/surface-focus";
-import { useEffect, useId, useRef, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, type PointerEvent, type ReactNode, type Ref } from "react";
 import { SidebarPanel } from "@/components/ui/sidebar-panel";
 import { PanelRightClose, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { sidePanelSurfaceClassName } from "@/components/ui/floating-surface";
 
 /** One stable sidebar shell: switching targets never replays its opening animation. */
-export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onCloseTab, onClose, onResizeStart, children }: {
+export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onCloseTab, onClose, panelRef, onResizeStart, children }: {
   tabs: PreviewTab[];
   activeId: string;
   width: number;
@@ -19,6 +19,7 @@ export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onClos
   onSelect: (id: string) => void;
   onCloseTab: (id: string) => void;
   onClose: () => void;
+  panelRef?: Ref<HTMLElement>;
   onResizeStart: (event: PointerEvent<HTMLButtonElement>) => void;
   children: ReactNode;
 }) {
@@ -46,7 +47,7 @@ export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onClos
     onCloseTab(tab.id);
   };
   const iconButton = "touch-target inline-flex size-8 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-  return <SidebarPanel aria-label={t("previewTabs.title")} data-testid="preview-pane" data-file-preview-panel
+  return <SidebarPanel ref={panelRef} aria-label={t("previewTabs.title")} data-testid="preview-pane" data-file-preview-panel
     width={width} isClosing={isClosing} contentClassName={sidePanelSurfaceClassName}
     header={<>
         <div ref={tabList} role="tablist" aria-label={t("previewTabs.title")} className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

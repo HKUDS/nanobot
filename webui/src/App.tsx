@@ -25,11 +25,21 @@ import { invalidateToolsCatalog } from "@/lib/tools-catalog-cache";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { StartupShell } from "@/components/StartupShell";
-import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
-import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
-import { webuiThreadCache } from "@/lib/webui-thread-cache";
+import { ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { isAppsSection, type SettingsExitGuard, type SettingsFocusTarget } from "@/components/settings/contracts";
+import {
+  RESTART_ROUTE_KEY,
+  RESTART_STARTED_KEY,
+  changesSettingsSurface,
+  defaultShellRoute,
+  readShellRoute,
+  rememberRestartRoute,
+  shellViewForSettingsSection,
+  writeShellRoute,
+  type ShellRoute,
+  type ShellView,
+} from "@/shell-route";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
 import { transitionSession } from "@/components/thread/session-transition";
 import {
@@ -52,6 +62,7 @@ import {
 import { ToastProvider, useToast } from "@/components/ui/toast";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
+import { useLocalGateway } from "@/hooks/useLocalGateway";
 import { useSessions } from "@/hooks/useSessions";
 import { useReconnectRuns } from "@/hooks/useReconnectRuns";
 import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
@@ -63,18 +74,8 @@ import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { useReadingTypography } from "@/hooks/useReadingTypography";
 import { cn } from "@/lib/utils";
-import {
-  BootstrapAuthRequiredError,
-  clearSavedSecret,
-  consumeUrlBootstrapSecret,
-  deriveWsUrl,
-  fetchBootstrap,
-  loadSavedSecret,
-  saveSecret,
-} from "@/lib/bootstrap";
 import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
-import { NanobotClient } from "@/lib/nanobot-client";
 import { BrowserNotifications, useBrowserNotificationLifecycle } from "@/components/BrowserNotifications";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { FilePreviewStore } from "@/hooks/useFilePreviewState";
@@ -83,7 +84,6 @@ import { BackgroundProvider } from "@/providers/BackgroundProvider";
 import { useVersionCheck } from "@/providers/VersionCheckProvider";
 import { useUpdateFlow } from "@/providers/UpdateFlowProvider";
 import type {
-  BootstrapResponse,
   ChatSummary,
   RuntimeSurface,
   SessionAutomationJob,
@@ -97,57 +97,20 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { HoverHint } from "@/components/ui/hover-hint";
 import { fetchSettings, fetchWorkspaces } from "@/lib/api";
-import {
-  createRuntimeHost,
-  isNativeRuntime,
-  toRuntimeSurface,
-} from "@/lib/runtime";
+import { isNativeRuntime } from "@/lib/runtime";
 import { projectNameFromPath, scopeWithAccessMode } from "@/lib/workspace";
 import {
   createTemporaryChatSession,
   deriveTemporaryChatTitle,
 } from "@/lib/temporary-chat";
 
-type BootState =
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "auth" }
-  | {
-      status: "ready";
-      client: NanobotClient;
-      token: string;
-      tokenExpiresAt: number | null;
-      modelName: string | null;
-      ingressLimits: BootstrapResponse["limits"] | null;
-      runtimeSurface: RuntimeSurface;
-      webuiCapabilities: string[];
-    };
-
-function bootstrapCapabilities(boot: BootstrapResponse): string[] {
-  const capabilities = boot.terminal?.webui?.capabilities;
-  return Array.isArray(capabilities) ? capabilities.filter((entry) => typeof entry === "string") : [];
-}
-
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
 const SESSION_UPDATES_STORAGE_KEY = "nanobot-webui.sidebar.session-updates.v1";
 const LEGACY_COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
-const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
-const RESTART_ROUTE_KEY = "nanobot-webui.restartRoute";
-const RESTART_ROUTE_TTL_MS = 5 * 60 * 1000;
 const SIDEBAR_WIDTH = 272;
 const SIDEBAR_WIDTH_STORAGE_KEY = "nanobot-webui.sidebar.width";
 const SIDEBAR_RAIL_WIDTH = 56;
 const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
-const TOKEN_REFRESH_MARGIN_MS = 30_000;
-const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "remote";
-type ShellRoute = {
-  view: ShellView;
-  activeKey: string | null;
-  settingsSection: SettingsSectionKey;
-  settingsFocus?: SettingsFocusTarget;
-  temporary?: boolean;
-};
 const loadThreadShell = () => import("@/components/thread/ThreadShell");
 const ThreadShell = lazy(() => loadThreadShell().then(
   (module) => ({ default: module.ThreadShell }),
@@ -169,214 +132,6 @@ const RenameDialog = lazy(async () => {
   const module = await import("@/components/RenameDialog");
   return { default: module.RenameDialog };
 });
-
-const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
-  "capabilities",
-  "overview",
-  "about",
-  "appearance",
-  "notifications",
-  "models",
-  "image",
-  "voice",
-  "browser",
-  "channels",
-  "apps",
-  "automations",
-  "memory",
-  "skills",
-  "runtime",
-  "advanced",
-];
-
-function isSettingsSectionKey(value: string | null): value is SettingsSectionKey {
-  return SETTINGS_SECTION_KEYS.includes(value as SettingsSectionKey);
-}
-
-function defaultShellRoute(): ShellRoute {
-  return { view: "chat", activeKey: null, settingsSection: "overview" };
-}
-
-function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
-  if (isAppsSection(section)) return "apps";
-  if (section === "automations") return "automations";
-  return "settings";
-}
-
-function changesSettingsSurface(current: ShellRoute, next: ShellRoute): boolean {
-  return current.view !== "chat" && current.view !== "remote" &&
-    (current.view !== next.view || current.settingsSection !== next.settingsSection);
-}
-
-function fallbackRestartHash(hash: string): boolean {
-  return !hash || hash === "/" || hash === "/new";
-}
-
-function rememberRestartRoute(): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(RESTART_ROUTE_KEY, window.location.hash || "#/new");
-  } catch {
-    // ignore storage errors
-  }
-}
-
-function maybeRestoreRestartHash(hash: string): string {
-  if (typeof window === "undefined" || !fallbackRestartHash(hash)) return hash;
-  try {
-    const startedAt = Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
-    const storedHash = window.localStorage.getItem(RESTART_ROUTE_KEY);
-    if (!startedAt || !storedHash || Date.now() - startedAt > RESTART_ROUTE_TTL_MS) {
-      window.localStorage.removeItem(RESTART_ROUTE_KEY);
-      return hash;
-    }
-    window.localStorage.removeItem(RESTART_ROUTE_KEY);
-    const nextHash = storedHash.startsWith("#") ? storedHash : `#${storedHash}`;
-    window.history.replaceState(
-      null,
-      "",
-      `${window.location.pathname}${window.location.search}${nextHash}`,
-    );
-    return nextHash.slice(1);
-  } catch {
-    return hash;
-  }
-}
-
-function readShellRoute(): ShellRoute {
-  if (typeof window === "undefined") return defaultShellRoute();
-  const currentHash = window.location.hash.startsWith("#")
-    ? window.location.hash.slice(1)
-    : window.location.hash;
-  const hash = maybeRestoreRestartHash(currentHash);
-  if (!hash || hash === "/" || hash === "/new") return defaultShellRoute();
-
-  const [path, query = ""] = hash.split("?", 2);
-  const params = new URLSearchParams(query);
-  const rawSettingsSection = params.get("section");
-  const settingsSection = isSettingsSectionKey(rawSettingsSection)
-    ? rawSettingsSection
-    : "overview";
-  const saved: unknown = window.history.state?.nanobotReturnChat;
-  const returnChat = saved && typeof saved === "object" && "hash" in saved
-    && saved.hash === window.location.hash ? saved : null;
-  const activeKey = params.get("chat")?.trim()
-    || (returnChat && "key" in returnChat && typeof returnChat.key === "string"
-      ? returnChat.key : null);
-  const temporary = Boolean(returnChat && "temporary" in returnChat && returnChat.temporary === true);
-
-  if (path === "/settings") {
-    const focus = params.get("focus");
-    return {
-      view: shellViewForSettingsSection(settingsSection),
-      activeKey,
-      temporary,
-      settingsSection,
-      settingsFocus: settingsSection === "advanced" && (focus === "sandbox" || focus === "sandbox-launcher")
-        ? focus
-        : settingsSection === "models" && focus?.startsWith("image-input:")
-          ? `image-input:${focus.slice("image-input:".length)}`
-          : undefined,
-    };
-  }
-  if (path === "/apps") {
-    return { view: "apps", activeKey, temporary, settingsSection: isAppsSection(settingsSection) ? settingsSection : "apps" };
-  }
-  if (path === "/automations") {
-    return { view: "automations", activeKey, temporary, settingsSection: "automations" };
-  }
-  if (path === "/channels") {
-    return { view: "apps", activeKey, temporary, settingsSection: "channels" };
-  }
-  if (path === "/remote") {
-    return { view: "remote", activeKey, temporary, settingsSection: "overview" };
-  }
-  if (path === "/skills") {
-    return { view: "apps", activeKey, temporary, settingsSection: "skills" };
-  }
-  if (path.startsWith("/temporary/")) {
-    const encoded = path.slice("/temporary/".length);
-    try {
-      const chatId = decodeURIComponent(encoded).trim();
-      return chatId
-        ? {
-            view: "chat",
-            activeKey: `websocket:${chatId}`,
-            settingsSection: "overview",
-            temporary: true,
-          }
-        : defaultShellRoute();
-    } catch {
-      return defaultShellRoute();
-    }
-  }
-  if (path.startsWith("/chat/")) {
-    const encoded = path.slice("/chat/".length);
-    try {
-      const key = decodeURIComponent(encoded).trim();
-      return key
-        ? { view: "chat", activeKey: key, settingsSection: "overview" }
-        : defaultShellRoute();
-    } catch {
-      return defaultShellRoute();
-    }
-  }
-  return defaultShellRoute();
-}
-
-function shellRouteHash(route: ShellRoute): string {
-  if (route.view === "chat") {
-    if (route.temporary && route.activeKey?.startsWith("websocket:")) {
-      const chatId = route.activeKey.slice("websocket:".length);
-      return `#/temporary/${encodeURIComponent(chatId)}`;
-    }
-    return route.activeKey
-      ? `#/chat/${encodeURIComponent(route.activeKey)}`
-      : "#/new";
-  }
-  const params = new URLSearchParams();
-  if (route.view === "settings" && route.settingsSection !== "overview") {
-    params.set("section", route.settingsSection);
-    if (route.settingsFocus) params.set("focus", route.settingsFocus);
-  }
-  if (route.view === "apps" && route.settingsSection !== "apps") {
-    params.set("section", route.settingsSection);
-  }
-  const query = params.toString();
-  return `#/${route.view}${query ? `?${query}` : ""}`;
-}
-
-function writeShellRoute(route: ShellRoute, replace = false): void {
-  if (typeof window === "undefined") return;
-  const nextHash = shellRouteHash(route);
-  const state = {
-    ...window.history.state,
-    nanobotReturnChat: route.view === "chat" ? null : {
-      hash: nextHash,
-      key: route.activeKey,
-      temporary: route.temporary === true,
-    },
-  };
-  const url = `${window.location.pathname}${window.location.search}${nextHash}`;
-  if (replace || window.location.hash === nextHash) {
-    window.history.replaceState(state, "", url);
-  } else {
-    window.history.pushState(state, "", url);
-  }
-}
-
-function bootstrapTokenExpiresAt(expiresInSeconds: number): number {
-  return Date.now() + Math.max(0, expiresInSeconds) * 1000;
-}
-
-function tokenRefreshDelayMs(expiresAt: number): number {
-  const remaining = Math.max(0, expiresAt - Date.now());
-  const margin = Math.min(
-    TOKEN_REFRESH_MARGIN_MS,
-    Math.max(1_000, remaining / 2),
-  );
-  return Math.max(TOKEN_REFRESH_MIN_DELAY_MS, remaining - margin);
-}
 
 function AuthForm({ onSecret }: {
   onSecret: (secret: string, onAuthRejected: () => void) => void;
@@ -590,12 +345,6 @@ function normalizeWorkspaceScope(scope: WorkspaceScopePayload): WorkspaceScopePa
   };
 }
 
-function isBootstrapAuthRequired(error: unknown): boolean {
-  if (error instanceof BootstrapAuthRequiredError) return true;
-  const msg = error instanceof Error ? error.message : String(error);
-  return msg.includes("HTTP 401") || msg.includes("HTTP 403");
-}
-
 function HostChrome({
   rightAction,
 }: {
@@ -612,12 +361,8 @@ function HostChrome({
   );
 }
 
-function resolveRuntimeSurface(
-  surface: RuntimeSurface | null | undefined,
-  fallback: RuntimeSurface,
-): RuntimeSurface {
-  if (isNativeRuntime(surface)) return "native";
-  return surface ? toRuntimeSurface(surface) : fallback;
+function prefetchChat() {
+  if (readShellRoute().view === "chat") void loadThreadShell().catch(() => {});
 }
 
 export default function App() {
@@ -625,129 +370,7 @@ export default function App() {
   useBrowserNotificationLifecycle();
   useReadingTypography();
   const { t } = useTranslation();
-  const [state, setState] = useState<BootState>({ status: "loading" });
-  const bootstrapSecretRef = useRef("");
-
-  const refreshReadyClient = useCallback(
-    async (client: NanobotClient, fallbackSurface: RuntimeSurface, signal?: AbortSignal) => {
-      const boot = await fetchBootstrap("", bootstrapSecretRef.current);
-      signal?.throwIfAborted();
-      const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
-      const runtimeSurface = resolveRuntimeSurface(boot.runtime_surface, fallbackSurface);
-      const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
-      const tokenExpiresAt = boot.expires_in
-        ? bootstrapTokenExpiresAt(boot.expires_in)
-        : null;
-      if (runtimeHost.socketFactory) {
-        client.updateUrl(url, runtimeHost.socketFactory);
-      } else {
-        client.updateUrl(url);
-      }
-      client.updateMaxFrameBytes(boot.limits?.transport.max_frame_bytes);
-      setState((current) =>
-        current.status === "ready" && current.client === client
-          ? {
-              ...current,
-              token: boot.api_token ?? "",
-              tokenExpiresAt,
-              modelName: boot.model_name ?? current.modelName,
-              ingressLimits: boot.limits ?? current.ingressLimits,
-              runtimeSurface,
-              webuiCapabilities: bootstrapCapabilities(boot),
-            }
-          : current,
-      );
-      return { token: boot.api_token ?? "", url };
-    },
-    [],
-  );
-
-  const bootstrapWithSecret = useCallback(
-    (secret: string, onAuthRejected?: () => void) => {
-      let cancelled = false;
-      if (readShellRoute().view === "chat") void loadThreadShell().catch(() => {});
-      (async () => {
-        if (!onAuthRejected) setState({ status: "loading" });
-        try {
-          const boot = await fetchBootstrap("", secret);
-          if (cancelled) return;
-          if (secret) saveSecret(secret);
-          const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
-          activateReloadCache(url);
-          const runtimeSurface = resolveRuntimeSurface(boot.runtime_surface, "browser");
-          const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
-          const client = new NanobotClient({
-            url,
-            maxFrameBytes: boot.limits?.transport.max_frame_bytes,
-            socketFactory: runtimeHost.socketFactory,
-            onReauth: async (signal) => {
-              try {
-                const refreshed = await refreshReadyClient(client, runtimeSurface, signal);
-                return refreshed.url;
-              } catch {
-                return null;
-              }
-            },
-          });
-          bootstrapSecretRef.current = secret;
-          client.connect();
-          setState({
-            status: "ready",
-            client,
-            token: boot.api_token ?? "",
-            tokenExpiresAt: boot.expires_in
-              ? bootstrapTokenExpiresAt(boot.expires_in)
-              : null,
-            modelName: boot.model_name ?? null,
-            ingressLimits: boot.limits ?? null,
-            runtimeSurface,
-            webuiCapabilities: bootstrapCapabilities(boot),
-          });
-        } catch (e) {
-          if (cancelled) return;
-          if (isBootstrapAuthRequired(e)) {
-            clearReloadCache();
-            clearStoredComposerDrafts();
-            webuiThreadCache.clear();
-            if (onAuthRejected) onAuthRejected();
-            else setState({ status: "auth" });
-          } else {
-            setState({
-              status: "error",
-              message: e instanceof Error ? e.message : String(e),
-            });
-          }
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    },
-    [refreshReadyClient],
-  );
-
-  useEffect(() => {
-    if (state.status !== "ready" || state.tokenExpiresAt === null) return;
-    const client = state.client;
-    const timer = window.setTimeout(async () => {
-      try {
-        await refreshReadyClient(client, state.runtimeSurface);
-      } catch (e) {
-        if (isBootstrapAuthRequired(e)) {
-          clearReloadCache();
-          clearStoredComposerDrafts();
-          webuiThreadCache.clear();
-          setState({ status: "auth" });
-        }
-      }
-    }, tokenRefreshDelayMs(state.tokenExpiresAt));
-    return () => window.clearTimeout(timer);
-  }, [refreshReadyClient, state]);
-
-  useEffect(() => {
-    const saved = consumeUrlBootstrapSecret() || loadSavedSecret();
-    return bootstrapWithSecret(saved);
-  }, [bootstrapWithSecret]);
+  const { state, bootstrapWithSecret, changeModelName, logout, restartEngine } = useLocalGateway(prefetchChat);
 
   if (state.status === "loading") {
     return <StartupShell />;
@@ -769,48 +392,6 @@ export default function App() {
     );
   }
 
-  const handleModelNameChange = (modelName: string | null) => {
-    setState((current) =>
-      current.status === "ready" ? { ...current, modelName } : current,
-    );
-  };
-
-  const handleLogout = () => {
-    if (state.status === "ready") {
-      state.client.close();
-    }
-    clearSavedSecret();
-    clearReloadCache();
-    clearStoredComposerDrafts();
-    webuiThreadCache.clear();
-    setState({ status: "auth" });
-  };
-
-  const handleNativeEngineRestart = async (): Promise<string> => {
-    const runtimeHost = createRuntimeHost(state.runtimeSurface);
-    if (!runtimeHost.restartEngine) {
-      throw new Error("native engine restart is unavailable");
-    }
-    rememberRestartRoute();
-    try {
-      window.localStorage.setItem(RESTART_STARTED_KEY, String(Date.now()));
-    } catch {
-      // ignore storage errors
-    }
-    try {
-      await runtimeHost.restartEngine();
-      const refreshed = await refreshReadyClient(state.client, state.runtimeSurface);
-      return refreshed.token;
-    } finally {
-      try {
-        window.localStorage.removeItem(RESTART_STARTED_KEY);
-        window.localStorage.removeItem(RESTART_ROUTE_KEY);
-      } catch {
-        // ignore storage errors
-      }
-    }
-  };
-
   return (
     <ClientProvider
       client={state.client}
@@ -823,9 +404,9 @@ export default function App() {
       <BrowserNotifications client={state.client} />
       <BackgroundProvider><RemoteInstances><ToastProvider><Shell
         runtimeSurface={state.runtimeSurface}
-        onModelNameChange={handleModelNameChange}
-        onLogout={handleLogout}
-        onNativeEngineRestart={handleNativeEngineRestart}
+        onModelNameChange={changeModelName}
+        onLogout={logout}
+        onNativeEngineRestart={restartEngine}
       /></ToastProvider></RemoteInstances></BackgroundProvider>
     </ClientProvider>
   );

@@ -12,6 +12,7 @@ import { useToast } from "@/components/ui/toast";
 import { useClient } from "@/providers/ClientProvider";
 import { groupRemoteProfiles, isCompatibilityError, remoteAction, type RemoteInspection, type RemoteProfile } from "@/lib/remote-instances";
 import { cn } from "@/lib/utils";
+import { hasOpenDialogSurface } from "@/lib/dom-overlays";
 import { parseSSHAddress } from "@/lib/ssh-address";
 import { clearPairReturn, readPairReturn, subscribePairReturn } from "@/lib/remote-pair-return";
 import { useRemoteConnections } from "./remote-context";
@@ -197,7 +198,7 @@ export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChro
         if (reason instanceof Error && reason.message === "same_instance" && showToast
           && !editorOpen && !fingerprint && !detailsOpen && page.current
           && !page.current.closest("[hidden], [inert], [aria-hidden='true']")
-          && !document.querySelector(":is([role='dialog'], [role='alertdialog']):not([data-state='closed'])")) {
+          && !hasOpenDialogSurface()) {
           showToast({ message: t("remote.errors.same_instance"), tone: "error", dedupeKey: "remote-same-instance" });
           return;
         }

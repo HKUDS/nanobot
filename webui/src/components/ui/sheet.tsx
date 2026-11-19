@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { useTranslation } from "react-i18next";
 
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 import { modalOverlayClassName, sidePanelSurfaceClassName } from "./floating-surface";
 
@@ -84,11 +85,12 @@ const SheetContent = React.forwardRef<
   ref,
 ) => {
   const { t } = useTranslation();
+  const surfaceRef = useOverlaySurfaceRef("dialog", ref);
   return (
     <SheetPortal>
       <SheetOverlay className={cn((side === "right" || side === "left") && modalOverlayClassName, overlayClassName)} />
       <DialogPrimitive.Content
-        ref={ref}
+        ref={surfaceRef}
         className={cn(
           sheetVariants({ side }),
           "data-[state=open]:animate-in data-[state=closed]:animate-out",

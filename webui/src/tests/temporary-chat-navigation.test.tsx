@@ -10,6 +10,7 @@ import { canonicalThreadPayload } from "./thread-test-payload";
 
 let groupedTopics = false;
 let withFiles = false;
+let withPairing = false;
 const previewFile = (path: string) => ({
   path: `/workspace/${path}`, display_path: path, project_path: "/workspace",
   language: "text", content: `Preview of ${path}`, size: 20, truncated: false,
@@ -105,12 +106,16 @@ describe("temporary chat navigation", () => {
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({ token: "test", api_token: "test", ws_path: "/" });
     groupedTopics = false;
     withFiles = false;
+    withPairing = false;
     localStorage.clear();
     sessionStorage.clear();
     window.history.replaceState(null, "", "/");
     vi.stubGlobal("WebSocket", TestSocket);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
+      if (path === "/api/settings/pairing") {
+        return Response.json({ requests: withPairing ? [{ code: "ABCD-EFGH", channel: "telegram", sender_id: "1" }] : [] });
+      }
       if (path === "/api/sessions") {
         return Response.json({ sessions: ["regular", ...(groupedTopics ? ["child"] : [])].map((id) => ({
           key: `websocket:${id}`,
@@ -345,14 +350,47 @@ describe("temporary chat navigation", () => {
     expect(screen.getAllByRole("tab")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "notes.txt" }));
     await screen.findByText("Preview of notes.txt");
-    const dialog = document.createElement("div");
-    dialog.setAttribute("role", "dialog");
-    document.body.append(dialog);
-    fireEvent.keyDown(window, { key: "Escape" });
+    withPairing = true;
+    act(() => TestSocket.current.receive({ event: "pairing_changed" }));
+    const dialog = await screen.findByRole("dialog", { name: "Pair account" });
+    // This popup does not intercept Escape itself; the preview must still yield.
+    fireEvent.keyDown(within(dialog).getByRole("textbox", { name: "Pairing code" }), { key: "Escape" });
     expect(screen.getByTestId("file-preview-panel")).toBeInTheDocument();
-    dialog.remove();
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    fireEvent.keyDown(screen.getByRole("button", { name: "notes.txt" }), { key: "Escape" });
     await waitFor(() => expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument());
+  });
+
+  it("commits a file preview drag and restores the page when closing mid-drag", async () => {
+    withFiles = true;
+    render(<App />);
+    await screen.findByRole("button", { name: "Temporary chat" });
+    act(() => TestSocket.current.open());
+    await selectTopic("Regular topic");
+    fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
+    await screen.findByText("Preview of notes.txt");
+
+    const panel = screen.getByTestId("preview-pane");
+    vi.spyOn(panel.parentElement!, "getBoundingClientRect")
+      .mockReturnValue(DOMRect.fromRect({ width: 1_200 }));
+    fireEvent(window, new Event("resize"));
+    const handle = screen.getByRole("button", { name: "Resize file preview" });
+    const { cursor, userSelect } = document.body.style;
+    fireEvent.pointerDown(handle, { clientX: 700 });
+    expect(document.body.style.cursor).toBe("col-resize");
+    fireEvent.pointerMove(window, { clientX: 570 });
+    fireEvent.pointerUp(window);
+    expect(panel.style.getPropertyValue("--file-preview-width")).toBe("630px");
+    expect(document.body.style.cursor).toBe(cursor);
+
+    fireEvent.pointerDown(handle, { clientX: 600 });
+    fireEvent.click(screen.getByRole("button", { name: "Close notes.txt" }));
+    expect(document.body.style.cursor).toBe(cursor);
+    expect(document.body.style.userSelect).toBe(userSelect);
+    await waitFor(() => expect(panel).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "notes.txt" }));
+    expect(screen.getByTestId("preview-pane").style.getPropertyValue("--file-preview-width")).toBe("630px");
   });
 
   it("forgets preview paths on temporary close and disconnect", async () => {
