@@ -2153,7 +2153,7 @@ html[data-custom-background] .markdown-inline-code {
 html[data-custom-background] .thread-history-status {
   --thread-history-background: hsl(var(--background) / 0.65);
 }
-html[data-custom-background] [data-testid="file-edit-diff"] {
+html[data-custom-background] .file-edit-diff-surface {
   background-color: hsl(var(--background) / 0.78);
   backdrop-filter: blur(12px);
 }

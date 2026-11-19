@@ -765,7 +765,7 @@ async def test_webui_deletion_cancels_parent_work_and_removes_child_sessions(tmp
             connection, "session.delete", {"key": "websocket:parent"},
         )
         assert response.status_code == 200
-        assert json.loads(response.body)["deleted"] is True
+        assert response.result == {"deleted": True}
         gateway.http.discard_session.assert_awaited_once_with("websocket:parent")
         assert sessions.read_session_file("websocket:parent") is None
         assert sessions.read_session_file(child_key) is None

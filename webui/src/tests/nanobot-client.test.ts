@@ -341,7 +341,7 @@ describe("NanobotClient", () => {
     expect(notice).toHaveBeenCalledWith({ event, temporary: false });
     client.close();
   });
-  it("bounds regular replay tails but retains temporary events until discard", async () => {
+  it("retains a larger replay tail for temporary chats and clears it on discard", async () => {
     const client = new NanobotClient({
       url: "ws://test", reconnect: false,
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
@@ -357,13 +357,20 @@ describe("NanobotClient", () => {
         socket.fakeMessage({ event: "delta", chat_id: chatId, text: String(index) });
       }
     }
+    for (let index = 2_010; index < 20_010; index++) {
+      socket.fakeMessage({ event: "delta", chat_id: "temporary", text: String(index) });
+    }
     const regular = vi.fn();
-    const temporary = vi.fn();
+    const temporary: string[] = [];
     client.onTranscript("regular", regular);
-    const unsubscribe = client.onTranscript("temporary", temporary);
+    const unsubscribe = client.onTranscript("temporary", (event) => {
+      if (event.event === "delta") temporary.push(event.text);
+    });
     expect(regular).toHaveBeenCalledTimes(2_000);
     expect(regular.mock.calls[0][0].text).toBe("10");
-    expect(temporary.mock.calls.filter(([event]) => event.event === "delta")).toHaveLength(2_010);
+    expect(temporary).toHaveLength(20_000);
+    expect(temporary[0]).toBe("10");
+    expect(temporary.at(-1)).toBe("20009");
     unsubscribe();
     socket.fakeMessage({ event: "delta", chat_id: "temporary", text: "discard me" });
     client.discardTemporaryChat("temporary");

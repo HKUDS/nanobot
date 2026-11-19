@@ -37,7 +37,6 @@ async def test_background_auth_and_staged_upload(tmp_path):
     handler.tokens = SimpleNamespace(check_api_token=lambda request: request.headers.get("Authorization") == "Bearer valid")
     router = WebUICommandRouter.__new__(WebUICommandRouter)
     router._background_lock = asyncio.Lock()
-    router._background_references = set()
     router._http_router = handler
     router._uploads = SimpleNamespace(store=store, owner=lambda connection: connection)
     router.request_locks = {}
@@ -106,7 +105,6 @@ async def test_background_style_persistence_and_validation(tmp_path):
     handler.tokens = SimpleNamespace(check_api_token=lambda request: request.headers.get("Authorization") == "Bearer valid")
     router = WebUICommandRouter.__new__(WebUICommandRouter)
     router._background_lock = asyncio.Lock()
-    router._background_references = set()
     router._http_router = handler
     router.request_locks = {}
     path = "/api/settings/background-style"
@@ -173,8 +171,6 @@ async def test_background_worker_cancellation_survives_disconnect(tmp_path, monk
     import asyncio
     import threading
 
-    from nanobot.webui import background
-
     store = AttachmentStore(tmp_path / "staging")
     body = image_bytes()
 
@@ -184,24 +180,28 @@ async def test_background_worker_cancellation_survives_disconnect(tmp_path, monk
     ref = await store.upload(chunks(), owner="alice", mime="image/png", size=len(body))
     router = WebUICommandRouter.__new__(WebUICommandRouter)
     router._background_lock = asyncio.Lock()
-    router._background_references = set()
     router._http_router = SimpleNamespace(bus=MessageBus(), settings=SimpleNamespace(
         config=SimpleNamespace(path=tmp_path / "config.json")))
     router._uploads = SimpleNamespace(store=store, owner=lambda connection: connection)
     router.request_locks = {}
+    staged_path = store.inspect([ref], owner="alice")[0].path
     started, release = threading.Event(), threading.Event()
-    original = background.save_background
+    original_open = type(staged_path).open
+    event_loop_thread = threading.get_ident()
 
-    def slow(*args):
-        started.set()
-        assert release.wait(5)
-        original(*args)
+    def slow_read(path, mode="r", *args, **kwargs):
+        if path == staged_path and mode == "rb":
+            assert threading.get_ident() != event_loop_thread
+            started.set()
+            assert release.wait(5)
+        return original_open(path, mode, *args, **kwargs)
 
-    monkeypatch.setattr(background, "save_background", slow)
+    monkeypatch.setattr(type(staged_path), "open", slow_read)
     task = asyncio.create_task(router.execute_webui_request("alice", "background.update", {"reference": ref}))
     assert await asyncio.to_thread(started.wait, 3)
-    # The event loop remains responsive, and disconnect cannot invalidate the worker's descriptor.
+    # Disconnect cannot remove the staged source even before the worker opens it.
     store.discard_owner("alice")
+    assert staged_path.exists()
     task.cancel()
     await asyncio.sleep(0)
     assert not task.done()
@@ -209,6 +209,7 @@ async def test_background_worker_cancellation_survives_disconnect(tmp_path, monk
     with pytest.raises(asyncio.CancelledError):
         await task
     assert (tmp_path / "webui" / "background.png").exists()
+    assert not staged_path.exists()
 
 
 async def test_background_worker_failure_releases_upload_for_retry(tmp_path, monkeypatch):
@@ -223,7 +224,6 @@ async def test_background_worker_failure_releases_upload_for_retry(tmp_path, mon
     ref = await store.upload(chunks(), owner="alice", mime="image/png", size=len(body))
     router = WebUICommandRouter.__new__(WebUICommandRouter)
     router._background_lock = asyncio.Lock()
-    router._background_references = set()
     router._http_router = SimpleNamespace(bus=MessageBus(), settings=SimpleNamespace(
         config=SimpleNamespace(path=tmp_path / "config.json")))
     router._uploads = SimpleNamespace(store=store, owner=lambda connection: connection)
@@ -251,7 +251,6 @@ async def test_invalid_background_releases_upload_for_retry(tmp_path):
 
     router = WebUICommandRouter.__new__(WebUICommandRouter)
     router._background_lock = asyncio.Lock()
-    router._background_references = set()
     router._http_router = SimpleNamespace(bus=MessageBus(), settings=SimpleNamespace(
         config=SimpleNamespace(path=tmp_path / "config.json")))
     router._uploads = SimpleNamespace(store=store, owner=lambda connection: connection)
@@ -281,7 +280,6 @@ async def test_background_waiter_cancelled_does_not_write(tmp_path, monkeypatch)
     bus = MessageBus()
     router = WebUICommandRouter.__new__(WebUICommandRouter)
     router._background_lock = asyncio.Lock()
-    router._background_references = set()
     router._http_router = SimpleNamespace(bus=bus, settings=SimpleNamespace(
         config=SimpleNamespace(path=tmp_path / "config.json")))
     router._uploads = SimpleNamespace(store=store, owner=lambda connection: connection)

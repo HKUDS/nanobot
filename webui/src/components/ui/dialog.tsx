@@ -7,6 +7,7 @@ import {
   modalOverlayClassName,
   modalSurfaceClassName,
 } from "@/components/ui/floating-surface";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 import { FloatingPortalContext } from "@/components/ui/floating-portal";
 
@@ -47,6 +48,7 @@ const DialogPositionedContent = React.forwardRef<
     overlayClassName?: string;
   }
 >(({ contained, positionerStyle, placement, overlayClassName, ...props }, ref) => {
+  const surfaceRef = useOverlaySurfaceRef("dialog", ref);
   const Overlay = contained ? "div" : DialogOverlay;
   return <Overlay data-dialog-backdrop {...(contained ? {} : { forceMount: true })} className={cn(contained && "absolute inset-0 z-50", overlayClassName)}>
   <div className={cn("fixed inset-0 z-50 flex items-start justify-center overscroll-contain", placement === "bottom" ? "overflow-clip" : "overflow-y-auto p-4", contained && "absolute")} style={{
@@ -55,7 +57,7 @@ const DialogPositionedContent = React.forwardRef<
     bottom: "auto",
     ...(contained ? { top: 0, height: "100%" } : positionerStyle),
   }}>
-    <DialogPrimitive.Content ref={ref} {...props} />
+    <DialogPrimitive.Content ref={surfaceRef} {...props} />
   </div>
   </Overlay>;
 });

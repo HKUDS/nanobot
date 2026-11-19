@@ -3,6 +3,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 import type { UIImage } from "@/lib/types";
 import { ZoomableImage } from "@/components/ZoomableImage";
@@ -38,6 +39,7 @@ export function ImageLightbox({
   const total = images.length;
   const current = index !== null ? images[index] : null;
   const opener = useRef<HTMLElement | null>(null);
+  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("dialog");
 
   const go = useCallback(
     (delta: number) => {
@@ -93,6 +95,7 @@ export function ImageLightbox({
           )}
         />
         <DialogPrimitive.Content
+          ref={surfaceRef}
           aria-label={current.name ?? t("lightbox.title")}
           aria-describedby={undefined}
           onOpenAutoFocus={() => { opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }}

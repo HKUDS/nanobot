@@ -4,6 +4,7 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react";
 
 import { floatingSurfaceElevationClassName, floatingItemClassName } from "@/components/ui/floating-surface";
 import { useFloatingPortal } from "@/components/ui/floating-portal";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 import { ControlChevron } from "@/components/ui/control-chevron";
 
@@ -28,9 +29,10 @@ export function SelectContent({ children, ...props }: Pick<
   "children" | "onPointerUpCapture" | "onPointerDownOutside" | "onKeyDownCapture" | "onEscapeKeyDown" | "onCloseAutoFocus"
 >) {
   const container = useFloatingPortal();
+  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("overlay");
   return (
     <SelectPrimitive.Portal container={container ?? undefined}>
-      <SelectPrimitive.Content {...props} position="item-aligned" className={cn("z-50 max-h-[min(24rem,calc(100dvh-2rem))] min-w-[10rem] overflow-hidden rounded-control border border-transparent", floatingSurfaceElevationClassName)}>
+      <SelectPrimitive.Content ref={surfaceRef} {...props} position="item-aligned" className={cn("z-50 max-h-[min(24rem,calc(100dvh-2rem))] min-w-[10rem] overflow-hidden rounded-control border border-transparent", floatingSurfaceElevationClassName)}>
         <SelectPrimitive.ScrollUpButton className="flex h-6 items-center justify-center"><ChevronUp className="h-3.5 w-3.5" /></SelectPrimitive.ScrollUpButton>
         <SelectPrimitive.Viewport className="p-1">
           {children}

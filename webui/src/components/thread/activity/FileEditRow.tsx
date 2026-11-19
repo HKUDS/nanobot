@@ -206,7 +206,7 @@ function FileUnifiedDiff({
 
   const renderBody = () => (
     <div
-      className="mt-1 overflow-hidden rounded-md border border-border/55 bg-background/80 shadow-[0_1px_0_rgba(15,23,42,0.03)]"
+      className="file-edit-diff-surface mt-1 overflow-hidden rounded-md border border-border/55 bg-background/80 shadow-[0_1px_0_rgba(15,23,42,0.03)]"
       data-testid="file-edit-diff"
     >
       <DiffSyntaxHighlight language={language} text={diff.text!} diff={renderableDiff} lineLimit={lineLimit} />

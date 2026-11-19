@@ -32,6 +32,7 @@ import {
   Unplug,
   X,
 } from "lucide-react";
+import { useSidebarGroupMotion } from "@/hooks/useSidebarGroupMotion";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -342,9 +343,6 @@ export const ChatList = memo(function ChatList({
       observer?.disconnect();
     };
   }, [hasListHeader, loading, sessions.length, temporarySessions.length]);
-  const layoutRowRefs = useRef(new Map<string, HTMLElement>());
-  const pendingLayoutRectsRef = useRef<Map<string, DOMRect> | null>(null);
-  const layoutAnimationsRef = useRef(new Map<string, Animation>());
   const [collapsedPaneGroups, setCollapsedPaneGroups] = useState<Set<string>>(
     readCollapsedPaneGroups,
   );
@@ -551,19 +549,7 @@ export const ChatList = memo(function ChatList({
     });
   }, [loading, paneGroups]);
 
-  const measureLayoutRows = useCallback(() => {
-    const rects = new Map<string, DOMRect>();
-    for (const [key, row] of layoutRowRefs.current) {
-      rects.set(key, row.getBoundingClientRect());
-    }
-    return rects;
-  }, []);
-
-  const captureLayout = useCallback(() => {
-    for (const animation of layoutAnimationsRef.current.values()) animation.cancel();
-    layoutAnimationsRef.current.clear();
-    pendingLayoutRectsRef.current = measureLayoutRows();
-  }, [measureLayoutRows]);
+  const { registerRow, captureLayout } = useSidebarGroupMotion(collapsedGroups, collapsedPaneGroups);
 
   const togglePaneGroup = useCallback((key: string) => {
     captureLayout();
@@ -580,43 +566,6 @@ export const ChatList = memo(function ChatList({
     captureLayout();
     onToggleGroup(key);
   }, [captureLayout, onToggleGroup]);
-
-  useLayoutEffect(() => {
-    const previousRects = pendingLayoutRectsRef.current;
-    if (!previousRects) return;
-    pendingLayoutRectsRef.current = null;
-    const nextRects = measureLayoutRows();
-    const reduceMotion = typeof window.matchMedia === "function"
-      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduceMotion) return;
-    for (const [key, nextRect] of nextRects) {
-      const previousRect = previousRects.get(key);
-      const row = layoutRowRefs.current.get(key);
-      if (!previousRect || !row || typeof row.animate !== "function") continue;
-      const deltaY = previousRect.top - nextRect.top;
-      if (Math.abs(deltaY) < 0.5) continue;
-      const animation = row.animate(
-        [
-          { transform: `translateY(${deltaY}px)` },
-          { transform: "translateY(0)" },
-        ],
-        {
-          duration: 180,
-          easing: "cubic-bezier(0.2, 0, 0, 1)",
-        },
-      );
-      layoutAnimationsRef.current.set(key, animation);
-      animation.addEventListener("finish", () => {
-        if (layoutAnimationsRef.current.get(key) === animation) {
-          layoutAnimationsRef.current.delete(key);
-        }
-      }, { once: true });
-    }
-  }, [collapsedGroups, collapsedPaneGroups, measureLayoutRows]);
-
-  useEffect(() => () => {
-    for (const animation of layoutAnimationsRef.current.values()) animation.cancel();
-  }, []);
 
   if (initialLoading && sessions.length === 0 && temporarySessions.length === 0) {
     return (
@@ -796,8 +745,7 @@ export const ChatList = memo(function ChatList({
                 <div
                   ref={(element) => {
                     const key = `group:${group.id}`;
-                    if (element) layoutRowRefs.current.set(key, element);
-                    else layoutRowRefs.current.delete(key);
+                    registerRow(key, element);
                   }}
                   data-sidebar-group-header={group.id}
                 >
@@ -866,8 +814,7 @@ export const ChatList = memo(function ChatList({
                         <li
                           key={s.key}
                           ref={(element) => {
-                            if (element) layoutRowRefs.current.set(s.key, element);
-                            else layoutRowRefs.current.delete(s.key);
+                            registerRow(s.key, element);
                           }}
                           data-sidebar-tab-group="true"
                           data-pane-group-collapsed={paneGroupCollapsed ? "true" : undefined}
@@ -1008,8 +955,7 @@ export const ChatList = memo(function ChatList({
                       <li
                         key={s.key}
                         ref={(element) => {
-                          if (element) layoutRowRefs.current.set(s.key, element);
-                          else layoutRowRefs.current.delete(s.key);
+                          registerRow(s.key, element);
                         }}
                         className="relative min-w-0"
                       >

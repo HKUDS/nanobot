@@ -11,6 +11,7 @@ from nanobot.channels.websocket.attachment_http import AttachmentHTTP
 from nanobot.channels.websocket.attachment_store import AttachmentStore
 from nanobot.config.loader import get_config_path
 from nanobot.config.paths import get_media_dir
+from nanobot.webui.automation_routes import WebUIAutomationRoutes
 from nanobot.webui.gateway_endpoint import WebUIGatewayEndpoint
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
@@ -136,10 +137,16 @@ def build_gateway_services(
         settings=settings,
         skills_workspace_path=workspace_path,
         disabled_skills=disabled_skills,
-        cron_service=cron_service,
-        local_trigger_store=local_trigger_store,
-        cron_pending_job_ids=cron_pending_job_ids,
-        local_trigger_pending_ids=local_trigger_pending_ids,
+        automation_routes=WebUIAutomationRoutes(
+            session_manager=session_manager,
+            workspaces=workspaces,
+            cron_service=cron_service,
+            local_trigger_store=local_trigger_store,
+            cron_pending_job_ids=cron_pending_job_ids,
+            local_trigger_pending_ids=local_trigger_pending_ids,
+            channel_runtime_status=channel_runtime_status,
+            log=logger,
+        ),
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
         mcp_runtime_status=mcp_runtime_status,

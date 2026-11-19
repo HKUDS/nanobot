@@ -20,7 +20,8 @@ from nanobot.config.schema import MCPServerConfig
 from nanobot.runtime_admission import RuntimeBusyError
 from nanobot.webui.http_utils import http_json_response
 from nanobot.webui.mcp_presets_api import custom_mcp_action
-from nanobot.webui.settings_routes import WebUISettingsRouter
+from nanobot.webui.settings_contracts import MutationParams
+from nanobot.webui.settings_routes import _SETTINGS_ROUTES, WebUISettingsRouter
 from nanobot.webui.settings_services import WebUISettingsServices
 
 
@@ -58,21 +59,27 @@ def _router(
     )
 
 
-def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
-    request = SimpleNamespace(path=path, headers=Headers())
-    request._nanobot_webui_mutation_request = True
-    request._nanobot_webui_mutation_payload = payload
-    request._nanobot_trusted_proxy_authenticated = True
-    return request
+def _mutation_request(path: str, payload: dict[str, object]) -> tuple[str, MutationParams]:
+    if path.startswith("/api/settings/channels/") and "/connect/" in path:
+        _, channel, _, operation = path.rsplit("/", 3)
+        return f"settings.channel.connect.{operation}", MutationParams({"channel": channel, **payload})
+    action = _SETTINGS_ROUTES[path].mutation
+    assert action is not None
+    return action, MutationParams(payload)
 
 
-async def test_sandbox_check_is_authenticated_explicit_and_serialized(tmp_path, monkeypatch):
+async def _mutate(
+    router: WebUISettingsRouter, request: tuple[str, MutationParams],
+):
+    action, params = request
+    return await router.dispatch_mutation(None, Headers(), action, params)
+
+
+async def test_sandbox_check_is_websocket_only_and_serialized(tmp_path, monkeypatch):
     path = "/api/settings/sandbox/check"
     router = _router(config_path=tmp_path / "config.json")
     response = await router.dispatch(None, SimpleNamespace(path=path, headers=Headers()), path)
     assert response.status_code == 405
-    unauthorized = _router(authorized=False, config_path=tmp_path / "config.json")
-    assert (await unauthorized.dispatch(None, _mutation_request(path, {}), path)).status_code == 401
     started, release = asyncio.Event(), asyncio.Event()
 
     async def probe(config, workspace):
@@ -81,33 +88,30 @@ async def test_sandbox_check_is_authenticated_explicit_and_serialized(tmp_path, 
         return {"state": "passed", "reason": "", "launcher": "/usr/bin/bwrap", "revision": "test", "supported_backend": "bwrap"}
 
     monkeypatch.setattr("nanobot.webui.settings_system.check_sandbox", probe)
-    first = asyncio.create_task(router.dispatch(None, _mutation_request(path, {}), path))
+    first = asyncio.create_task(_mutate(router, _mutation_request(path, {})))
     await asyncio.wait_for(started.wait(), 2)
     try:
-        assert (await router.dispatch(None, _mutation_request(path, {}), path)).status_code == 409
+        assert (await _mutate(router, _mutation_request(path, {}))).status_code == 409
     finally:
         release.set()
     assert (await first).status_code == 200
-    assert (await router.dispatch(None, _mutation_request(path, {}), path)).status_code == 200
+    assert (await _mutate(router, _mutation_request(path, {}))).status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_nanobot_update_requires_auth_local_permission_and_websocket(tmp_path, monkeypatch):
+async def test_nanobot_update_requires_local_permission_and_websocket(tmp_path, monkeypatch):
     router = _router(config_path=tmp_path / "config.json")
     path = "/api/settings/nanobot-update/job/prepare"
     request = SimpleNamespace(path=path, headers=Headers())
     response = await router.dispatch(None, request, path)
     assert response.status_code == 405
-    response = await router.dispatch(None, _mutation_request(path, {}), path)
+    response = await _mutate(router, _mutation_request(path, {}))
     assert response.status_code == 403
-    unauthorized = _router(authorized=False, config_path=tmp_path / "config.json")
-    response = await unauthorized.dispatch(None, _mutation_request(path, {}), path)
-    assert response.status_code == 401
     monkeypatch.setattr(router._system, "allow_feature_package_install", lambda _: True)
-    response = await router.dispatch(None, _mutation_request(path, {"id": "invalid"}), path)
+    response = await _mutate(router, _mutation_request(path, {"id": "invalid"}))
     assert response.status_code == 400
     router._runtime_surface = "native"
-    response = await router.dispatch(None, _mutation_request(path, {}), path)
+    response = await _mutate(router, _mutation_request(path, {}))
     assert response.status_code == 409
 
 
@@ -155,9 +159,9 @@ async def test_provider_login_keeps_maintenance_busy_until_worker_exits(tmp_path
     ))
     monkeypatch.setattr("nanobot.webui.settings_api.settings_payload", lambda **_: {})
     path = "/api/settings/provider/oauth-login"
-    response = await router.dispatch(None, _mutation_request(path, {"provider": "github_copilot"}), path)
+    response = await _mutate(router, _mutation_request(path, {"provider": "github_copilot"}))
     assert response.status_code == 200
-    payload = json.loads(response.body)
+    payload = response.result
     with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
         pytest.fail("The authorization prompt still has a live worker")
     try:
@@ -172,9 +176,9 @@ async def test_provider_login_keeps_maintenance_busy_until_worker_exits(tmp_path
                 "/api/settings/provider/oauth-logout" if finish == "logout"
                 else "/api/settings/provider/oauth-login/complete"
             )
-            response = await router.dispatch(None, _mutation_request(path, {
+            response = await _mutate(router, _mutation_request(path, {
                 "provider": "github_copilot", "flow_id": payload["flow_id"], "cancel": "true",
-            }), path)
+            }))
             assert response.status_code == 200
             assert await asyncio.to_thread(stopping.wait, 1)
         assert router.settings.oauth_flows.get("github_copilot", payload["flow_id"]) is None
@@ -207,9 +211,9 @@ async def test_failed_codex_login_start_still_owns_late_worker(tmp_path, monkeyp
     monkeypatch.setattr(oauth, "login_oauth_interactive", login)
     path = "/api/settings/provider/oauth-login"
     try:
-        response = await router.dispatch(None, _mutation_request(path, {
+        response = await _mutate(router, _mutation_request(path, {
             "provider": "openai_codex", "remote_browser": "true",
-        }), path)
+        }))
         assert response.status_code == 502
         assert entered.is_set()
         with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
@@ -227,7 +231,6 @@ async def test_failed_codex_login_start_still_owns_late_worker(tmp_path, monkeyp
 async def test_channel_setup_blocks_maintenance_until_confirmed_cleanup(
     tmp_path, monkeypatch, close_fails,
 ) -> None:
-    router = _router(config_path=tmp_path / "config.json")
     cleanup_started, allow_cleanup = asyncio.Event(), asyncio.Event()
 
     class Connector:
@@ -248,10 +251,11 @@ async def test_channel_setup_blocks_maintenance_until_confirmed_cleanup(
         "nanobot.webui.settings_routes.load_channel_plugin",
         lambda _: SimpleNamespace(load_connector=lambda: connector),
     )
+    router = _router(config_path=tmp_path / "config.json")
     path = "/api/settings/channels/whatsapp/connect/start"
-    response = await router.dispatch(None, _mutation_request(path, {}), path)
+    response = await _mutate(router, _mutation_request(path, {}))
     assert response.status_code == 200
-    assert json.loads(response.body)["status"] == "pending"
+    assert response.result["status"] == "pending"
     with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
         pytest.fail("Returning a QR code does not finish its connection")
     shutdown = asyncio.create_task(router.close())
@@ -275,14 +279,14 @@ async def test_channel_setup_blocks_maintenance_until_confirmed_cleanup(
 
 @pytest.mark.asyncio
 async def test_legacy_connector_can_connect_but_cannot_claim_maintenance_idle(tmp_path, monkeypatch):
-    router = _router(config_path=tmp_path / "config.json")
     connector = SimpleNamespace(handle=AsyncMock(return_value={"status": "pending"}))
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.load_channel_plugin",
         lambda _: SimpleNamespace(load_connector=lambda: connector),
     )
+    router = _router(config_path=tmp_path / "config.json")
     path = "/api/settings/channels/custom/connect/start"
-    response = await router.dispatch(None, _mutation_request(path, {}), path)
+    response = await _mutate(router, _mutation_request(path, {}))
     assert response.status_code == 200
     await router.close()
     with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
@@ -457,9 +461,9 @@ async def test_settings_shutdown_joins_browser_authorization_and_releases_admiss
     monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
     router = _router(config_path=tmp_path / "config.json")
     path = "/api/settings/mcp-oauth/start"
-    response = await router.dispatch(None, _mutation_request(path, {"name": "linear"}), path)
+    response = await _mutate(router, _mutation_request(path, {"name": "linear"}))
     assert response.status_code == 200
-    assert json.loads(response.body)["status"] == "authorization_required"
+    assert response.result["status"] == "authorization_required"
     with pytest.raises(RuntimeBusyError), router.bus.admission.pause_if_idle(lambda: False):
         pytest.fail("Settings returned, but authorization has not finished")
 
@@ -477,7 +481,7 @@ async def test_settings_shutdown_joins_browser_authorization_and_releases_admiss
 
 
 @pytest.mark.asyncio
-async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monkeypatch) -> None:
+async def test_mcp_oauth_start_uses_gateway_callback_and_sanitizes_errors(monkeypatch) -> None:
     config = SimpleNamespace(
         type="streamableHttp",
         auth="oauth",
@@ -501,11 +505,11 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
         {"name": "xmind"},
     )
 
-    response = await router.dispatch(None, request, "/api/settings/mcp-oauth/start")
+    response = await _mutate(router, request)
 
     assert response is not None
     assert response.status_code == 200
-    assert json.loads(response.body)["flow_id"] == "flow-123"
+    assert response.result["flow_id"] == "flow-123"
     start.assert_awaited_once_with(
         "xmind",
         config,
@@ -515,20 +519,15 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
         reset_credentials=False,
     )
 
-    denied = _router(authorized=False)
-    denied_response = await denied.dispatch(None, request, "/api/settings/mcp-oauth/start")
-    assert denied_response is not None
-    assert denied_response.status_code == 401
 
     failed = _router()
     failed._mcp_oauth = SimpleNamespace(
         start=AsyncMock(side_effect=RuntimeError("upstream secret response"))
     )
-    failed_response = await failed.dispatch(None, request, "/api/settings/mcp-oauth/start")
+    failed_response = await _mutate(failed, request)
     assert failed_response is not None
     assert failed_response.status_code == 500
-    assert json.loads(failed_response.body) == {"error": "MCP OAuth start failed"}
-    assert b"upstream secret response" not in failed_response.body
+    assert failed_response.message == "MCP OAuth start failed"
 
 
 @pytest.mark.asyncio
@@ -575,22 +574,14 @@ async def test_mcp_oauth_manual_completion_reads_websocket_payload() -> None:
         {"flow_id": "flow-123", "callback_url": callback_url},
     )
 
-    response = await router.dispatch(None, request, "/api/settings/mcp-oauth/complete")
+    response = await _mutate(router, request)
 
     assert response is not None
     assert response.status_code == 200
-    assert json.loads(response.body)["status"] == "connecting"
-    assert b"oauth-code" not in response.body
+    assert response.result["status"] == "connecting"
+    assert "oauth-code" not in json.dumps(response.result)
     submit.assert_called_once_with(flow_id="flow-123", callback_url=callback_url)
 
-    denied = _router(authorized=False)
-    denied_response = await denied.dispatch(
-        None,
-        request,
-        "/api/settings/mcp-oauth/complete",
-    )
-    assert denied_response is not None
-    assert denied_response.status_code == 401
 
 
 @pytest.mark.parametrize(
@@ -636,71 +627,58 @@ async def test_oauth_completion_reads_websocket_payload(
         },
     )
 
-    response = await router.dispatch(
-        None,
-        request,
-        "/api/settings/provider/oauth-login/complete",
-    )
+    response = await _mutate(router, request)
 
     assert response is not None
     assert response.status_code == 200
-    assert json.loads(response.body) == {
+    assert response.result == {
         "status": "pending",
         "provider": provider,
         "flow_id": "flow-123",
     }
     assert captured == {
-        "query": {"provider": [provider], "flow_id": ["flow-123"]},
+        "query": MutationParams({"provider": provider, "flow_id": "flow-123", "authorization_response": authorization_response}),
         "authorization_response": authorization_response,
     }
-    assert request.path == "/api/settings/provider/oauth-login/complete"
-    assert not request.headers
 
 
 @pytest.mark.parametrize(
-    ("route_path", "function_name", "payload", "expected_query"),
+    ("route_path", "function_name", "payload"),
     [
         (
             "/api/settings/update",
             "update_agent_settings",
             {"model_preset": "Codex"},
-            {"model_preset": ["Codex"]},
         ),
         (
             "/api/settings/model-configurations/create",
             "create_model_configuration",
             {"name": "Codex", "model": "openai-codex/gpt-5.6"},
-            {"name": ["Codex"], "model": ["openai-codex/gpt-5.6"]},
         ),
         (
             "/api/settings/model-configurations/delete",
             "delete_model_configuration",
             {"name": "spare"},
-            {"name": ["spare"]},
         ),
         (
             "/api/settings/model-configurations/migrate",
             "migrate_model_configurations",
-            {},
             {},
         ),
         (
             "/api/settings/model-call-order/update",
             "update_model_call_order",
             {"order": ["backup"]},
-            {"order": ['["backup"]']},
         ),
         (
             "/api/settings/provider/create",
             "create_provider_settings",
             {"name": "team", "api_base": "https://llm.example/v1"},
-            {"name": ["team"], "api_base": ["https://llm.example/v1"]},
         ),
         (
             "/api/settings/provider/update",
             "update_provider_settings",
             {"provider": "team", "api_base": "https://llm.example/v2"},
-            {"provider": ["team"], "api_base": ["https://llm.example/v2"]},
         ),
     ],
 )
@@ -710,7 +688,6 @@ async def test_runtime_config_mutation_routes_refresh_live_runtime(
     route_path: str,
     function_name: str,
     payload: dict[str, object],
-    expected_query: dict[str, list[str]],
 ) -> None:
     captured: dict[str, object] = {}
     refresh_runtime_config = MagicMock()
@@ -722,14 +699,14 @@ async def test_runtime_config_mutation_routes_refresh_live_runtime(
     monkeypatch.setattr(f"nanobot.webui.settings_routes.{function_name}", mutate)
     request = _mutation_request(route_path, payload)
 
-    response = await _router(
+    response = await _mutate(_router(
         refresh_runtime_config=refresh_runtime_config,
-    ).dispatch(None, request, route_path)
+    ), request)
 
     assert response is not None
     assert response.status_code == 200
-    assert json.loads(response.body)["routed"] == function_name
-    assert captured["query"] == expected_query
+    assert response.result["routed"] == function_name
+    assert captured["query"] == MutationParams(payload)
     refresh_runtime_config.assert_called_once_with()
 
 
@@ -747,19 +724,15 @@ async def test_model_update_route_forwards_session_rename_dependency(monkeypatch
     path = "/api/settings/model-configurations/update"
     request = _mutation_request(path, {"name": "openai", "new_name": "Codex"})
 
-    response = await _router(
+    response = await _mutate(_router(
         rename_model_preset=rename_model_preset,
         refresh_runtime_config=refresh_runtime_config,
-    ).dispatch(
-        None,
-        request,
-        path,
-    )
+    ), request)
 
     assert response is not None
     assert response.status_code == 200
     assert captured == {
-        "query": {"name": ["openai"], "new_name": ["Codex"]},
+        "query": MutationParams({"name": "openai", "new_name": "Codex"}),
         "rename_model_preset": rename_model_preset,
     }
     refresh_runtime_config.assert_called_once_with()
@@ -775,11 +748,11 @@ async def test_older_client_does_not_partially_update_provider_settings(tmp_path
     path = "/api/settings/provider/update"
     request = _mutation_request(path, {"provider": "openai", "apiType": "auto", "apiBase": "https://example.test/v1"})
 
-    response = await router.dispatch(None, request, path)
+    response = await _mutate(router, request)
 
     assert response is not None
     assert response.status_code == 400
-    assert "Update the client" in json.loads(response.body)["error"]
+    assert "Update the client" in response.message
     assert config_path.read_text(encoding="utf-8") == before
     refresh.assert_not_called()
 
@@ -969,25 +942,23 @@ async def test_version_check_owner_is_additive_read_only_and_failure_is_not_a_re
     assert "secret" not in unavailable.body.decode()
 
 
-async def test_runtime_config_route_authentication_validation_and_restart(tmp_path):
+async def test_runtime_config_requires_websocket_and_tracks_restart(tmp_path):
     from nanobot.config.loader import load_config
 
     path = "/api/settings/runtime-config/update"
     config_path = tmp_path / "config.json"
     request = _mutation_request(path, {"values": {"tools.exec.timeout": 19}})
-    unauthorized = await _router(authorized=False, config_path=config_path).dispatch(None, request, path)
-    assert unauthorized.status_code == 401
-    assert not config_path.exists()
     router = _router(config_path=config_path)
     http_request = SimpleNamespace(path=path, headers=Headers())
     assert (await router.dispatch(None, http_request, path)).status_code == 405
-    invalid = _mutation_request(path, {"values": {"channels.send_progress": False}})
-    assert (await router.dispatch(None, invalid, path)).status_code == 400
     assert not config_path.exists()
-    result = await router.dispatch(None, request, path)
+    invalid = _mutation_request(path, {"values": {"channels.send_progress": False}})
+    assert (await _mutate(router, invalid)).status_code == 400
+    assert not config_path.exists()
+    result = await _mutate(router, request)
     assert result.status_code == 200
     assert load_config(config_path).tools.exec.timeout == 19
-    body = json.loads(result.body)
+    body = result.result
     assert body["runtime_config"]["tools.exec.timeout"] == 19
     assert body["restart_required_sections"] == ["runtime"]
     refreshed = await router.dispatch(None, SimpleNamespace(path="/api/settings", headers=Headers()), "/api/settings")
@@ -998,11 +969,11 @@ async def test_runtime_settings_only_save_without_refreshing_or_rebinding(tmp_pa
     refresh = MagicMock()
     router = _router(config_path=tmp_path / "config.json", refresh_runtime_config=refresh)
     path = "/api/settings/runtime-config/update"
-    response = await router.dispatch(None, _mutation_request(path, {
+    response = await _mutate(router, _mutation_request(path, {
         "values": {"agents.defaults.dream.enabled": False, "gateway.port": 19001},
-    }), path)
+    }))
     assert response.status_code == 200
-    assert json.loads(response.body)["requires_restart"]
+    assert response.result["requires_restart"]
     refresh.assert_not_called()
 
 
@@ -1014,9 +985,9 @@ async def test_reverting_runtime_switch_clears_restart_but_preserves_other_chang
     path = "/api/settings/runtime-config/update"
 
     async def update(values):
-        response = await router.dispatch(None, _mutation_request(path, {"values": values}), path)
+        response = await _mutate(router, _mutation_request(path, {"values": values}))
         assert response.status_code == 200
-        return json.loads(response.body)
+        return response.result
 
     assert (await update({"agents.defaults.dream.enabled": not original_memory}))["requires_restart"]
     await update({"tools.web.enable": not original_web})
@@ -1034,31 +1005,31 @@ async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path)
     original_reader = config.tools.web.fetch.use_jina_reader
     original_port = config.gateway.port
     path = "/api/settings/web-search/update"
-    first = await router.dispatch(None, _mutation_request(path, {
+    first = await _mutate(router, _mutation_request(path, {
         "provider": "duckduckgo", "use_jina_reader": not original_reader,
-    }), path)
+    }))
     assert first.status_code == 200
-    assert json.loads(first.body)["restart_required_sections"] == ["browser"]
+    assert first.result["restart_required_sections"] == ["browser"]
 
     runtime_path = "/api/settings/runtime-config/update"
-    changed = await router.dispatch(None, _mutation_request(runtime_path, {
+    changed = await _mutate(router, _mutation_request(runtime_path, {
         "values": {"gateway.port": original_port + 1},
-    }), runtime_path)
+    }))
     assert changed.status_code == 200
-    assert set(json.loads(changed.body)["restart_required_sections"]) == {"browser", "runtime"}
+    assert set(changed.result["restart_required_sections"]) == {"browser", "runtime"}
 
-    restored = await router.dispatch(None, _mutation_request(path, {
+    restored = await _mutate(router, _mutation_request(path, {
         "provider": "duckduckgo", "use_jina_reader": original_reader,
-    }), path)
+    }))
     assert restored.status_code == 200
-    assert json.loads(restored.body)["restart_required_sections"] == ["runtime"]
+    assert restored.result["restart_required_sections"] == ["runtime"]
     refreshed = await router.dispatch(None, SimpleNamespace(path="/api/settings", headers=Headers()), "/api/settings")
     assert json.loads(refreshed.body)["restart_required_sections"] == ["runtime"]
-    reverted = await router.dispatch(None, _mutation_request(runtime_path, {
+    reverted = await _mutate(router, _mutation_request(runtime_path, {
         "values": {"gateway.port": original_port},
-    }), runtime_path)
+    }))
     assert reverted.status_code == 200
-    assert json.loads(reverted.body)["restart_required_sections"] == []
+    assert reverted.result["restart_required_sections"] == []
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -1077,11 +1048,11 @@ async def test_image_switch_round_trip_clears_restart(tmp_path, enabled):
     )
     router.logger.warning = MagicMock()
     path = "/api/settings/image-generation/update"
-    changed = await router.dispatch(None, _mutation_request(path, {"enabled": not enabled}), path)
-    assert json.loads(changed.body)["requires_restart"] is True
-    reverted = await router.dispatch(None, _mutation_request(path, {"enabled": enabled}), path)
-    assert json.loads(reverted.body)["requires_restart"] is False
-    assert json.loads(reverted.body)["restart_required_sections"] == []
+    changed = await _mutate(router, _mutation_request(path, {"enabled": not enabled}))
+    assert changed.result["requires_restart"] is True
+    reverted = await _mutate(router, _mutation_request(path, {"enabled": enabled}))
+    assert reverted.result["requires_restart"] is False
+    assert reverted.result["restart_required_sections"] == []
 
 
 @pytest.mark.asyncio
@@ -1111,11 +1082,11 @@ async def test_first_mcp_oauth_request_saves_proxy_flag_before_starting_flow(tmp
         "/api/settings/mcp-oauth/start",
         {"name": "xmind", "use_proxy": True},
     )
-    response = await router.dispatch(None, request, "/api/settings/mcp-oauth/start")
+    response = await _mutate(router, request)
 
     assert response is not None
     assert response.status_code == 200
-    assert json.loads(response.body)["flow_id"] == "first-flow"
+    assert response.result["flow_id"] == "first-flow"
     assert captured == {"network": "http://shared.example:8080"}
 
 
@@ -1172,7 +1143,7 @@ async def test_mcp_proxy_mutation_persists_reloads_and_keeps_oauth_credentials(
             connection, "settings.mcp.proxy", {"name": "team-docs", "use_proxy": str(use_proxy).lower()},
         )
         assert response.status_code == 200
-        payload = json.loads(response.body)
+        payload = response.result
         assert payload["hot_reload"]["ok"] is True
         assert payload["requires_restart"] is False
         row = next(row for row in payload["presets"] if row["name"] == "team-docs")

@@ -10,16 +10,17 @@ from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ws_http import GatewayHTTPHandler
 
 
-def test_terminal_probe_is_private_stable_and_does_not_issue_credentials():
+async def test_terminal_probe_is_private_stable_and_does_not_issue_credentials():
     handler = object.__new__(GatewayHTTPHandler)
     handler.config = WebSocketConfig(token_issue_secret="fixture-secret")
     handler.tokens = GatewayTokenStore(max_tokens=0)
     connection = SimpleNamespace(remote_address=("127.0.0.1", 10000))
     request = Request("/webui/terminal", Headers({"Host": "127.0.0.1:8765"}))
-    assert handler._handle_bootstrap(connection, request, terminal_probe=True).status_code == 401
+    denied = await handler._handle_bootstrap(connection, request, terminal_probe=True)
+    assert denied.status_code == 401
     request.headers["X-Nanobot-Auth"] = "fixture-secret"
     for _ in range(3):
-        response = handler._handle_bootstrap(connection, request, terminal_probe=True)
+        response = await handler._handle_bootstrap(connection, request, terminal_probe=True)
         assert response.status_code == 200
         assert json.loads(response.body) == gateway_identity(handler.tokens.instance_id)
         assert "no-store" in response.headers["Cache-Control"]

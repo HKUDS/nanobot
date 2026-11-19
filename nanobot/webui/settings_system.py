@@ -51,6 +51,7 @@ from nanobot.update_service import (
 )
 from nanobot.webui.settings_capabilities import network_safety_payload
 from nanobot.webui.settings_contracts import (
+    MutationParams,
     QueryParams,
     SettingsRequest,
     SettingsRouteResult,
@@ -1088,7 +1089,16 @@ class SystemSettingsHandler:
             )
 
         try:
-            payload = await connector.handle(action, request.query)
+            query = request.query
+            if isinstance(query, MutationParams):
+                # Channel connectors expose a scalar form interface, not structured JSON fields.
+                query = {
+                    key: [value]
+                    for key in query.values
+                    if key not in {"channel", "values", "authorization_response"}
+                    and (value := query_first(query, key)) is not None
+                }
+            payload = await connector.handle(action, query)
         except ChannelConnectError as exc:
             return SettingsRouteResult.failure(exc.status, exc.message)
         except Exception:

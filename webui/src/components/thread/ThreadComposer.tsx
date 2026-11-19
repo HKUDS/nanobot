@@ -110,7 +110,7 @@ import { useComposerMentionInput } from "@/hooks/useComposerMentionInput";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
-import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
+import { useComposerVoiceInput } from "@/hooks/useComposerVoiceInput";
 import type {
   CliAppInfo,
   ChatSummary,
@@ -144,6 +144,7 @@ import {
   readDraggedSession,
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
@@ -155,10 +156,6 @@ import {
   type QueuedPromptContent,
 } from "@/components/thread/useQueuedPrompt";
 
-const VOICE_SHORTCUT_CODE = "KeyD";
-const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
-type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
-
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
@@ -167,54 +164,6 @@ function formatBytes(n: number): string {
 
 function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
-}
-
-function isVoiceShortcutDown(event: KeyboardEvent): boolean {
-  return (
-    event.code === VOICE_SHORTCUT_CODE
-    && event.ctrlKey
-    && event.shiftKey
-    && !event.altKey
-    && !event.metaKey
-  );
-}
-
-function isVoiceShortcutRelease(event: KeyboardEvent): boolean {
-  return (
-    event.code === VOICE_SHORTCUT_CODE
-    || event.key === "Control"
-    || event.key === "Shift"
-  );
-}
-
-function getVoiceShortcutPlatform(): VoiceShortcutPlatform {
-  if (typeof navigator === "undefined") return "other";
-  const userAgentData = (navigator as Navigator & { userAgentData?: { platform?: string } })
-    .userAgentData;
-  const platform = [
-    userAgentData?.platform,
-    navigator.platform,
-    navigator.userAgent,
-  ].filter(Boolean).join(" ").toLowerCase();
-  const isIpadPretendingToBeMac =
-    navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
-  if (isIpadPretendingToBeMac || /mac|iphone|ipad|ipod/.test(platform)) return "apple";
-  if (/win/.test(platform)) return "windows";
-  if (/cros/.test(platform)) return "chromeos";
-  if (/linux|x11|android/.test(platform)) return "linux";
-  return "other";
-}
-
-function getVoiceShortcutLabel(): string {
-  switch (getVoiceShortcutPlatform()) {
-    case "apple":
-      return "⌃⇧D";
-    case "chromeos":
-    case "linux":
-    case "windows":
-    case "other":
-      return "Ctrl ⇧ D";
-  }
 }
 
 interface ThreadComposerProps {
@@ -631,7 +580,6 @@ export function ThreadComposer({
     end: number;
   } | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
-  const [voiceSetupError, setVoiceSetupError] = useState<VoiceRecorderErrorKey | null>(null);
   const showToast = useToast();
   const [sendPending, setSendPending] = useState(false);
   const [pathInspection, setPathInspection] = useState<{
@@ -797,9 +745,7 @@ export function ThreadComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
-  const voiceShortcutDownRef = useRef(false);
   const isHero = variant === "hero";
-  const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
   const projectPickerAvailable =
     !workspaceProjectLocked
     && !!workspaceDefaultScope
@@ -1428,19 +1374,6 @@ export function ThreadComposer({
     measureDraft();
   }, [readingTextSize, customReadingTextSize, measureDraft]);
 
-  // Runs before paint so switching sessions never flashes stale draft text.
-  useLayoutEffect(() => {
-    if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
-    previousPendingQueueKeyRef.current = pendingQueueKey;
-    setValue("");
-    setInlineError(null);
-    setVoiceSetupError(null);
-    setSlashMenuDismissed(false);
-    setCliAppMenuDismissed(false);
-    setCursorPosition(0);
-    clear();
-  }, [clear, pendingQueueKey]);
-
   const appendTranscription = useCallback((text: string) => {
     const transcript = text.trim();
     if (!transcript) return;
@@ -1454,56 +1387,26 @@ export function ThreadComposer({
     focusTextarea();
   }, [focusTextarea]);
 
-  const clearVoiceSetupError = useCallback(() => setVoiceSetupError(null), []);
-  const setVoiceError = useCallback((key: VoiceRecorderErrorKey) => {
-    // Setup blockers carry instructions users may need to keep in view while fixing them.
-    if (key === "insecureContext" || key === "permission" || key === "notConfigured") {
-      setVoiceSetupError(key);
-      return;
-    }
-    showToast?.({ message: t(`thread.composer.voiceErrors.${key}`), tone: "error", dedupeKey: "voice-input" });
-  }, [showToast, t]);
-  const voiceRecorder = useVoiceRecorder({
-    disabled: interactionDisabled,
-    onClearError: clearVoiceSetupError,
-    onError: setVoiceError,
-    onTranscript: appendTranscription,
-    onTranscribeAudio,
+  const {
+    recorder: voiceRecorder, setupError: voiceSetupError, clearSetupError,
+    shortcutLabel: voiceShortcutLabel, shortcutAria, canSendQueuedPrompt,
+  } = useComposerVoiceInput({
+    disabled: interactionDisabled, onTranscribeAudio, onTranscript: appendTranscription,
     wantsWav: transcriptionProvider === "xiaomi_mimo",
   });
 
-  useEffect(() => {
-    if (!onTranscribeAudio) return;
-
-    function onKeyDown(event: KeyboardEvent): void {
-      if (!isVoiceShortcutDown(event) || event.repeat || voiceShortcutDownRef.current) return;
-      event.preventDefault();
-      voiceShortcutDownRef.current = true;
-      voiceRecorder.beginShortcutHold();
-    }
-
-    function onKeyUp(event: KeyboardEvent): void {
-      if (!voiceShortcutDownRef.current || !isVoiceShortcutRelease(event)) return;
-      event.preventDefault();
-      voiceShortcutDownRef.current = false;
-      voiceRecorder.endShortcutHold();
-    }
-
-    function onWindowBlur(): void {
-      if (!voiceShortcutDownRef.current) return;
-      voiceShortcutDownRef.current = false;
-      voiceRecorder.endShortcutHold();
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("blur", onWindowBlur);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("blur", onWindowBlur);
-    };
-  }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
+  // Runs before paint so switching sessions never flashes stale draft text.
+  useLayoutEffect(() => {
+    if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
+    previousPendingQueueKeyRef.current = pendingQueueKey;
+    setValue("");
+    setInlineError(null);
+    clearSetupError();
+    setSlashMenuDismissed(false);
+    setCliAppMenuDismissed(false);
+    setCursorPosition(0);
+    clear();
+  }, [clear, clearSetupError, pendingQueueKey]);
 
   const handleStop = useCallback(() => {
     pauseQueue();
@@ -1890,7 +1793,7 @@ export function ThreadComposer({
         && !e.ctrlKey
         && !e.metaKey
       ) {
-        if (!e.repeat && voiceRecorder.state === "idle" && !voiceShortcutDownRef.current) {
+        if (!e.repeat && canSendQueuedPrompt()) {
           sendQueuedPrompt(queuedPrompt);
         }
         return;
@@ -2371,7 +2274,7 @@ export function ThreadComposer({
                             ? t("thread.composer.configureModel", { defaultValue: "Configure model" })
                             : isUserShell ? t("thread.composer.shell.run") : t("thread.composer.send")
                     }
-                    aria-keyshortcuts={showVoiceButton ? VOICE_SHORTCUT_ARIA : undefined}
+                    aria-keyshortcuts={showVoiceButton ? shortcutAria : undefined}
                     onPointerDown={showVoiceButton ? voiceRecorder.beginPress : undefined}
                     onPointerUp={showVoiceButton ? voiceRecorder.endPress : undefined}
                     onPointerCancel={showVoiceButton ? voiceRecorder.endPress : undefined}
@@ -2653,6 +2556,7 @@ function CliAppMentionPalette({
     layout.maxHeight - SLASH_PALETTE_CHROME_PX,
   );
   const listRef = useSelectedOptionScroll(selectedIndex);
+  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("overlay");
   const groupedCandidates = (["session", "cli", "mcp"] as const)
     .map((kind) => ({
       kind,
@@ -2668,6 +2572,7 @@ function CliAppMentionPalette({
     .filter((group) => group.items.length > 0);
   return (
     <div
+      ref={surfaceRef}
       role="listbox"
       aria-label={t("thread.composer.mentions.ariaLabel")}
       style={{ maxHeight: layout.maxHeight }}
@@ -2817,8 +2722,10 @@ function SlashCommandPalette({
     layout.maxHeight - SLASH_PALETTE_CHROME_PX,
   );
   const listRef = useSelectedOptionScroll(selectedIndex);
+  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("overlay");
   return (
     <div
+      ref={surfaceRef}
       role="listbox"
       aria-label={t("thread.composer.slash.ariaLabel")}
       style={{ maxHeight: layout.maxHeight }}

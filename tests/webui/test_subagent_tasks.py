@@ -71,8 +71,8 @@ async def test_webui_task_access_and_targeted_idempotent_cancel(tmp_path):
                 connection, "subagent.cancel", {"session_key": "websocket:a", "task_id": task_id},
             )
             assert result.status_code == 404
-            errors.append(result.body)
-        assert errors[0] == errors[1]
+            errors.append(result.message)
+        assert errors == ["task unavailable", "task unavailable"]
         assert manager.check(foreign, "websocket:b").state == "running"
 
         for _ in range(2):
@@ -80,7 +80,8 @@ async def test_webui_task_access_and_targeted_idempotent_cancel(tmp_path):
                 connection, "subagent.cancel", {"session_key": "websocket:a", "task_id": first},
             )
             assert result.status_code == 200
-            assert json.loads(result.body)["state"] == "cancelled"
+            assert result.result is not None
+            assert result.result["state"] == "cancelled"
         assert manager.check(sibling, "websocket:a").state == "running"
         assert manager.check(foreign, "websocket:b").state == "running"
         assert bus.inbound_size == 1
