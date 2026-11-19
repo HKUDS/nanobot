@@ -367,7 +367,11 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
     )
     session = loop.sessions.get_or_create("websocket:chat-title")
     session.metadata[WEBUI_SESSION_METADATA_KEY] = True
-    session.add_message("user", "帮我优化一下 webui 的 sidebar")
+    caption = "帮我优化一下 webui 的 sidebar"
+    session.add_message("user", [
+        {"type": "image_attachment", "id": "a" * 64},
+        {"type": "text", "text": caption},
+    ])
     session.add_message("assistant", "可以，我会先调整布局和视觉层级。")
     loop.sessions.save(session)
 
@@ -382,6 +386,8 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
     session = await loop.sessions.state.get(session.key)
     assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "优化 WebUI 侧边栏"
     loop.provider.chat_stream_with_retry.assert_awaited_once()
+    title_prompt = loop.provider.chat_stream_with_retry.await_args.args[0][-1]["content"]
+    assert f"User: {caption}\nAssistant:" in title_prompt
     assert loop.provider.chat_stream_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
     assert (
         loop.provider.chat_stream_with_retry.await_args.kwargs["reasoning_effort"]

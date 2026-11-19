@@ -276,13 +276,18 @@ class TestTurnTranscriptSummary:
 
 
 class TestConsolidatorSummarize:
-    def test_format_messages_renders_user_text_and_image_blocks(self):
-        formatted = MemoryStore._format_messages([
+    def test_raw_archive_keeps_captions_and_path_free_image_markers(self, store):
+        checkpoint = store.raw_archive([
             {"role": "user", "content": "look", "media": ["/m/pic.png"]},
             {"role": "user", "content": [{"type": "image_attachment", "id": "a" * 64}]},
+            {"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,YQ=="}},
+                {"type": "text", "text": "a caption"},
+            ]},
         ])
 
-        assert formatted == "[?] USER: look\n[?] USER: [image]"
+        assert checkpoint == "[RAW] 3 messages\n[?] USER: look\n[?] USER: [image]\n[?] USER: [image]\na caption"
+        assert store.read_unprocessed_history(since_cursor=0)[0]["content"] == checkpoint
 
     async def test_archive_uses_captured_generation(
         self, consolidator, mock_provider, runtime
@@ -583,6 +588,33 @@ class TestCompactIdleSession:
             build_messages=MagicMock(side_effect=_build_test_messages),
             get_tool_definitions=MagicMock(return_value=[]),
         )
+
+    async def test_archive_and_token_probe_use_image_markers_without_reading_attachments(
+        self, real_consolidator, runtime, mock_provider, monkeypatch,
+    ):
+        from nanobot.session.image_attachments import persist_user_image_blocks
+
+        session = Session(key="cli:archive-images")
+        session.add_message("user", persist_user_image_blocks([
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,YQ=="}},
+            {"type": "text", "text": "compare"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,Yg=="}},
+        ]))
+        monkeypatch.setattr(
+            "nanobot.session.image_attachments.read_atomic_bytes",
+            lambda *_: pytest.fail("text history opened an image"),
+        )
+        mock_provider.chat_stream_with_retry.return_value = LLMResponse(content="Compared two images.")
+
+        real_consolidator.estimate_session_prompt_tokens(session, runtime=runtime)
+        summary = await real_consolidator.archive_session(session, archive_end=1, runtime=runtime)
+
+        assert summary == "Compared two images."
+        assert mock_provider.chat_stream_with_retry.await_args.kwargs["messages"][1]["content"] == [
+            {"type": "text", "text": "[image]"},
+            {"type": "text", "text": "compare"},
+            {"type": "text", "text": "[image]"},
+        ]
 
     async def test_partial_raw_write_does_not_advance_checkpoint(
         self, real_consolidator, store, runtime, mock_provider, monkeypatch

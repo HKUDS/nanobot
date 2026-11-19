@@ -22,7 +22,7 @@ from nanobot.providers.base import (
     RetryStatusCallback,
 )
 from nanobot.providers.compaction import ProviderStateCommitError, provider_compaction_scope
-from nanobot.providers.images import replace_replayed_images
+from nanobot.providers.image_input import replace_replayed_images
 from nanobot.providers.model_options import ModelOptions
 from nanobot.providers.oauth_catalog_cache import oauth_catalog_auth_rejected
 from nanobot.providers.registry import find_by_name

@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, TypedDict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict, TypeVar, cast
 from uuid import uuid4
 
 from nanobot.providers.base import ProviderConversationState
@@ -20,6 +20,7 @@ from nanobot.session.display_history import HistoryFact, HistoryReader
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.image_attachments import replay_user_image_blocks
 from nanobot.session.location import SessionLocation
+from nanobot.session.message_content import message_text, text_history_blocks
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionTypes
 from nanobot.utils.helpers import (
@@ -51,22 +52,7 @@ _FORK_VOLATILE_METADATA_KEYS = {
 
 
 def _text_preview(content: object) -> str:
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        parts: list[str] = []
-        for block in cast(list[object], content):
-            if isinstance(block, dict):
-                block_data = cast(dict[object, object], block)
-                if block_data.get("type") != "text":
-                    continue
-                value = block_data.get("text")
-                if isinstance(value, str):
-                    parts.append(value)
-        text = " ".join(parts)
-    else:
-        return ""
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", message_text(content)).strip()
     if len(text) > _SESSION_PREVIEW_MAX_CHARS:
         text = text[: _SESSION_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
     return text
@@ -202,6 +188,22 @@ class Session:
         is not a user request and must not resume an old task on the next turn.
         A positive ``max_messages`` applies an additional caller-owned count limit.
         """
+        return self._history(
+            max_messages, max_tokens=max_tokens, extend_to_user=extend_to_user,
+            view="model" if include_runtime_context else "public",
+        )
+
+    def get_text_history(
+        self, *, max_tokens: int = 0, include_runtime_context: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Return the replayable context for archives and estimates without loading images."""
+        return self._history(max_tokens=max_tokens, view="text" if include_runtime_context else "public")
+
+    def _history(
+        self, max_messages: int = 0, *, max_tokens: int = 0, extend_to_user: bool = False,
+        view: Literal["model", "text", "public"],
+    ) -> list[dict[str, Any]]:
+        include_runtime_context = view != "public"
         replayable = self.messages[self.last_archived:]
         if max_messages <= 0:
             start_idx = 0
@@ -239,6 +241,8 @@ class Session:
                 message = public_history_message(message)
             content = message.get("content", "")
             role = message.get("role")
+            if role == "user" and view != "model" and isinstance(content, list):
+                content = text_history_blocks(cast(list[object], content))
             cli_apps = cast(object, message.get("cli_apps"))
             if (
                 include_runtime_context
@@ -312,11 +316,11 @@ class Session:
             if start:
                 kept = kept[start:]
             out = kept
-        for entry in out:
-            if entry["role"] == "user":
-                entry["content"] = replay_user_image_blocks(
-                    entry["content"], load_images=include_runtime_context,
-                )
+        if view == "model":
+            for entry in out:
+                content = entry["content"]
+                if entry["role"] == "user" and isinstance(content, list):
+                    entry["content"] = replay_user_image_blocks(cast(list[object], content))
         return out
 
     def clear(self) -> None:

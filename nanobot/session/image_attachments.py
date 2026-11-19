@@ -5,13 +5,13 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from hashlib import sha256
-from typing import Any, TypedDict, cast
+from typing import TypedDict, cast
 
 from nanobot.config.paths import get_data_dir
-from nanobot.providers.images import REPLAYED_IMAGE_META
+from nanobot.providers.image_input import REPLAYED_IMAGE_META
+from nanobot.session.message_content import IMAGE_ATTACHMENT_TYPE
 from nanobot.utils.atomic_file import atomic_write_text, io_path, read_atomic_bytes
 
-_IMAGE_REF = "image_attachment"
 _IMAGE_ID = re.compile(r"[0-9a-f]{64}")
 IMAGE_UNAVAILABLE = "[Previous image unavailable]"
 
@@ -37,50 +37,31 @@ def persist_user_image_blocks(content: Sequence[object]) -> list[object]:
         if not path.is_file():
             directory.mkdir(mode=0o700, exist_ok=True)
             atomic_write_text(path, url)
-        ref: ImageAttachment = {"type": _IMAGE_REF, "id": image_id}
+        ref: ImageAttachment = {"type": IMAGE_ATTACHMENT_TYPE, "id": image_id}
         stored.append(ref)
     return stored
 
 
-def replay_user_image_blocks(content: Any, *, load_images: bool) -> Any:
-    if not isinstance(content, list):
-        return content
+def replay_user_image_blocks(content: Sequence[object]) -> list[object]:
+    """Materialize the selected user blocks for a model request."""
     replay: list[object] = []
-    for value in cast(list[object], content):
+    for value in content:
         block = cast(dict[str, object], value) if isinstance(value, dict) else {}
-        if block.get("type") == _IMAGE_REF:
-            url = _load_image(block.get("id")) if load_images else None
+        if block.get("type") == IMAGE_ATTACHMENT_TYPE:
+            url = _load_image(block.get("id"))
             if url is not None:
                 replay.append({
                     "type": "image_url", "image_url": {"url": url},
                     "_meta": {REPLAYED_IMAGE_META: True},
                 })
             else:
-                replay.append({"type": "text", "text": IMAGE_UNAVAILABLE if load_images else "[image]"})
+                replay.append({"type": "text", "text": IMAGE_UNAVAILABLE})
         elif block.get("type") == "image_url":
             # Temporary sessions keep their images in memory only.
-            replay.append(
-                {**block, "_meta": {REPLAYED_IMAGE_META: True}}
-                if load_images else {"type": "text", "text": "[image]"}
-            )
+            replay.append({**block, "_meta": {REPLAYED_IMAGE_META: True}})
         else:
             replay.append(cast(object, value))
     return replay
-
-
-def user_message_text(content: object) -> str:
-    """Read visible text without expanding image attachments."""
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-    parts: list[str] = []
-    for value in cast(list[object], content):
-        if isinstance(value, dict):
-            block = cast(dict[str, object], value)
-            if block.get("type") == "text" and isinstance(text := block.get("text"), str):
-                parts.append(text)
-    return "\n".join(parts)
 
 
 def _load_image(image_id: object) -> str | None:

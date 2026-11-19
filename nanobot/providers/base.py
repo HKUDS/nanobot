@@ -34,7 +34,7 @@ from nanobot.providers.compaction import (
     provider_compaction_scope,
 )
 from nanobot.providers.generation import GenerationSettings as GenerationSettings
-from nanobot.providers.images import replace_replayed_images
+from nanobot.providers.image_input import replace_replayed_images
 from nanobot.providers.model_options import ModelOptions
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import sanitize_surrogates_deep

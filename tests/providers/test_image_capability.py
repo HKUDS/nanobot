@@ -12,7 +12,7 @@ from nanobot.providers.base import (
 )
 from nanobot.providers.factory import make_provider, provider_signature
 from nanobot.providers.fallback_provider import FallbackProvider
-from nanobot.providers.images import REPLAYED_IMAGE_META
+from nanobot.providers.image_input import REPLAYED_IMAGE_META
 
 _IMAGE = {"type": "image_url", "image_url": {"url": "data:image/png;base64,c3ludGhldGlj"}}
 

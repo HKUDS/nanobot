@@ -242,6 +242,7 @@ async def test_borrowed_image_origin_survives_canonical_reload(tmp_path: Path) -
     augment = MagicMock(return_value=[{"kind": "image", "url": "/borrowed"}])
     response = build_session_thread_response(persisted, augment_user_media=augment)
     augment.assert_called_once_with([str(source)], [str(source)])
+    assert response["events"][0]["text"] == "look"
     assert response["events"][0]["media_urls"][0]["url"] == "/borrowed"
 
 
