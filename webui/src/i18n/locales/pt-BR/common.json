@@ -1775,7 +1775,6 @@
     "automationsDescription": "Excluir este tópico também exclui suas automações vinculadas.",
     "automationsDescriptionMany": "As automações vinculadas também serão excluídas.",
     "moreAutomations": "+ {{count}} a mais",
-    "confirmWithAutomations": "Excluir",
     "schedule": {
       "at": "{{time}}",
       "every": "A cada {{duration}}",
@@ -2546,7 +2545,6 @@
     "archiveFailed": "Não foi possível alterar o status de arquivamento.",
     "unarchivedSingle": "Conversa desarquivada",
     "deleteFailedSingle": "Não foi possível excluir a conversa",
-    "deleteWindow": "Você tem {{seconds}} segundos para desfazer a ação.",
     "pendingDelete": "{{count}} conversas serão excluídas",
     "archived": "{{count}} conversas arquivadas",
     "unarchived": "{{count}} conversas desarquivadas",

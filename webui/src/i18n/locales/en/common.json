@@ -1955,7 +1955,6 @@
     "automationsDescription": "Deleting this topic also deletes its linked automations.",
     "automationsDescriptionMany": "Linked automations will also be deleted.",
     "moreAutomations": "+ {{count}} more",
-    "confirmWithAutomations": "Delete",
     "schedule": {
       "at": "{{time}}",
       "every": "Every {{duration}}",
@@ -2726,7 +2725,6 @@
     "archiveFailed": "Could not change archive status.",
     "unarchivedSingle": "Topic unarchived",
     "deleteFailedSingle": "Could not delete the topic",
-    "deleteWindow": "You have {{seconds}} seconds to undo.",
     "pendingDelete": "{{count}} topics will be deleted",
     "archived": "{{count}} topics archived",
     "unarchived": "{{count}} topics unarchived",

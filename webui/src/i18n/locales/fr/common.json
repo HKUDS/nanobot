@@ -1773,7 +1773,6 @@
     "automationsDescription": "Supprimer ce sujet supprime aussi ses tâches automatiques liées.",
     "automationsDescriptionMany": "Les automatisations liées seront également supprimées.",
     "moreAutomations": "+ {{count}} autres",
-    "confirmWithAutomations": "Supprimer",
     "schedule": {
       "at": "{{time}}",
       "every": "Tous les {{duration}}",
@@ -2544,7 +2543,6 @@
     "archiveFailed": "Impossible de modifier le statut d’archivage.",
     "unarchivedSingle": "Conversation désarchivée",
     "deleteFailedSingle": "Impossible de supprimer la conversation",
-    "deleteWindow": "Vous avez {{seconds}} secondes pour annuler.",
     "pendingDelete": "{{count}} conversations vont être supprimées",
     "archived": "{{count}} conversations archivées",
     "unarchived": "{{count}} conversations désarchivées",

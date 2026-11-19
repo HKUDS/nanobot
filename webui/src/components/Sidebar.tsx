@@ -12,7 +12,6 @@ import { useTranslation } from "react-i18next";
 
 import {
   ChatList,
-  type SidebarDeleteDecision,
   type SidebarDeleteItem,
   type SidebarPaneGroup,
 } from "@/components/ChatList";
@@ -42,8 +41,8 @@ interface SidebarProps {
   onNewChat: () => void;
   onSelect: (key: string) => void;
   onCloseTemporaryChat?: (key: string) => void;
-  onRequestDelete: (key: string, label: string, onDecision?: SidebarDeleteDecision) => void;
-  onRequestDeleteMany?: (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => void;
+  onRequestDelete: (key: string, label: string) => void;
+  onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, title: string) => Promise<void>;
   onRequestRenameTab?: (key: string, label: string) => void;

@@ -22,7 +22,7 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import { invalidateToolsCatalog } from "@/lib/tools-catalog-cache";
-import type { SidebarDeleteDecision, SidebarDeleteItem } from "@/components/ChatList";
+import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { StartupShell } from "@/components/StartupShell";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
@@ -831,8 +831,6 @@ type PendingDelete = {
   id: number;
   items: SidebarDeleteItem[];
   automations: SessionAutomationJob[];
-  automationKeys: Set<string>;
-  onDecision?: SidebarDeleteDecision;
 };
 
 function restorePinOrder(pins: readonly string[], previous: readonly string[], restoring: ReadonlySet<string>) {
@@ -895,7 +893,6 @@ function Shell({
     createChat,
     forkChat,
     deleteChat,
-    getSessionAutomations,
   } = useSessions();
   // Failed reads retain an empty list or partial reload cache, not proof of deletion.
   const sessionsLoaded = !loading && sessionsError === null;
@@ -2085,21 +2082,18 @@ function Shell({
     refresh,
   );
 
-  const finishDeleteConfirmation = useCallback((request: PendingDelete, confirmed: boolean) => {
-    request.onDecision?.(confirmed);
-    setDeleteQueue((queue) => queue.filter((entry) => entry.id !== request.id));
+  const dismissDeleteConfirmation = useCallback((id: number) => {
+    setDeleteQueue((queue) => queue.filter((entry) => entry.id !== id));
   }, []);
 
-  const onConfirmDelete = useCallback(() => {
-    if (!pendingDelete) return;
-    const { automationKeys } = pendingDelete;
-    const items = pendingDelete.items.filter((item) => topicSessions.some((session) => session.key === item.key));
-    finishDeleteConfirmation(pendingDelete, items.length > 0);
+  const stageDelete = useCallback((requested: SidebarDeleteItem[], deleteAutomations = false) => {
+    const items = requested.filter((item) => topicSessions.some((session) => session.key === item.key));
     if (!items.length) return;
     const batchKeys = new Set(items.map((item) => item.key));
     setDeletingKeys((current) => new Set([...current, ...batchKeys]));
+    closeMobileSidebar();
 
-    if (activeKey && batchKeys.has(activeKey)) {
+    if (view === "chat" && activeKey && batchKeys.has(activeKey)) {
       const currentIndex = topicSessions.findIndex((session) => session.key === activeKey);
       const available = new Set(topicSessions.filter((session) => !batchKeys.has(session.key)).map((session) => session.key));
       const fallbackKey = activeTabState?.paneKeys.find((key) => available.has(key))
@@ -2117,7 +2111,7 @@ function Shell({
       try {
         for (const item of items) {
           try {
-            const result = await deleteChat(item.key, automationKeys.has(item.key) ? { deleteAutomations: true } : undefined);
+            const result = await deleteChat(item.key, deleteAutomations ? { deleteAutomations: true } : undefined);
             if (result.deleted) {
               filePreviewStore.delete(item.key);
               draftStore.delete(item.key);
@@ -2140,7 +2134,6 @@ function Shell({
           id: ++nextDeleteId.current,
           items: blockedItems,
           automations: blockedJobs,
-          automationKeys: new Set(blockedItems.map((item) => item.key)),
         };
         setDeleteQueue((queue) => [...queue, confirmation]);
       }
@@ -2156,39 +2149,11 @@ function Shell({
       action: { label: t("toast.undo"), run: reveal },
       onExpire: () => { void commit(); },
     });
-  }, [activeKey, activeTabState, deleteChat, draftStore, filePreviewStore, finishDeleteConfirmation, navigate, pendingDelete, showToast, t, topicSessions]);
+  }, [activeKey, activeTabState, closeMobileSidebar, deleteChat, draftStore, filePreviewStore, navigate, showToast, t, topicSessions, view]);
 
-  const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => {
-    const uniqueItems = Array.from(new Map(items.filter((item) => !deletingKeys.has(item.key)).map((item) => [item.key, item])).values());
-    if (uniqueItems.length === 0) {
-      onDecision?.(false);
-      return;
-    }
-    const automationResults = await Promise.allSettled(uniqueItems.map((item) => getSessionAutomations(item.key)));
-    const automationKeys = new Set<string>();
-    const automations = automationResults.flatMap((result, index) => {
-      if (result.status !== "fulfilled" || !result.value.length) return [];
-      automationKeys.add(uniqueItems[index].key);
-      return result.value;
-    });
-    let decision = onDecision;
-    const confirmation: PendingDelete = {
-      id: ++nextDeleteId.current,
-      items: uniqueItems,
-      automations,
-      automationKeys,
-      onDecision: (confirmed) => {
-        const notify = decision;
-        decision = undefined;
-        notify?.(confirmed);
-      },
-    };
-    setDeleteQueue((queue) => [...queue, confirmation]);
-  }, [deletingKeys, getSessionAutomations]);
-
-  const onRequestDelete = useCallback((key: string, label: string, onDecision?: SidebarDeleteDecision) => {
-    void onRequestDeleteMany([{ key, label }], onDecision);
-  }, [onRequestDeleteMany]);
+  const onRequestDelete = useCallback((key: string, label: string) => {
+    stageDelete([{ key, label }]);
+  }, [stageDelete]);
 
   const automaticSidebarSort = sidebarState.view.sort === "manual"
     ? "updated_desc"
@@ -2460,7 +2425,7 @@ function Shell({
     onSelect: onSelectSidebarItem,
     onCloseTemporaryChat,
     onRequestDelete,
-    onRequestDeleteMany,
+    onRequestDeleteMany: stageDelete,
     onTogglePin,
     onRequestRename,
     onToggleArchive,
@@ -2858,8 +2823,11 @@ function Shell({
               title={pendingDelete.items[0]?.label ?? ""}
               count={pendingDelete.items.length}
               automations={pendingDelete.automations}
-              onCancel={() => finishDeleteConfirmation(pendingDelete, false)}
-              onConfirm={onConfirmDelete}
+              onCancel={() => dismissDeleteConfirmation(pendingDelete.id)}
+              onConfirm={() => {
+                dismissDeleteConfirmation(pendingDelete.id);
+                stageDelete(pendingDelete.items, true);
+              }}
             />
           </Suspense>
         ) : null}

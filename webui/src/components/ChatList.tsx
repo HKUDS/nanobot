@@ -192,8 +192,6 @@ export interface SidebarDeleteItem {
   label: string;
 }
 
-export type SidebarDeleteDecision = (confirmed: boolean) => void;
-
 function droppablePaneKey(
   dataTransfer: DataTransfer,
   group: SidebarPaneGroup,
@@ -231,8 +229,8 @@ interface ChatListProps {
   activeKey: string | null;
   onSelect: (key: string) => void;
   onCloseTemporaryChat?: (key: string) => void;
-  onRequestDelete: (key: string, label: string, onDecision?: SidebarDeleteDecision) => void;
-  onRequestDeleteMany?: (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => void;
+  onRequestDelete: (key: string, label: string) => void;
+  onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, title: string) => Promise<void>;
   onRequestRenameTab?: (key: string, label: string) => void;
@@ -352,7 +350,6 @@ export const ChatList = memo(function ChatList({
   );
   const [paneDropTarget, setPaneDropTarget] = useState<string | null>(null);
   const [deleteSelectionMode, setDeleteSelectionMode] = useState(false);
-  const [deleteConfirmationPending, setDeleteConfirmationPending] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<{
     keys: string[];
     archive: boolean;
@@ -378,7 +375,7 @@ export const ChatList = memo(function ChatList({
     () => new Set(),
   );
   const deleteSelectionAnchorRef = useRef<string | null>(null);
-  const selectionConfirmationPending = pendingArchive !== null || deleteConfirmationPending;
+  const selectionConfirmationPending = pendingArchive !== null;
   const closeDeleteSelection = useCallback(() => {
     setDeleteSelectionMode(false);
     setSelectedDeleteKeys(new Set());
@@ -691,22 +688,12 @@ export const ChatList = memo(function ChatList({
     });
     if (!range) deleteSelectionAnchorRef.current = targetKey ?? null;
   };
-  const requestDeleteItems = (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => {
+  const requestDeleteKeys = (keys: string[]) => {
+    const items = keys.map((key) => deleteItemsByKey.get(key))
+      .filter((item): item is SidebarDeleteItem => item !== undefined);
     if (items.length === 0) return;
-    if (onRequestDeleteMany) onRequestDeleteMany(items, onDecision);
-    else if (items.length === 1) onRequestDelete(items[0].key, items[0].label, onDecision);
-  };
-  const requestDeleteKeys = (keys: string[], onDecision?: SidebarDeleteDecision) => {
-    requestDeleteItems(keys
-      .map((key) => deleteItemsByKey.get(key))
-      .filter((item): item is SidebarDeleteItem => item !== undefined), onDecision);
-  };
-  const confirmDeleteSelection = () => {
-    setDeleteConfirmationPending(true);
-    requestDeleteKeys(Array.from(selectedDeleteKeys), (confirmed) => {
-      setDeleteConfirmationPending(false);
-      if (confirmed) closeDeleteSelection();
-    });
+    if (onRequestDeleteMany) onRequestDeleteMany(items);
+    else if (items.length === 1) onRequestDelete(items[0].key, items[0].label);
   };
   const selectedArchiveKeys = Array.from(selectedDeleteKeys).filter((key) => archivableKeys.has(key));
   const allSelectedArchived = selectedArchiveKeys.length > 0
@@ -1207,7 +1194,6 @@ export const ChatList = memo(function ChatList({
           <div
             ref={selectionBarRef}
             data-testid="delete-selection-bar"
-            aria-busy={deleteConfirmationPending}
             className="sticky bottom-2 z-30 mx-1 mt-3 flex min-h-11 items-center gap-1 rounded-floating border border-sidebar-border/80 bg-popover/95 p-1.5 pl-3 shadow-[0_10px_30px_rgba(15,23,42,0.14)] backdrop-blur-xl"
           >
             <span className="min-w-0 flex-1 truncate pr-2 text-[12.5px] font-medium text-foreground/85">
@@ -1221,7 +1207,7 @@ export const ChatList = memo(function ChatList({
                 <button
                   type="button"
                   aria-label={t(allSelectedArchived ? "chat.unarchive" : "chat.archive")}
-                  disabled={selectedDeleteKeys.size === 0 || deleteConfirmationPending}
+                  disabled={selectedDeleteKeys.size === 0}
                   onClick={() => setPendingArchive({
                     keys: selectedArchiveKeys,
                     archive: !allSelectedArchived,
@@ -1238,8 +1224,11 @@ export const ChatList = memo(function ChatList({
               <button
                 type="button"
                 aria-label={t("chat.delete")}
-                disabled={selectedDeleteKeys.size === 0 || deleteConfirmationPending}
-                onClick={confirmDeleteSelection}
+                disabled={selectedDeleteKeys.size === 0}
+                onClick={() => {
+                  requestDeleteKeys(Array.from(selectedDeleteKeys));
+                  closeDeleteSelection();
+                }}
                 className="touch-target inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-destructive transition-colors media-hover:hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-40"
               >
                 <Trash2 className="h-4 w-4" aria-hidden />

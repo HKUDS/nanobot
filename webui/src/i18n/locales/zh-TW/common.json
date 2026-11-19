@@ -1773,7 +1773,6 @@
     "automationsDescription": "刪除話題也會刪除關聯的自動任務",
     "automationsDescriptionMany": "關聯的自動任務也會一併刪除。",
     "moreAutomations": "另有 {{count}} 個",
-    "confirmWithAutomations": "刪除",
     "schedule": {
       "at": "{{time}}",
       "every": "每 {{duration}}",
@@ -2544,7 +2543,6 @@
     "archiveFailed": "無法變更封存狀態。",
     "unarchivedSingle": "已取消封存",
     "deleteFailedSingle": "無法刪除對話",
-    "deleteWindow": "可在 {{seconds}} 秒內復原。",
     "pendingDelete": "即將刪除 {{count}} 個對話",
     "archived": "已封存 {{count}} 個對話",
     "unarchived": "已取消封存 {{count}} 個對話",

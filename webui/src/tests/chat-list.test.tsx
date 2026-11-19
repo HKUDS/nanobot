@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
@@ -94,7 +94,6 @@ describe("ChatList", () => {
     { archivedPaneKeys: [], projectLocked: undefined },
   ])("archives only persisted panes in a mixed selection ($archivedPaneKeys, draft=$projectLocked)", async ({ archivedPaneKeys, projectLocked }) => {
     const onArchiveMany = vi.fn();
-    const onRequestDeleteMany = vi.fn();
     render(<ChatList
       sessions={[session({ chatId: "draft", title: "Draft", projectLocked: false })]}
       paneGroups={{
@@ -110,7 +109,6 @@ describe("ChatList", () => {
       activeKey="websocket:draft"
       onSelect={vi.fn()}
       onRequestDelete={vi.fn()}
-      onRequestDeleteMany={onRequestDeleteMany}
       onTogglePin={vi.fn()}
       onRequestRename={vi.fn()}
       onToggleArchive={vi.fn()}
@@ -122,11 +120,6 @@ describe("ChatList", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Select" }));
     const bar = screen.getByTestId("delete-selection-bar");
     expect(within(bar).queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
-    fireEvent.click(within(bar).getByRole("button", { name: "Delete" }));
-    expect(onRequestDeleteMany).toHaveBeenCalledWith([
-      { key: "websocket:draft", label: "Draft" },
-    ], expect.any(Function));
-    act(() => onRequestDeleteMany.mock.calls[0][1](false));
     fireEvent.click(screen.getByRole("button", { name: "Empty fork" }));
     const action = archivedPaneKeys.length ? "Unarchive" : "Archive";
     fireEvent.click(within(bar).getByRole("button", { name: action }));
@@ -875,9 +868,7 @@ describe("ChatList", () => {
       { key: "websocket:root", label: "Root topic" },
       { key: "websocket:child", label: "Research pane" },
       { key: "websocket:target", label: "Target tab" },
-    ], expect.any(Function));
-    expect(screen.getByText("3 selected")).toBeInTheDocument();
-    act(() => onRequestDeleteMany.mock.calls[0][1](true));
+    ]);
     expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
   });
 

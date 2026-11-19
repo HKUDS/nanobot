@@ -1773,7 +1773,6 @@
     "automationsDescription": "Eliminar este tema también elimina sus tareas automáticas vinculadas.",
     "automationsDescriptionMany": "También se eliminarán las automatizaciones vinculadas.",
     "moreAutomations": "+ {{count}} más",
-    "confirmWithAutomations": "Eliminar",
     "schedule": {
       "at": "{{time}}",
       "every": "Cada {{duration}}",
@@ -2544,7 +2543,6 @@
     "archiveFailed": "No se pudo cambiar el estado de archivado.",
     "unarchivedSingle": "Conversación desarchivada",
     "deleteFailedSingle": "No se pudo eliminar la conversación",
-    "deleteWindow": "Tienes {{seconds}} segundos para deshacer la acción.",
     "pendingDelete": "Se eliminarán {{count}} conversaciones",
     "archived": "{{count}} conversaciones archivadas",
     "unarchived": "{{count}} conversaciones desarchivadas",

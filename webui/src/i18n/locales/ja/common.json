@@ -1773,7 +1773,6 @@
     "automationsDescription": "このトピックを削除すると、関連する自動タスクも削除されます。",
     "automationsDescriptionMany": "関連する自動タスクも削除されます。",
     "moreAutomations": "他 {{count}} 件",
-    "confirmWithAutomations": "削除",
     "schedule": {
       "at": "{{time}}",
       "every": "{{duration}} ごと",
@@ -2544,7 +2543,6 @@
     "archiveFailed": "アーカイブ状態を変更できませんでした。",
     "unarchivedSingle": "会話のアーカイブを解除しました",
     "deleteFailedSingle": "会話を削除できませんでした",
-    "deleteWindow": "{{seconds}} 秒以内なら元に戻せます。",
     "pendingDelete": "{{count}} 件の会話を削除します",
     "archived": "{{count}} 件の会話をアーカイブしました",
     "unarchived": "{{count}} 件の会話のアーカイブを解除しました",

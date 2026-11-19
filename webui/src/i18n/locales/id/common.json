@@ -1773,7 +1773,6 @@
     "automationsDescription": "Menghapus topik ini juga menghapus tugas otomatis terkait.",
     "automationsDescriptionMany": "Automasi terkait juga akan dihapus.",
     "moreAutomations": "+ {{count}} lagi",
-    "confirmWithAutomations": "Hapus",
     "schedule": {
       "at": "{{time}}",
       "every": "Setiap {{duration}}",
@@ -2544,7 +2543,6 @@
     "archiveFailed": "Tidak dapat mengubah status arsip.",
     "unarchivedSingle": "Percakapan dikeluarkan dari arsip",
     "deleteFailedSingle": "Gagal menghapus percakapan",
-    "deleteWindow": "Anda punya {{seconds}} detik untuk mengurungkan tindakan.",
     "pendingDelete": "{{count}} percakapan akan dihapus",
     "archived": "{{count}} percakapan diarsipkan",
     "unarchived": "{{count}} percakapan dikeluarkan dari arsip",

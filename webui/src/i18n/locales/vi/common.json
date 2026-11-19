@@ -1773,7 +1773,6 @@
     "automationsDescription": "Xóa chủ đề này cũng xóa các tác vụ tự động liên quan.",
     "automationsDescriptionMany": "Các tự động hóa liên kết cũng sẽ bị xóa.",
     "moreAutomations": "+ {{count}} mục nữa",
-    "confirmWithAutomations": "Xóa",
     "schedule": {
       "at": "{{time}}",
       "every": "Mỗi {{duration}}",
@@ -2544,7 +2543,6 @@
     "archiveFailed": "Không thể thay đổi trạng thái lưu trữ.",
     "unarchivedSingle": "Đã bỏ lưu trữ cuộc trò chuyện",
     "deleteFailedSingle": "Không thể xóa cuộc trò chuyện",
-    "deleteWindow": "Bạn có {{seconds}} giây để hoàn tác.",
     "pendingDelete": "Sắp xóa {{count}} cuộc trò chuyện",
     "archived": "Đã lưu trữ {{count}} cuộc trò chuyện",
     "unarchived": "Đã bỏ lưu trữ {{count}} cuộc trò chuyện",
