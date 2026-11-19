@@ -5434,6 +5434,7 @@ async def test_user_messages_fan_out_to_other_clients_on_the_same_chat(
         "chat_id": "shared-chat",
         "text": "one more detail",
         "starts_turn": False,
+        "waiting_for_model": True,
         "turn_id": "steer-a",
         "input_id": "user:steer-a",
         "active_turn_id": "turn-a",
@@ -5446,12 +5447,13 @@ async def test_user_messages_fan_out_to_other_clients_on_the_same_chat(
             payload["turn_id"],
             payload["starts_turn"],
             payload["active_turn_id"],
+            payload.get("waiting_for_model"),
         )
         for payload in origin_payloads
         if payload["event"] == "message_accepted"
     ] == [
-        ("message_accepted", "turn-a", True, "turn-a"),
-        ("message_accepted", "steer-a", False, "turn-a"),
+        ("message_accepted", "turn-a", True, "turn-a", None),
+        ("message_accepted", "steer-a", False, "turn-a", True),
     ]
     outsider.send.assert_not_awaited()
     assert bus.publish_inbound.await_count == 2

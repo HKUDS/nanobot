@@ -19,6 +19,7 @@ import { ImageGallery } from "@/components/ImageGallery";
 import { InlineImageProvider, useInlineImages } from "@/components/InlineImageContext";
 import { INLINE_REFERENCE_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/components/InlineTokenHighlight";
 import { MarkdownText } from "@/components/MarkdownText";
+import { PendingEdgeOverlay, usePendingEdgeState, type PendingEdgeState } from "@/components/PendingEdgeOverlay";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
 import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
@@ -424,6 +425,11 @@ export function MessageBubble({
     () => mergeMcpMentionPresets(mcpPresets, message.mcpPresets),
     [mcpPresets, message.mcpPresets],
   );
+  const { edgeState, completeSeal } = usePendingEdgeState(
+    message.id,
+    message.role === "user" ? message.processingStatus : undefined,
+    temporary || message.role !== "user",
+  );
 
   if (message.kind === "compaction" && message.compaction) {
     return <ContextCompactionNotice compaction={message.compaction} />;
@@ -453,6 +459,15 @@ export function MessageBubble({
     const hasText = userContent.trim().length > 0;
     const showDeliveryStatus =
       message.deliveryStatus === "sending" || message.deliveryStatus === "failed";
+    const processingStatus = message.processingStatus;
+    const showProcessingStatus = !temporary && processingStatus === "pending";
+    const mediaEdgeState: PendingEdgeState = !hasText ? edgeState : "solid";
+    const mediaSealEnd = !hasText ? completeSeal : undefined;
+    const userMedia = hasImages
+      ? <ImageGallery images={images} align="right" size="compact" edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
+      : hasMedia
+        ? <MessageMedia media={media} align="right" pending={message.deliveryStatus === "sending"} edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
+        : null;
     const quotedContext = parsedMessage.quotedContext;
     const slashCommand = matchingSlashCommand(userContent, slashCommands);
     const bangPrefix = /^(\s*)!/.exec(userContent);
@@ -487,10 +502,7 @@ export function MessageBubble({
         className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5"
       >
         {!hasText ? contextMenu : null}
-        {hasImages ? <ImageGallery images={images} align="right" size="compact" /> : null}
-        {!hasImages && hasMedia ? (
-          <MessageMedia media={media} align="right" pending={message.deliveryStatus === "sending"} />
-        ) : null}
+        {userMedia}
         {quotedContext ? (
           <UserQuotedContext
             text={quotedContext}
@@ -503,17 +515,25 @@ export function MessageBubble({
             <p
               data-theme-surface
               data-temporary-message={temporary ? "true" : undefined}
+              data-pending-edge={edgeState !== "solid" ? edgeState : undefined}
               className={cn(
-                "ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
+                "relative ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
                 "text-left text-reading whitespace-pre-wrap [overflow-wrap:anywhere]",
                 temporary
                   ? "border border-dashed border-muted-foreground/40 bg-transparent"
                   : "user-message-surface bg-secondary/70",
+                showProcessingStatus && "user-message-surface-dashed",
               )}
             >
+              <PendingEdgeOverlay state={edgeState} onSealEnd={completeSeal} />
               {messageText}
             </p>
           </div>
+        ) : null}
+        {!showDeliveryStatus && showProcessingStatus ? (
+          <span role="status" className="sr-only">
+            {t("message.delivery.waiting")}
+          </span>
         ) : null}
         {showDeliveryStatus ? (
             <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
@@ -657,10 +677,14 @@ function MessageMedia({
   media,
   align,
   pending = false,
+  edgeState = "solid",
+  onSealEnd,
 }: {
   media: UIMediaAttachment[];
   align: "left" | "right";
   pending?: boolean;
+  edgeState?: PendingEdgeState;
+  onSealEnd?: () => void;
 }) {
   const inlineImages = useInlineImages();
   if (media.length === 0) return null;
@@ -681,6 +705,9 @@ function MessageMedia({
     }
   }
   if (images.length === 0 && videos.length === 0 && files.length === 0) return null;
+  const attachSealToImages = images.length > 0;
+  const attachSealToVideos = !attachSealToImages && videos.length > 0;
+  const attachSealToFiles = !attachSealToImages && !attachSealToVideos;
 
   return (
     <div
@@ -690,15 +717,34 @@ function MessageMedia({
       )}
     >
       {images.length > 0 ? (
-        <ImageGallery images={images} align={align} size={align === "left" ? "large" : "compact"} />
+        <ImageGallery
+          images={images}
+          align={align}
+          size={align === "left" ? "large" : "compact"}
+          edgeState={edgeState}
+          onSealEnd={attachSealToImages ? onSealEnd : undefined}
+        />
       ) : null}
       {videos.map((item, i) => (
-        <AttachmentTile key={`video-${i}`} attachment={item} pending={pending} className="my-0" />
+        <AttachmentTile
+          key={`video-${i}`}
+          attachment={item}
+          pending={pending}
+          edgeState={edgeState}
+          onSealEnd={attachSealToVideos && i === 0 ? onSealEnd : undefined}
+          className="my-0"
+        />
       ))}
       {files.length > 0 ? (
         <div className={cn("flex w-full min-w-0 flex-wrap items-start gap-2", align === "right" && "justify-end")}>
           {files.map((item, i) => (
-            <AttachmentTile key={`file-${i}`} attachment={item} pending={pending} />
+            <AttachmentTile
+              key={`file-${i}`}
+              attachment={item}
+              pending={pending}
+              edgeState={edgeState}
+              onSealEnd={attachSealToFiles && i === 0 ? onSealEnd : undefined}
+            />
           ))}
         </div>
       ) : null}

@@ -2182,6 +2182,7 @@
     "actions": "Tindakan pesan",
     "streaming": "sedang mengalir",
     "delivery": {
+      "waiting": "Menunggu diproses",
       "sending": "Mengirim",
       "failed": "Belum terkirim"
     },

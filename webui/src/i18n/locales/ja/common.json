@@ -2182,6 +2182,7 @@
     "actions": "メッセージ操作",
     "streaming": "生成中",
     "delivery": {
+      "waiting": "処理待ち",
       "sending": "送信中",
       "failed": "未送信"
     },

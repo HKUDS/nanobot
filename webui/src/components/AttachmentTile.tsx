@@ -8,6 +8,7 @@ import { ImageThumbnail } from "@/components/ImageGallery";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { useRegisterInlineImage } from "@/components/InlineImageContext";
 import { AttachmentCard, AttachmentTypeFace, attachmentCardActionClassName } from "@/components/AttachmentCard";
+import { PendingEdgeOverlay, type PendingEdgeState } from "@/components/PendingEdgeOverlay";
 
 interface AttachmentTileProps {
   attachment: UIMediaAttachment;
@@ -15,9 +16,11 @@ interface AttachmentTileProps {
   inline?: boolean;
   variant?: "default" | "compact";
   pending?: boolean;
+  edgeState?: PendingEdgeState;
+  onSealEnd?: () => void;
 }
 
-export function AttachmentTile({ attachment, className, inline = false, variant = "default", pending = false }: AttachmentTileProps) {
+export function AttachmentTile({ attachment, className, inline = false, variant = "default", pending = false, edgeState = "solid", onSealEnd }: AttachmentTileProps) {
   const { t } = useTranslation();
   const videoUrl = attachment.url;
   const [failedUrl, setFailedUrl] = useState<string | undefined>(undefined);
@@ -31,7 +34,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
     return (
       <span className={cn("not-prose my-3 block max-w-full", className)}>
         <ImageThumbnail key={attachment.url} image={attachment}
-          size={variant === "compact" ? "compact" : "large"}
+          size={variant === "compact" ? "compact" : "large"} edgeState={edgeState} onSealEnd={onSealEnd}
           onOpen={() => setImageOpen(true)} onError={() => setFailedUrl(attachment.url)} />
         <ImageLightbox images={[attachment]} index={imageOpen ? 0 : null}
           onIndexChange={() => {}} onOpenChange={setImageOpen} />
@@ -46,6 +49,8 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
         className={className}
         inline={inline}
         variant={variant}
+        edgeState={edgeState}
+        onSealEnd={onSealEnd}
       >
         <video
           src={videoUrl}
@@ -73,7 +78,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
   </a> : undefined;
 
   return <span data-file-attachment className={cn("not-prose inline-flex w-24 max-w-full shrink-0 flex-col gap-1 align-top", className)}>
-    <AttachmentCard name={name} description={status} action={download}>
+    <AttachmentCard name={name} description={status} action={download} edgeState={edgeState} onSealEnd={onSealEnd}>
       <AttachmentTypeFace name={filePath} kind={attachment.kind} />
     </AttachmentCard>
     {status ? <span className="break-words text-center text-[11px] leading-4 text-muted-foreground">{status}</span> : null}
@@ -92,16 +97,21 @@ function AttachmentFrame({
   className,
   inline = false,
   variant = "default",
+  edgeState = "solid",
+  onSealEnd,
 }: {
   attachment: UIMediaAttachment;
   children: ReactNode;
   className?: string;
   inline?: boolean;
   variant?: "default" | "compact";
+  edgeState?: PendingEdgeState;
+  onSealEnd?: () => void;
 }) {
   const frameClassName = cn(
-    "not-prose my-3 block w-fit max-w-full overflow-hidden rounded-control",
-    "border border-border/60 bg-muted/40",
+    "not-prose relative my-3 block w-fit max-w-full overflow-hidden rounded-control",
+    edgeState === "solid" && "ring-1 ring-inset ring-border/60",
+    "bg-muted/40",
     attachment.kind === "image" && "bg-background/85",
     attachment.kind === "video" ? "w-[min(100%,32rem)]" : "",
     variant === "compact" && "my-1 rounded-xl shadow-none",
@@ -114,13 +124,16 @@ function AttachmentFrame({
   ) : (
     <div className={bodyClassName}>{children}</div>
   );
+  const edgeOverlay = <PendingEdgeOverlay state={edgeState} solidTone="media" onSealEnd={onSealEnd} />;
   return inline ? (
     <span className={frameClassName}>
       {body}
+      {edgeOverlay}
     </span>
   ) : (
     <figure className={frameClassName}>
       {body}
+      {edgeOverlay}
     </figure>
   );
 }

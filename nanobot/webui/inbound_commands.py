@@ -248,6 +248,7 @@ class WebUICommandRouter:
         *,
         turn_id: str | None,
         starts_turn: bool,
+        waiting_for_model: bool,
         media: list[dict[str, Any]],
         cli_apps: list[dict[str, Any]],
         mcp_presets: list[dict[str, Any]],
@@ -262,6 +263,8 @@ class WebUICommandRouter:
         if turn_id is not None:
             body["turn_id"] = turn_id
             body["input_id"] = f"user:{turn_id}"
+        if waiting_for_model:
+            body["waiting_for_model"] = True
         if media:
             body["media_urls"] = media
         if cli_apps:
@@ -812,6 +815,12 @@ class WebUICommandRouter:
             if queued_owner is not None:
                 metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
+        # Live presentation only: a follow-up accepted while another turn owns the chat.
+        waiting_for_model = (
+            is_webui and temporary_policy is None and turn_id is not None
+            and not restart_control and not is_user_shell and not content.lstrip().startswith("/")
+            and queued_owner is None and websocket_turn_id(chat_id) is not None
+        )
         accepted = False
         session_generation: str | None = None
         session_created = False
@@ -905,6 +914,7 @@ class WebUICommandRouter:
                 content,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
+                waiting_for_model=waiting_for_model,
                 media=media,
                 cli_apps=cli_apps,
                 mcp_presets=mcp_presets,
@@ -919,6 +929,7 @@ class WebUICommandRouter:
                 chat_id=chat_id,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
+                **({"waiting_for_model": True} if waiting_for_model else {}),
                 **({"media_urls": media} if media else {}),
                 **(
                     {"active_turn_id": active_turn_id}

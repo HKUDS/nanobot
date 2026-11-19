@@ -2182,6 +2182,7 @@
     "actions": "Actions du message",
     "streaming": "en cours de génération",
     "delivery": {
+      "waiting": "En attente de traitement",
       "sending": "Envoi",
       "failed": "Non envoyé"
     },
