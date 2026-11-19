@@ -189,7 +189,9 @@ export function useNanobotStream(
   // Keep received state ahead of React's batched render: navigation can unmount
   // this hook after a stream flush but before the queued render commits.
   const setMessages = useCallback<React.Dispatch<React.SetStateAction<UIMessage[]>>>((update) => {
-    const next = typeof update === "function" ? update(messagesRef.current) : update;
+    const next = transcriptRef.current.mergeInputProcessing(
+      typeof update === "function" ? update(messagesRef.current) : update,
+    );
     messagesRef.current = next;
     transcriptRef.current.projection = { ...transcriptRef.current.projection, messages: next };
     setRenderedMessages(next);
@@ -716,11 +718,21 @@ export function useNanobotStream(
       if (turnId) {
         setMessages((prev) => transitionTurnDelivery(prev, turnId, "accepted"));
       }
+      if (ev.event === "input_processing") {
+        if (Array.isArray(ev.input_ids) && ev.input_ids.every((id) => typeof id === "string")
+          && (ev.processing_status === "consumed" || ev.processing_status === "cancelled")) {
+          setMessages(transcriptRef.current.markInputProcessing(ev.input_ids, ev.processing_status));
+        }
+        return;
+      }
       if (ev.event === "message_accepted") {
-        if (ev.media_urls?.length) {
+        const hasMedia = Boolean(ev.media_urls?.length);
+        const pending = ev.processing_status === "pending";
+        if (hasMedia || pending) {
           setMessages((prev) => prev.map((message) => (
             message.role === "user" && message.turnId === ev.turn_id
-              ? { ...message, media: ev.media_urls }
+              ? { ...message, ...(hasMedia ? { media: ev.media_urls } : {}),
+                  ...(pending && !message.processingStatus ? { processingStatus: "pending" } : {}) }
               : message
           )));
         }

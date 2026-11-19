@@ -2182,6 +2182,8 @@
     "actions": "Thao tác tin nhắn",
     "streaming": "đang truyền",
     "delivery": {
+      "waiting": "Đang chờ xử lý",
+      "cancelled": "Đã hủy",
       "sending": "Đang gửi",
       "failed": "Chưa gửi"
     },

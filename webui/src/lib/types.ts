@@ -17,6 +17,7 @@ export interface UIContextCompaction extends ContextCompaction {
 
 export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "complete";
 export type MessageDeliveryStatus = "sending" | "accepted" | "failed";
+export type InputProcessingStatus = "pending" | "consumed" | "cancelled";
 export type MessageDeliveryErrorKind =
   | "message_too_big"
   | "workspace_scope_rejected"
@@ -184,6 +185,7 @@ export interface UIMessage {
   reasoningStreamId?: string;
   /** Ephemeral delivery lifecycle for optimistic user messages. */
   deliveryStatus?: MessageDeliveryStatus;
+  processingStatus?: InputProcessingStatus;
   deliveryErrorKind?: MessageDeliveryErrorKind;
 }
 
@@ -1569,10 +1571,17 @@ export type InboundEvent =
       event: "message_accepted";
       chat_id: string;
       turn_id: string;
+      processing_status?: "pending";
       media_urls?: UIMediaAttachment[];
       starts_turn?: boolean;
       active_turn_id?: string;
       started_at?: number;
+    }
+  | {
+      event: "input_processing";
+      chat_id: string;
+      input_ids: string[];
+      processing_status: Exclude<InputProcessingStatus, "pending">;
     }
   | ({
       event: "user_message";
@@ -1589,6 +1598,7 @@ export type InboundEvent =
       session_mentions?: SessionMention[];
       provenance?: { session_message?: UISessionMessage };
       input_id?: string;
+      processing_status?: InputProcessingStatus;
     } & InboundTurnMetadata)
   | ({
       event: "message";

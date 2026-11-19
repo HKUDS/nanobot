@@ -342,6 +342,8 @@ function parseThreadProjectionEvent(value: unknown, validatedGraphs: ReadonlySet
   switch (value.event) {
     case "user_message":
       if (typeof value.text !== "string" || typeof value.starts_turn !== "boolean") break;
+      if (value.processing_status !== undefined && value.processing_status !== "pending"
+        && value.processing_status !== "consumed" && value.processing_status !== "cancelled") break;
       if (value.media_urls !== undefined && (
         !Array.isArray(value.media_urls) || !value.media_urls.every(isProjectionMedia)
       )) break;

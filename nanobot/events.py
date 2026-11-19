@@ -29,6 +29,17 @@ class ModelRequestEvent(AgentEvent):
     response_input_ids: tuple[str, ...] = ()
 
 
+InputProcessingOutcome = Literal["consumed", "cancelled"]
+
+
+@dataclass(frozen=True)
+class InputProcessingEvent(AgentEvent):
+    """A batch of inputs entered the run or was discarded before processing."""
+
+    input_ids: tuple[str, ...]
+    status: InputProcessingOutcome
+
+
 @dataclass(frozen=True)
 class ResponseInputsEvent(AgentEvent):
     """Identify the inputs being answered by the next model request."""

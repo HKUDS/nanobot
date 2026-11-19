@@ -252,6 +252,7 @@ class WebUICommandRouter:
         cli_apps: list[dict[str, Any]],
         mcp_presets: list[dict[str, Any]],
         session_mentions: list[SessionMention],
+        awaiting_processing: bool,
     ) -> None:
         body: dict[str, Any] = {
             "event": "user_message",
@@ -262,6 +263,8 @@ class WebUICommandRouter:
         if turn_id is not None:
             body["turn_id"] = turn_id
             body["input_id"] = f"user:{turn_id}"
+        if awaiting_processing:
+            body["processing_status"] = "pending"
         if media:
             body["media_urls"] = media
         if cli_apps:
@@ -812,6 +815,12 @@ class WebUICommandRouter:
             if queued_owner is not None:
                 metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
+        track_processing = (
+            is_webui and self._transcripts.sessions is not None and temporary_policy is None
+            and not restart_control and not is_user_shell and not content.lstrip().startswith("/")
+            and turn_id is not None
+        )
+        awaiting_processing = False
         accepted = False
         session_generation: str | None = None
         session_created = False
@@ -837,15 +846,17 @@ class WebUICommandRouter:
             if session_generation is not None:
                 metadata[HISTORY_GENERATION_METADATA_KEY] = session_generation
             if is_webui and not restart_control and temporary_policy is None:
-                await self._transcripts.append_user_message(
+                recorded = await self._transcripts.append_user_message(
                     chat_id,
                     content,
+                    awaiting_processing=track_processing,
                     metadata=metadata,
                     media_paths=media_paths or None,
                     cli_apps=cli_apps or None,
                     mcp_presets=mcp_presets or None,
                     session_mentions=session_mentions or None,
                 )
+                awaiting_processing = track_processing and recorded
             if trusted_webui:
                 context_blocks: list[RuntimeContextBlock] = []
                 if not is_user_shell and envelope.get("intent") == "create_automation":
@@ -909,6 +920,7 @@ class WebUICommandRouter:
                 cli_apps=cli_apps,
                 mcp_presets=mcp_presets,
                 session_mentions=session_mentions,
+                awaiting_processing=awaiting_processing,
             )
         if is_webui and turn_id:
             active_turn_id = websocket_turn_id(chat_id)
@@ -919,6 +931,7 @@ class WebUICommandRouter:
                 chat_id=chat_id,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
+                **({"processing_status": "pending"} if awaiting_processing else {}),
                 **({"media_urls": media} if media else {}),
                 **(
                     {"active_turn_id": active_turn_id}

@@ -2564,6 +2564,24 @@ describe("useNanobotStream", () => {
     ]);
   });
 
+  it("settles only the named pending message, even if a peer's outcome arrives before its bubble", () => {
+    const fake = fakeClient();
+    const chat = "chat-processing";
+    const { result } = renderHook(() => useNanobotStream(chat, EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => {
+      const first = result.current.send("same text")!;
+      const second = result.current.send("same text", undefined, { continueActiveTurn: true })!;
+      for (const { turnId } of [first, second]) fake.emit(chat, {
+        event: "message_accepted", chat_id: chat, turn_id: turnId, processing_status: "pending",
+      });
+      fake.emit(chat, { event: "input_processing", chat_id: chat,
+        input_ids: [`user:${second.turnId}`, "user:peer"], processing_status: "consumed" });
+      fake.emit(chat, { event: "user_message", chat_id: chat, turn_id: "peer", input_id: "user:peer",
+        starts_turn: false, text: "peer prompt", processing_status: "pending" });
+    });
+    expect(result.current.messages.map((row) => row.processingStatus)).toEqual(["pending", "consumed", "consumed"]);
+  });
+
   it("projects a user turn submitted from another attached client exactly once", () => {
     const fake = fakeClient();
     const { result } = renderHook(

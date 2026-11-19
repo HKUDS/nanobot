@@ -61,7 +61,7 @@ from nanobot.command.builtin import register_core_commands
 from nanobot.command.router import CommandExpansion, command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
-from nanobot.events import NO_EVENTS, AgentEvent, EventSink
+from nanobot.events import NO_EVENTS, AgentEvent, EventSink, InputProcessingEvent
 from nanobot.execution.files import exclude_file_paths
 from nanobot.llm_usage.context import source_from_request
 from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
@@ -1561,11 +1561,22 @@ class AgentLoop:
         # callbacks can yield to another submitter for the same session key.
         self._pending_queues.detach(session_key, pending)
         for item in pending.drain():
+            await self._report_unprocessed_input(item)
             for coordinator in self._automation_turn_coordinators:
                 coordinator.complete(item, error=error)
             if item.channel != "system" and self.commands.requires_session_queue(command_text(item)):
                 delivery = self.turn_delivery_factory.unrouted(item, session_key)
                 await delivery.complete(None, publish_completion=True)
+
+    async def _report_unprocessed_input(self, message: InboundMessage) -> None:
+        if self._preserve_inflight_turns_on_shutdown or message.channel != "websocket":
+            return
+        input_id = input_history_metadata(message).get("input_id")
+        if isinstance(input_id, str):
+            await self.bus.publish_event(
+                InputProcessingEvent((input_id,), "cancelled"), channel=message.channel,
+                chat_id=message.chat_id, metadata=message.metadata,
+            )
 
     async def _dispatch_one(
         self,
@@ -1620,6 +1631,7 @@ class AgentLoop:
                         coordinator.complete(msg, response=response)
                 except asyncio.CancelledError as exc:
                     logger.info("Task cancelled for session {}", session_key)
+                    await self._report_unprocessed_input(msg)
                     if not processing:
                         if self.commands.requires_session_queue(command_text(msg)):
                             await delivery.complete(None, publish_completion=True)

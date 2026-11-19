@@ -9,7 +9,14 @@ import { hasPendingAgentActivity } from "./activity-timeline";
 import { reconcileModelRequest } from "./model-request";
 import { joinThreadFragments } from "./thread-page-fragments";
 import { ThreadProjectionIndex } from "./thread-projection-index";
-import type { ThreadProjectionEvent, UIMessage, WebuiThreadPersistedPayload } from "./types";
+import type { InputProcessingStatus, ThreadProjectionEvent, UIMessage, WebuiThreadPersistedPayload } from "./types";
+
+type ProcessingOutcome = Exclude<InputProcessingStatus, "pending">;
+
+function setProcessingStatus(row: UIMessage, status: InputProcessingStatus): UIMessage {
+  if (row.processingStatus !== undefined && row.processingStatus !== "pending") return row;
+  return row.processingStatus === status ? row : { ...row, processingStatus: status };
+}
 
 type Ranges = Array<[number, number]>;
 type Members = Map<string, Ranges>;
@@ -245,6 +252,7 @@ export class ThreadTranscript {
   private pendingFragmentGap: PendingFragmentGap | null = null;
   private withdrawnSources = new Set<string>();
   fragmentCompletedTurnIds: string[] = [];
+  private readonly earlyProcessingOutcomes = new Map<string, ProcessingOutcome>();
   private readonly recordLiveContributions: boolean;
   private revision = 0;
   private order = 0;
@@ -277,6 +285,22 @@ export class ThreadTranscript {
   get messages(): UIMessage[] { return this.projection.messages; }
   get modelRequests() { return this.projection.modelRequests; }
   get hasPendingFragmentGap(): boolean { return this.pendingFragmentGap !== null; }
+
+  mergeInputProcessing(rows: UIMessage[]): UIMessage[] {
+    if (this.earlyProcessingOutcomes.size === 0) return rows;
+    return rows.map((row) => {
+      const id = row.inputId;
+      const outcome = id ? this.earlyProcessingOutcomes.get(id) : undefined;
+      if (!id || !outcome) return row;
+      this.earlyProcessingOutcomes.delete(id);
+      return setProcessingStatus(row, outcome);
+    });
+  }
+
+  markInputProcessing(inputIds: string[], status: ProcessingOutcome): UIMessage[] {
+    for (const id of inputIds) this.earlyProcessingOutcomes.set(id, status);
+    return this.mergeInputProcessing(this.messages);
+  }
 
   private installUnit(unit: Unit): void {
     this.order = Math.max(this.order, unit.order + 1);
@@ -765,7 +789,7 @@ export class ThreadTranscript {
       }
       return { ...row, activitySegmentId: segment };
     });
-    const nextMessages = [...prefix];
+    let nextMessages = [...prefix];
     let previous = prefix.length;
     for (const row of mappedRows) {
       const anchor = anchors.get(candidate.byRow.get(row.id)!);
@@ -777,6 +801,22 @@ export class ThreadTranscript {
     }
     if (keepSuffix) nextMessages.push(...this.messages.slice(previous)
       .filter((row) => !replaced.has(this.byRow.get(row.id)!)));
+    const inputOutcomes = new Map<string, ProcessingOutcome>();
+    if (!replacedHistory) for (const row of this.messages) {
+      if (row.inputId && (row.processingStatus === "consumed" || row.processingStatus === "cancelled")) {
+        inputOutcomes.set(row.inputId, row.processingStatus);
+      }
+    }
+    for (const event of body?.events ?? []) {
+      if (event.event === "user_message" && event.input_id
+        && (event.processing_status === "consumed" || event.processing_status === "cancelled")) {
+        inputOutcomes.set(event.input_id, event.processing_status);
+      }
+    }
+    nextMessages = this.mergeInputProcessing(nextMessages.map((row) => {
+      const outcome = row.inputId ? inputOutcomes.get(row.inputId) : undefined;
+      return outcome ? setProcessingStatus(row, outcome) : row;
+    }));
     const modelRequests = new Map(this.modelRequests);
     for (const [turn, snapshot] of candidate.modelRequests) {
       modelRequests.set(turn, reconcileModelRequest(modelRequests.get(turn), snapshot));

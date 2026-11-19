@@ -27,7 +27,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
 from nanobot.context_graph import ContextGraph, ContextGraphParts, graph_from_parts
 from nanobot.context_sources import PromptSourcesEvent
-from nanobot.events import ModelRequestEvent
+from nanobot.events import InputProcessingEvent, ModelRequestEvent
 from nanobot.pairing.events import PairingChanged
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.webui_turns import (
@@ -293,6 +293,19 @@ class WebUIOutboundDelivery:
             return
 
         recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
+        if isinstance(event, InputProcessingEvent):
+            sessions = self._transcripts.sessions
+            generation = msg.metadata.get(HISTORY_GENERATION_METADATA_KEY)
+            if sessions is not None and isinstance(generation, str):
+                changed = await sessions.state.settle_history_inputs(
+                    webui_session_key(msg.chat_id), event.input_ids, event.status, expected_generation=generation,
+                )
+                if changed:
+                    await self._fanout(recipients, {
+                        "event": "input_processing", "chat_id": msg.chat_id,
+                        "input_ids": changed, "processing_status": event.status,
+                    }, label=" input_processing ")
+            return
         if not recipients:
             quiet_events = (
                 ModelRequestEvent, ProgressEvent, RetryStatusEvent, UserInputEvent, TurnEndEvent, SessionUpdatedEvent,

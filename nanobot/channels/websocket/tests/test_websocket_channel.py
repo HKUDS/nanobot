@@ -49,6 +49,7 @@ from nanobot.channels.websocket.runtime import (
 )
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelAPIConfig, ModelPresetConfig
+from nanobot.events import InputProcessingEvent
 from nanobot.pairing.events import PairingChanged
 from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
@@ -5373,9 +5374,39 @@ async def test_authorized_webui_turn_is_acked_after_bus_acceptance(history,
         "chat_id": "chat-accepted",
         "turn_id": "turn-accepted",
         "starts_turn": True,
+        "processing_status": "pending",
         "active_turn_id": "turn-accepted",
         "started_at": wth.websocket_turn_wall_started_at("chat-accepted"),
     }
+
+
+@pytest.mark.asyncio
+async def test_processing_outcome_updates_only_the_named_input_in_live_and_replayed_history(history, bus):
+    channel = _ch(bus, session_manager=history.sessions)
+    peer = AsyncMock()
+    peer.remote_address = ("127.0.0.1", 50123)
+    channel._attach(peer, "processing-chat")
+    for turn_id in ("picked-up", "waiting"):
+        await channel._dispatch_envelope(peer, "webui-client", {
+            "type": "message", "chat_id": "processing-chat", "turn_id": turn_id,
+            "content": "identical prompts", "webui": True,
+        })
+
+    consumed = await history.message(channel="websocket", chat_id="processing-chat", content="",
+                                     event=InputProcessingEvent(("user:picked-up",), "consumed"))
+    await channel.send(consumed)
+    frames = [payload for payload in _sent_ws_payloads(peer) if payload["event"] == "input_processing"]
+    assert frames == [{"event": "input_processing", "chat_id": "processing-chat",
+                       "input_ids": ["user:picked-up"], "processing_status": "consumed"}]
+
+    def states():
+        body = history.build("websocket:processing-chat")
+        return [(row["input_id"], row["processing_status"]) for row in body["events"] if row["event"] == "user_message"]
+
+    assert states() == [("user:picked-up", "consumed"), ("user:waiting", "pending")]
+    await channel.send(await history.message(channel="websocket", chat_id="processing-chat", content="",
+        event=InputProcessingEvent(("user:picked-up", "user:waiting"), "cancelled")))
+    assert states() == [("user:picked-up", "consumed"), ("user:waiting", "cancelled")]
 
 
 @pytest.mark.asyncio

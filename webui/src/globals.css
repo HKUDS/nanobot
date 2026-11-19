@@ -84,6 +84,11 @@
   inherits: false;
   initial-value: transparent;
 }
+@property --pending-edge-progress {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: -20%;
+}
 
 /* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
 @layer base {
@@ -1237,8 +1242,165 @@
 .user-message-surface,
 .side-panel-surface {
   --composer-shadow-color: 240 10% 16%;
-  --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
+  --surface-depth-shadow: 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
+  --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), var(--surface-depth-shadow);
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+
+.user-message-surface-dashed,
+.user-message-surface[data-pending-edge="sealing"] {
+  --tw-shadow: var(--surface-depth-shadow);
+}
+
+.pending-edge-overlay {
+  --pending-edge-progress: -20%;
+  --pending-edge-solid-color: hsl(var(--border) / 0.75);
+  --pending-edge-sheen-color: hsl(var(--foreground) / 0.34);
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: inherit;
+  corner-shape: inherit;
+}
+
+.dark .pending-edge-overlay {
+  --pending-edge-sheen-color: hsl(var(--foreground) / 0.42);
+}
+
+.pending-edge-overlay[data-solid-tone="card"] {
+  --pending-edge-solid-color: hsl(var(--border) / 0.70);
+}
+
+.pending-edge-overlay[data-solid-tone="media"] {
+  --pending-edge-solid-color: hsl(var(--border) / 0.60);
+}
+
+.pending-edge-overlay[data-pending-edge-overlay="sealing"] {
+  animation: pending-edge-seal 460ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.pending-edge-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  corner-shape: inherit;
+}
+
+.pending-edge-layer-dashed {
+  border: 1px dashed hsl(var(--muted-foreground) / 0.30);
+}
+
+.pending-edge-overlay[data-pending-edge-overlay="pending"] .pending-edge-layer-dashed {
+  border-color: hsl(var(--muted-foreground) / 0.58);
+  animation: pending-edge-breathe 2s ease-in-out infinite;
+}
+
+.dark .pending-edge-overlay[data-pending-edge-overlay="pending"] .pending-edge-layer-dashed {
+  border-color: hsl(var(--muted-foreground) / 0.62);
+}
+
+.pending-edge-overlay[data-pending-edge-overlay="sealing"] .pending-edge-layer-dashed {
+  -webkit-mask-image: linear-gradient(
+    105deg,
+    transparent 0%,
+    transparent calc(var(--pending-edge-progress) - 8%),
+    #000 calc(var(--pending-edge-progress) + 8%),
+    #000 100%
+  );
+  mask-image: linear-gradient(
+    105deg,
+    transparent 0%,
+    transparent calc(var(--pending-edge-progress) - 8%),
+    #000 calc(var(--pending-edge-progress) + 8%),
+    #000 100%
+  );
+}
+
+.pending-edge-layer-solid {
+  border: 1px solid var(--pending-edge-solid-color);
+  -webkit-mask-image: linear-gradient(
+    105deg,
+    #000 0%,
+    #000 calc(var(--pending-edge-progress) - 8%),
+    transparent calc(var(--pending-edge-progress) + 8%),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    105deg,
+    #000 0%,
+    #000 calc(var(--pending-edge-progress) - 8%),
+    transparent calc(var(--pending-edge-progress) + 8%),
+    transparent 100%
+  );
+}
+
+.pending-edge-layer-sheen {
+  border: 1px solid var(--pending-edge-sheen-color);
+  -webkit-mask-image: linear-gradient(
+    105deg,
+    transparent calc(var(--pending-edge-progress) - 18%),
+    #000 var(--pending-edge-progress),
+    transparent calc(var(--pending-edge-progress) + 18%)
+  );
+  mask-image: linear-gradient(
+    105deg,
+    transparent calc(var(--pending-edge-progress) - 18%),
+    #000 var(--pending-edge-progress),
+    transparent calc(var(--pending-edge-progress) + 18%)
+  );
+  animation: pending-edge-sheen-opacity 460ms ease-out forwards;
+}
+
+@keyframes pending-edge-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes pending-edge-seal {
+  from {
+    --pending-edge-progress: -20%;
+  }
+  to {
+    --pending-edge-progress: 120%;
+  }
+}
+
+@keyframes pending-edge-sheen-opacity {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  78% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes pending-edge-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes pending-edge-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .thread-composer-surface {
@@ -1256,10 +1418,28 @@
 
 @media (prefers-reduced-motion: reduce) {
   .thread-composer-surface { transition: var(--theme-paint-transition, none); }
+  .pending-edge-overlay[data-pending-edge-overlay="pending"] .pending-edge-layer-dashed {
+    border-color: hsl(var(--muted-foreground) / 0.30);
+    animation: none;
+  }
+  .pending-edge-overlay[data-pending-edge-overlay="sealing"] { animation: none; }
+  .pending-edge-overlay[data-pending-edge-overlay="sealing"] .pending-edge-layer-dashed {
+    -webkit-mask-image: none;
+    mask-image: none;
+    animation: pending-edge-fade-out 160ms ease-out forwards;
+  }
+  .pending-edge-layer-solid {
+    -webkit-mask-image: none;
+    mask-image: none;
+    animation: pending-edge-fade-in 160ms ease-out forwards;
+  }
+  .pending-edge-layer-sheen { display: none; }
 }
 
 @media (forced-colors: active) {
   .thread-composer-surface, .context-inspector-surface, .user-message-surface, .side-panel-surface { outline: 1px solid CanvasText; }
+  .user-message-surface-dashed { outline-style: dashed; }
+  .pending-edge-overlay { display: none; }
   .thread-composer-surface:focus-within { outline: 2px solid Highlight; }
   [data-keyboard-focus] { outline: 2px solid Highlight; outline-offset: -2px; }
 }
