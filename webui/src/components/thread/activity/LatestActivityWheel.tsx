@@ -34,7 +34,7 @@ export function LatestActivityWheel({ row, visible }: { row: ReactElement; visib
       aria-hidden
       {...{ inert: "" }}
       data-testid="latest-activity-wheel"
-      className="relative h-6 min-w-0 overflow-hidden pe-1 max-sm:ms-6 sm:flex-1 [mask-image:linear-gradient(transparent,black_10%,black_90%,transparent)] [&_[data-activity-marker]]:self-center [&_[data-activity-marker]]:items-center [&_[data-activity-marker]]:pt-0"
+      className="relative h-6 min-w-0 overflow-hidden pe-1 [mask-image:linear-gradient(transparent,black_10%,black_90%,transparent)] [&_[data-activity-marker]]:self-center [&_[data-activity-marker]]:items-center [&_[data-activity-marker]]:pt-0"
     >
       {canRoll ? <motion.div
         key={frame.key}

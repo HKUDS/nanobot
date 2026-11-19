@@ -55,6 +55,7 @@ import { formControlFocusClassName } from "@/components/ui/form-control";
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import type { FileEditDisplayMode } from "@/lib/local-preferences";
@@ -251,6 +252,7 @@ function FoldedAgentActivity({
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
   const { activityMode, fileEditDisplayMode } = useLocalPreferences();
+  const mobile = useMediaQuery("(max-width: 639px)");
   const pageVisible = usePageVisibility();
   const threadVisible = useThreadVisibility();
   const activityMessages = useMemo(() => coalesceActivityMessages(messages), [messages]);
@@ -322,6 +324,11 @@ function FoldedAgentActivity({
   );
   const activityDuration = formatActivityDuration(durationMs);
   const showActivityPreview = isTurnStreaming && hasVisibleActivity && !outerExpanded && !hideHeader && !retryStatus;
+  const preview = useMemo(() => {
+    if (!showActivityPreview) return null;
+    const row = latestActivityRow(activityMessages, fileEditsByMessage, cliAppsByName, mcpPresetsByName);
+    return row ? <LatestActivityWheel row={row} visible={pageVisible && threadVisible} /> : null;
+  }, [showActivityPreview, activityMessages, fileEditsByMessage, cliAppsByName, mcpPresetsByName, pageVisible, threadVisible]);
   const workingLabel = (duration: string) => t("message.activityWorkingFor", {
     duration,
     defaultValue: "Working for {{duration}}",
@@ -356,7 +363,7 @@ function FoldedAgentActivity({
             defaultValue: "{{error}} Retrying",
           })
       : isTurnStreaming
-    ? workingLabel(activityDuration)
+    ? mobile ? t("message.agentActivity.working") : workingLabel(activityDuration)
     : durationMs <= 0
       ? t("message.activityWorked", { defaultValue: "Worked" })
       : t("message.activityWorkedFor", {
@@ -409,15 +416,8 @@ function FoldedAgentActivity({
         collapseLabel={t("message.collapseActivity")}
         contentId={detailsId}
         label={activityLabel}
-        preview={showActivityPreview ? (
-          <CollapsedActivityPreview
-            messages={activityMessages}
-            fileEditsByMessage={fileEditsByMessage}
-            cliAppsByName={cliAppsByName}
-            mcpPresetsByName={mcpPresetsByName}
-            visible={pageVisible && threadVisible}
-          />
-        ) : undefined}
+        preview={preview}
+        compactPreview={mobile && preview !== null}
         hasDetails={hasVisibleActivity}
         onToggle={toggleOuter}
       >
@@ -501,61 +501,54 @@ function traceLines(message: UIMessage): string[] {
   return message.content.trim() ? [message.content] : [];
 }
 
-const CollapsedActivityPreview = memo(function CollapsedActivityPreview({
-  messages, fileEditsByMessage, cliAppsByName, mcpPresetsByName, visible,
-}: {
-  messages: UIMessage[];
-  fileEditsByMessage: Map<string, FileEditSummary[]>;
-  cliAppsByName: Map<string, CliAppInfo>;
-  mcpPresetsByName: Map<string, McpPresetInfo>;
-  visible: boolean;
-}) {
-  const row = useMemo(() => {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (isReasoningOnlyAssistant(message)) {
-        return <ReasoningRow key={message.id} text={message.reasoning ?? ""} streaming={!!message.reasoningStreaming} />;
-      }
-      if (message.activityKind === "model" && message.content.trim()) {
-        return <ActivityStep key={message.id} icon={Layers} label={safeActivityDetail(compactReasoningPreview(message.content))} />;
-      }
-      if (message.kind !== "trace") continue;
-      const edit = fileEditsByMessage.get(message.id)?.at(-1);
-      if (edit) return <FileEditGroup key={edit.key} edits={[edit]} displayMode="summary" />;
-      const entry = activityTraceEntries(message).at(-1);
-      const event = entry?.sessionEvent ?? message.toolEvents?.at(-1);
-      const line = entry?.line ?? formatToolCallTrace(event);
-      if (!line?.trim()) continue;
-      const traceKey = canonicalToolTrace(line);
-      const events = message.toolEvents ?? [];
-      const matchingEvent = entry?.sessionEvent ?? [...events].reverse().find((item) => {
-        const trace = formatToolCallTrace(item);
-        return trace !== null && canonicalToolTrace(trace) === traceKey;
-      });
-      const key = `${message.id}:${matchingEvent?.call_id ?? traceKey}`;
-      const search = webSearchRunsByTraceLine(events).get(traceKey);
-      if (search) {
-        const source = search.sources.at(-1);
-        if (source) return <WebActivityRow key={`${key}:${source.href}`} {...source} />;
-        return <WebSearchActionRow key={key} run={search} turnActive />;
-      }
-      if (matchingEvent && toolEventName(matchingEvent) === "exec_session") {
-        return <ExecSessionRow key={key} event={matchingEvent} turnActive />;
-      }
-      const state = genericToolStateByTraceLine(message).get(traceKey);
-      const cli = cliRunMapByTraceLine(message).get(traceKey) ?? parseCliRunTrace(line, state?.status);
-      if (cli) return <CliRunRow key={key} run={cli} active app={cliAppsByName.get(cli.name.toLowerCase())} />;
-      const mcp = mcpRunMapByTraceLine(message).get(traceKey) ?? parseMcpRunTrace(line, state?.status);
-      if (mcp) return <McpRunRow key={key} run={mcp} active preset={mcpPresetsByName.get(mcp.presetName.toLowerCase())} />;
-      const trace = parseGenericToolTrace(line);
-      if (trace) return <GenericToolRun key={key} items={[{ trace, status: state?.status ?? "running", error: state?.error }]} />;
-      return <ActivityTraceRow key={key} line={line} active state={state} />;
+function latestActivityRow(
+  messages: UIMessage[],
+  fileEditsByMessage: Map<string, FileEditSummary[]>,
+  cliAppsByName: Map<string, CliAppInfo>,
+  mcpPresetsByName: Map<string, McpPresetInfo>,
+) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (isReasoningOnlyAssistant(message)) {
+      return <ReasoningRow key={message.id} text={message.reasoning ?? ""} streaming={!!message.reasoningStreaming} />;
     }
-    return null;
-  }, [messages, fileEditsByMessage, cliAppsByName, mcpPresetsByName]);
-
-  return row ? <LatestActivityWheel row={row} visible={visible} /> : null;
-});
+    if (message.activityKind === "model" && message.content.trim()) {
+      return <ActivityStep key={message.id} icon={Layers} label={safeActivityDetail(compactReasoningPreview(message.content))} />;
+    }
+    if (message.kind !== "trace") continue;
+    const edit = fileEditsByMessage.get(message.id)?.at(-1);
+    if (edit) return <FileEditGroup key={edit.key} edits={[edit]} displayMode="summary" />;
+    const entry = activityTraceEntries(message).at(-1);
+    const event = entry?.sessionEvent ?? message.toolEvents?.at(-1);
+    const line = entry?.line ?? formatToolCallTrace(event);
+    if (!line?.trim()) continue;
+    const traceKey = canonicalToolTrace(line);
+    const events = message.toolEvents ?? [];
+    const matchingEvent = entry?.sessionEvent ?? [...events].reverse().find((item) => {
+      const trace = formatToolCallTrace(item);
+      return trace !== null && canonicalToolTrace(trace) === traceKey;
+    });
+    const key = `${message.id}:${matchingEvent?.call_id ?? traceKey}`;
+    const search = webSearchRunsByTraceLine(events).get(traceKey);
+    if (search) {
+      const source = search.sources.at(-1);
+      if (source) return <WebActivityRow key={`${key}:${source.href}`} {...source} />;
+      return <WebSearchActionRow key={key} run={search} turnActive />;
+    }
+    if (matchingEvent && toolEventName(matchingEvent) === "exec_session") {
+      return <ExecSessionRow key={key} event={matchingEvent} turnActive />;
+    }
+    const state = genericToolStateByTraceLine(message).get(traceKey);
+    const cli = cliRunMapByTraceLine(message).get(traceKey) ?? parseCliRunTrace(line, state?.status);
+    if (cli) return <CliRunRow key={key} run={cli} active app={cliAppsByName.get(cli.name.toLowerCase())} />;
+    const mcp = mcpRunMapByTraceLine(message).get(traceKey) ?? parseMcpRunTrace(line, state?.status);
+    if (mcp) return <McpRunRow key={key} run={mcp} active preset={mcpPresetsByName.get(mcp.presetName.toLowerCase())} />;
+    const trace = parseGenericToolTrace(line);
+    if (trace) return <GenericToolRun key={key} items={[{ trace, status: state?.status ?? "running", error: state?.error }]} />;
+    return <ActivityTraceRow key={key} line={line} active state={state} />;
+  }
+  return null;
+}
 
 const ActivityMessageTimeline = memo(function ActivityMessageTimeline({
   messages,

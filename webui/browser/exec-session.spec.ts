@@ -15,7 +15,7 @@ for (const width of [1280, 360]) {
     await expect(activity).toContainText("Command failed (exit 7) curl -u •••• https://example.invalid");
     await page.getByRole("button", { name: "many", exact: true }).click();
     await expect(activity.getByTestId("latest-activity-wheel")).toContainText("Command still running");
-    await activity.getByRole("button", { name: /^Working for / }).click();
+    await activity.getByRole("button", { name: width < 640 ? "Working" : /^Working for /, exact: true }).click();
     const disclosure = activity.getByRole("button", { name: "Show 24 earlier checks" });
     await expect(activity.getByTestId("activity-step")).toHaveCount(1);
     await disclosure.click();
