@@ -25,12 +25,12 @@ from nanobot.providers.base import LLMResponse, ProviderConversationState
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.message_content import history_message_text
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
 from nanobot.utils.gitstore import MEMORY_CONTENT_PATHS, MEMORY_WIKI_PATH, GitStore
 from nanobot.utils.helpers import (
     atomic_write_lines,
     build_assistant_message,
-    content_with_media_breadcrumbs,
     ensure_dir,
     estimate_prompt_tokens_chain,
     strip_think,
@@ -615,11 +615,7 @@ class MemoryStore:
     def _format_messages(messages: list[dict[str, Any]]) -> str:
         lines: list[str] = []
         for message in messages:
-            content = content_with_media_breadcrumbs(
-                message.get("role"),
-                message.get("content", ""),
-                message.get("media"),
-            )
+            content = history_message_text(message)
             if not content:
                 continue
             tools_used = message.get("tools_used")
@@ -1002,11 +998,11 @@ class MemoryArchiver:
             messages=list(session.messages[:archive_end]),
             last_consolidated=session.last_archived,
         )
-        history = prefix.get_history(max_tokens=input_token_budget)
+        history = prefix.get_text_history(max_tokens=input_token_budget)
         archive_history = Session(
             key=session.key,
             messages=messages,
-        ).get_history()
+        ).get_text_history()
         if not archive_history or history[-len(archive_history):] != archive_history:
             logger.debug(
                 "Memory archive cannot replay the full chunk for {}; raw-dumping",
@@ -1137,15 +1133,6 @@ class Consolidator:
             persist=persist,
         )
 
-    @staticmethod
-    def _full_replay_history(
-        session: Session,
-    ) -> list[dict[str, Any]]:
-        """Return all messages that can reach the next model prompt."""
-        if not session.messages:
-            return []
-        return session.get_history()
-
     def estimate_session_prompt_tokens(
         self,
         session: Session,
@@ -1153,7 +1140,7 @@ class Consolidator:
         runtime: LLMRuntime,
     ) -> tuple[int, str]:
         """Estimate prompt size from the full replayable session history."""
-        history = self._full_replay_history(session)
+        history = session.get_text_history()
         channel = session.key.split(":", 1)[0] if ":" in session.key else None
         summary = session_summary_from_metadata(
             session.metadata,
@@ -1265,7 +1252,7 @@ class Consolidator:
                 "Idle-session compact for {}: archived={}, visible={}, retained={}, summary={}",
                 session_key,
                 len(messages_to_archive),
-                len(session.get_history()),
+                len(session.get_text_history()),
                 len(session.messages),
                 bool(summary),
             )

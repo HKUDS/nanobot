@@ -1007,6 +1007,7 @@ async def test_runner_does_not_compact_primary_request_from_fallback_usage(monke
     primary = MagicMock(spec=LLMProvider)
     primary._image_input_error.return_value = None
     primary.provider_name = "primary"
+    primary.supports_images = True
     primary.generation = GenerationSettings(max_tokens=100)
     primary.supports_native_compaction.return_value = False
     primary.chat_stream_with_retry = AsyncMock(side_effect=[

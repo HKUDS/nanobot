@@ -40,6 +40,9 @@ def persisted_message(message: dict[str, Any]) -> dict[str, Any]:
         for key in ("timestamp", INBOUND_META_TURN_ID):
             if isinstance(value := metadata.get(key), str) and value:
                 entry[key] = value
+        for key in ("media", INBOUND_META_LOCAL_MEDIA):
+            if isinstance(paths := metadata.get(key), list):
+                entry[key] = [path for path in cast(list[object], paths) if isinstance(path, str)]
         if isinstance(source := metadata.get("session_message"), dict):
             entry["session_message"] = source
         if isinstance(context := metadata.get(RUNTIME_CONTEXT_MESSAGE_META), dict):

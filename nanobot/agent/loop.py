@@ -86,6 +86,7 @@ from nanobot.security.workspace_access import (
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
+from nanobot.session.image_attachments import persist_user_image_blocks
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
 from nanobot.session.message_metadata import input_history_metadata, persisted_message
 from nanobot.session.model_selection import (
@@ -110,7 +111,7 @@ from nanobot.session.summary import (
     SessionSummaryCheckpoint,
 )
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
-from nanobot.utils.cancellation import task_is_cancelling
+from nanobot.utils.cancellation import shield_and_drain, task_is_cancelling
 from nanobot.utils.document import reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -748,10 +749,12 @@ class AgentLoop:
             if text_override is not None:
                 text = text_override
             extra.update(automation_extra)
-            text, runtime_context_meta = append_runtime_context(
-                text,
-                runtime_context_blocks or (),
-            )
+            user_content = await self.runner.prepare_prompt(
+                self.context.build_user_content, text, image_paths=media_paths,
+            ) if media_paths else text
+            if isinstance(user_content, list) and session.policy.persist:
+                user_content = await shield_and_drain(asyncio.to_thread(persist_user_image_blocks, user_content))
+            content, runtime_context_meta = append_runtime_context(user_content, runtime_context_blocks or ())
             if runtime_context_meta is not None:
                 extra[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
             if INBOUND_META_MODEL_OPTIONS in msg.metadata:
@@ -762,7 +765,7 @@ class AgentLoop:
                 session.metadata.update(SessionModelPreset(
                     selection.base_preset, ModelOptions.parse(msg.metadata[INBOUND_META_MODEL_OPTIONS]),
                 ).metadata_update())
-            session.add_message("user", text, **extra)
+            session.add_message("user", content, **extra)
             self._mark_pending_user_turn(session)
             followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
             if isinstance(followup_id, str) and followup_id:
@@ -776,7 +779,7 @@ class AgentLoop:
         return TranscriptInput(
             history=ctx.history,
             current_message=ctx.msg.content,
-            media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
+            media=ctx.msg.media if ctx.kind is TurnKind.USER else None,
             session_summary=ctx.pending_summary,
             runtime_context_blocks=ctx.runtime_context_blocks,
             input_metadata=(
@@ -1058,11 +1061,15 @@ class AgentLoop:
         if image_paths:
             content, image_paths = reference_non_image_attachments(content, image_paths)
             image_paths = image_paths or None
-        user_content = self.context.build_user_content(content, image_paths=image_paths)
+        user_content = await self.runner.prepare_prompt(
+            self.context.build_user_content, content, image_paths=image_paths,
+        ) if image_paths else content
         row: dict[str, Any] = {
             "role": "user", "content": user_content,
             "_meta": input_history_metadata(message),
         }
+        if image_paths:
+            row["_meta"]["media"] = image_paths
         if HIDDEN_HISTORY_META in message.metadata:
             row[HIDDEN_HISTORY_META] = message.metadata[HIDDEN_HISTORY_META]
         metadata_value = cast(object, message.metadata)
@@ -1117,8 +1124,10 @@ class AgentLoop:
 
     async def _checkpoint_turn(self, session: Session, payload: AgentCheckpoint) -> None:
         public_payload: dict[str, Any] = dict(payload)
-        preceding = Session(key=session.key)
-        self._save_turn(preceding, payload["preceding_messages"], skip=0)
+        preceding = Session(key=session.key, policy=session.policy)
+        await shield_and_drain(asyncio.to_thread(
+            self._save_turn, preceding, payload["preceding_messages"], skip=0,
+        ))
         public_payload["preceding_messages"] = preceding.messages
         public_payload["consumed_followup_ids"] = sorted(preceding.consumed_followup_ids)
         public_payload.pop("provider_state", None)
@@ -2185,9 +2194,9 @@ class AgentLoop:
             stored_state,
             runtime.model,
         ):
-            current_provider_message = self.context.build_current_message(
-                ctx.msg.content,
-                media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
+            current_provider_message = await self.runner.prepare_prompt(
+                self.context.build_current_message, ctx.msg.content,
+                media=ctx.msg.media if ctx.kind is TurnKind.USER else None,
                 runtime_context_blocks=ctx.runtime_context_blocks,
                 include_memory=session.policy.persist,
                 has_cron=(ctx.tools if ctx.tools is not None else self.tools).has("cron"),
@@ -2312,12 +2321,13 @@ class AgentLoop:
             turn_continuation.record_iteration_limit(
                 session.metadata, ctx.stop_reason,
             )
-        self._save_turn(
-            session, ctx.all_messages, ctx.save_skip,
+        await shield_and_drain(asyncio.to_thread(
+            self._save_turn, session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,
             summary_checkpoint=None if ctx.ephemeral else ctx.summary_checkpoint,
             input_persisted_early=ctx.input_persisted_early,
-        )
+            store_images=ctx.commit_session,
+        ))
         if (
             not ctx.ephemeral
             and ctx.provider_compaction_applied
@@ -2364,7 +2374,7 @@ class AgentLoop:
         if ctx.ephemeral and ctx.outbound is not None:
             ctx.outbound.metadata["_stop_reason"] = ctx.stop_reason
 
-    def _sanitize_persisted_blocks(
+    def _redact_persisted_tool_images(
         self,
         content: list[object],
     ) -> list[object]:
@@ -2422,6 +2432,7 @@ class AgentLoop:
         turn_latency_ms: int | None = None,
         summary_checkpoint: SessionSummaryCheckpoint | None = None,
         input_persisted_early: bool = False,
+        store_images: bool = True,
     ) -> None:
         declared_tool_call_ids = {
             str(tc["id"])
@@ -2484,7 +2495,7 @@ class AgentLoop:
                 fulfilled_tool_call_ids.add(tool_call_id_str)
                 # Preserve model-visible text for replay; redact only inline images.
                 if isinstance(content, list):
-                    filtered = self._sanitize_persisted_blocks(
+                    filtered = self._redact_persisted_tool_images(
                         cast(list[object], content),
                     )
                     if not filtered:
@@ -2493,14 +2504,11 @@ class AgentLoop:
                             {"type": "text", "text": "[tool result omitted during persistence]"}
                         ]
                     entry["content"] = filtered
-            elif role == "user":
-                if isinstance(content, list):
-                    filtered = self._sanitize_persisted_blocks(
-                        cast(list[object], content),
-                    )
-                    if not filtered:
-                        continue
-                    entry["content"] = filtered
+            elif role == "user" and isinstance(content, list):
+                if not content:
+                    continue
+                if store_images and session.policy.persist:
+                    entry["content"] = persist_user_image_blocks(cast(list[object], content))
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
             if role == "user" and isinstance(followup_id, str) and followup_id:

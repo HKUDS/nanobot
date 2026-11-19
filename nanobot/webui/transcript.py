@@ -36,6 +36,7 @@ from nanobot.session.history_graph import (
 )
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.message_content import message_text
 from nanobot.session.session_messages import (
     session_message_envelope,
     session_message_public_metadata,
@@ -835,8 +836,7 @@ def _session_user_event(
     message = public_history_message(message)
     if _is_legacy_raw_subagent_result(message):
         return None
-    content = message.get("content")
-    text = content if isinstance(content, str) else ""
+    text = message_text(message.get("content"))
     media = message.get("media")
     cli_apps = message.get("cli_apps")
     mcp_presets = message.get("mcp_presets")

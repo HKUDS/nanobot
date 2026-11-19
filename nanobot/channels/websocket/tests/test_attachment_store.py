@@ -190,7 +190,7 @@ async def test_filename_collision_never_unlinks_existing_file(tmp_path, monkeypa
     assert existing.read_bytes() == b"keep"
 
 
-async def test_committed_paths_persist_and_replay_without_reference_format(tmp_path):
+async def test_committed_paths_persist_as_media_metadata(tmp_path):
     from nanobot.session.manager import SessionManager
 
     store = AttachmentStore(tmp_path / "media")
@@ -205,9 +205,7 @@ async def test_committed_paths_persist_and_replay_without_reference_format(tmp_p
     replay = replay_manager.get_or_create("websocket:binary-upload")
     assert replay.messages[0]["media"] == paths
     assert reference not in str(replay.messages)
-    assert replay.get_history()[0] == {
-        "role": "user", "content": f"look\n[image: {paths[0]}]",
-    }
+    assert replay.get_history()[0] == {"role": "user", "content": "look"}
     store.clear()
     assert Path(paths[0]).exists()
 

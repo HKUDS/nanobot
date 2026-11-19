@@ -16,7 +16,7 @@ def session_context_payload(session: Session) -> dict[str, Any]:
     model-specific token budget.  This projection deliberately reports only the
     session-owned part: archived summary plus the replayable raw suffix.
     """
-    replay = session.get_history(max_messages=0, include_runtime_context=False)
+    replay = session.get_text_history(include_runtime_context=False)
     raw_summary = session.metadata.get("_last_summary")
     summary = ""
     summary_preview = ""

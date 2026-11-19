@@ -235,8 +235,10 @@ class TestRestartCommand:
     @pytest.mark.asyncio
     async def test_status_reports_runtime_info(self):
         loop, _bus = _make_loop()
-        session = MagicMock()
-        session.get_history.return_value = [{"role": "user"}] * 3
+        session = Session("telegram:c1")
+        session.add_message("user", [{"type": "image_attachment", "id": "a" * 64}])
+        session.add_message("assistant", "Image received")
+        session.add_message("user", "Continue")
         session.metadata = {
             "_last_usage": LLMUsage.reported(input_tokens=0, output_tokens=0).to_dict()
         }
@@ -275,8 +277,8 @@ class TestRestartCommand:
     @pytest.mark.asyncio
     async def test_status_counts_running_dispatch_and_subagent_tasks(self):
         loop, _bus = _make_loop()
-        session = MagicMock()
-        session.get_history.return_value = [{"role": "user"}]
+        session = Session("telegram:c1")
+        session.add_message("user", "Hello")
         loop.sessions.state.get = AsyncMock(return_value=session)
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(1000, "tiktoken")
@@ -327,8 +329,8 @@ class TestRestartCommand:
     @pytest.mark.asyncio
     async def test_status_falls_back_to_session_usage_when_context_estimate_missing(self):
         loop, _bus = _make_loop()
-        session = MagicMock()
-        session.get_history.return_value = [{"role": "user"}]
+        session = Session("telegram:c1")
+        session.add_message("user", "Hello")
         session.metadata = {
             "_last_usage": LLMUsage.reported(input_tokens=1200, output_tokens=34).to_dict()
         }
@@ -350,9 +352,7 @@ class TestRestartCommand:
     @pytest.mark.asyncio
     async def test_process_direct_preserves_render_metadata(self):
         loop, _bus = _make_loop()
-        session = MagicMock()
-        session.get_history.return_value = []
-        loop.sessions.state.get = AsyncMock(return_value=session)
+        loop.sessions.state.get = AsyncMock(return_value=Session("cli:test"))
         loop.subagents.get_running_count.return_value = 0
         loop.subagents.get_running_count_by_session.return_value = 0
 

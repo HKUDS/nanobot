@@ -367,7 +367,11 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
     )
     session = loop.sessions.get_or_create("websocket:chat-title")
     session.metadata[WEBUI_SESSION_METADATA_KEY] = True
-    session.add_message("user", "帮我优化一下 webui 的 sidebar")
+    caption = "帮我优化一下 webui 的 sidebar"
+    session.add_message("user", [
+        {"type": "image_attachment", "id": "a" * 64},
+        {"type": "text", "text": caption},
+    ])
     session.add_message("assistant", "可以，我会先调整布局和视觉层级。")
     loop.sessions.save(session)
 
@@ -382,6 +386,8 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
     session = await loop.sessions.state.get(session.key)
     assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "优化 WebUI 侧边栏"
     loop.provider.chat_stream_with_retry.assert_awaited_once()
+    title_prompt = loop.provider.chat_stream_with_retry.await_args.args[0][-1]["content"]
+    assert f"User: {caption}\nAssistant:" in title_prompt
     assert loop.provider.chat_stream_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
     assert (
         loop.provider.chat_stream_with_retry.await_args.kwargs["reasoning_effort"]
@@ -530,7 +536,7 @@ def test_save_turn_commits_summary_boundary_without_rewriting_raw_history() -> N
     ]
 
 
-def test_save_turn_keeps_image_placeholder_and_runtime_context() -> None:
+def test_save_turn_keeps_user_image_and_runtime_context() -> None:
     loop = _mk_loop()
     session = Session(key="test:image")
     block = RuntimeContextBlock(source="test", content="provider context")
@@ -545,33 +551,11 @@ def test_save_turn_keeps_image_placeholder_and_runtime_context() -> None:
         )],
         skip=0,
     )
-    assert session.messages[0]["content"] == [
-        {"type": "text", "text": "[image: /media/feishu/photo.jpg]"},
-        {"type": "text", "text": "provider context"},
-    ]
-    assert public_history_message(session.messages[0])["content"] == [
-        {"type": "text", "text": "[image: /media/feishu/photo.jpg]"}
-    ]
-
-
-def test_save_turn_keeps_image_placeholder_without_meta() -> None:
-    loop = _mk_loop()
-    session = Session(key="test:image-no-meta")
-    block = RuntimeContextBlock(source="test", content="provider context")
-
-    loop._save_turn(
-        session,
-        [_runtime_message(
-            [
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
-            ],
-            [block],
-        )],
-        skip=0,
-    )
-    assert session.messages[0]["content"] == [
+    content = session.get_history()[0]["content"]
+    assert content[0]["image_url"] == {"url": "data:image/png;base64,abc"}
+    assert content[1:] == [{"type": "text", "text": "provider context"}]
+    assert session.get_history(include_runtime_context=False)[0]["content"] == [
         {"type": "text", "text": "[image]"},
-        {"type": "text", "text": "provider context"},
     ]
 
 
@@ -1196,18 +1180,17 @@ async def test_process_message_persists_media_paths_on_user_turn(tmp_path: Path)
     loop.sessions.invalidate("websocket:c-media")
     persisted = loop.sessions.get_or_create("websocket:c-media")
     assert [m["role"] for m in persisted.messages] == ["user"]
-    assert public_history_message(persisted.messages[0])["content"] == "look"
+    assert persisted.get_history(include_runtime_context=False)[0]["content"] == [
+        {"type": "text", "text": "[image]"},
+        {"type": "text", "text": "[image]"},
+        {"type": "text", "text": "look"},
+    ]
     assert persisted.messages[0]["media"] == [str(img_a), str(img_b)]
 
 
 @pytest.mark.asyncio
 async def test_process_message_persists_media_only_turn_without_text(tmp_path: Path) -> None:
-    """A turn with images but no text still persists (previously silent-dropped).
-
-    The old early-persist gate skipped messages without text, leaving pure
-    image turns un-checkpointed. They now materialise as an empty-content
-    user row with ``media`` attached.
-    """
+    """The image-only input is replayable even if the first model call never finishes."""
     img = tmp_path / "only.png"
     img.write_bytes(_PNG_1X1)
 
@@ -1228,7 +1211,11 @@ async def test_process_message_persists_media_only_turn_without_text(tmp_path: P
     persisted = loop.sessions.get_or_create("websocket:c-images-only")
     assert len(persisted.messages) == 1
     assert persisted.messages[0]["role"] == "user"
-    assert public_history_message(persisted.messages[0])["content"] == ""
+    content = persisted.get_history()[0]["content"]
+    assert [block["type"] for block in content].count("image_url") == 1
+    assert persisted.get_history(include_runtime_context=False)[0]["content"] == [
+        {"type": "text", "text": "[image]"},
+    ]
     assert persisted.messages[0]["media"] == [str(img)]
 
 

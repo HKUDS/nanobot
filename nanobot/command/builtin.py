@@ -220,7 +220,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             version=__version__, model=runtime.model,
             start_time=loop._start_time, last_usage=last_usage,  # pyright: ignore[reportPrivateUsage]
             context_window_tokens=runtime.context_window_tokens,
-            session_msg_count=len(session.get_history(max_messages=0)),
+            session_msg_count=len(session.get_text_history()),
             context_tokens_estimate=ctx_est,
             search_usage_text=search_usage_text,
             active_task_count=task_count,
