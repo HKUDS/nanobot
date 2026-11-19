@@ -1955,7 +1955,6 @@
     "automationsDescription": "删除话题也会删除关联的自动任务",
     "automationsDescriptionMany": "关联的自动任务也会一并删除。",
     "moreAutomations": "另有 {{count}} 个",
-    "confirmWithAutomations": "删除",
     "schedule": {
       "at": "{{time}}",
       "every": "每 {{duration}}",
@@ -2726,7 +2725,6 @@
     "archiveFailed": "无法更改归档状态。",
     "unarchivedSingle": "已取消归档",
     "deleteFailedSingle": "删除会话失败",
-    "deleteWindow": "可在 {{seconds}} 秒内撤销。",
     "pendingDelete": "即将删除 {{count}} 个会话",
     "archived": "已归档 {{count}} 个会话",
     "unarchived": "已取消归档 {{count}} 个会话",

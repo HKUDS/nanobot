@@ -95,7 +95,9 @@ If creating or forking a topic times out, it may already have succeeded; it is n
 
 Drag topics within a sidebar group to reorder them. **Rename** edits a topic title in place; a failed save keeps the draft for retry.
 
-Use **Select** in a topic's action menu to archive or delete several topics with one confirmation. Click outside the topic rows and toolbar, or press **Esc**, to leave selection mode. Cancelling a confirmation keeps your selection. Archiving removes pins and hides topics from the default list while keeping their conversations. Use **Show archived** to find them again; selecting only archived topics offers **Unarchive**.
+Use **Select** in a topic's action menu to archive or delete several topics at once. Click outside the topic rows and toolbar, or press **Esc**, to leave selection mode. Cancelling a confirmation keeps your selection. Archiving removes pins and hides topics from the default list while keeping their conversations. Use **Show archived** to find them again; selecting only archived topics offers **Unarchive**.
+
+**Delete** hides the selected topics and gives you 8 seconds to choose **Undo** before deleting them. If a topic has linked automations, confirm before deleting it and its automations.
 
 ### Conversation groups and panes
 

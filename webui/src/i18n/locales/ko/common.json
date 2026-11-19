@@ -1773,7 +1773,6 @@
     "automationsDescription": "이 주제를 삭제하면 연결된 자동 작업도 삭제됩니다.",
     "automationsDescriptionMany": "연결된 자동화도 함께 삭제됩니다.",
     "moreAutomations": "+ {{count}}개 더",
-    "confirmWithAutomations": "삭제",
     "schedule": {
       "at": "{{time}}",
       "every": "{{duration}}마다",
@@ -2544,7 +2543,6 @@
     "archiveFailed": "보관 상태를 변경하지 못했습니다.",
     "unarchivedSingle": "대화 보관을 해제했습니다",
     "deleteFailedSingle": "대화를 삭제하지 못했습니다",
-    "deleteWindow": "{{seconds}}초 안에 삭제를 취소할 수 있습니다.",
     "pendingDelete": "대화 {{count}}개가 곧 삭제됩니다",
     "archived": "대화 {{count}}개를 보관했습니다",
     "unarchived": "대화 {{count}}개의 보관을 해제했습니다",

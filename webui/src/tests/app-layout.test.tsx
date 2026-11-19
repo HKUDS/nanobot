@@ -50,10 +50,9 @@ const pairingChangeHandlers = new Set<() => void>();
 const readyHandlers = new Set<() => void>();
 let mockSessions: ChatSummary[] = [];
 
-async function confirmTopicDeletion(button: HTMLElement) {
-  fireEvent.click(button);
-  // Happy DOM delivers the modal's aria-hidden removal on a timer. Start
-  // measuring the Undo window after the observer makes the toast reachable.
+async function clickDeleteAction(action: HTMLElement) {
+  fireEvent.click(action);
+  // Flush menu dismissal and Happy DOM's aria-hidden observer before timing Undo.
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 }
 
@@ -2480,17 +2479,16 @@ describe("App layout", () => {
       ).toBeInTheDocument(),
     );
 
+    fireEvent.click(within(sidebar).getByRole("button", { name: "First chat" }));
     fireEvent.pointerDown(screen.getByLabelText("Topic actions for First chat"), {
       button: 0,
     });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
-
-    await waitFor(() =>
-      expect(screen.getByText("Delete this topic?")).toBeInTheDocument(),
-    );
+    const deleteFirst = await screen.findByRole("menuitem", { name: "Delete" });
     vi.useFakeTimers();
-    await confirmTopicDeletion(screen.getByRole("button", { name: "Delete" }));
+    await clickDeleteAction(deleteFirst);
     expect(screen.getByText("Topic will be deleted")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeVisible();
+    expect(window.location.hash).toBe("#/chat/websocket%3Achat-b");
     expect(within(sidebar).queryByRole("button", { name: /^First chat$/ })).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS - 1); });
     expect(deleteChatSpy).not.toHaveBeenCalled();
@@ -2499,14 +2497,12 @@ describe("App layout", () => {
     expect(deleteChatSpy).toHaveBeenCalledTimes(1);
     expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a");
     expect(within(sidebar).getByRole("button", { name: /^Second chat$/ })).toBeInTheDocument();
-    expect(screen.queryByText("Delete this topic?")).not.toBeInTheDocument();
     expect(document.body.style.pointerEvents).not.toBe("none");
 
     fireEvent.pointerDown(screen.getByLabelText("Topic actions for Second chat"), { button: 0 });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
-    const lastDelete = await screen.findByRole("alertdialog", { name: "Delete this topic?" });
+    const deleteLast = await screen.findByRole("menuitem", { name: "Delete" });
     vi.useFakeTimers();
-    await confirmTopicDeletion(within(lastDelete).getByRole("button", { name: "Delete" }));
+    await clickDeleteAction(deleteLast);
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
     expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "56px" });
   }, 15_000);
@@ -2609,7 +2605,7 @@ describe("App layout", () => {
     expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pinned_keys: keys, archived_keys: [] }));
   });
 
-  it("deletes multiple selected topics through one confirmation", async () => {
+  it("offers one Undo for a bulk topic deletion", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -2650,21 +2646,12 @@ describe("App layout", () => {
 
     const automationReads: Array<(jobs: SessionAutomationJob[]) => void> = [];
     getSessionAutomationsSpy.mockImplementation(() => new Promise((resolve) => automationReads.push(resolve)));
+    vi.useFakeTimers();
     fireEvent.click(within(sidebar).getByRole("button", { name: "Delete" }));
     fireEvent.click(document.body);
     expect(screen.getByTestId("delete-selection-bar")).toHaveTextContent("2 selected");
     expect(deleteChatSpy).not.toHaveBeenCalled();
     await act(async () => automationReads.forEach((resolve) => resolve([])));
-    expect(await screen.findByText("Delete 2 conversations?")).toBeInTheDocument();
-    fireEvent.keyDown(screen.getByRole("alertdialog"), { key: "Escape" });
-    expect(screen.getByTestId("delete-selection-bar")).toHaveTextContent("2 selected");
-    expect(deleteChatSpy).not.toHaveBeenCalled();
-
-    getSessionAutomationsSpy.mockResolvedValue([]);
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Delete" }));
-    expect(await screen.findByText("Delete 2 conversations?")).toBeInTheDocument();
-    vi.useFakeTimers();
-    await confirmTopicDeletion(screen.getByRole("button", { name: "Delete" }));
     expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
     expect(screen.getByText("2 topics will be deleted")).toBeVisible();
     expect(screen.getAllByRole("button", { name: "Undo" })).toHaveLength(1);
@@ -2695,10 +2682,9 @@ describe("App layout", () => {
     const { unmount } = render(<App />);
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Review notes"), { button: 0 });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
-    expect(await screen.findByRole("alertdialog", { name: "Delete this topic?" })).toBeVisible();
+    const deleteItem = await screen.findByRole("menuitem", { name: "Delete" });
     vi.useFakeTimers();
-    await confirmTopicDeletion(screen.getByRole("button", { name: "Delete" }));
+    await clickDeleteAction(deleteItem);
     expect(within(sidebar).queryByRole("button", { name: "Review notes" })).not.toBeInTheDocument();
     expect(screen.getByText("Topic will be deleted").closest('[role="status"]')).toHaveTextContent("Review notes");
     expect(deleteChatSpy).not.toHaveBeenCalled();
@@ -2734,15 +2720,16 @@ describe("App layout", () => {
     fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Topic a"), { button: 0 });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
     fireEvent.click(within(sidebar).getByRole("button", { name: "Topic b" }));
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Delete" }));
-    const initial = await screen.findByRole("alertdialog", { name: "Delete 2 conversations?" });
     vi.useFakeTimers();
-    await confirmTopicDeletion(within(initial).getByRole("button", { name: "Delete" }));
+    await clickDeleteAction(within(sidebar).getByRole("button", { name: "Delete" }));
+    expect(screen.getByText("2 topics will be deleted")).toBeVisible();
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
     expect(deleteChatSpy.mock.calls).toEqual([["websocket:chat-a"], ["websocket:chat-b"]]);
-    const retry = screen.getByRole("alertdialog", { name: "Delete this topic?" });
+    vi.useRealTimers();
+    const retry = await screen.findByRole("alertdialog", { name: "Delete this topic?" });
     expect(within(retry).getByText("Added during undo")).toBeVisible();
-    await confirmTopicDeletion(within(retry).getByRole("button", { name: "Delete" }));
+    vi.useFakeTimers();
+    await clickDeleteAction(within(retry).getByRole("button", { name: "Delete" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
     expect(deleteChatSpy).toHaveBeenCalledTimes(3);
     expect(deleteChatSpy).toHaveBeenLastCalledWith("websocket:chat-b", { deleteAutomations: true });
@@ -2806,7 +2793,7 @@ describe("App layout", () => {
     ).not.toBeInTheDocument();
 
     vi.useFakeTimers();
-    await confirmTopicDeletion(screen.getByRole("button", { name: "删除" }));
+    await clickDeleteAction(screen.getByRole("button", { name: "删除" }));
     expect(deleteChatSpy).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
     expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a", { deleteAutomations: true });
@@ -2902,9 +2889,8 @@ describe("App layout", () => {
     expect(deleteItem).toBeInTheDocument();
 
     fireEvent.click(deleteItem);
-    await waitFor(() =>
-      expect(screen.getByText("Delete this topic?")).toBeInTheDocument(),
-    );
+    expect(await screen.findByRole("button", { name: "Undo" })).toBeVisible();
+    expect(sheet).not.toBeInTheDocument();
   }, 15_000);
 
   it("renames inline in the mobile drawer without dismissing it and reloads the saved title", async () => {
@@ -4587,10 +4573,9 @@ describe("App layout", () => {
     fireEvent.pointerDown(within(sidebar).getByRole("button", {
       name: "New topic pane actions",
     }), { button: 0, ctrlKey: false });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
-    expect(await screen.findByText("Delete this topic?")).toBeInTheDocument();
+    const deletePane = await screen.findByRole("menuitem", { name: "Delete" });
     vi.useFakeTimers();
-    await confirmTopicDeletion(screen.getByRole("button", { name: "Delete" }));
+    await clickDeleteAction(deletePane);
 
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
     expect(deleteChatSpy).toHaveBeenCalledWith("websocket:new-pane");
