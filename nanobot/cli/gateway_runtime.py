@@ -82,20 +82,22 @@ async def _deliver_to_channel(
         else raw_generation if isinstance(raw_generation, str) else None
     )
     key = session_key or (raw_key if isinstance(raw_key, str) else None)
-    if key is None:
-        key = f"{msg.channel}:{msg.chat_id}"
     if msg.channel == "websocket":
         from nanobot.agent.turn_delivery import TurnRoute
         from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
         from nanobot.session.webui_turns import WebuiTurnRoutePolicy
-        from nanobot.webui.session_identity import webui_session_key
+        from nanobot.webui.session_identity import webui_display_session_key
 
+        target_key = webui_display_session_key(msg.chat_id)
+        key = key or target_key
         route = await WebuiTurnRoutePolicy(session_manager).admit(
             TurnRoute(msg.channel, msg.chat_id, metadata), key, expected_generation,
         )
         metadata = route.metadata
-        if key == webui_session_key(msg.chat_id):
+        if key == target_key:
             expected_generation = cast(str, metadata[HISTORY_GENERATION_METADATA_KEY])
+    elif key is None:
+        key = f"{msg.channel}:{msg.chat_id}"
     if metadata != (msg.metadata or {}):
         msg = replace(msg, metadata=metadata)
     if record and msg.channel != "cli" and msg.content.strip():

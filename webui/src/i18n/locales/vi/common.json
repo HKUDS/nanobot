@@ -1955,6 +1955,7 @@
       "collapseDraft": "Thu gọn ô soạn thảo",
       "send": "Gửi tin nhắn",
       "stop": "Dừng phản hồi",
+      "stopSharedTurn": "Dừng lượt hiện tại trong phiên dùng chung này, kể cả khi lượt đó bắt đầu ở kênh khác.",
       "quotedContext": "Ngữ cảnh được trích dẫn",
       "removeQuotedContext": "Xóa trích dẫn",
       "modelNotConfigured": "Chưa cấu hình mô hình",

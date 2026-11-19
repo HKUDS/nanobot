@@ -376,10 +376,10 @@ export class ThreadTranscript {
       this.projection = projectThreadEvent(this.projection, event, options);
       return this.messages;
     }
-    const updatesInputMedia = event.event === "user_message" && !event.provenance?.session_message
-      && !!event.turn_id && !!event.media_urls?.length
+    const updatesInput = event.event === "user_message" && !event.provenance?.session_message
+      && !!event.turn_id && (event.media_urls?.length || event.entry_channel)
       && this.messages.some((message) => message.role === "user" && message.turnId === event.turn_id);
-    if (!options.persisted && !updatesInputMedia && this.represented(event)) return this.messages;
+    if (!options.persisted && !updatesInput && this.represented(event)) return this.messages;
     if (!event.projection_id && (!event.turn_id || event.turn_seq === undefined)) {
       event = { ...event, projection_id: options.createId() };
     }
@@ -676,12 +676,42 @@ export class ThreadTranscript {
       return unit ? [unit] : [];
     }));
     const matches = matchUnits(candidate.units, this.units);
+    const channelAnswers = new Map<string, Unit>();
+    const replacedChannelAnswers = new Set<Unit>();
+    if (body?.sessionKey && !body.sessionKey.startsWith("websocket:")) {
+      // Channel history stores final replies rather than the streamed records.
+      // A completed turn and its canonical answer identify the replacement
+      // without claiming coverage of tools or other live turns.
+      for (const event of body.events) {
+        if (event.event !== "message" || event.kind || event.turn_seq !== undefined) continue;
+        const answer = candidate.bySource.get(candidate.describe(event).source);
+        if (!answer) continue;
+        if (event.turn_id && completed.has(event.turn_id)) channelAnswers.set(event.turn_id, answer);
+        for (const input of event.response_input_ids ?? []) {
+          if (!input.startsWith("user:")) continue;
+          const turn = input.slice("user:".length);
+          if (completed.has(turn)) channelAnswers.set(turn, answer);
+        }
+      }
+      if (channelAnswers.size) for (const row of this.messages) {
+        if (row.role !== "assistant" || row.kind || row.turnPhase !== "answer" || !row.turnId) continue;
+        const answer = channelAnswers.get(row.turnId);
+        const old = this.byRow.get(row.id);
+        if (!answer || old?.rows.size !== 1) continue;
+        replacedChannelAnswers.add(old);
+        matches.byOld.set(old, new Set([answer]));
+        const previous = matches.byNew.get(answer) ?? new Set<Unit>();
+        previous.add(old);
+        matches.byNew.set(answer, previous);
+      }
+    }
+    const isCovered = (unit: Unit) => replacedChannelAnswers.has(unit) || this.unitCovered(unit, candidate);
     const overlaps = new Set([...withdrawn, ...matches.byOld.keys()]);
     const firstOverlap = this.messages.findIndex((row) => overlaps.has(this.byRow.get(row.id)!));
     const windowRows = new Set(this.messages.slice(Math.max(0, firstOverlap)).map((row) => row.id));
     const received = replacedHistory ? [] : Array.from(this.units).filter((unit) => unit.received > 0
       && Array.from(unit.rows).some((id) => windowRows.has(id)));
-    const protectedUnits = received.filter((unit) => !this.unitCovered(unit, candidate));
+    const protectedUnits = received.filter((unit) => !isCovered(unit));
     const newTail = read.empty && protectedUnits.length > 0
       && protectedUnits.every((unit) => unit.received > read.revision);
     const appendedInputs = this.messages.filter((row) => row.role === "user" && row.turnId
@@ -741,7 +771,7 @@ export class ThreadTranscript {
     const replaced = new Set<Unit>();
     for (const old of this.units) if ((reset && !protectedUnits.includes(old))
       || ((withdrawn.has(old) || Array.from(matches.byOld.get(old) ?? []).some((unit) => admitted.has(unit)))
-        && (old.received === 0 || this.unitCovered(old, candidate)))) replaced.add(old);
+        && (old.received === 0 || isCovered(old)))) replaced.add(old);
     const previousCount = this.messages.length;
     const firstReplaced = this.messages.findIndex((row) => replaced.has(this.byRow.get(row.id)!));
     const prefix = read.kind !== "older" && !reset && firstReplaced > 0
@@ -781,8 +811,9 @@ export class ThreadTranscript {
     for (const [turn, snapshot] of candidate.modelRequests) {
       modelRequests.set(turn, reconcileModelRequest(modelRequests.get(turn), snapshot));
     }
-    const oldActive = this.projection.activeAssistantId;
-    const activeReplaced = !!joined && !!oldActive && replaced.has(this.byRow.get(oldActive)!);
+    const activeUnit = this.byRow.get(this.projection.activeAssistantId ?? "");
+    const activeReplaced = !!activeUnit && replaced.has(activeUnit)
+      && (!!joined || replacedChannelAnswers.has(activeUnit));
     const adoptProjection = (fullyAdopt || replacedHistory) && read.kind !== "older";
     this.projection = adoptProjection
       ? { ...candidate.projection, messages: nextMessages, modelRequests,
@@ -837,9 +868,13 @@ export class ThreadTranscript {
       if (event.input_id) confirmedInputs.add(`id:${event.input_id}`);
       if (event.provenance?.session_message?.message_id) confirmedInputs.add(`message:${event.provenance.session_message.message_id}`);
     }
+    const admittedChannelTurns = new Set(Array.from(channelAnswers)
+      .filter(([, unit]) => admitted.has(unit)).map(([turn]) => turn));
     this.live = this.live.filter(({ event }) => !(event.event === "user_message"
       && ((event.input_id && confirmedInputs.has(`id:${event.input_id}`))
         || (event.provenance?.session_message?.message_id && confirmedInputs.has(`message:${event.provenance.session_message.message_id}`))))
+      && !(event.turn_id && admittedChannelTurns.has(event.turn_id)
+        && (event.event === "delta" || event.event === "stream_end" || (event.event === "message" && !event.kind)))
       && !this.represented(event));
     if (adoptProjection) {
       this.boundaries = new Map(candidate.boundaries);

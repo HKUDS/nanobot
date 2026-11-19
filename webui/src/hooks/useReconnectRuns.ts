@@ -25,8 +25,9 @@ export function useReconnectRuns(client: NanobotClient, getToken: () => string):
         turnId: client.getRunTurnId(chatId),
       }));
       const recover = async ({ chatId, generation, turnId }: typeof jobs[number]) => {
-        const key = `websocket:${chatId}`;
-        const body = await fetchLatestWebuiThread(client, getToken(), key, signal);
+        const key = client.sessionKeyForChat(chatId);
+        if (!key) return;
+        const body = await fetchLatestWebuiThread(client, getToken(), key, chatId, signal);
         if (!body || signal.aborted) return;
         const { completedTurnIds, snapshot } = persistedCanonicalRunState(body);
         const mounted = client.hasTranscript(chatId);

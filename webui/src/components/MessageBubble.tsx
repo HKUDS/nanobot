@@ -406,6 +406,10 @@ function IncomingSessionMessage({
   );
 }
 
+function EntryChannelLabel({ label }: { label: string }) {
+  return <span className="text-xs text-muted-foreground">{label}</span>;
+}
+
 export function MessageBubble({
   message,
   temporary = false,
@@ -487,6 +491,7 @@ export function MessageBubble({
         className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5"
       >
         {!hasText ? contextMenu : null}
+        {message.entryChannel ? <EntryChannelLabel label={message.entryChannel} /> : null}
         {hasImages ? <ImageGallery images={images} align="right" size="compact" /> : null}
         {!hasImages && hasMedia ? (
           <MessageMedia media={media} align="right" pending={message.deliveryStatus === "sending"} />
@@ -539,6 +544,7 @@ export function MessageBubble({
       className="group/assistant relative w-full text-reading"
     >
       {contextMenu}
+      {message.entryChannel ? <EntryChannelLabel label={message.entryChannel} /> : null}
       {hasReasoning ? (
         <ReasoningBubble
           text={reasoning}

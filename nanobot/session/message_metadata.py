@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_TURN_ID, InboundMessage
+from nanobot.bus.events import (
+    INBOUND_META_INPUT_ID,
+    INBOUND_META_LOCAL_MEDIA,
+    INBOUND_META_TURN_ID,
+    InboundMessage,
+)
 from nanobot.runtime_context import RUNTIME_CONTEXT_HISTORY_META, RUNTIME_CONTEXT_MESSAGE_META
 from nanobot.session.session_messages import session_message_input, session_message_public_metadata
 
@@ -16,6 +21,10 @@ def input_history_metadata(message: InboundMessage) -> dict[str, Any]:
     if envelope is not None:
         extra["session_message"] = session_message_public_metadata(envelope)
         extra["input_id"] = f"session-message:{envelope['message_id']}"
+    input_id = message.metadata.get(INBOUND_META_INPUT_ID)
+    if envelope is None and message.is_user_input and isinstance(input_id, str):
+        extra["input_id"] = input_id
+        extra["entry_channel"] = "webui" if message.channel == "websocket" else message.channel
     turn_id = message.metadata.get(INBOUND_META_TURN_ID)
     if isinstance(turn_id, str) and turn_id:
         extra[INBOUND_META_TURN_ID] = turn_id
@@ -37,7 +46,7 @@ def persisted_message(message: dict[str, Any]) -> dict[str, Any]:
     if entry.get("role") == "user":
         if "input_id" in metadata:
             entry["input_id"] = metadata["input_id"]
-        for key in ("timestamp", INBOUND_META_TURN_ID):
+        for key in ("timestamp", INBOUND_META_TURN_ID, "entry_channel"):
             if isinstance(value := metadata.get(key), str) and value:
                 entry[key] = value
         if isinstance(source := metadata.get("session_message"), dict):

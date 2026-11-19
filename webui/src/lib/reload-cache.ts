@@ -1,3 +1,5 @@
+import { normalizeSessionHandle } from "./session-handle";
+import { isChannelChatAlias } from "./session-identity";
 import type { ChatSummary, WorkspaceScopePayload } from "./types";
 
 const PREFIX = "nanobot.reload.v1.";
@@ -49,7 +51,10 @@ export function readReloadSessions(): ChatSummary[] {
   return value.flatMap((row): ChatSummary[] => {
     if (!isRecord(row) || typeof row.key !== "string" || typeof row.channel !== "string"
       || typeof row.chatId !== "string" || typeof row.preview !== "string") return [];
+    const channelSession = row.channel !== "websocket";
+    if (channelSession && !isChannelChatAlias(row.chatId)) return [];
     const workspaceScope = readWorkspaceScope(row.workspaceScope);
+    const handle = normalizeSessionHandle(row.handle, channelSession);
     return [{
       key: row.key, channel: row.channel, chatId: row.chatId, preview: row.preview,
       title: typeof row.title === "string" ? row.title : undefined,
@@ -58,7 +63,9 @@ export function readReloadSessions(): ChatSummary[] {
       ...(typeof row.modelPreset === "string" ? { modelPreset: row.modelPreset } : {}),
       ...(typeof row.runStartedAt === "number" ? { runStartedAt: row.runStartedAt } : {}),
       ...(workspaceScope ? { workspaceScope } : {}),
-      ...(typeof row.projectLocked === "boolean" ? { projectLocked: row.projectLocked } : {}),
+      ...(channelSession || typeof row.projectLocked === "boolean"
+        ? { projectLocked: channelSession || row.projectLocked === true } : {}),
+      ...(handle ? { handle } : {}),
     }];
   });
 }

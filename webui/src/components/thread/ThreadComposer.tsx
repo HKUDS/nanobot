@@ -252,6 +252,8 @@ interface ThreadComposerProps {
   sessions?: ChatSummary[];
   skills?: SkillSummary[];
   onStop?: () => void;
+  stopHint?: string;
+  userShellEnabled?: boolean;
   surfaceRef?: Ref<HTMLDivElement>;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   onInspectAttachment?: (path: string) => Promise<LocalAttachment>;
@@ -585,6 +587,8 @@ export function ThreadComposer({
   sessions = [],
   skills = [],
   onStop,
+  stopHint,
+  userShellEnabled = true,
   surfaceRef,
   onTranscribeAudio,
   onInspectAttachment,
@@ -893,7 +897,7 @@ export function ThreadComposer({
   );
   const hasErrors = images.some((img) => img.status === "error");
 
-  const isUserShell = value.trimStart().startsWith("!");
+  const isUserShell = userShellEnabled && value.trimStart().startsWith("!");
   const requiresModelSetup = modelNeedsSetup && !isUserShell;
   const hasComposerContent = value.trim().length > 0 || readyImages.length > 0;
   const canSend =
@@ -2396,6 +2400,8 @@ export function ThreadComposer({
                       </kbd>
                     ) : null}
                   </TooltipContent>
+                ) : showStopButton && stopHint ? (
+                  <TooltipContent>{stopHint}</TooltipContent>
                 ) : isUserShell ? (
                   <TooltipContent>{t("thread.composer.shell.run")}</TooltipContent>
                 ) : null}

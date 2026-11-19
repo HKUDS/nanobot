@@ -60,7 +60,11 @@ from nanobot.webui.outbound_wire import (
     project_notification,
     project_tool_events,
 )
-from nanobot.webui.session_identity import webui_session_key
+from nanobot.webui.session_identity import (
+    channel_session_key,
+    webui_display_session_key,
+    webui_session_key,
+)
 from nanobot.webui.session_projection import WebUISessionProjection
 from nanobot.webui.temporary_chats import WebUITemporaryChats
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY, WebUITranscriptRecorder
@@ -134,7 +138,7 @@ class WebUIOutboundDelivery:
         event = msg.event
         if not isinstance(event, ModelRequestEvent | ContextCompactionEvent):
             return project_notification(msg.chat_id, event, msg.metadata)
-        persistent = self._temporary_chats.should_persist_transcript(msg.chat_id)
+        persistent = self._persists_transcript(msg.chat_id)
         parts: ContextGraphParts | None = None
         graph: ContextGraph | None = None
         try:
@@ -161,6 +165,9 @@ class WebUIOutboundDelivery:
 
         return bus.subscribe(queue_changed, PairingChanged)
 
+    def _persists_transcript(self, chat_id: str) -> bool:
+        return channel_session_key(chat_id) is None and self._temporary_chats.should_persist_transcript(chat_id)
+
     def discard(self, chat_id: str, *, complete: bool = False) -> None:
         """Forget unclosed streams when a turn ends or its chat is discarded."""
         if not complete or self._temporary_chats.should_persist_transcript(chat_id):
@@ -172,7 +179,7 @@ class WebUIOutboundDelivery:
 
     async def hydrate(self, chat_id: str) -> None:
         for event in await self._session_projection.hydration_events(
-            webui_session_key(chat_id), chat_id,
+            webui_display_session_key(chat_id), chat_id,
         ):
             if event["event"] == "goal_state":
                 await self._send_goal_state(chat_id, event["goal_state"])
@@ -217,7 +224,7 @@ class WebUIOutboundDelivery:
             and all(previous.metadata.get(key) == following.metadata.get(key) for key in (
                 HISTORY_GENERATION_METADATA_KEY, WEBUI_TURN_METADATA_KEY, WEBSOCKET_TURN_OWNER_METADATA_KEY,
             ))
-            and self._temporary_chats.should_persist_transcript(following.chat_id)
+            and self._persists_transcript(following.chat_id)
         )
 
     async def send_batch(self, messages: Sequence[OutboundMessage]) -> None:
@@ -276,7 +283,7 @@ class WebUIOutboundDelivery:
         if isinstance(event, PromptSourcesEvent):
             await self._context_graph.observe_prompt(
                 msg.chat_id, event.sources, msg.metadata, system_sources=event.system_sources,
-                persistent=self._temporary_chats.should_persist_transcript(msg.chat_id),
+                persistent=self._persists_transcript(msg.chat_id),
             )
             return
         if isinstance(event, PairingChanged):
@@ -369,7 +376,7 @@ class WebUIOutboundDelivery:
                     )
             return
         if isinstance(event, SessionUpdatedEvent):
-            if recipients:
+            if recipients or channel_session_key(msg.chat_id) is not None:
                 await self.session_updated(msg.chat_id, scope=event.scope)
             return
         progress = event if isinstance(event, ProgressEvent) else None
@@ -388,9 +395,11 @@ class WebUIOutboundDelivery:
         include_source: bool = False,
         transcript_overrides: dict[str, Any] | None = None,
     ) -> bool:
+        if include_source and channel_session_key(chat_id) is not None and (metadata or {}).get("webui") is True:
+            event["entry_channel"] = "WebUI"
         if (
             (metadata or {}).get(WEBUI_RESTART_CONTROL_METADATA_KEY) is True
-            or not self._temporary_chats.should_persist_transcript(chat_id)
+            or not self._persists_transcript(chat_id)
         ):
             self._transcripts.prepare_event(
                 chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
@@ -429,7 +438,9 @@ class WebUIOutboundDelivery:
         phase: str,
         include_source: bool = False,
     ) -> bool:
-        if not self._temporary_chats.should_persist_transcript(chat_id):
+        if include_source and channel_session_key(chat_id) is not None and (metadata or {}).get("webui") is True:
+            event["entry_channel"] = "WebUI"
+        if not self._persists_transcript(chat_id):
             self._transcripts.prepare_event(
                 chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
             )
@@ -472,7 +483,7 @@ class WebUIOutboundDelivery:
             payload["tool_events"] = project_tool_events(progress.tool_events)
             await self._context_graph.observe_tools(
                 msg.chat_id, payload["tool_events"], msg.metadata,
-                persistent=self._temporary_chats.should_persist_transcript(msg.chat_id),
+                persistent=self._persists_transcript(msg.chat_id),
             )
         agent_ui = msg.metadata.get(OUTBOUND_META_AGENT_UI)
         if agent_ui is not None:
@@ -633,7 +644,9 @@ class WebUIOutboundDelivery:
         await self._fanout(recipients, payload, label=" goal_status ")
 
     async def session_updated(self, chat_id: str, *, scope: str | None = None) -> None:
-        recipients = self._transport.webui_recipients("all_connections")
+        recipients = self._transport.webui_recipients(
+            "authenticated_webui" if channel_session_key(chat_id) is not None else "all_connections",
+        )
         if not recipients:
             return
         payload: SessionUpdatedWirePayload = {"event": "session_updated", "chat_id": chat_id}

@@ -165,6 +165,16 @@ Select a task for its read-only conversation and tool activity. Closing the deta
 
 These controls appear when the connected host supports subagent tasks. See [Subagents](./concepts.md#subagents) for cancellation, saved history, and gateway restart behavior.
 
+## Channel Chats
+
+Open a saved channel conversation from the sidebar. Its title is the channel name (such as Telegram), with an `@handle` to distinguish conversations. Separate chats and threads, including Telegram topics, stay separate.
+
+Nanobot shares the conversation history across the channel and WebUI, but each reply goes only to the place that started the turn. Replies to messages you send in WebUI stream in the browser. For messages sent from the channel, WebUI shows when the conversation is running and refreshes the history after the turn ends. **Stop** can stop work started from either place.
+
+To see which tools ran, open the reply’s message actions and select **Worked**. If there’s no reply, expand **Worked** directly in the thread. Channel history shows tool names, not arguments or raw results. Older messages may not have source labels.
+
+Only give trusted people access to this WebUI: channel history can include group messages. Channel chats use the gateway's workspace and cannot be renamed, cleared, or deleted from WebUI.
+
 ## Temporary Chats
 
 Start **New topic → Temporary chat** to work without saved agent profiles, long-term memory, or the memory skill in the model context. The conversation is not added to topic history or long-term memory. Native file readers and editors cannot access the agent profile or memory files in this mode. Subagents are unavailable; project instructions and ordinary workspace files remain available.

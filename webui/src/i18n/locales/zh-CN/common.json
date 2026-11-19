@@ -2137,6 +2137,7 @@
       "collapseDraft": "收起编辑",
       "send": "发送消息",
       "stop": "停止响应",
+      "stopSharedTurn": "停止共享会话的当前轮次，包括从其他渠道发起的轮次。",
       "quotedContext": "引用内容",
       "removeQuotedContext": "移除引用",
       "modelNotConfigured": "模型未配置",

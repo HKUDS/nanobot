@@ -150,7 +150,7 @@ describe("SessionSearchDialog", () => {
       id: "answer", role: "assistant", createdAt: 1,
       content: `${"Earlier content. ".repeat(1000)}权限配置 Full Access 25% session_history.py`,
     };
-    cache.set("chat-1", new ThreadTranscript([body]).save());
+    cache.set("websocket:chat-1", new ThreadTranscript([body]).save());
     const onSelect = vi.fn();
     render(<SessionSearchDialog open sessions={[session(1), session(2)]}
       activeKey={null} loading={false} messageCache={cache}
@@ -174,17 +174,17 @@ describe("SessionSearchDialog", () => {
   it("updates an open query for streamed messages and cache eviction without duplicate sessions", () => {
     const cache = new ThreadMessageCache(() => false, 100_000, 1);
     const body = (content: string): UIMessage => ({ id: "answer", role: "assistant", content, createdAt: 1 });
-    cache.set("chat-1", new ThreadTranscript([body("Cached needle")]).save());
+    cache.set("websocket:chat-1", new ThreadTranscript([body("Cached needle")]).save());
     render(<SessionSearchDialog open sessions={[session(1), session(2)]}
       activeKey={null} loading={false} messageCache={cache}
       onOpenChange={() => {}} onSelect={() => {}} />);
     fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "needle" } });
     expect(screen.getByText("Chat 1")).toBeInTheDocument();
-    act(() => cache.setLoadedMessages("chat-2", [[body("Streaming needle"), body("Another needle")]]));
+    act(() => cache.setLoadedMessages("websocket:chat-2", [[body("Streaming needle"), body("Another needle")]]));
     expect(screen.getAllByText("Chat 2")).toHaveLength(1);
-    act(() => cache.set("chat-2", new ThreadTranscript([body("Streaming needle")]).save()));
+    act(() => cache.set("websocket:chat-2", new ThreadTranscript([body("Streaming needle")]).save()));
     expect(screen.queryByText("Chat 1")).not.toBeInTheDocument();
-    act(() => cache.setLoadedMessages("chat-2", [[body("Replacement answer")]]));
+    act(() => cache.setLoadedMessages("websocket:chat-2", [[body("Replacement answer")]]));
     expect(screen.queryByText("Chat 2")).not.toBeInTheDocument();
   });
 

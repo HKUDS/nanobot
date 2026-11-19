@@ -2425,7 +2425,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 
 
 @pytest.mark.asyncio
-async def test_sessions_list_only_returns_websocket_sessions_by_default(
+async def test_sessions_list_includes_native_and_known_public_channels(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sm = _seed_many(
@@ -2459,8 +2459,10 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
         assert listing.status_code == 200
         sessions = listing.json()["sessions"]
         keys = {s["key"] for s in sessions}
-        assert keys == {"websocket:alpha", "websocket:beta"}
+        assert keys == {"websocket:alpha", "websocket:beta", "slack:C123"}
         rows = {row["key"]: row for row in sessions}
+        assert rows["slack:C123"]["title"] == "Slack"
+        assert rows["slack:C123"]["chat_id"].startswith("channel.")
         handles = {
             handle.session_key: handle
             for handle in await SessionHandleResolver(sm).alist_all()

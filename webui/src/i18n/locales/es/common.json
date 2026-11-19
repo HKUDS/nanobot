@@ -1955,6 +1955,7 @@
       "collapseDraft": "Reducir el área de escritura",
       "send": "Enviar mensaje",
       "stop": "Detener respuesta",
+      "stopSharedTurn": "Detiene el turno actual de esta sesión compartida, aunque se haya iniciado en otro canal.",
       "quotedContext": "Contexto citado",
       "removeQuotedContext": "Quitar cita",
       "modelNotConfigured": "Modelo no configurado",

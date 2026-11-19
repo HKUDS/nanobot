@@ -25,7 +25,7 @@ from nanobot.security.workspace_access import (
     validate_workspace_scope_payload,
 )
 from nanobot.session.webui_turns import websocket_turn_wall_started_at
-from nanobot.webui.session_identity import webui_session_key
+from nanobot.webui.session_identity import channel_session_title, webui_session_key
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
@@ -239,6 +239,10 @@ class WebUIWorkspaceController:
             self._default_restrict_to_workspace,
         )
 
+    def gateway_default_scope(self) -> WorkspaceScope:
+        """Return the gateway scope, ignoring the WebUI's default access setting."""
+        return default_workspace_scope(self._default_workspace, self._default_restrict_to_workspace)
+
     def automation_scope(
         self, session_key: str, channel: str, message_metadata: dict[str, Any],
     ) -> WorkspaceScope:
@@ -302,7 +306,13 @@ class WebUIWorkspaceController:
         if identity is not None and not identity.policy.persist:
             return self.restricted_default_scope()
         data = self._sessions.read_session_metadata(session_key)
-        return self._scope_from_snapshot(data) if data is not None else None
+        if data is None:
+            return None
+        if channel_session_title(session_key) is not None:
+            return (
+                self.gateway_default_scope() if self._sessions.types.public_history(data["metadata"]) else None
+            )
+        return self._scope_from_snapshot(data)
 
     async def async_scope_for_session_key(self, session_key: str) -> WorkspaceScope:
         draft = self._draft_scopes.get(session_key)

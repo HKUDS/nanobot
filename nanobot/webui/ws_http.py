@@ -15,10 +15,10 @@ import json
 import mimetypes
 import re
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
 from urllib.parse import parse_qs, quote, unquote, urlsplit, urlunsplit
 
 from loguru import logger
@@ -42,8 +42,19 @@ from nanobot.session.session_handles import (
     SessionHandleResolver,
 )
 from nanobot.triggers.local_types import LocalTrigger
+from nanobot.utils.cancellation import shield_and_drain
+from nanobot.utils.helpers import strip_think
 from nanobot.webui.automation_chats import AutomationChat, automation_chats
 from nanobot.webui.automation_results import cron_run_response, trigger_run_response
+from nanobot.webui.channel_history import (
+    ChannelHistoryMedia,
+    ChannelHistoryPage,
+    build_channel_prompt_index,
+    build_channel_thread,
+    external_session_title,
+    has_public_channel_history,
+    read_channel_history,
+)
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_preview_availability_payload,
@@ -106,7 +117,11 @@ from nanobot.webui.session_automations import (
     session_automations_payload,
 )
 from nanobot.webui.session_context import session_context_payload
-from nanobot.webui.session_identity import is_webui_session_key
+from nanobot.webui.session_identity import (
+    channel_session_chat_id,
+    channel_session_key,
+    is_webui_session_key,
+)
 from nanobot.webui.session_list_index import (
     WEBUI_SESSION_INDEX_INTERNAL_FIELDS,
     indexed_workspace_scope,
@@ -292,6 +307,18 @@ def _decode_api_key(raw_key: str) -> str | None:
     if _api_key_re.match(key) is None:
         return None
     return key
+
+
+def _decode_session_history_key(raw_key: str) -> str | None:
+    if (compact := _decode_api_key(raw_key)) is not None:
+        return compact
+    # Decode one path segment exactly once. Channel addresses can include
+    # characters such as `!`, `@`, `#`, and `/` that are not native WebUI IDs.
+    try:
+        key = unquote(raw_key, errors="strict")
+    except UnicodeDecodeError:
+        return None
+    return key if external_session_title(key) is not None else None
 
 
 def _mutation_payload(request: WsRequest) -> dict[str, Any] | None:
@@ -887,7 +914,9 @@ class GatewayHTTPHandler:
     async def _dispatch_session_routes(self, request: WsRequest, got: str) -> Response | None:
         m = re.fullmatch(r"/api/sessions/([^/]+)/webui-thread/prompts", got)
         if m:
-            return await self._project_session_history(request, m.group(1), self._handle_prompt_index_get)
+            return await self._project_session_history(
+                request, m.group(1), self._handle_prompt_index_get, channel="prompts",
+            )
 
         m = re.match(r"^/api/sessions/([^/]+)/webui-thread/trace-detail$", got)
         if m:
@@ -1090,37 +1119,54 @@ class GatewayHTTPHandler:
         sessions = list_webui_sessions(self.session_manager, stored_sessions)
         cleaned: list[dict[str, Any]] = []
         default_scope: WorkspaceScope | None = None
+        channel_scope: WorkspaceScope | None = None
         scopes: dict[str, WorkspaceScope] = {}
+        canonical_previews = {row["key"]: row["preview"] for row in stored_sessions}
         for s in sessions:
             key = s.get("key")
-            if not (isinstance(key, str) and is_webui_session_key(key)):
+            if not isinstance(key, str):
+                continue
+            native = is_webui_session_key(key)
+            channel_title = None if native else external_session_title(key)
+            if not native and channel_title is None:
                 continue
             row = {
                 k: v
                 for k, v in s.items()
                 if k != "path" and k not in WEBUI_SESSION_INDEX_INTERNAL_FIELDS
             }
-            # Keep the additive recovery field absent for ordinary sessions so
-            # older clients and compact list responses stay unchanged.
-            if row.get("recovery_state") is None:
+            if channel_title is not None:
+                chat_id = channel_session_chat_id(key)
+                assert chat_id is not None
+                row["chat_id"] = chat_id
+                row["title"] = channel_title
+                # Old raw subagent injections can lack today's hidden marker.
+                preview = strip_think(canonical_previews[key])
+                row["preview"] = "" if preview.startswith("[Subagent '") else preview
                 row.pop("recovery_state", None)
-            chat_id = key.split(":", 1)[1]
+                if channel_scope is None:
+                    channel_scope = self.workspaces.gateway_default_scope()
+                scope = channel_scope
+            else:
+                if row.get("recovery_state") is None:
+                    row.pop("recovery_state", None)
+                chat_id = key.split(":", 1)[1]
+                if default_scope is None:
+                    default_scope = self.workspaces.default_scope()
+                scope_present, raw_scope = indexed_workspace_scope(s)
+                if scope_present:
+                    scope_key = json.dumps(raw_scope, ensure_ascii=False, sort_keys=True)
+                    scope = scopes.get(scope_key)
+                    if scope is None:
+                        scope = self.workspaces.scope_for_indexed_metadata(
+                            raw_scope, scope_present=True, default_scope=default_scope,
+                        )
+                        scopes[scope_key] = scope
+                else:
+                    scope = default_scope
             started_at = websocket_turn_wall_started_at(chat_id)
             if started_at is not None:
                 row["run_started_at"] = started_at
-            if default_scope is None:
-                default_scope = self.workspaces.default_scope()
-            scope_present, raw_scope = indexed_workspace_scope(s)
-            if scope_present:
-                scope_key = json.dumps(raw_scope, ensure_ascii=False, sort_keys=True)
-                scope = scopes.get(scope_key)
-                if scope is None:
-                    scope = self.workspaces.scope_for_indexed_metadata(
-                        raw_scope, scope_present=True, default_scope=default_scope,
-                    )
-                    scopes[scope_key] = scope
-            else:
-                scope = default_scope
             row["workspace_scope"] = scope.payload()
             row["project_locked"] = True
             handle = handles.get(key)
@@ -1147,18 +1193,76 @@ class GatewayHTTPHandler:
 
     async def _project_session_history(
         self, request: WsRequest, key: str, project: _HistoryProjection[_ProjectionResult],
+        *, channel: Literal["thread", "prompts"] | None = None,
     ) -> _ProjectionResult | Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        decoded = _decode_api_key(key)
+        decoded = _decode_session_history_key(key) if channel is not None else _decode_api_key(key)
         if decoded is None:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded):
-            return _http_error(404, "session not found")
+            if channel is None or (alias := channel_session_chat_id(decoded)) is None:
+                return _http_error(404, "session not found")
+            return await shield_and_drain(asyncio.to_thread(
+                self._handle_channel_history_get, request, decoded, alias, channel,
+            ))
         if self.session_manager is None:
             return _http_error(503, "session manager unavailable")
         return await self.session_manager.state.project_history(
             decoded, lambda history: project(request, key, history=history),
+        )
+
+    def _handle_channel_history_get(
+        self, request: WsRequest, key: str, chat_id: str, kind: Literal["thread", "prompts"],
+    ) -> Response:
+        from nanobot.session.webui_turns import websocket_turn_id, websocket_turn_wall_started_at
+
+        if self.session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        query = _parse_query(request.path)
+        if_none_match = _case_insensitive_header(request.headers, "If-None-Match")
+        variant: dict[str, Any] = {"kind": kind, "gateway_instance": self.tokens.instance_id}
+        if kind == "thread":
+            try:
+                page = ChannelHistoryPage.from_query(
+                    _query_first(query, "limit"), _query_first(query, "before"),
+                    _query_first(query, "after"), _query_first(query, "direction"),
+                )
+            except ValueError as exc:
+                return _http_error(400, str(exc))
+            scope = self.workspaces.gateway_default_scope().payload()
+            media = ChannelHistoryMedia(self.media, chat_id, self.workspaces.restricted_default_scope())
+            started_at = websocket_turn_wall_started_at(chat_id)
+            active_turn_id = websocket_turn_id(chat_id)
+            variant.update(
+                page=(page.limit, page.before, page.after), workspace_scope=scope,
+                active_turn_id=active_turn_id, started_at=started_at,
+            )
+
+            def project(generation: str, messages: Iterator[tuple[int, dict[str, Any]]]) -> dict[str, Any]:
+                data = build_channel_thread(
+                    key, chat_id, generation, messages, page=page, media=media,
+                    active_turn_id=active_turn_id, running=started_at is not None,
+                )
+                data["workspace_scope"] = scope
+                return data
+        else:
+            def project(generation: str, messages: Iterator[tuple[int, dict[str, Any]]]) -> dict[str, Any]:
+                return build_channel_prompt_index(key, chat_id, generation, messages)
+
+        result = read_channel_history(
+            self.session_manager, key, variant=variant, project=project,
+            not_modified=lambda revision: _etag_matches(if_none_match, _quoted_etag(revision)),
+        )
+        if result is None:
+            return _http_error(404, "session not found")
+        headers = [*_NO_STORE_HEADERS, ("ETag", _quoted_etag(result.revision))]
+        if result.data is None:
+            return _http_response(b"", status=304, extra_headers=headers)
+        result.data["revision"] = result.revision
+        return _http_json_response(
+            result.data, accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+            extra_headers=headers,
         )
 
     def _handle_prompt_index_get(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response:
@@ -1213,7 +1317,7 @@ class GatewayHTTPHandler:
             return self._handle_webui_thread_get(request, key, history=history, diagnostics=diagnostics)
 
         try:
-            prepared = await self._project_session_history(request, key, project)
+            prepared = await self._project_session_history(request, key, project, channel="thread")
             if isinstance(prepared, _PreparedThreadResponse):
                 response = await asyncio.to_thread(
                     _encode_thread_response, prepared.data,
@@ -1761,9 +1865,16 @@ class GatewayHTTPHandler:
             sig,
             payload,
             request=request,
-            scope_for_session=self.workspaces.existing_scope_for_session_key,
+            scope_for_session=self._media_scope_for_session,
         )
 
+    def _media_scope_for_session(self, reference: str) -> WorkspaceScope | None:
+        key = channel_session_key(reference)
+        if key is None:
+            return self.workspaces.existing_scope_for_session_key(reference)
+        if self.session_manager is not None and has_public_channel_history(self.session_manager, key):
+            return self.workspaces.restricted_default_scope()
+        return None
 
     async def _dispatch_misc_routes(
         self, connection: Any, request: WsRequest, got: str

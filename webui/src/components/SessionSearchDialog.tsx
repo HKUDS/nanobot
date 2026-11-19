@@ -73,7 +73,7 @@ export function SessionSearchDialog({
     return searchableSessions.flatMap(({ session, text }) => {
       if (terms.every((term) => text.includes(term))) return [{ session }];
       const preview = messageCache && findLoadedMessagePreview(
-        messageCache.readLoadedMessages(session.chatId), searchQuery,
+        messageCache.readLoadedMessages(session.key), searchQuery,
       );
       return preview === undefined ? [] : [{ session, preview }];
     });

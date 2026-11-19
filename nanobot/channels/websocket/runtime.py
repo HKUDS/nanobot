@@ -428,9 +428,11 @@ class WebSocketChannel(BaseChannel):
         is_dm: bool,
         require_existing_session: bool,
         session_generation: str | None,
+        session_key: str | None = None,
     ) -> None:
         await self._handle_message(
             sender_id=sender_id,
+            session_key=session_key,
             chat_id=chat_id,
             content=content,
             media=media,

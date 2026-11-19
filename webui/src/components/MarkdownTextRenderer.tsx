@@ -19,6 +19,7 @@ import remend from "remend";
 import type { ListItem, Nodes, Root } from "mdast";
 
 import { parseMathAwareMarkdownBlocks } from "@/lib/markdown-streaming-blocks";
+import { isSessionKey } from "@/lib/session-identity";
 
 import { DisplayMath } from "@/components/DisplayMath";
 import { AttachmentTile } from "@/components/AttachmentTile";
@@ -383,7 +384,7 @@ function sessionReferenceHref(href: string): string | null {
   if (!prefix) return null;
   try {
     const sessionKey = decodeURIComponent(href.slice(prefix.length)).trim();
-    if (!sessionKey.startsWith("websocket:") || sessionKey === "websocket:") return null;
+    if (!isSessionKey(sessionKey)) return null;
     return `#/chat/${encodeURIComponent(sessionKey)}`;
   } catch {
     return null;

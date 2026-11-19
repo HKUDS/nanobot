@@ -1,3 +1,4 @@
+import { isSessionKey } from "./session-identity";
 import type { SessionMention } from "./types";
 import { isLocalAttachment, type LocalAttachment } from "../../../packages/client-events/attachments";
 
@@ -25,7 +26,7 @@ function readDraft(raw: string): ComposerDraft | undefined {
   const sessionMentions = value.sessionMentions.flatMap((item: unknown): SessionMention[] => {
     if (!isRecord(item) || typeof item.name !== "string"
       || !/^[\p{L}\p{N}_-]{1,80}$/u.test(item.name)
-      || typeof item.session_key !== "string" || !item.session_key.startsWith("websocket:")
+      || typeof item.session_key !== "string" || !isSessionKey(item.session_key)
       || item.session_key.length > 512 || typeof item.title !== "string") return [];
     return [{
       name: item.name,

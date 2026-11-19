@@ -25,6 +25,7 @@ function fakeClient() {
   return {
     status: "open" as const,
     defaultChatId: null as string | null,
+    setChannelSessions: vi.fn(),
     onStatus: () => () => {},
     onRunCompletion: () => () => {},
     onError: () => () => {},

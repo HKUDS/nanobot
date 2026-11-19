@@ -141,7 +141,8 @@ class WorkspaceScopeResolver:
         )
 
     def persist_message_scope(self, session: Any, msg: Any) -> None:
-        if getattr(msg, "channel", None) != self.scoped_channel:
+        if (getattr(msg, "channel", None) != self.scoped_channel
+                or not session.key.startswith(f"{self.scoped_channel}:")):
             return
         metadata = getattr(msg, "metadata", None)
         if not isinstance(metadata, dict):

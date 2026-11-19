@@ -77,6 +77,11 @@ function matchesTurn(message: UIMessage, turn: UIMessageTurnFields): boolean {
   return !turn.turnId || !message.turnId || message.turnId === turn.turnId;
 }
 
+function entryChannelFields(event: ThreadProjectionEvent): Pick<UIMessage, "entryChannel"> {
+  const label = typeof event.entry_channel === "string" ? event.entry_channel.trim() : "";
+  return label ? { entryChannel: label } : {};
+}
+
 function positionedTurnFields(
   target: UIMessage | undefined,
   turn: UIMessageTurnFields,
@@ -602,6 +607,7 @@ function appendAnswerText(
     ...target,
     content: target.content + event.text,
     isStreaming: true,
+    ...entryChannelFields(event),
     ...positionedTurnFields(target, turn, options),
     ...(event.stream_id ? { streamId: event.stream_id } : {}),
     ...(event.source ? { source: event.source } : {}),
@@ -940,14 +946,19 @@ function reduceThreadEvent(
     } else if (event.turn_id) {
       const existing = state.messages.findIndex((message) => message.role === "user" && message.turnId === event.turn_id);
       if (existing >= 0) {
-        if (!options.persisted && event.media_urls?.length) {
-          const message = state.messages[existing];
-          const media = event.media_urls.map((item) => toMediaAttachment(item));
+        const entry = entryChannelFields(event);
+        const media = !options.persisted && event.media_urls?.length
+          ? event.media_urls.map((item) => toMediaAttachment(item)) : undefined;
+        const message = state.messages[existing];
+        if (media || (entry.entryChannel && message.entryChannel !== entry.entryChannel)) {
           state.messages = replaceMessageAt(state.messages, existing, {
             ...message,
-            media,
-            images: media.every((item) => item.kind === "image")
-              ? media.map(({ url, name }) => ({ url, name })) : undefined,
+            ...entry,
+            ...(media ? {
+              media,
+              images: media.every((item) => item.kind === "image")
+                ? media.map(({ url, name }) => ({ url, name })) : undefined,
+            } : {}),
           });
           options.effects?.bodyWrites.add(message.id);
         }
@@ -976,6 +987,7 @@ function reduceThreadEvent(
       content: event.text,
       createdAt: projectionCreatedAt(event, options),
       ...turn,
+      ...entryChannelFields(event),
       ...(!options.persisted ? { deliveryStatus: "accepted" as const } : {}),
       ...(media?.length ? { media } : {}),
       ...(event.cli_apps?.length ? { cliApps: event.cli_apps } : {}),
@@ -1045,6 +1057,7 @@ function reduceThreadEvent(
         role: "assistant",
         content: text,
         isStreaming: true,
+        ...entryChannelFields(event),
         ...positionedTurnFields(undefined, turn, options),
         ...(event.stream_id ? { streamId: event.stream_id } : {}),
         ...(event.source ? { source: event.source } : {}),
@@ -1054,12 +1067,13 @@ function reduceThreadEvent(
       }];
       options.effects?.bodyWrites.add(id);
       targetIndex = state.messages.length - 1;
-    } else if (targetIndex !== null && (typeof text === "string" || event.source
+    } else if (targetIndex !== null && (typeof text === "string" || event.source || event.entry_channel
       || event.response_sources !== undefined || event.response_input_ids !== undefined)) {
       const target = state.messages[targetIndex];
       state.messages = replaceMessageAt(state.messages, targetIndex, {
         ...target,
         ...(typeof text === "string" ? { content: text } : {}),
+        ...entryChannelFields(event),
         ...positionedTurnFields(target, turn, options),
         ...(event.stream_id ? { streamId: event.stream_id } : {}),
         ...(event.source ? { source: event.source } : {}),
@@ -1163,6 +1177,7 @@ function reduceThreadEvent(
       : undefined;
     const projected = {
       content: event.text,
+      ...entryChannelFields(event),
       ...(event.render_as === "text" ? { renderAs: event.render_as } : {}),
       ...(media?.length ? { media } : {}),
       ...(latencyMs !== undefined ? { latencyMs } : {}),

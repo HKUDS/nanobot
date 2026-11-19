@@ -24,6 +24,7 @@ export function fetchLatestWebuiThread(
   client: NanobotClient,
   token: string,
   key: string,
+  chatId: string | null,
   signal?: AbortSignal,
 ): Promise<WebuiThreadPersistedPayload | null> {
   if (signal?.aborted) return Promise.reject(abortedRequest());
@@ -54,13 +55,14 @@ export function fetchLatestWebuiThread(
       // Recovery must not join a read started before or during an outage.
       if (status !== "open") current.shareable = false;
     });
-    const unsubscribeSessionUpdate = client.onSessionUpdate((chatId, scope) => {
-      if (key === `websocket:${chatId}` && scope !== "metadata") {
+    const ownsChat = (id: string) => chatId === null ? client.sessionKeyForChat(id) === key : id === chatId;
+    const unsubscribeSessionUpdate = client.onSessionUpdate((updatedChatId, scope) => {
+      if (scope !== "metadata" && ownsChat(updatedChatId)) {
         current.controller.abort(INVALIDATED_THREAD_READ);
       }
     });
-    const unsubscribeRunCompletion = client.onRunCompletion((chatId) => {
-      if (key === `websocket:${chatId}`) current.controller.abort(INVALIDATED_THREAD_READ);
+    const unsubscribeRunCompletion = client.onRunCompletion((completedChatId) => {
+      if (ownsChat(completedChatId)) current.controller.abort(INVALIDATED_THREAD_READ);
     });
     const finish = () => {
       if (current.settled) return;
@@ -91,7 +93,7 @@ export function fetchLatestWebuiThread(
       if (current.controller.signal.reason === INVALIDATED_THREAD_READ) {
         // Replace the stale page after the current notification finishes so
         // all surviving consumers can join one read of its updated thread.
-        resolve(Promise.resolve().then(() => fetchLatestWebuiThread(client, token, key, signal)));
+        resolve(Promise.resolve().then(() => fetchLatestWebuiThread(client, token, key, chatId, signal)));
         return;
       }
       reject(abortedRequest());

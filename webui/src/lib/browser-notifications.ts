@@ -82,10 +82,10 @@ export function taskNoticeKey(notice: TaskNotice): string | null {
     ? JSON.stringify([event.chat_id, event.recovery_id, event.status]) : null;
 }
 
-export function notificationChatUrl(chatId: string, temporary: boolean): string {
+export function notificationChatUrl(chatId: string, temporary: boolean, sessionKey = `websocket:${chatId}`): string {
   // The page origin identifies the gateway, including isolated remote views.
   // Never copy the page's query, fragment, userinfo, or any auth token.
-  return `${window.location.origin}/${temporary ? "#/temporary/" : "#/chat/"}${encodeURIComponent(temporary ? chatId : `websocket:${chatId}`)}`;
+  return `${window.location.origin}/${temporary ? "#/temporary/" : "#/chat/"}${encodeURIComponent(temporary ? chatId : sessionKey)}`;
 }
 
 export async function showBrowserNotification(body: string, options: {

@@ -92,9 +92,9 @@ export function historyContentSnapshot(messages: UIMessage[], forkBoundaryMessag
     messages: filterThreadDisplayUnits(projectActivityTimeline(projectWebuiThreadMessages(messages)))
     .flatMap((unit) => unit.type === "message" ? [unit.message] : unit.messages)
     .map(({ role, kind, renderAs, activityKind, content, reasoning, images, media, traces,
-      toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage }) =>
+      toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage, entryChannel }) =>
       ({ role, kind, renderAs, activityKind, content, reasoning, images, media, traces,
-        toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage })) };
+        toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage, entryChannel })) };
 }
 
 // Display payloads are JSON values. Shared tool results and media need no byte-by-byte serialization.

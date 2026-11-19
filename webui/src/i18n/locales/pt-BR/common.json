@@ -1957,6 +1957,7 @@
       "collapseDraft": "Recolher a área de edição",
       "send": "Enviar mensagem",
       "stop": "Parar resposta",
+      "stopSharedTurn": "Interrompe o turno atual nesta sessão compartilhada, mesmo que tenha começado em outro canal.",
       "quotedContext": "Contexto citado",
       "removeQuotedContext": "Remover citação",
       "modelNotConfigured": "Modelo não configurado",
