@@ -817,7 +817,7 @@ class WebUICommandRouter:
         waiting_for_model = (
             is_webui and temporary_policy is None and turn_id is not None
             and not restart_control and not is_user_shell and not content.lstrip().startswith("/")
-            and queued_owner is None and websocket_turn_id(chat_id) is not None
+            and queued_owner is None and latest_live_websocket_turn(chat_id) is not None
         )
         accepted = False
         session_generation: str | None = None
