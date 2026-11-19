@@ -7034,13 +7034,21 @@ async def test_model_request_delivery_persists_started_and_terminal_offline(hist
     for sequence, phase in enumerate(("started", "completed"), 1):
         await channel.send(await history.message(
             channel="websocket", chat_id="model-requests", content="",
-            event=ModelRequestEvent("request", "run", sequence, phase),
+            event=ModelRequestEvent(
+                "request", "run", sequence, phase,
+                response_input_ids=("input-1", "input-2") if phase == "started" else (),
+            ),
         ))
     rows = history.read("websocket:model-requests")
     assert [r["event"] for r in rows] == ["model_request", "model_request"]
     assert [r["phase"] for r in rows] == ["started", "completed"]
+    assert rows[0]["response_input_ids"] == ["input-1", "input-2"]
+    assert "response_input_ids" not in rows[1]
     if connected:
-        assert [r["phase"] for r in _sent_ws_payloads(ws)] == ["started", "completed"]
+        frames = _sent_ws_payloads(ws)
+        assert [r["phase"] for r in frames] == ["started", "completed"]
+        assert frames[0]["response_input_ids"] == ["input-1", "input-2"]
+        assert "response_input_ids" not in frames[1]
 
 
 @pytest.mark.asyncio

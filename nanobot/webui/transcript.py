@@ -1158,9 +1158,11 @@ def _recover_incomplete_turns(
 def _needs_user_event_backfill(
     lines: list[dict[str, Any]], history: HistoryReader, *, legacy: bool = True,
 ) -> bool:
+    # A request start identifies response targets, but is not persisted answer evidence.
+    display_lines = [record for record in lines if record.get("event") != "model_request"]
     referenced_inputs = {
         input_id
-        for record in lines
+        for record in display_lines
         if isinstance(references := record.get("response_input_ids"), list)
         for input_id in cast(list[object], references)
         if isinstance(input_id, str) and input_id
@@ -1168,7 +1170,7 @@ def _needs_user_event_backfill(
     return any(not history.has_input(input_id) for input_id in referenced_inputs) or legacy and any(
         not any(record.get("event") == "user" or isinstance(record.get("response_input_ids"), list) for record in turn)
         and _transcript_turn_signature(turn)
-        for turn in _split_transcript_turns(lines)
+        for turn in _split_transcript_turns(display_lines)
     )
 
 
@@ -1625,6 +1627,10 @@ def _client_projection_event(
             ):
                 return None
             projected.update(request_id=request_id, run_id=run_id, sequence=sequence, phase=phase)
+            if phase == "started" and isinstance(references := record.get("response_input_ids"), list):
+                input_ids = [value for value in cast(list[object], references) if isinstance(value, str) and value]
+                if input_ids:
+                    projected["response_input_ids"] = input_ids
             if "request_usage" in record:
                 projected["request_usage"] = _sanitize_turn_usage(record["request_usage"]) or None
             if (graph := decode_graph(record.get("context_graph"))) is not None:

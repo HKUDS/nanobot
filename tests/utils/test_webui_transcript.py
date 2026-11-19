@@ -1276,6 +1276,7 @@ def test_model_request_persists_through_reconnect_projection(history, tmp_path, 
         request_id="request", run_id="run", sequence=2, phase=phase,
         usage=usage, round_usages=(usage,) * 10, context_window_tokens=32000,
         request_usage=usage if measured else None,
+        response_input_ids=("input-1", "input-2") if phase == "started" else (),
     ))
     assert projection is not None
     assert projection.persistence == "turn_activity"
@@ -1289,5 +1290,9 @@ def test_model_request_persists_through_reconnect_projection(history, tmp_path, 
     assert response is not None
     [event] = [e for e in response["events"] if e["event"] == "model_request"]
     assert {field: event[field] for field in record} == record
+    if phase == "started":
+        assert event["response_input_ids"] == ["input-1", "input-2"]
+    else:
+        assert "response_input_ids" not in event
     assert len(event["round_usages"]) == 8
     assert event["usage"] == usage.to_turn_dict()

@@ -1682,6 +1682,8 @@ export type InboundEvent =
       run_id: string;
       sequence: number;
       phase: "started" | "completed" | "failed" | "cancelled";
+      /** Inputs being answered by this request; present on started when identified. */
+      response_input_ids?: string[];
       usage?: TurnUsage;
       round_usages?: RoundUsage[];
       context_window_tokens?: number;
