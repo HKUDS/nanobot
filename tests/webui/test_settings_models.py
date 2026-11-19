@@ -156,6 +156,7 @@ def test_model_domain_owns_dto_and_config_updates() -> None:
         "model_presets",
         "model_call_order",
         "model_call_order_editable",
+        "image_fallback_configured",
         "model_configuration_migratable",
         "model_api_resolution_supported",
         "provider_api_configuration_supported",
