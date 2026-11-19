@@ -709,6 +709,22 @@ export function ThreadComposer({
     return null;
   }, [formatRejection, formatUploadTooLarge, ingressLimits, maxAttachments, maxFileBytes, maxTextBytes, t, textTooLargeMessage]);
 
+  const validatePrompt = useCallback((prompt: QueuedPromptContent): boolean => {
+    if (imageInputBlocked && prompt.images?.some(({ kind }) => kind === "image")) {
+      showToast?.({
+        message: t("errors.modelRequestFailed.imageInputTitle"),
+        tone: "error",
+        action: onInspectImagePreset
+          ? { label: t("settings.models.viewPreset"), run: onInspectImagePreset }
+          : undefined,
+      });
+      return false;
+    }
+    const error = queuedPromptError(prompt);
+    if (error) setInlineError(error);
+    return error === null;
+  }, [imageInputBlocked, onInspectImagePreset, queuedPromptError, showToast, t]);
+
   const {
     snapshot: queueSnapshot,
     collect: collectQueuedPrompt,
@@ -719,8 +735,7 @@ export function ThreadComposer({
   } = useQueuedPrompt(pendingQueueKey, { isStreaming, activeTurnId, completedTurnIds }, {
     disabled: !!disabled || sendPending,
     onSend,
-    validate: queuedPromptError,
-    onValidationError: setInlineError,
+    validate: validatePrompt,
     onSendAttempt: focusTextarea,
   });
   const queuedPrompt = queueSnapshot.prompt;
@@ -1661,17 +1676,6 @@ export function ThreadComposer({
       return;
     }
     if (!canSend) return;
-    if (!isUserShell && imageInputBlocked && (readyImages.some(({ kind }) => kind === "image")
-      || queuedPrompt?.images?.some(({ kind }) => kind === "image"))) {
-      showToast?.({
-        message: t("errors.modelRequestFailed.imageInputTitle"),
-        tone: "error",
-        action: onInspectImagePreset
-          ? { label: t("settings.models.viewPreset"), run: onInspectImagePreset }
-          : undefined,
-      });
-      return;
-    }
     if (isUserShell && (images.length > 0 || normalizedQuotedContext)) {
       setInlineError(t("thread.composer.shell.removeContext"));
       return;
@@ -1726,11 +1730,7 @@ export function ThreadComposer({
       slashLifecycle === "finalize_active_turn";
     if (!isUserShell && !slashLifecycle) {
       const prompt = collectGuidancePrompt();
-      const error = queuedPromptError(prompt);
-      if (error) {
-        setInlineError(error);
-        return;
-      }
+      if (!validatePrompt(prompt)) return;
       if (queuedPrompt) {
         sendQueuedPrompt(prompt, options);
         if (draftKey) draftStore?.delete(draftKey);
@@ -1789,16 +1789,13 @@ export function ThreadComposer({
     clearComposerText,
     collectGuidancePrompt,
     queuedPrompt,
-    queuedPromptError,
+    validatePrompt,
     sendQueuedPrompt,
     clearQueuedPrompt,
     hasTouchPrimaryPointer,
     hasComposerContent,
     handleStop,
-    imageInputBlocked,
     images.length,
-    onInspectImagePreset,
-    showToast,
     isStreaming,
     isUserShell,
     maxTextBytes,
