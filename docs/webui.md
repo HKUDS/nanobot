@@ -211,7 +211,7 @@ In Restricted mode, ordinary file and shell work stays inside the selected proje
 
 The composer supports text, attachments (images, documents, and videos), slash commands and `@` mentions. With voice transcription configured, the empty composer offers voice input; transcription is added to the draft before sending.
 
-When the selected preset has **Image input** off and no fallback accepts images, the composer keeps your draft. Select **View preset** in the notification to check the switch. Turn it on only if the model supports images, or use a preset that does.
+When the selected preset has **Image input** off and no fallback accepts images, the composer keeps your draft. Select **View preset** in the toast to check the switch. Turning it on lets nanobot send images; the model itself must support them. If the provider rejects a request containing images before any work is saved, the toast also takes you to the preset. Check the model’s capabilities or use an image-capable preset.
 
 Start a message with `!` to run a Shell command directly in the topic's workspace, without calling the model (for example, `!git status`). Multiline commands are supported; remove attachments and quoted text before running a command. Commands run immediately, separately from waiting messages, and use the topic's existing permissions and Shell limits.
 

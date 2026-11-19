@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { RecoveryState } from "@/lib/types";
-import { resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
+import { isImageRequestFailure, resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 
 interface RecoveryNoticeProps {
   state: RecoveryState;
@@ -40,7 +40,7 @@ export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings, o
   const modelFailure = state.reason === "model_request_failed"
     ? resolveModelRequestFailureCopy({ errorKind: state.failure_error_kind }, t)
     : null;
-  const imageFailure = modelFailure !== null && state.failure_error_kind === "unsupported_image";
+  const imageFailure = modelFailure !== null && isImageRequestFailure(state.failure_error_kind);
   const openSettings = imageFailure ? onInspectImagePreset : onOpenSettings;
   const title = modelFailure?.title ?? (state.status === "failed"
     ? t("recovery.failed", { defaultValue: "Task recovery failed" })
@@ -101,7 +101,7 @@ export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings, o
           <X className="mr-1 h-3.5 w-3.5" aria-hidden />
           {t("recovery.dismiss", { defaultValue: "Dismiss" })}
         </Button>
-        {!contextUnavailable && !(imageFailure && imageInputBlocked) ? (
+        {!contextUnavailable && !(state.failure_error_kind === "unsupported_image" && imageInputBlocked) ? (
           <Button
             type="button"
             size="sm"

@@ -38,6 +38,8 @@ import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { GoalIsland } from "@/components/thread/GoalIsland";
 import { ThreadLoadingSkeleton } from "@/components/thread/ThreadLoadingSkeleton";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
+import { useToast } from "@/components/ui/toast";
+import { isImageRequestFailure, resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
 import { execSessionCommands } from "@/components/thread/activity/exec-session-model";
@@ -407,6 +409,7 @@ export function ThreadShell({
   skills = [],
 }: ThreadShellProps) {
   const { t } = useTranslation();
+  const showToast = useToast();
   const chatId = session?.chatId ?? null;
   const historyKey = temporary ? null : session?.key ?? null;
   const [visibleWindow, setVisibleWindow] = useState<{ key: string | null; turnIds: string[]; hasMessages: boolean } | null>(null);
@@ -806,9 +809,22 @@ export function ThreadShell({
   );
   const imageInputBlocked = settings?.image_fallback_configured === false
     && settings.model_presets.find((preset) => preset.name === activeModelPreset)?.supports_images === false;
-  const inspectImagePreset = onInspectImagePreset
+  const inspectImagePreset = useMemo(() => onInspectImagePreset
     ? () => onInspectImagePreset(activeModelPreset)
-    : onOpenModelSettings;
+    : onOpenModelSettings, [activeModelPreset, onInspectImagePreset, onOpenModelSettings]);
+  const imageRequestError = streamError?.kind === "model_request_failed" && isImageRequestFailure(streamError.errorKind)
+    ? streamError
+    : null;
+  useEffect(() => {
+    if (!imageRequestError) return;
+    showToast?.({
+      message: resolveModelRequestFailureCopy(imageRequestError, t).title,
+      tone: "error",
+      dedupeKey: `image-request-failed:${imageRequestError.chatId}`,
+      action: inspectImagePreset ? { label: t("settings.models.viewPreset"), run: inspectImagePreset } : undefined,
+    });
+    dismissStreamError();
+  }, [dismissStreamError, imageRequestError, inspectImagePreset, showToast, t]);
   useEffect(() => {
     setModelFallback(null);
     if (!chatId) return;
@@ -1306,12 +1322,11 @@ export function ThreadShell({
           imageInputBlocked={imageInputBlocked}
         />
       ) : null}
-      {streamError && !hasInlineDeliveryError(messages, streamError) ? (
+      {streamError && !imageRequestError && !hasInlineDeliveryError(messages, streamError) ? (
         <StreamErrorNotice
           error={streamError}
           onDismiss={dismissStreamError}
           onOpenSettings={onOpenModelSettings}
-          onInspectImagePreset={inspectImagePreset}
         />
       ) : null}
       {sandboxNotice.issue && onOpenSandboxSettings && !streamError && !recoveryState ? (

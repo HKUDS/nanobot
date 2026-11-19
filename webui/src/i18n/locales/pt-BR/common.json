@@ -2581,6 +2581,7 @@
       "rateLimitTitle": "Limite de solicitações do provedor do modelo atingido",
       "serverTitle": "Erro no serviço do provedor do modelo",
       "imageInputTitle": "A entrada de imagens está desativada nesta predefinição",
+      "imageRequestRejectedTitle": "O modelo rejeitou a solicitação com imagem",
       "imageInputBody": "Esta solicitação inclui imagens. Confira a predefinição ou use uma que aceite imagens.",
       "unknownTitle": "Falha na solicitação ao provedor do modelo",
       "bodyWithAttempt": "Interrompido após {{attempts}} tentativas. Tente mais tarde ou escolha outro modelo.",

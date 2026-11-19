@@ -6,6 +6,7 @@ import { useClient } from "@/providers/ClientProvider";
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { ApiError, fetchWebuiThread, fetchWebuiThreadTraceDetail } from "@/lib/api";
 import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
+import { isImageRequestFailure } from "@/lib/model-request-failure";
 import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
 import { historyContentSnapshot, sameHistoryContent } from "@/lib/thread-display-projection";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
@@ -867,7 +868,8 @@ export function useNanobotStream(
               ...(failureAttempts !== undefined ? { attempts: failureAttempts } : {}),
             }
           : null;
-        if (modelFailure) setStreamError(modelFailure);
+        // Recovery decides whether an image failure needs an action card or just a toast.
+        if (modelFailure && !isImageRequestFailure(modelFailure.errorKind)) setStreamError(modelFailure);
         applyProjectionEvent(ev);
         playTurnCompleteSound();
         onTurnEnd?.();
@@ -890,8 +892,11 @@ export function useNanobotStream(
             ? { reply_preserved: ev.reply_preserved }
             : {}),
         };
-        setRecoveryState(next);
-        if (ev.reason === "model_request_failed" || ev.status === "resuming") {
+        const inputRejected = ev.status === "recovered" && ev.reason === "input_rejected";
+        setRecoveryState(inputRejected ? null : next);
+        if (inputRejected) {
+          setStreamError({ kind: "model_request_failed", chatId, errorKind: next.failure_error_kind });
+        } else if (ev.reason === "model_request_failed" || ev.status === "resuming") {
           setStreamError(null);
         }
         if (
@@ -908,7 +913,7 @@ export function useNanobotStream(
       }
 
       if (ev.event === "attached") {
-        setRecoveryState(ev.recovery_state ?? null);
+        setRecoveryState(ev.recovery_state?.reason === "input_rejected" ? null : ev.recovery_state ?? null);
         if (
           ev.recovery_state?.reason === "model_request_failed"
           || ev.recovery_state?.status === "resuming"

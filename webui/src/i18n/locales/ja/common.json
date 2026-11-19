@@ -2579,6 +2579,7 @@
       "rateLimitTitle": "モデルプロバイダーのリクエスト上限に達しました",
       "serverTitle": "モデルプロバイダーでサービスエラーが発生しました",
       "imageInputTitle": "このプリセットでは画像入力がオフです",
+      "imageRequestRejectedTitle": "モデルが画像付きのリクエストを拒否しました",
       "imageInputBody": "このリクエストには画像が含まれています。プリセットを確認するか、画像対応のプリセットを使用してください。",
       "unknownTitle": "モデルプロバイダーへのリクエストに失敗しました",
       "bodyWithAttempt": "{{attempts}} 回試行して停止しました。後でもう一度試すか、別のモデルを選んでください。",

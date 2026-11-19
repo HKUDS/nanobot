@@ -2579,6 +2579,7 @@
       "rateLimitTitle": "Đã đạt giới hạn yêu cầu của nhà cung cấp mô hình",
       "serverTitle": "Lỗi dịch vụ nhà cung cấp mô hình",
       "imageInputTitle": "Đầu vào hình ảnh đã tắt cho cấu hình này",
+      "imageRequestRejectedTitle": "Mô hình đã từ chối yêu cầu có hình ảnh",
       "imageInputBody": "Yêu cầu này có hình ảnh. Hãy kiểm tra cấu hình hoặc dùng cấu hình hỗ trợ hình ảnh.",
       "unknownTitle": "Yêu cầu tới nhà cung cấp mô hình không thành công",
       "bodyWithAttempt": "Đã dừng sau {{attempts}} lần thử. Hãy thử lại sau hoặc chọn mô hình khác.",

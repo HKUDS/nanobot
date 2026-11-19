@@ -11,7 +11,6 @@ interface StreamErrorNoticeProps {
   error: StreamError;
   onDismiss: () => void;
   onOpenSettings?: () => void;
-  onInspectImagePreset?: () => void;
 }
 
 /**
@@ -19,12 +18,9 @@ interface StreamErrorNoticeProps {
  * visible failed message. ``role="alert"`` + ``aria-live="assertive"``
  * ensures screen readers announce the failure.
  */
-export function StreamErrorNotice({ error, onDismiss, onOpenSettings, onInspectImagePreset }: StreamErrorNoticeProps) {
+export function StreamErrorNotice({ error, onDismiss, onOpenSettings }: StreamErrorNoticeProps) {
   const { t } = useTranslation();
-
   const { title, body } = resolveCopy(error, t);
-  const imageFailure = error.kind === "model_request_failed" && error.errorKind === "unsupported_image";
-  const openSettings = imageFailure ? onInspectImagePreset : onOpenSettings;
 
   return (
     <div
@@ -43,9 +39,9 @@ export function StreamErrorNotice({ error, onDismiss, onOpenSettings, onInspectI
       <div className="min-w-0 flex-1">
         <p className="font-medium">{title}</p>
         <p className="mt-0.5 text-destructive">{body}</p>
-        {error.kind === "model_request_failed" && openSettings ? (
-          <Button variant="link" size="sm" className="h-auto px-0 py-1" onClick={openSettings}>
-            {t(imageFailure ? "settings.models.viewPreset" : "thread.composer.reauthSettings")}
+        {error.kind === "model_request_failed" && onOpenSettings ? (
+          <Button variant="link" size="sm" className="h-auto px-0 py-1" onClick={onOpenSettings}>
+            {t("thread.composer.reauthSettings")}
           </Button>
         ) : null}
       </div>

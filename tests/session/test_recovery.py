@@ -881,6 +881,43 @@ async def test_model_failure_waits_across_restart_and_rejects_duplicate_continue
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("progress", ["none", "reply", "tool"])
+async def test_image_request_rejection_only_waits_for_recovery_when_work_is_saved(
+    tmp_path: Path, progress: str,
+) -> None:
+    coordinator, bus, sessions = _coordinator(tmp_path)
+    session = sessions.get_or_create("websocket:chat")
+    session.messages = [{"role": "user", "content": "read this image"}]
+    if progress == "reply":
+        session.messages.append({"role": "assistant", "content": "saved reply", "_interrupted": True})
+    else:
+        if progress == "tool":
+            session.messages.extend([
+                {"role": "assistant", "content": "", "tool_calls": [{"id": "call-1"}]},
+                {"role": "tool", "content": "saved result", "tool_call_id": "call-1"},
+                {"role": "user", "content": "continue", "_hidden_history": {"kind": "internal_continuation"}},
+            ])
+        session.messages.append({"role": "assistant", "content": "[Assistant reply unavailable due to model error.]"})
+    _persist(sessions, session)
+
+    await coordinator.turn_completed(
+        session.key, failure_kind="model", failure_error_kind="image_request_rejected",
+    )
+
+    event = bus.outbound.get_nowait().event
+    assert isinstance(event, RecoveryStateEvent)
+    assert event.failure_error_kind == "image_request_rejected"
+    saved = sessions.get_or_create(session.key)
+    assert saved.messages == session.messages
+    if progress == "none":
+        assert (event.status, event.reason) == ("recovered", "input_rejected")
+        assert saved.metadata[RECOVERY_METADATA_KEY]["status"] == "recovered"
+    else:
+        assert (event.status, event.reason) == ("awaiting_user", "model_request_failed")
+        assert saved.metadata[RECOVERY_METADATA_KEY]["status"] == "awaiting_user"
+
+
+@pytest.mark.asyncio
 async def test_new_input_after_model_failure_does_not_change_saved_context(tmp_path: Path) -> None:
     coordinator, _, sessions = _coordinator(tmp_path)
     session = sessions.get_or_create("websocket:chat")

@@ -151,9 +151,19 @@ async def test_declared_vision_does_not_hide_actual_upstream_rejection(stream):
     response = await call(messages=messages)
     assert response.content == upstream.content
     assert response.error_status_code == 400
+    assert LLMProvider.public_error_kind(response) == "image_request_rejected"
+    assert LLMProvider.public_error_kind(upstream) == "unknown"
     assert len(primary.calls) == 1
     assert created == []
     assert messages == before
+
+
+async def test_text_request_rejected_with_400_keeps_generic_diagnosis():
+    provider = ImageProvider(response=LLMResponse(
+        "invalid request", finish_reason="error", error_status_code=400,
+    ))
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hi"}])
+    assert LLMProvider.public_error_kind(response) == "unknown"
 
 
 def test_factory_resolves_independent_capabilities_and_refresh_signature():

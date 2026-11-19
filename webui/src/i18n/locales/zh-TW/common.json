@@ -2579,6 +2579,7 @@
       "rateLimitTitle": "模型供應商請求受到限制",
       "serverTitle": "模型供應商服務發生錯誤",
       "imageInputTitle": "此預設的圖像輸入已關閉",
+      "imageRequestRejectedTitle": "模型拒絕了含有圖片的請求",
       "imageInputBody": "這次請求包含圖片。請檢查此預設，或使用支援圖片的預設。",
       "unknownTitle": "模型供應商請求失敗",
       "bodyWithAttempt": "已嘗試 {{attempts}} 次，仍未成功。可稍後繼續或切換模型。",

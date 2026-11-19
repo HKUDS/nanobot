@@ -2579,6 +2579,7 @@
       "rateLimitTitle": "Limite de requêtes du fournisseur du modèle atteinte",
       "serverTitle": "Erreur du service du fournisseur du modèle",
       "imageInputTitle": "L’entrée d’images est désactivée pour ce préréglage",
+      "imageRequestRejectedTitle": "Le modèle a rejeté la requête avec image",
       "imageInputBody": "Cette requête contient des images. Vérifiez le préréglage ou utilisez-en un qui accepte les images.",
       "unknownTitle": "Échec de la requête au fournisseur du modèle",
       "bodyWithAttempt": "Arrêt après {{attempts}} tentatives. Réessayez plus tard ou choisissez un autre modèle.",

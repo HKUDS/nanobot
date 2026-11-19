@@ -5,13 +5,19 @@ export interface ModelRequestFailureDetails {
   attempts?: number;
 }
 
+export function isImageRequestFailure(errorKind?: string): boolean {
+  return errorKind === "unsupported_image" || errorKind === "image_request_rejected";
+}
+
 export function resolveModelRequestFailureCopy(
   details: ModelRequestFailureDetails,
   t: TFunction,
 ): { title: string; body: string } {
-  if (details.errorKind === "unsupported_image") {
+  if (isImageRequestFailure(details.errorKind)) {
     return {
-      title: t("errors.modelRequestFailed.imageInputTitle"),
+      title: t(details.errorKind === "unsupported_image"
+        ? "errors.modelRequestFailed.imageInputTitle"
+        : "errors.modelRequestFailed.imageRequestRejectedTitle"),
       body: t("errors.modelRequestFailed.imageInputBody"),
     };
   }
