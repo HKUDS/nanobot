@@ -24,7 +24,7 @@ This walkthrough is for people who have not used a terminal, API key, or config 
 
 ## 1. Install Python
 
-If you do not already have Python 3.11 or newer, download it from [python.org](https://www.python.org/downloads/). On Windows, check **Add python.exe to PATH** during installation.
+If you do not already have Python 3.11 or newer, download it from [python.org](https://www.python.org/downloads/). On Windows, check the box labeled **Add python.exe to PATH** during installation so your terminal can find Python automatically.
 
 Open your terminal:
 
@@ -34,23 +34,23 @@ Open your terminal:
 | macOS | Press `Command+Space`, type `Terminal`, and press Enter |
 | Linux | Open your app menu and search for **Terminal** |
 
-Check your Python version:
+Type this command and press Enter:
 
 ```bash
 python --version
 ```
 
-You should see `Python 3.11` or newer. If `python` is not recognized, close and reopen the terminal, or try `python3 --version` (macOS/Linux) or `py --version` (Windows).
+You should see something like `Python 3.12.x` (any version `3.11` or higher works). If you get an error saying `python` is not recognized, close and reopen the terminal, or try `python3 --version` (macOS/Linux) or `py --version` (Windows).
 
 ## 2. Prepare Your Model Details
 
-Having a regular chat website subscription does not automatically give you API access. Before continuing, make sure you have an AI provider ready.
+Having a regular chat website subscription (like ChatGPT Plus or Claude Pro) does not automatically give you API access. Before continuing, make sure you have an AI provider ready.
 
-If you do not have a provider yet, [OpenRouter](https://openrouter.ai/) is an easy starting point (not required—any supported provider works):
+If you do not have a provider yet, [OpenRouter](https://openrouter.ai/) is a simple starting point (any supported provider works):
 
 1. Create an account at [OpenRouter](https://openrouter.ai/).
 2. Open [API Keys](https://openrouter.ai/settings/keys) and create a key. Keep it somewhere private for Step 4.
-3. Pick a model from the [model catalog](https://openrouter.ai/models) and copy its model ID. Choose a model that supports tool calling if you want nanobot to work with files or tools.
+3. Pick a model from the [model catalog](https://openrouter.ai/models) and copy its model ID. Pick a model that supports tools (often labeled **Tools**) if you want nanobot to read files or run actions for you.
 
 If you prefer a model that runs locally on your own computer with no API key, see the [Ollama recipe](./provider-cookbook.md#recipe-ollama-local-model). If you are using a company-managed AI service, ask your administrator for the endpoint URL, key, and model ID.
 
@@ -125,10 +125,10 @@ If a setting asks you to restart nanobot, click the **Restart** button shown in 
 ## Your First File Task
 
 1. Create a practice folder (for example `Documents/nanobot-practice`) and copy a short text file into it so your originals stay safe.
-2. Start a new topic in the WebUI, click the folder selector, pick that practice folder, and click **Confirm**. Leave access set to **Restricted**.
+2. Start a new topic in the WebUI, click the folder selector, pick that practice folder, and click **Confirm**. Leave access set to **Restricted** (this keeps nanobot safely inside your chosen folder so it cannot touch files elsewhere on your computer).
 3. Send: *"Read notes.txt and write a short summary to summary.md in this folder."* (Replace `notes.txt` with your file's name.)
 
-Check the folder—you should see `summary.md` created there.
+Open your practice folder—you should see a new `summary.md` file there.
 
 > [!NOTE]
 > Choosing a workspace folder sets where nanobot reads and writes files. Attaching a file only shares that file with the chat. Also, starting a new topic or choosing a different folder does not separate long-term memory—if you need completely separate memory (for example, for different clients), see [Multiple Instances](./multiple-instances.md).

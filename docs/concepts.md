@@ -6,6 +6,15 @@ For source-code structure and contributor details, see [Architecture](./architec
 
 ## Main Building Blocks
 
+```mermaid
+flowchart LR
+    U["WebUI / Terminal / Chat Apps"] --> G["Gateway"]
+    G --> A["Agent"]
+    A --> P["AI Provider"]
+    A --> T["Tools (Files, Shell, Web, MCP)"]
+    A --> M["Workspace & Memory"]
+```
+
 | Part | What it does |
 |---|---|
 | Agent | Reads your message and conversation context, runs enabled tools when needed, and writes the reply |

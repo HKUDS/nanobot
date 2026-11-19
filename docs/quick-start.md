@@ -100,7 +100,7 @@ If you installed nanobot another way (such as `uv` or `pip`), `nanobot webui` st
 To test without a browser, send a single message from the terminal:
 
 ```bash
-nanobot -m "Hello!"
+nanobot agent -m "Hello!"
 ```
 
 Or open an interactive terminal chat:

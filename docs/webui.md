@@ -16,7 +16,7 @@ On a fresh install, nanobot creates your config and workspace, starts the local 
 
 With the official installer, the gateway stays running in the background after you close the browser or terminal. Manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`. For other install methods (such as `uv` or `pip`), use `nanobot webui --detach` or `nanobot gateway --background` to keep it running in the background.
 
-To sign in from another browser on the same machine, copy the **complete login link** printed in the terminal (including everything after `#`) and keep it private. Use `nanobot webui --no-open` to print the link without launching a browser.
+To sign in from another browser on the same machine, copy the **complete login link** printed in the terminal (shaped like `http://127.0.0.1:8765/#...`, including everything after `#`)—the bare address without the `#...` token will not sign a new browser in. Keep that link private. Use `nanobot webui --no-open` to print the link without launching a browser.
 
 <details>
 <summary>Manual configuration for the local WebUI</summary>
@@ -179,6 +179,7 @@ Create automations from the topic where you want replies delivered. Local trigge
 Settings that require a gateway restart are clearly marked in the WebUI.
 
 - **Appearance:** Choose **System**, **Light**, or **Dark** theme, pick a reading text size (Small, Standard, Large, or custom 14–28 px), choose how much activity/diff detail to show, or set a custom background image (**Settings → Appearance → Background**—PNG, JPEG, or WebP up to 6 MiB, with adjustable blur and fade).
+- **Notifications:** Open **Settings → Notifications** to turn on **Browser notifications** (alerts you when a background task finishes or needs attention; click **Test notification** to verify) and **Completion sound**. Works on localhost or HTTPS (on iPhone/iPad, open from the Home Screen).
 - **Check for updates:** Open **Settings → About** to check for updates. nanobot does not run automatic background version checks or auto-install updates without your confirmation. See [Updating nanobot](./updating.md).
 
 ## Sharing Access

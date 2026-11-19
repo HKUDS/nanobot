@@ -7,6 +7,13 @@ nanobot keeps recent chat history separate from long-term memory like your prefe
 
 ## How Memory Works
 
+```mermaid
+flowchart LR
+    C["Active Chat"] -->|"/compact or auto-summarize"| H["Summaries (history.jsonl)"]
+    H -->|"/dream or periodic schedule"| R["Long-Term Memory (SOUL, USER, MEMORY, wiki/)"]
+    C -->|"Direct 'Remember...' request"| R
+```
+
 nanobot organizes memory into four layers so conversations stay fast while useful knowledge builds up over time:
 
 | Layer | Where it lives | What it holds |
