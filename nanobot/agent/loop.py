@@ -1257,6 +1257,8 @@ class AgentLoop:
                 ),
                 terminal_wait_seconds=_SUBAGENT_TERMINAL_WAIT_SECONDS,
             ) if pending_queue is not None else None
+            if pending_inputs is not None:
+                turn_scope_stack.callback(self._release_drained_inputs, pending_inputs)
             hook = build_agent_turn_hook(AgentTurnHookSpec(
                 events=events,
                 streaming=streaming,
@@ -1307,10 +1309,6 @@ class AgentLoop:
                     session_key=consolidation_session_key,
                     tools=effective_tools.get_definitions(),
                     persist=session is not None and not ephemeral,
-                ),
-                on_inputs_taken=(
-                    partial(self.bus.finish_inputs, session.key, session.generation)
-                    if retain_session_state and session is not None else None
                 ),
                 injection_callback=pending_inputs.drain if pending_inputs is not None else None,
                 terminal_injection_callback=(
@@ -1579,6 +1577,12 @@ class AgentLoop:
             if item.channel != "system" and self.commands.requires_session_queue(command_text(item)):
                 delivery = self.turn_delivery_factory.unrouted(item, session_key)
                 await delivery.complete(None, publish_completion=True)
+
+    def _release_drained_inputs(self, pending: PendingInputs) -> None:
+        # These messages no longer live in the inbox. Started requests already
+        # removed their IDs; close out any remaining waiters on turn exit.
+        for message in pending.tracked_inputs:
+            self._release_interrupted_input(message)
 
     def _release_interrupted_input(self, message: InboundMessage) -> None:
         self.bus.release_input(

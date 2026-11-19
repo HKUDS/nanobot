@@ -5379,9 +5379,11 @@ async def test_authorized_webui_turn_is_acked_after_bus_acceptance(history,
 
 
 @pytest.mark.asyncio
-async def test_stop_marks_only_the_input_the_agent_has_not_taken(history, tmp_path):
+@pytest.mark.parametrize("outcome", ["stop_queued", "stop_preparing", "prepared", "rejected"])
+async def test_pending_input_waits_for_its_own_model_request(history, tmp_path, monkeypatch, outcome):
+    from nanobot.agent.context_governance import ContextWindowExceededError
     from nanobot.agent.loop import AgentLoop
-    from nanobot.providers.base import GenerationSettings
+    from nanobot.providers.base import GenerationSettings, LLMResponse
 
     bus = MessageBus()
     channel = _ch(bus, session_manager=history.sessions)
@@ -5391,16 +5393,33 @@ async def test_stop_marks_only_the_input_the_agent_has_not_taken(history, tmp_pa
     peer.remote_address = ("127.0.0.1", 50123)
     channel._attach(peer, chat)
     entered_model = asyncio.Event()
+    finish_first = asyncio.Event()
+    preparing_followup = asyncio.Event()
+    resume_preparation = asyncio.Event()
 
-    async def wait_for_stop(**_kwargs):
+    async def reply(**_kwargs):
+        if entered_model.is_set():
+            await asyncio.Future()
         entered_model.set()
-        await asyncio.Future()
+        await finish_first.wait()
+        return LLMResponse(content="first answer")
 
     provider = MagicMock(aclose=AsyncMock(), generation=GenerationSettings())
     provider.get_default_model.return_value = "test-model"
     provider.can_resume_conversation_state.return_value = False
-    provider.chat_stream_with_retry = AsyncMock(side_effect=wait_for_stop)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=reply)
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model", session_manager=history.sessions)
+    prepare = loop.runner._prepare_model_request
+
+    async def prepare_request(*args, **kwargs):
+        if entered_model.is_set():
+            preparing_followup.set()
+            await resume_preparation.wait()
+            if outcome == "rejected":
+                raise ContextWindowExceededError(session_key=key, estimated_tokens=2, input_budget=1, source="test")
+        return await prepare(*args, **kwargs)
+
+    monkeypatch.setattr(loop.runner, "_prepare_model_request", prepare_request)
     worker = asyncio.create_task(loop.run())
 
     async def send(turn_id, content="identical prompts"):
@@ -5412,13 +5431,29 @@ async def test_stop_marks_only_the_input_the_agent_has_not_taken(history, tmp_pa
         await send("picked-up")
         await asyncio.wait_for(entered_model.wait(), 5)
         await send("waiting")
+        if outcome != "stop_queued":
+            finish_first.set()
+            await asyncio.wait_for(preparing_followup.wait(), 5)
         await channel._dispatch_envelope(peer, "webui-client", {"type": "attach", "chat_id": chat})
         attached = next(frame for frame in _sent_ws_payloads(peer) if frame["event"] == "attached")
         assert attached["pending_input_ids"] == ["user:waiting"]
-        await send("stop", "/stop")
+
+        if outcome.startswith("stop_"):
+            await send("stop", "/stop")
+            status = "cancelled"
+        else:
+            resume_preparation.set()
+            status = "consumed" if outcome == "prepared" else "released"
         async with asyncio.timeout(5):
-            while not any(f.get("processing_status") == "cancelled" for f in _sent_ws_payloads(peer)):
+            while not any(f.get("input_ids") == ["user:waiting"] and f.get("processing_status") == status
+                          for f in _sent_ws_payloads(peer)):
                 await channel.send(await bus.consume_outbound())
+            if outcome == "prepared":
+                while not any(f.get("phase") == "started" and f.get("response_input_ids") == ["user:waiting"]
+                              for f in _sent_ws_payloads(peer)):
+                    await channel.send(await bus.consume_outbound())
+        await channel._dispatch_envelope(peer, "webui-client", {"type": "attach", "chat_id": chat})
+        assert [f["pending_input_ids"] for f in _sent_ws_payloads(peer) if f["event"] == "attached"][-1] == []
     finally:
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
@@ -5426,13 +5461,12 @@ async def test_stop_marks_only_the_input_the_agent_has_not_taken(history, tmp_pa
     frames = [frame for frame in _sent_ws_payloads(peer) if frame["event"] == "input_processing"]
     assert [(frame["input_ids"], frame["processing_status"]) for frame in frames] == [
         (["user:picked-up"], "pending"), (["user:picked-up"], "consumed"),
-        (["user:waiting"], "pending"), (["user:waiting"], "cancelled"),
+        (["user:waiting"], "pending"), (["user:waiting"], status),
     ]
     states = {row.get("input_id"): row.get("processing_status") for row in history.build(key)["events"]
               if row["event"] == "user_message"}
-    assert {k: states[k] for k in ("user:picked-up", "user:waiting")} == {
-        "user:picked-up": None, "user:waiting": "cancelled",
-    }
+    assert states["user:picked-up"] is None
+    assert states["user:waiting"] == ("cancelled" if status == "cancelled" else None)
 
 
 @pytest.mark.asyncio
