@@ -114,7 +114,7 @@ export function FileActions({
       <Menu.Portal container={portal ?? undefined}>
         <Menu.Content aria-label={t("fileActions.menu", { name: path.split(/[\\/]/).pop() || path })}
           align="start" sideOffset={4} collisionPadding={12}
-          className={cn(floatingSurfaceClassName, floatingSurfaceMotionClassName, "min-w-40 rounded-control p-1 [&_[role=menuitem]]:py-1.5")}
+          className={cn(floatingSurfaceClassName, floatingSurfaceMotionClassName, "min-w-40 origin-[var(--radix-popper-transform-origin)] rounded-control p-1 [&_[role=menuitem]]:py-1.5")}
           onClick={(event) => event.stopPropagation()}
           onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
           onInteractOutside={() => { interactedOutside.current = true; }}
@@ -122,6 +122,8 @@ export function FileActions({
             event.preventDefault();
             if (!interactedOutside.current) opener.current?.focus();
           }}>
+          {/* Track the click point even when collision handling shifts the menu; render no visible arrow. */}
+          <Menu.Arrow width={0} height={0} aria-hidden />
           <Menu.Item className={itemClassName} disabled={!resolved} onSelect={(event) => {
             event.preventDefault();
             if (resolved) void copy(resolved.path);
