@@ -70,15 +70,15 @@ for (const input of ["pointer", "keyboard"]) {
     await page.goto("/browser/fixture.html?case=continuity");
     const trigger = page.getByRole("button", { name: "Report file" });
     const bounds = (await trigger.boundingBox())!;
-    const offset = { x: Math.floor(bounds.width - 6), y: Math.floor(bounds.height / 2) };
-    if (input === "pointer") await trigger.click({ button: "right", position: offset });
+    const anchorX = input === "pointer" ? Math.floor(bounds.x + bounds.width - 6) : Math.round(bounds.x);
+    if (input === "pointer") await page.mouse.click(anchorX, Math.floor(bounds.y + bounds.height / 2), { button: "right" });
     else await trigger.press("Shift+F10");
     const menu = page.getByRole("menu");
     await expect(menu).toHaveAttribute("data-side", "bottom");
     await expect.poll(() => menu.evaluate(node => {
       const [x, y] = getComputedStyle(node).transformOrigin.split(" ").map(Number.parseFloat);
       return { x: Math.round(node.parentElement!.getBoundingClientRect().left + x), y };
-    })).toEqual({ x: Math.round(bounds.x + (input === "pointer" ? offset.x : 0)), y: 0 });
+    })).toEqual({ x: anchorX, y: 0 });
     await menu.press("Escape");
     await expect(trigger).toBeFocused();
   });
