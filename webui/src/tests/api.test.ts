@@ -1351,6 +1351,7 @@ describe("webui API helpers", () => {
             title: "优化 WebUI 标题",
             project_locked: projectLocked,
             model_preset: "fast",
+            model_options: projectLocked ? { reasoning_effort: "high", codex_fast_mode: false } : undefined,
             run_started_at: 1_700_000_000,
             handle: {
               id: "handle_0123456789abcdef0123456789abcdef",
@@ -1368,6 +1369,8 @@ describe("webui API helpers", () => {
         projectLocked: true,
         preview: "",
         modelPreset: "fast",
+        modelOptions: projectLocked ? { reasoning_effort: "high", codex_fast_mode: false }
+          : { reasoning_effort: null, codex_fast_mode: null },
         runStartedAt: 1_700_000_000,
         handle: {
           id: "handle_0123456789abcdef0123456789abcdef",
@@ -1399,9 +1402,9 @@ describe("webui API helpers", () => {
             accepts_args: false,
           },
           {
-            command: "/history",
-            title: "Show conversation history",
-            description: "Print the last N messages.",
+            command: "/inspect",
+            title: "Inspect session",
+            description: "Inspect a session.",
             icon: "history",
             arg_hint: "[n]",
             lifecycle: "side_channel",
@@ -1437,9 +1440,9 @@ describe("webui API helpers", () => {
         acceptsArgs: false,
       },
       {
-        command: "/history",
-        title: "Show conversation history",
-        description: "Print the last N messages.",
+        command: "/inspect",
+        title: "Inspect session",
+        description: "Inspect a session.",
         icon: "history",
         argHint: "[n]",
         lifecycle: "side_channel",

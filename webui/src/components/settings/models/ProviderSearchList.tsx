@@ -26,6 +26,7 @@ const PROVIDER_SEARCH_ALIASES: Record<string, string> = {
   volcengine_coding_plan: "火山引擎 豆包 doubao",
   minimax: "海螺 稀宇",
   minimax_anthropic: "海螺 稀宇",
+  shengsuanyun: "胜算云 勝算雲",
   siliconflow: "硅基流动 矽基流動 硅基流動",
   stepfun: "阶跃星辰 階躍星辰",
   xiaomi_mimo: "小米 mimo",

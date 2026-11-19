@@ -9,6 +9,7 @@ import type {
   OutboundMcpPresetMention,
   OutboundMedia,
   SessionMention,
+  SessionModelOptions,
   SidebarStatePayload,
   GoalStateWsPayload,
   WorkspaceScopePayload,
@@ -288,6 +289,12 @@ export class NanobotClient {
     return this.readyChatId;
   }
 
+  /** Stable browser preference namespace without authentication or query parameters. */
+  get preferenceScope(): string {
+    const url = new URL(this.currentUrl, window.location.href);
+    return `${url.protocol}//${url.host}${url.pathname}`;
+  }
+
   /** Swap the URL (e.g. after fetching a fresh token) then reconnect. */
   updateUrl(url: string, socketFactory?: (url: string) => WebSocket): void {
     this.currentUrl = url;
@@ -439,9 +446,9 @@ export class NanobotClient {
     this.applyRunEffects(this.runs.transition({ kind: "fence", chatId, completedTurnIds }));
   }
 
-  /** Settle explicit fragment completions without claiming coverage of live content. */
-  settleFragmentRunLifecycle(chatId: string, completedTurnIds: readonly string[]): void {
-    this.applyRunEffects(this.runs.transition({ kind: "settle-fragment-lifecycle", chatId, completedTurnIds }));
+  /** Settle explicit completions without claiming coverage of live content. */
+  settleCompletedRunLifecycle(chatId: string, completedTurnIds: readonly string[]): void {
+    this.applyRunEffects(this.runs.transition({ kind: "settle-completed-lifecycle", chatId, completedTurnIds }));
   }
 
   /** Whether a mounted transcript owns delivery for this chat. */
@@ -742,6 +749,23 @@ export class NanobotClient {
     }
   }
 
+  async uploadBackground(file: File): Promise<void> {
+    const socket = this.socket;
+    const capability = this.upload;
+    const stillConnected = () => this.socket === socket
+      && socket?.readyState === WS_OPEN && this.upload === capability;
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read image"));
+      reader.onerror = () => reject(new Error("Could not read image"));
+      reader.readAsDataURL(file);
+    });
+    const [attachment] = await uploadAttachments([{ data_url: dataUrl, name: file.name }], capability,
+      typeof window !== "undefined" ? window.location.href : this.currentUrl, stillConnected);
+    if (!attachment || !("reference" in attachment)) throw new Error("Could not upload image");
+    await this.requestMutation("background.update", { reference: attachment.reference });
+  }
+
   async sendAttachments(
     chatId: string, content: string, media: OutboundMedia[],
     options?: Parameters<NanobotClient["sendMessage"]>[3],
@@ -802,6 +826,7 @@ export class NanobotClient {
       quotedContext?: string;
       intent?: "create_automation";
       userShell?: boolean;
+      modelOptions?: SessionModelOptions;
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
       /** False for side-channel or injected messages that do not own a lifecycle. */
@@ -824,6 +849,8 @@ export class NanobotClient {
       ...(options?.quotedContext?.trim() ? { quoted_context: options.quotedContext.trim() } : {}),
       ...(options?.intent === "create_automation" ? { intent: options.intent } : {}),
       ...(options?.userShell ? { user_shell: true } : {}),
+      ...(!temporary && !options?.userShell && options?.modelOptions
+        ? { model_options: options.modelOptions } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,
@@ -1041,6 +1068,10 @@ export class NanobotClient {
         this.temporaryChatIds.add(parsed.chat_id);
       } else {
         this.knownChats.add(parsed.chat_id);
+      }
+      const live = parsed.live_turn_ids;
+      if (Array.isArray(live) && live.every((id) => typeof id === "string" && id.length > 0)) {
+        this.applyRunEffects(this.runs.transition({ kind: "reattach", chatId: parsed.chat_id, liveTurnIds: live }));
       }
       this.dispatch(parsed.chat_id, parsed);
       return;

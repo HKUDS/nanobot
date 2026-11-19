@@ -135,6 +135,23 @@ class HistoryReader:
             (self.key, ordinal),
         )]
 
+    def open_tail_sequences(self) -> dict[str, int]:
+        """Last sequence for each identity in an unclosed tail, in first-appearance order."""
+        ordinal = self.turn_count - 1
+        last = self._db.execute(
+            """SELECT kind FROM history_entries WHERE session_key=? AND turn_ordinal=?
+               ORDER BY position DESC LIMIT 1""", (self.key, ordinal),
+        ).fetchone()
+        if last is None or last[0] == HistoryKind.COMPLETION:
+            # Do not append over a terminal transcript_incomplete marker.
+            return {}
+        return {turn_id: sequence for turn_id, sequence in self._db.execute(
+            """SELECT json_extract(record, '$.turn_id') AS turn_id,
+                      max(coalesce(json_extract(record, '$.sequence'), 0))
+               FROM history_entries WHERE session_key=? AND turn_ordinal=?
+               GROUP BY turn_id ORDER BY min(position)""", (self.key, ordinal),
+        ) if turn_id}
+
     def read_entry_page(
         self, ordinal: int, *, start: int, end: int, reverse: bool,
         max_records: int, max_bytes: int, allow_oversized: bool = False,

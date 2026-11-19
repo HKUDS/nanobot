@@ -163,9 +163,9 @@ async def test_auxiliary_calls_do_not_publish_response_identity():
 
 
 @pytest.mark.parametrize("with_tools", [False, True])
-@pytest.mark.parametrize("with_images", [False, True])
+@pytest.mark.parametrize(("with_images", "image_error"), [(False, False), (True, False), (True, True)])
 @pytest.mark.parametrize("fallback", [False, True])
-async def test_attribution_does_not_change_provider_requests(with_tools, with_images, fallback):
+async def test_attribution_does_not_change_provider_requests(with_tools, with_images, image_error, fallback):
     requests = []
 
     class CapturingProvider(AnswerProvider):
@@ -173,7 +173,7 @@ async def test_attribution_does_not_change_provider_requests(with_tools, with_im
             requests.append((self.provider_name, deepcopy({
                 key: value for key, value in kwargs.items() if not key.startswith("on_")
             })))
-            if with_images and len(requests) == 1:
+            if image_error and len(requests) == 1:
                 return LLMResponse(content="Images unsupported", finish_reason="error",
                                    error_status_code=400)
             return await super().chat(**kwargs)
@@ -201,7 +201,12 @@ async def test_attribution_does_not_change_provider_requests(with_tools, with_im
             messages=deepcopy(messages), tools=tools, model="same-model",
             provider_context=ProviderCallContext(events=EventSink(AsyncMock()), response_preset=preset),
         )
-        assert result.content == "answer"
+        assert result.content == ("Images unsupported" if image_error else "answer")
+        assert result.finish_reason == ("error" if image_error else "stop")
+        assert len(requests) == (1 if image_error else 1 + int(fallback))
+        assert all(request["messages"] == original for _, request in requests)
+        if image_error:
+            assert result.error_status_code == 400
         results.append(deepcopy(requests))
     assert results[0] == results[1]
     assert messages == original

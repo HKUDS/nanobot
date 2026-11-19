@@ -23,6 +23,7 @@ from nanobot.agent.tools.mcp_oauth import (
     mcp_oauth_has_credentials,
 )
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.apps.cli import CliAppManager
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.loader import load_config, resolve_config_env_vars, save_config
 from nanobot.config.network import NetworkConfig
@@ -600,8 +601,9 @@ def mcp_presets_payload(
         if name not in known
     ]
     existing_names = {str(row["name"]) for row in (*preset_rows, *custom_rows)}
-    plugin_rows = [
-        _agent_plugin_payload(plugin)
+    managed_plugins = CliAppManager(workspace=config.workspace_path).managed_plugin_owners()
+    plugin_rows: list[dict[str, Any]] = [
+        _agent_plugin_payload(plugin) | {"managed_by_cli": managed_plugins.get(plugin.root)}
         for plugin in discover_agent_plugins(config.workspace_path)
         if f"plugin-{plugin.name}" not in existing_names
     ]

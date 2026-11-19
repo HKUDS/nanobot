@@ -500,6 +500,7 @@ class AgentRunner:
                 had_injections = True
             await end_length_segment(interrupted=drained_before_request)
             response_input_ids = self._response_input_ids(messages)
+            request_state.response_input_ids = response_input_ids
             if spec.events.accepts(ResponseInputsEvent):
                 await spec.events.emit(ResponseInputsEvent(response_input_ids))
             context = AgentHookContext(
@@ -964,6 +965,7 @@ class AgentRunner:
             "provider_context": replace(
                 provider_context or ProviderCallContext(),
                 response_preset=spec.runtime.model_preset or "",
+                model_options=spec.runtime.model_options,
             ),
         }
 
@@ -992,6 +994,7 @@ class AgentRunner:
                 round_usages=tuple(usage for usage in state.recent_round_usages if usage is not None),
                 context_window_tokens=spec.runtime.context_window_tokens,
                 request_usage=request_usage,
+                response_input_ids=state.response_input_ids if phase == "started" else (),
             ))
 
         try:

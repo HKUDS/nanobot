@@ -19,7 +19,7 @@ interface DeleteConfirmProps {
   open: boolean;
   title: string;
   count?: number;
-  automations?: SessionAutomationJob[];
+  automations: SessionAutomationJob[];
   onCancel: () => void;
   onConfirm: () => void;
 }
@@ -28,13 +28,12 @@ export function DeleteConfirm({
   open,
   title,
   count = 1,
-  automations = [],
+  automations,
   onCancel,
   onConfirm,
 }: DeleteConfirmProps) {
   const { t } = useTranslation();
   const locale = currentLocale();
-  const hasAutomations = automations.length > 0;
   const multiple = count > 1;
   const visibleAutomations = automations.slice(0, 4);
   const hiddenCount = Math.max(0, automations.length - visibleAutomations.length);
@@ -59,42 +58,34 @@ export function DeleteConfirm({
               : t("deleteConfirm.title", { title })}
           </AlertDialogTitle>
           <AlertDialogDescription className="mt-3 max-w-[17rem] text-center text-[14px] leading-6 text-muted-foreground">
-            {hasAutomations
-              ? multiple
-                ? t("deleteConfirm.automationsDescriptionMany", {
-                    defaultValue: "Linked automations will also be deleted.",
-                  })
-                : t("deleteConfirm.automationsDescription")
-              : multiple
-                ? t("deleteConfirm.descriptionMany", {
-                    defaultValue: "This action cannot be undone.",
-                  })
-                : t("deleteConfirm.description")}
+            {multiple
+              ? t("deleteConfirm.automationsDescriptionMany", {
+                  defaultValue: "Linked automations will also be deleted.",
+                })
+              : t("deleteConfirm.automationsDescription")}
           </AlertDialogDescription>
-          {hasAutomations ? (
-            <div className="mt-4 max-h-40 w-full overflow-y-auto rounded-2xl bg-muted/55 px-3 py-2 text-left">
-              {visibleAutomations.map((job) => (
-                <div key={job.id} className="min-w-0 py-1.5">
-                  <div className="truncate text-[13px] font-medium leading-5 text-foreground">
-                    {job.name || job.id}
-                  </div>
-                  <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11.5px] leading-5 text-muted-foreground">
-                    <span className="truncate">
-                      {formatAutomationSchedule(job, t, locale)}
-                    </span>
-                    <span className="truncate">{formatAutomationNextRun(job, t, locale)}</span>
-                  </div>
+          <div className="mt-4 max-h-40 w-full overflow-y-auto rounded-2xl bg-muted/55 px-3 py-2 text-left">
+            {visibleAutomations.map((job) => (
+              <div key={job.id} className="min-w-0 py-1.5">
+                <div className="truncate text-[13px] font-medium leading-5 text-foreground">
+                  {job.name || job.id}
                 </div>
-              ))}
-              {hiddenCount > 0 ? (
-                <div className="text-[13px] leading-6 text-muted-foreground">
-                  {t("deleteConfirm.moreAutomations", {
-                    count: hiddenCount,
-                  })}
+                <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11.5px] leading-5 text-muted-foreground">
+                  <span className="truncate">
+                    {formatAutomationSchedule(job, t, locale)}
+                  </span>
+                  <span className="truncate">{formatAutomationNextRun(job, t, locale)}</span>
                 </div>
-              ) : null}
-            </div>
-          ) : null}
+              </div>
+            ))}
+            {hiddenCount > 0 ? (
+              <div className="text-[13px] leading-6 text-muted-foreground">
+                {t("deleteConfirm.moreAutomations", {
+                  count: hiddenCount,
+                })}
+              </div>
+            ) : null}
+          </div>
         </AlertDialogHeader>
         <AlertDialogFooter className="mt-6 !grid grid-cols-1 gap-2 sm:grid-cols-2">
           <AlertDialogCancel
@@ -107,9 +98,7 @@ export function DeleteConfirm({
             onClick={onConfirm}
             className="w-full min-w-0 !whitespace-normal bg-destructive text-center text-destructive-foreground hover:bg-destructive/90"
           >
-            {hasAutomations
-              ? t("deleteConfirm.confirmWithAutomations")
-              : t("deleteConfirm.confirm")}
+            {t("deleteConfirm.confirm")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

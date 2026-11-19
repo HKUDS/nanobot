@@ -373,24 +373,6 @@ def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:
     return f"[image: {path}]" if path else empty
 
 
-def content_with_media_breadcrumbs(
-    role: str | None,
-    content: Any,
-    media: Any,
-) -> Any:
-    """Append persisted user-media breadcrumbs to plain-text content."""
-    if role != "user" or not isinstance(content, str) or not isinstance(media, list):
-        return content
-    breadcrumbs = "\n".join(
-        image_placeholder_text(path)
-        for path in cast(list[object], media)
-        if isinstance(path, str) and path
-    )
-    if not breadcrumbs:
-        return content
-    return f"{content}\n{breadcrumbs}" if content else breadcrumbs
-
-
 def truncate_text(text: str, max_chars: int) -> str:
     """Truncate text with a stable suffix."""
     if max_chars <= 0 or len(text) <= max_chars:
@@ -910,15 +892,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     try:
         from nanobot.utils.gitstore import GitStore
 
-        gs = GitStore(
-            workspace,
-            tracked_files=[
-                "SOUL.md",
-                "USER.md",
-                "memory/MEMORY.md",
-            ],
-        )
-        gs.init()
+        GitStore.for_memory(workspace).init()
     except Exception:
         logger.exception("Failed to initialize git store for {}", workspace)
 

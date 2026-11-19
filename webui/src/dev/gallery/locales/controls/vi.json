@@ -54,6 +54,11 @@
     "model": "Mô hình ví dụ",
     "disabledModel": "Bộ chọn mô hình bị vô hiệu hóa"
   },
+  "codexSpeed": {
+    "title": "Tốc độ Codex",
+    "description": "Chọn Fast hoặc Siêu nhanh. Chọn lại chế độ đang bật để tắt.",
+    "options": "Hiển thị Siêu nhanh cho các mô hình được hỗ trợ."
+  },
   "segmented": {
     "title": "Lựa chọn phân đoạn",
     "description": "Một nhóm ít lựa chọn luôn hiển thị.",
@@ -100,6 +105,15 @@
     "confirm": "Xác nhận xóa",
     "removed": "Đã xóa ví dụ.",
     "available": "Ví dụ khả dụng."
+  },
+  "toast": {
+    "title": "Thông báo tạm thời",
+    "description": "Thông báo ngắn về lỗi, thành công và thao tác có thể hoàn tác.",
+    "options": "Gắn ToastProvider và dùng useToast để hiện thông báo. Nếu có nút thao tác, thông báo sẽ hiện lâu hơn.",
+    "showError": "Hiện lỗi",
+    "error": "Không thể lưu ví dụ.",
+    "pending": "Ví dụ sẽ bị xóa.",
+    "restored": "Đã khôi phục ví dụ."
   },
   "sheet": {
     "title": "Bảng bên",

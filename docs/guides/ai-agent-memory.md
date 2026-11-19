@@ -19,7 +19,9 @@ Use an installation with a configured model that has already returned a reply. I
 
 ## Minimal working example
 
-In your existing chat, send a specific preference, such as “For Acme release notes, use concise bullet points.” Then send these commands one at a time, waiting for each to finish:
+In a chat with write access to the agent workspace, say “Remember that for Acme release notes I prefer concise bullet points.” Ask which memory file the agent updated, then check the saved preference in a new chat.
+
+To curate recent conversations with Dream instead, send these commands one at a time, waiting for each to finish:
 
 ```text
 /compact
@@ -27,7 +29,7 @@ In your existing chat, send a specific preference, such as “For Acme release n
 /dream-log
 ```
 
-Compaction puts recent conversation into the archive Dream reads. Dream then decides what to save; inspect its changes to confirm the preference reached `USER.md` or `memory/MEMORY.md`. Ask the agent to read the saved preference, then check it in a new chat. For corrections and restoration, follow [Save and Check a Preference](../memory.md#save-and-check-a-preference).
+Compaction puts recent conversation into the archive Dream reads. Inspect the changes to see what Dream saved. For corrections and restoration, follow [Save and Check a Preference](../memory.md#save-and-check-a-preference).
 
 The files live in the configured agent workspace, normally `~/.nanobot/workspace/`. Selecting a project or starting a new topic does not move or isolate this memory.
 

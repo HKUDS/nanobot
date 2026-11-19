@@ -88,6 +88,17 @@ IMPORT_RULES = (
         (*_ADAPTERS, "nanobot.agent", "nanobot.config", "nanobot.security", "nanobot.session"),
     ),
     ImportRule(
+        "http-execution",
+        ("nanobot.execution.http",),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.config", "nanobot.providers", "nanobot.session"),
+    ),
+    ImportRule(
+        "sandbox-execution",
+        ("nanobot.execution.sandbox",),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.config", "nanobot.session"),
+        allowed_targets=("nanobot.config.paths.get_media_dir",),
+    ),
+    ImportRule(
         "channel-routing-contracts",
         ("nanobot.channels.notification_routes",),
         ("nanobot",),
@@ -101,7 +112,18 @@ IMPORT_RULES = (
     ImportRule(
         "security-primitives",
         ("nanobot.security",),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.execution", "nanobot.session"),
+    ),
+    ImportRule(
+        "resource-execution",
+        ("nanobot.execution",),
         (*_ADAPTERS, "nanobot.agent", "nanobot.session"),
+    ),
+    ImportRule(
+        "file-tool-execution",
+        ("nanobot.agent.tools.filesystem", "nanobot.agent.tools.apply_patch",
+         "nanobot.agent.tools.search", "nanobot.utils.file_edit_events"),
+        ("nanobot.security", "nanobot.agent.tools.path_utils", "os", "shutil", "glob"),
     ),
     ImportRule(
         "websocket-transport",

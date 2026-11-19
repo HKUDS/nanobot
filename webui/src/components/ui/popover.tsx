@@ -15,12 +15,13 @@ const PopoverTrigger = PopoverPrimitive.Trigger;
 interface PopoverContentProps
   extends React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content> {
   portalContainer?: HTMLElement | null;
+  motionClassName?: string;
 }
 
 const PopoverContent = React.forwardRef<
   React.ElementRef<typeof PopoverPrimitive.Content>,
   PopoverContentProps
->(({ className, sideOffset = 4, portalContainer, ...props }, ref) => {
+>(({ className, sideOffset = 4, portalContainer, motionClassName = floatingSurfaceMotionClassName, ...props }, ref) => {
   const dialogContainer = useFloatingPortal();
   return (
   <PopoverPrimitive.Portal container={portalContainer ?? dialogContainer ?? undefined}>
@@ -29,7 +30,7 @@ const PopoverContent = React.forwardRef<
       sideOffset={sideOffset}
       className={cn(
         floatingSurfaceClassName,
-        floatingSurfaceMotionClassName,
+        motionClassName,
         "origin-[var(--radix-popover-content-transform-origin)] max-h-[min(var(--radix-popover-content-available-height),28rem)]",
         className,
       )}

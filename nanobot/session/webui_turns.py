@@ -42,6 +42,7 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.message_content import message_text
 from nanobot.session.session_messages import (
     SESSION_MESSAGE_METADATA_KEY,
     session_message_envelope,
@@ -78,10 +79,11 @@ class _WebsocketTurn:
     started_at: float
     turn_id: str | None
     transcript_persistence_failed: bool = False
+    ended: bool = False
 
 
-# All in-flight lifecycle owners per chat, in admission order. The three maps
-# above remain the latest-owner projection consumed by the HTTP API.
+# In-flight owners and any retained transcript-recovery markers, in admission
+# order. The three maps above remain the latest-owner projection for the HTTP API.
 _WEBSOCKET_ACTIVE_TURNS: dict[str, dict[str, _WebsocketTurn]] = {}
 
 
@@ -136,7 +138,7 @@ def _title_inputs(session: Session) -> tuple[str, str]:
             continue
         message = public_history_message(message)
         role = message.get("role")
-        content = message.get("content")
+        content = message_text(message.get("content")) if role == "user" else message.get("content")
         if not isinstance(content, str) or not content.strip():
             continue
         content = strip_think(content)
@@ -250,13 +252,28 @@ async def maybe_generate_webui_title(
 
 
 def websocket_turn_wall_started_at(chat_id: str) -> float | None:
-    """Return ``time.time()`` when the active user turn began, if still running."""
+    """Return the start time for the latest transcript owner, even if retired."""
     return _WEBSOCKET_TURN_WALL_STARTED_AT.get(chat_id)
 
 
 def websocket_turn_id(chat_id: str) -> str | None:
-    """Return the WebUI identity of the active turn, when one was provided."""
+    """Return the latest transcript owner's WebUI identity, even if retired."""
     return _WEBSOCKET_TURN_IDS.get(chat_id)
+
+
+def live_websocket_turns(chat_id: str) -> tuple[tuple[float, str | None], ...]:
+    """Return queued/running owners, excluding retired transcript-recovery markers."""
+    turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
+    if turns is None:
+        return ()
+    # HTTP session lists also sample from a reader thread.
+    return tuple((turn.started_at, turn.turn_id) for turn in turns.copy().values() if not turn.ended)
+
+
+def latest_live_websocket_turn(chat_id: str) -> tuple[float, str | None] | None:
+    """Return the latest queued or running turn for status and admission."""
+    turns = live_websocket_turns(chat_id)
+    return turns[-1] if turns else None
 
 
 def register_queued_websocket_turn_if_idle(
@@ -264,7 +281,7 @@ def register_queued_websocket_turn_if_idle(
     turn_id: str | None,
 ) -> str | None:
     """Track an accepted WebUI turn while it waits for AgentLoop admission."""
-    if websocket_turn_wall_started_at(chat_id) is not None:
+    if latest_live_websocket_turn(chat_id) is not None:
         return None
     owner = uuid4().hex
     _WEBSOCKET_ACTIVE_TURNS.setdefault(chat_id, {})[owner] = _WebsocketTurn(
@@ -302,7 +319,7 @@ def mark_websocket_turn_transcript_persistence_failed(
     chat_id: str,
     owner: str | None,
 ) -> bool:
-    """Keep a turn active when any canonical display event could not be written."""
+    """Remember that this owner's canonical transcript may be incomplete."""
     if not owner:
         return False
     turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
@@ -318,13 +335,14 @@ def clear_websocket_turn_if_current(
     *,
     preserve_persistence_failure: bool = False,
 ) -> bool:
-    """Clear one lifecycle owner without disturbing concurrent turns for the chat."""
+    """Retire one owner, optionally keeping its transcript-recovery marker."""
     if not owner:
         return False
     turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
     if turns is None or owner not in turns:
         return False
     if preserve_persistence_failure and turns[owner].transcript_persistence_failed:
+        turns[owner] = replace(turns[owner], ended=True)
         return False
     turns.pop(owner)
     _sync_websocket_turn_projection(chat_id)

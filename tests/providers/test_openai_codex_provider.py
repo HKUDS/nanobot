@@ -48,7 +48,7 @@ def _mock_codex_token(monkeypatch: pytest.MonkeyPatch) -> None:
     [(None, False, False), (1000, False, False), (1000, True, False), (1000, False, True)],
     ids=["optional", "compaction-error", "generation-error", "persistent-fallback"],
 )
-async def test_image_retry_cannot_bypass_required_compaction(
+async def test_image_failure_preserves_input_and_required_compaction(
     monkeypatch, stream, input_budget, fail_after_compaction, with_fallback,
 ) -> None:
     _mock_codex_token(monkeypatch)
@@ -82,7 +82,7 @@ async def test_image_retry_cannot_bypass_required_compaction(
             ))
         if len(submitted) == (2 if fail_after_compaction else 1):
             raise _CodexHTTPError("fixture rejection", status_code=400, error_code="unsupported_value")
-        return provider_base.LLMResponse(content="accepted without images")
+        return provider_base.LLMResponse(content="unexpected repeated generation")
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", request)
     caller = FallbackProvider(
@@ -116,10 +116,12 @@ async def test_image_retry_cannot_bypass_required_compaction(
             else:
                 assert response.preserve_provider_state_on_error is True
         else:
-            assert submitted == ["generation", "generation"]
-            assert response.content == "accepted without images"
-            assert "data:image/png;base64,abc" not in str(bodies[-1])
-            assert question["content"][1]["type"] == "text"
+            assert submitted == ["generation"]
+            assert response.finish_reason == "error"
+            assert response.error_status_code == 400
+            assert response.error_code == "unsupported_value"
+            assert "data:image/png;base64,abc" in str(bodies[-1])
+            assert question["content"][1]["type"] == "image_url"
     finally:
         await provider.aclose()
 
@@ -1491,3 +1493,72 @@ async def test_codex_request_preserves_optional_tool_fields(monkeypatch):
     assert response.content == "ok"
     assert captured["tools"][0]["strict"] is False
     assert captured["tools"][0]["parameters"] == parameters
+
+
+@pytest.mark.parametrize("configured", [None, "priority"])
+async def test_codex_session_fast_mode_overrides_inherited_body_without_mutating_provider(
+    monkeypatch, configured,
+) -> None:
+    from nanobot.providers.model_options import ModelOptions
+
+    _mock_codex_token(monkeypatch)
+    bodies: list[dict[str, Any]] = []
+
+    async def fake_request(_url, _headers, body, **_kwargs):
+        bodies.append(body)
+        return provider_base.LLMResponse(content="synthetic answer")
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+    extra_body: dict[str, Any] = {"text": {"verbosity": "low"}}
+    if configured is not None:
+        extra_body["service_tier"] = configured
+    provider = OpenAICodexProvider(extra_body=extra_body)
+    for choice in (None, True, False, None):
+        await provider.chat(
+            [{"role": "user", "content": "synthetic prompt"}],
+            reasoning_effort="low",
+            provider_context=provider_base.ProviderCallContext(
+                model_options=ModelOptions(codex_fast_mode=choice),
+            ),
+        )
+    assert [body.get("service_tier") for body in bodies] == [configured, "priority", None, configured]
+    assert all(body["reasoning"]["effort"] == "low" for body in bodies)
+    assert all(body["text"] == {"verbosity": "low"} for body in bodies)
+    assert extra_body == {"text": {"verbosity": "low"}, **({"service_tier": configured} if configured else {})}
+    await provider.aclose()
+
+
+async def test_codex_session_overrides_preset_wire_fields_without_changing_other_options(monkeypatch):
+    from nanobot.providers.model_options import ModelOptions
+
+    _mock_codex_token(monkeypatch)
+    bodies: list[dict[str, Any]] = []
+
+    async def fake_request(_url, _headers, body, **_kwargs):
+        bodies.append(body)
+        return provider_base.LLMResponse(content="synthetic answer")
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+    config = Config.model_validate({
+        "providers": {"openaiCodex": {"extraBody": {"service_tier": "priority"}}},
+        "modelPresets": {
+            "standard": {"model": "gpt-6.2-sol", "provider": "openai_codex", "codexFastMode": "ultrafast",
+                         "extraBody": {"reasoning": {"effort": "high", "summary": "detailed"}}},
+        },
+    })
+    provider = make_provider(config, preset_name="standard")
+    try:
+        for options in (ModelOptions(), ModelOptions("low", True), ModelOptions(codex_fast_mode=False),
+                        ModelOptions(codex_fast_mode="ultrafast"), ModelOptions()):
+            await provider.chat(
+                [{"role": "user", "content": "synthetic prompt"}],
+                reasoning_effort=options.reasoning_effort,
+                provider_context=provider_base.ProviderCallContext(model_options=options),
+            )
+    finally:
+        await provider.aclose()
+    assert [body.get("service_tier") for body in bodies] == ["ultrafast", "priority", None, "ultrafast", "ultrafast"]
+    assert "service_tier" not in bodies[2]
+    assert [body["reasoning"] for body in bodies] == [
+        {"effort": effort, "summary": "detailed"} for effort in ["high", "low", "high", "high", "high"]
+    ]

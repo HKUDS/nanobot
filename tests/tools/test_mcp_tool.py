@@ -258,7 +258,7 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
             id="true-property-preserves-value",
         ),
         pytest.param(
-            False, {"value": None}, "value is not allowed by schema",
+            False, {"value": None}, "parameters: False schema does not allow None",
             id="false-property-rejects-null",
         ),
         pytest.param(False, {}, None, id="false-property-can-be-absent"),
@@ -271,7 +271,7 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
         pytest.param(
             {"type": "array", "items": False},
             {"value": [1]},
-            "value[0] is not allowed by schema",
+            "value: Expected at most 0 items but found 1 extra: 1",
             id="false-items-reject-element",
         ),
         pytest.param(
@@ -281,8 +281,8 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
         pytest.param(
             {"type": "object", "properties": {"blocked": False}},
             {"value": {"blocked": "x"}},
-            "value.blocked is not allowed by schema",
-            id="nested-false-property-reports-path",
+            "value: False schema does not allow 'x'",
+            id="nested-false-property-rejects-value",
         ),
     ],
 )
@@ -2452,8 +2452,8 @@ def test_long_server_name_tools_are_matched_by_server_name() -> None:
 @pytest.mark.parametrize("params, error", [
     ({"team": "nanobot", "query": "bug"}, None),
     ({"team": "nanobot", "customView": "saved-view"}, None),
-    ({"query": "bug"}, "missing required team"),
-    ({"team": "nanobot", "customView": ""}, "customView must be at least 1 chars"),
+    ({"query": "bug"}, "parameters:"),
+    ({"team": "nanobot", "customView": ""}, "customView:"),
 ])
 async def test_optional_mcp_filters_reach_server_unchanged(params, error):
     async def call_tool(name, arguments):

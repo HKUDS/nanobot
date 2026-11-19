@@ -144,7 +144,7 @@ Important files:
 
 Tool behavior is part of the model contract. Keep user-visible tool names, schemas, and error messages stable unless a change is intentional.
 
-Before tool execution, schema-guided casting can decode a nested JSON string when the declared type requires an object or array. Simple container-only unions are supported without selecting a preferred branch. String-accepting unions, malformed JSON, mismatched values, and schemas without an explicit container type stay unchanged. This step does not infer types through references or composition rules. The model-facing schema and original tool-call arguments in history remain unchanged.
+Before tool execution, arguments are validated against JSON Schema without coercion. Numeric strings and serialized nested objects or arrays are rejected when their JSON types do not match the schema; actionable tool errors let the model correct the call. MCP validation uses the server's original input schema, independently of provider-facing adaptations. Validation defaults to draft 2020-12, honors supported explicit dialects, and does not retrieve external references. The original tool-call arguments in history remain unchanged. JSON Schema integers include numbers such as 2.0; built-in tools adapt these validated values to Python integers where an index is required.
 
 ## Config and Paths
 

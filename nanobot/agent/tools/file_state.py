@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-@dataclass(frozen=True)
+@dataclass(slots=True)
 class _FileReadContext:
     call_id: str
-    tool_results: Callable[[], Mapping[str, str]]
+    tool_results: Callable[[], Mapping[str, str]] | None
 
 
 _current_file_read: ContextVar[_FileReadContext | None] = ContextVar(
@@ -24,11 +24,15 @@ _current_file_read: ContextVar[_FileReadContext | None] = ContextVar(
 def file_read_context(
     call_id: str, tool_results: Callable[[], Mapping[str, str]],
 ) -> Generator[None]:
-    """Bind one file read; resolve visible results only when checking a prior read."""
-    token = _current_file_read.set(_FileReadContext(call_id, tool_results))
+    """Bind call-local receipts without indexing results unless a read needs them."""
+    context = _FileReadContext(call_id, tool_results)
+    token = _current_file_read.set(context)
     try:
         yield
     finally:
+        # A tool can spawn a task that inherits this context and outlives the call.
+        # It must not retain the model request or use its read receipts afterward.
+        context.tool_results = None
         _current_file_read.reset(token)
 
 
@@ -60,7 +64,7 @@ class FileStates:
             offset=offset,
             limit=limit,
             content_hash=content_hash,
-            call_id=context.call_id if context is not None else None,
+            call_id=context.call_id if context is not None and context.tool_results else None,
             result_hash=hashlib.sha256(result.encode("utf-8")).hexdigest(),
         )
 
@@ -75,7 +79,7 @@ class FileStates:
         p = str(Path(path).resolve())
         entry = self._state.get(p)
         context = _current_file_read.get()
-        if entry is None or context is None or not entry.call_id:
+        if entry is None or context is None or context.tool_results is None or not entry.call_id:
             return None
         if entry.offset != offset or entry.limit != limit:
             return None

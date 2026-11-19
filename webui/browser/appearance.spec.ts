@@ -11,6 +11,30 @@ test("appearance puts interface settings before activity display", async ({ page
   ]);
 });
 
+test("reading preview and theme cards let a custom background through", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/browser/fixture.html?case=appearance");
+  const card = page.locator(".appearance-reading-card");
+  const preview = page.locator(".appearance-reading-preview");
+  const theme = page.locator(".appearance-theme-card").first();
+  const canvas = page.locator("[data-appearance-fixture]");
+  await canvas.evaluate(element => element.setAttribute("data-theme-surface", ""));
+  await expect(canvas).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await page.evaluate(() => { document.documentElement.dataset.customBackground = ""; });
+  await expect(canvas).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  for (const surface of [card, preview, theme]) {
+    expect(await surface.evaluate(node => getComputedStyle(node).backgroundColor)).toMatch(/^rgba\(/);
+  }
+  await page.getByRole("radio", { name: "Dark", exact: true }).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  for (const surface of [card, preview, theme]) {
+    expect(await surface.evaluate(node => getComputedStyle(node).backgroundColor)).toMatch(/^rgba\(/);
+  }
+  await page.evaluate(() => { delete document.documentElement.dataset.customBackground; });
+  await expect(canvas).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  expect(await card.evaluate(node => getComputedStyle(node).backgroundColor)).toMatch(/^rgb\(/);
+});
+
 test("system theme stays live, explicit choices persist, and tabs agree", async ({ page, context }) => {
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/browser/fixture.html?case=appearance");
@@ -98,7 +122,7 @@ test("appearance explanations open on demand and follow the selected display mod
   const explanations = [
     ["Reading text size", "Adjust messages, code and the composer—not navigation."],
     ["Activity display", "Choose how much detail appears as nanobot works."],
-    ["Activity details", "Show progress while working; keep finished work compact."],
+    ["Activity details", "Keep details collapsed by default. Show the latest activity while working."],
     ["Edit preview", "Show changed files and line counts."],
   ];
   for (const [label, description] of explanations) {
@@ -109,12 +133,20 @@ test("appearance explanations open on demand and follow the selected display mod
     await expect(page.getByRole("tooltip")).toBeHidden();
   }
 
-  await page.getByRole("button", { name: "Expanded", exact: true }).click();
+  const collapsed = page.getByRole("button", { name: "Collapsed", exact: true });
+  const expanded = page.getByRole("button", { name: "Expanded", exact: true });
+  await expect(collapsed).toHaveAttribute("aria-pressed", "true");
+  await expanded.click();
+  await page.reload();
+  await expect(expanded).toHaveAttribute("aria-pressed", "true");
   const activity = page.getByRole("button", { name: "Activity details", exact: true });
   await activity.focus();
   await expect(page.getByRole("tooltip")).toHaveText("Keep activity details expanded by default.");
   await activity.press("Escape");
   await expect(page.getByRole("tooltip")).toBeHidden();
+  await collapsed.click();
+  await page.reload();
+  await expect(collapsed).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Diff", exact: true }).click();
   const edits = page.getByRole("button", { name: "Edit preview", exact: true });
   await edits.focus();

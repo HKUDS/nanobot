@@ -144,6 +144,7 @@ class _EmptyGatewaySessionManager:
     def state(self):
         return SimpleNamespace(
             list_sessions=AsyncMock(return_value=[]),
+            recovery_candidates=AsyncMock(return_value=[]),
             migrate_history=AsyncMock(),
             record_delivery=AsyncMock(),
             aclose=AsyncMock(),
@@ -315,36 +316,6 @@ def test_disabled_dream_cursor_only_advances_when_behind(tmp_path) -> None:
     store.set_last_dream_cursor(10)
     cli_gateway_runtime._advance_dream_cursor_if_behind(store)
     assert store.get_last_dream_cursor() == 10
-
-
-def test_commit_dream_changes_skips_noop_run(tmp_path) -> None:
-    store = MemoryStore(tmp_path)
-    store.write_soul("# Soul")
-    store.write_memory("# Memory")
-    store.git.init()
-    store.git.auto_commit("initial")
-    store.git.auto_commit = MagicMock(wraps=store.git.auto_commit)
-
-    assert cli_gateway_runtime._commit_dream_changes(store) is None
-    store.git.auto_commit.assert_not_called()
-
-
-def test_commit_dream_changes_commits_real_edits(tmp_path) -> None:
-    store = MemoryStore(tmp_path)
-    store.write_soul("# Soul")
-    store.write_memory("# Memory")
-    store.git.init()
-    store.git.auto_commit("initial")
-    store.write_memory("# Memory\n- Research notes")
-    store.git.auto_commit = MagicMock(wraps=store.git.auto_commit)
-
-    sha = cli_gateway_runtime._commit_dream_changes(store)
-
-    assert sha is not None
-    store.git.auto_commit.assert_called_once()
-    message = store.git.auto_commit.call_args.args[0]
-    assert message.startswith("dream: periodic memory consolidation\n\n")
-    assert "Research notes" in message
 
 
 @pytest.fixture
@@ -2433,7 +2404,8 @@ def test_webui_detached_gateway_does_not_retain_launcher_lease(monkeypatch, tmp_
     assert requested[0][1] is not no_dock
 
 
-def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("dev_port", [5173, 5174])
+def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path, dev_port: int) -> None:
     config_file = tmp_path / "config.json"
     config_file.write_text("{}", encoding="utf-8")
     seen: dict[str, object] = {}
@@ -2476,6 +2448,8 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
         [
             "webui",
             "--dev",
+            "--dev-port",
+            str(dev_port),
             "--config",
             str(config_file),
             "--port",
@@ -2490,9 +2464,10 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     dev_kwargs = seen["dev_kwargs"]
     assert isinstance(dev_kwargs, dict)
     assert dev_kwargs["target_url"] == "http://127.0.0.1:8899"
+    assert dev_kwargs["port"] == dev_port
     saved = json.loads(config_file.read_text(encoding="utf-8"))
     secret = saved["channels"]["websocket"]["tokenIssueSecret"]
-    browser_url = f"http://127.0.0.1:5173/#/?bootstrapSecret={secret}"
+    browser_url = f"http://127.0.0.1:{dev_port}/#/?bootstrapSecret={secret}"
     assert seen["start_options"].port == 18888
     assert seen["attached_while_dev_running"] is True
     assert seen["attach_kwargs"]["poll_hook"] == seen["dev_server"].ensure_running

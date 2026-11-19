@@ -11,6 +11,7 @@ import { FileActionsProvider } from "@/components/FileActions";
 import { createFilePreviewResource } from "@/lib/file-preview-resource";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
+import { useSessionModelOptions } from "@/hooks/useSessionModelOptions";
 import { usePromptHistory } from "@/hooks/usePromptHistory";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { SandboxNotice } from "@/components/thread/SandboxNotice";
@@ -22,6 +23,7 @@ import { latestSubagentInputKey } from "@/lib/subagent-tasks";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { ThreadWelcomeMark } from "@/components/thread/ThreadWelcomeMark";
 import {
   ComposerUsagePopover,
   type ComposerContextUsage,
@@ -33,9 +35,12 @@ import {
   toModelBadgeInfo,
 } from "@/components/thread/model-preset";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
+import { GoalIsland } from "@/components/thread/GoalIsland";
 import { ThreadLoadingSkeleton } from "@/components/thread/ThreadLoadingSkeleton";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
+import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
+import { execSessionCommands } from "@/components/thread/activity/exec-session-model";
 import { useNanobotStream, type SendAttachment, type SendOptions } from "@/hooks/useNanobotStream";
 import { useFilePreviewState, type FilePreviewState, type FilePreviewStore } from "@/hooks/useFilePreviewState";
 import {
@@ -260,89 +265,6 @@ interface ThreadShellProps {
   skills?: SkillSummary[];
 }
 
-const HERO_GREETING_KEYS = [
-  "thread.empty.greetings.workOn",
-  "thread.empty.greetings.start",
-  "thread.empty.greetings.build",
-  "thread.empty.greetings.tackle",
-] as const;
-
-function HeroGreeting({ text }: { text: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const headingRef = useRef<HTMLHeadingElement>(null);
-
-  useLayoutEffect(() => {
-    const container = containerRef.current;
-    const heading = headingRef.current;
-    if (!container || !heading) return;
-
-    const fitToWidth = () => {
-      heading.style.removeProperty("font-size");
-      const availableWidth = container.clientWidth;
-      if (availableWidth <= 0) return;
-
-      const naturalWidth = heading.scrollWidth;
-      const maximumFontSize = Number.parseFloat(window.getComputedStyle(heading).fontSize);
-      if (
-        naturalWidth <= availableWidth
-        || !Number.isFinite(maximumFontSize)
-        || maximumFontSize <= 0
-      ) {
-        return;
-      }
-
-      const fittedFontSize = Math.max(
-        12,
-        Math.floor(maximumFontSize * ((availableWidth - 2) / naturalWidth) * 100) / 100,
-      );
-      heading.style.fontSize = `${fittedFontSize}px`;
-    };
-
-    fitToWidth();
-
-    let lastObservedWidth = container.clientWidth;
-    const resizeObserver = typeof ResizeObserver === "undefined"
-      ? null
-      : new ResizeObserver(([entry]) => {
-          const nextWidth = entry?.contentRect.width ?? container.clientWidth;
-          if (nextWidth === lastObservedWidth) return;
-          lastObservedWidth = nextWidth;
-          fitToWidth();
-        });
-    resizeObserver?.observe(container);
-    window.addEventListener("resize", fitToWidth);
-
-    let cancelled = false;
-    void document.fonts?.ready.then(() => {
-      if (!cancelled) fitToWidth();
-    });
-
-    return () => {
-      cancelled = true;
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", fitToWidth);
-    };
-  }, [text]);
-
-  return (
-    <div ref={containerRef} className="min-w-0 w-full max-w-[44rem]">
-      <h1
-        ref={headingRef}
-        data-testid="hero-greeting"
-        data-theme-ink
-        className="select-none whitespace-nowrap text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight"
-      >
-        {text}
-      </h1>
-    </div>
-  );
-}
-
-function randomHeroGreetingKey(): (typeof HERO_GREETING_KEYS)[number] {
-  const index = Math.floor(Math.random() * HERO_GREETING_KEYS.length);
-  return HERO_GREETING_KEYS[index] ?? HERO_GREETING_KEYS[0];
-}
-
 interface PendingFirstMessage {
   finish?: (accepted: boolean) => void;
   content: string;
@@ -505,6 +427,18 @@ export function ThreadShell({
     [historyKey, sessions, titleOverrides],
   );
   const { client, getToken, ingressLimits, modelName, token, webuiCapabilities } = useClient();
+  const [online, setOnline] = useState(client.status === "open");
+  useEffect(() => client.onStatus((status) => setOnline(status === "open")), [client]);
+  const cancelGoal = useCallback(async () => {
+    if (!chatId || client.status !== "open") throw new Error(t("thread.composer.cancelGoalOffline"));
+    await client.sendSystemCommand(chatId, "/cancel_goal").catch(() => {
+      throw new Error(t("thread.composer.cancelGoalFailed"));
+    });
+    const remainingGoal = client.getGoalState(chatId);
+    if (remainingGoal?.active || remainingGoal?.status === "blocked") {
+      throw new Error(t("thread.composer.cancelGoalFailed"));
+    }
+  }, [chatId, client, t]);
   const favoriteWorkspaceProject = useCallback(
     async (path: string, pinned: boolean) => {
       const response = await client.requestMutation<{ favorite_projects: ProjectDirectory[] }>("workspace.favorite", { path, pinned });
@@ -550,8 +484,7 @@ export function ThreadShell({
     dismissed: boolean;
   } | null>(null);
   const sandboxNotice = useSandboxNotice(client, chatId, webuiCapabilities.includes("webui.sandbox-settings.v1"));
-  const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
-  const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
+  const [submittedViewportTurn, setSubmittedViewportTurn] = useState<{ chatId: string; turnId: string } | null>(null);
   const { state: previewState, openFile, resolveFile, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
     useFilePreviewState(previewSessionKey, filePreviewStore);
   const [contextSidebarOpen, setContextSidebarOpen] = useState(false);
@@ -636,11 +569,11 @@ export function ThreadShell({
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
   const handleTurnEnd = useCallback(() => {
     if (chatId) activeViewportTurnByChatIdRef.current.delete(chatId);
-    setSubmittedViewportTurnId(null);
     onTurnEnd?.();
   }, [chatId, onTurnEnd]);
   const {
     messages,
+    execSourceMessages,
     modelRequests,
     messagesKey,
     messagesReady,
@@ -681,7 +614,11 @@ export function ThreadShell({
   const showTemporaryChatControl =
     !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
   const promptNavigation = usePromptHistory(historyKey, historyVersion, displayMessages);
-  const updateNavigationMessages = promptNavigation.updateMessages;
+  const sessionCommands = useMemo(
+    () => messagesReady ? execSessionCommands(execSourceMessages ?? [], promptNavigation.window?.messages ?? []) : new Map<string, string>(),
+    [execSourceMessages, messagesReady, promptNavigation.window?.messages],
+  );
+  const expandNavigationTraceDetail = promptNavigation.expandTraceDetail;
   useEffect(() => {
     if (!chatId || !messagesReady) return;
     messageCacheRef.current.setLoadedMessages(chatId, promptNavigation.window
@@ -696,13 +633,9 @@ export function ThreadShell({
     const details = await loadBodyTraceDetails(refs);
     for (const detail of details) {
       const projected = projectThreadEvents(detail.events);
-      updateNavigationMessages((current) => current.flatMap((message) => (
-        message.traceDetail?.ref === detail.ref
-          ? projected.map((row) => ({ ...row, activitySegmentId: message.activitySegmentId }))
-          : [message]
-      )));
+      expandNavigationTraceDetail(detail.ref, projected);
     }
-  }, [loadBodyTraceDetails, updateNavigationMessages]);
+  }, [expandNavigationTraceDetail, loadBodyTraceDetails]);
 
   useEffect(() => {
     if (chatId && historyKey) sessionKeyByChatIdRef.current.set(chatId, historyKey);
@@ -719,7 +652,7 @@ export function ThreadShell({
       filePreviewCloseTimerRef.current = null;
     }
     setClosingPreview(null);
-    setSubmittedViewportTurnId(null);
+    setSubmittedViewportTurn(null);
   }, [previewSessionKey]);
 
   useEffect(() => {
@@ -789,15 +722,12 @@ export function ThreadShell({
       ?? historyActiveTurnId
       ?? restoredViewportTurnId
     : null;
-  const activeTurnStartedHere =
-    viewportTurnId !== null && viewportTurnId === submittedViewportTurnId;
+  const submittedViewportTurnId = submittedViewportTurn?.chatId === chatId
+    ? submittedViewportTurn.turnId : null;
   useEffect(() => {
     if (!chatId || !messagesReady || turnActive) return;
     activeViewportTurnByChatIdRef.current.delete(chatId);
-    setSubmittedViewportTurnId((current) =>
-      current === rememberedViewportTurnId ? null : current,
-    );
-  }, [chatId, messagesReady, rememberedViewportTurnId, turnActive]);
+  }, [chatId, messagesReady, turnActive]);
   const filePreviewAvailabilityCache = useMemo(
     () => new Map<string, FilePreviewAvailabilityCacheEntry>(),
     [previewSessionKey],
@@ -853,7 +783,6 @@ export function ThreadShell({
   const composerVariant = showHeroComposer ? emptyComposerVariant : "thread";
   // Only unpersisted drafts can choose a project; history pages do not own this state.
   const projectLocked = !!session && session.projectLocked !== false;
-  const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const sessionModelPreset = session?.modelPreset?.trim() || null;
   const [localModelPreset, setLocalModelPreset] = useState<string | null>(null);
   useEffect(() => {
@@ -900,12 +829,19 @@ export function ThreadShell({
       });
     });
   }, [activeModelPreset, chatId, client]);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const { data: modelOptionsData, select: selectModelOptions, reset: resetModelOptions,
+    sendValue: selectedModelOptions, moveToSession: moveModelOptionsToSession } = useSessionModelOptions({
+    sessionKey: session?.key ?? null, preset: activeModelPreset, settings,
+    open: modelMenuOpen, disabled: temporary, storedValue: session?.modelOptions,
+  });
   const handleModelPresetChange = useCallback((name: string) => {
+    resetModelOptions(name);
     setLocalModelPreset(name);
     if (chatId) {
       void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
     }
-  }, [chatId, client]);
+  }, [chatId, client, resetModelOptions]);
   const modelPresetOptions = useMemo(
     () => modelPresetOptionsFromSettings(settings),
     [settings],
@@ -923,22 +859,17 @@ export function ThreadShell({
   const modelBadgeLabel = modelBadge.needsSetup
     ? t("thread.composer.chooseAI", { defaultValue: "Choose your AI" })
     : modelBadge.label;
-  useEffect(() => {
-    if (showHeroComposer && !wasShowingHeroComposerRef.current) {
-      setHeroGreetingKey(randomHeroGreetingKey());
-    }
-    wasShowingHeroComposerRef.current = showHeroComposer;
-  }, [showHeroComposer]);
-
   const withWorkspaceScope = useCallback(
     (options?: SendOptions): SendOptions | undefined => {
-      if (!workspaceScope) return options;
+      const modelOptions = selectedModelOptions();
+      if (!workspaceScope && !modelOptions) return options;
       return {
         ...(options ?? {}),
-        workspaceScope,
+        ...(workspaceScope ? { workspaceScope } : {}),
+        ...(modelOptions ? { modelOptions } : {}),
       };
     },
-    [workspaceScope],
+    [selectedModelOptions, workspaceScope],
   );
 
   const refreshModelSettings = useCallback(async () => {
@@ -1045,7 +976,7 @@ export function ThreadShell({
     const submitted = send(pending.content, pending.images, pending.options);
     if (submitted && !submitted.sideChannel) {
       activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
-      setSubmittedViewportTurnId(submitted.turnId);
+      setSubmittedViewportTurn({ chatId, turnId: submitted.turnId });
     }
     if (submitted?.delivery) {
       void submitted.delivery.then(() => pending.finish?.(true), (error: unknown) => {
@@ -1084,7 +1015,7 @@ export function ThreadShell({
     );
     if (submitted && !submitted.sideChannel) {
       activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
-      setSubmittedViewportTurnId(submitted.turnId);
+      setSubmittedViewportTurn({ chatId, turnId: submitted.turnId });
     }
     onPendingFirstMessageConsumed?.(pendingFirstMessage.id);
   }, [
@@ -1128,13 +1059,14 @@ export function ThreadShell({
         setBooting(false);
         return false;
       }
+      moveModelOptionsToSession(`websocket:${newId}`, pendingFirstRef.current?.options?.modelOptions);
       if (localModelPreset) {
         await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
       }
       setPendingFirstTargetChatId(newId);
       return delivery;
     },
-    [booting, client, draftKey, draftStore, localModelPreset, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
+    [booting, client, draftKey, draftStore, localModelPreset, moveModelOptionsToSession, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
   );
 
   const inspectAttachment = useCallback(async (path: string) => {
@@ -1147,6 +1079,9 @@ export function ThreadShell({
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
+      if (content.trim() === "/cancel_goal" && options?.sideChannel) {
+        return cancelGoal().then(() => true);
+      }
       setRestoredFirstDraft((current) => current?.chatId === chatId ? { ...current, error: "" } : current);
       const submitted = send(content, images, withWorkspaceScope(options));
       if (
@@ -1156,11 +1091,11 @@ export function ThreadShell({
         && options?.continueActiveTurn !== true
       ) {
         activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
-        setSubmittedViewportTurnId(submitted.turnId);
+        setSubmittedViewportTurn({ chatId, turnId: submitted.turnId });
       }
       return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
     },
-    [chatId, send, withWorkspaceScope],
+    [cancelGoal, chatId, send, withWorkspaceScope],
   );
 
   const loadTemporaryFilePreview = useCallback((path: string) =>
@@ -1397,6 +1332,8 @@ export function ThreadShell({
           modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
+          modelOptionsControl={{ data: modelOptionsData, onChange: selectModelOptions }}
+          onModelMenuOpenChange={setModelMenuOpen}
           onModelPresetChange={handleModelPresetChange}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
@@ -1451,6 +1388,8 @@ export function ThreadShell({
           modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
+          modelOptionsControl={{ data: modelOptionsData, onChange: selectModelOptions }}
+          onModelMenuOpenChange={setModelMenuOpen}
           onModelPresetChange={handleModelPresetChange}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
@@ -1494,9 +1433,10 @@ export function ThreadShell({
   const emptyState = initialHistoryLoading ? (
     <ThreadLoadingSkeleton />
   ) : (
-    <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 [animation-duration:220ms] motion-reduce:animate-none">
-      <HeroGreeting text={t(heroGreetingKey)} />
-    </div>
+    <>
+      <h1 className="sr-only">{session ? title : t(temporary || temporaryChatEnabled ? "temporaryChat.title" : "sidebar.newChat")}</h1>
+      <ThreadWelcomeMark />
+    </>
   );
   const sessionInfoAction = historyKey ? (
     <SessionInfoPopover client={client} sessionKey={historyKey} token={token} />
@@ -1514,6 +1454,8 @@ export function ThreadShell({
     <ThreadHeader
       className={previewOpen ? "h-10" : undefined}
       title={title}
+      goal={currentGoalState && (currentGoalState.active || currentGoalState.status === "blocked")
+        ? <GoalIsland key={historyKey} goal={currentGoalState} cancelDisabled={!online} onCancel={cancelGoal} /> : undefined}
       onToggleSidebar={onToggleSidebar}
       theme={theme}
       onToggleTheme={onToggleTheme}
@@ -1566,6 +1508,7 @@ export function ThreadShell({
           resolve={previewSessionKey ? resolveFilePreviewAvailability : undefined}
         >
           <FileActionsProvider value={previewSessionKey ? fileActions : undefined}>
+          <ExecSessionCommandsContext.Provider value={sessionCommands}>
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
@@ -1583,7 +1526,7 @@ export function ThreadShell({
             composer={inlineComposer ? <div ref={setLocalComposerHost} /> : null}
             onComposerLayoutChange={alignSidebar}
             activeTurnId={viewportTurnId}
-            activeTurnStartedHere={activeTurnStartedHere}
+            submittedPromptTurnId={submittedViewportTurnId}
             conversationKey={historyKey}
             conversationReady={messagesReady}
             onVisibleMessagesChange={reportVisibleMessages}
@@ -1603,6 +1546,7 @@ export function ThreadShell({
             onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
+          </ExecSessionCommandsContext.Provider>
           </FileActionsProvider>
         </FilePreviewAvailabilityProvider>
       </div>

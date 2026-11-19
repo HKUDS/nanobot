@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
-from urllib.parse import quote, unquote, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit, urlunsplit
 
 from loguru import logger
 from websockets.datastructures import Headers
@@ -621,6 +621,26 @@ class GatewayHTTPHandler:
         request: WsRequest,
         got: str,
     ) -> Any | None:
+        if got == "/api/settings/background-style":
+            if not self.check_api_token(request):
+                return _http_error(401, "Unauthorized")
+            from nanobot.webui.background import load_background_style
+
+            directory = self.settings.config.path.parent / "webui"
+            return _http_json_response(
+                load_background_style(directory), extra_headers=_NO_STORE_HEADERS,
+            )
+        if got == "/api/settings/background":
+            if not self.check_api_token(request):
+                return _http_error(401, "Unauthorized")
+            path = self.settings.config.path.parent / "webui" / "background.png"
+            try:
+                body = path.read_bytes()
+            except FileNotFoundError:
+                return _http_error(404, "Background not found")
+            return _http_response(body, content_type="image/png", extra_headers=[
+                ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"),
+            ])
         if got == "/api/remote-instances" or got.startswith("/api/remote-instances/"):
             return await self._dispatch_remote_instances(connection, request, got)
         if self.config.token_issue_path:
@@ -693,7 +713,21 @@ class GatewayHTTPHandler:
             return _http_error(403, "remote_connections_local_only")
         try:
             if path == "/api/remote-instances":
-                return _http_json_response(await self.remote_instances.health(), extra_headers=_NO_STORE_HEADERS)
+                parsed = urlsplit(request.path)
+                try:
+                    if parsed.fragment or len(parsed.query) > 4096:
+                        raise ValueError
+                    query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True, max_num_fields=20)
+                    if query.keys() - {"check"} or any(
+                        re.fullmatch(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", key) is None
+                        for key in query.get("check", [])
+                    ):
+                        raise ValueError
+                except ValueError:
+                    return _http_error(400, "invalid_health_check")
+                check = {key.lower() for key in query.get("check", [])}
+                result = await self.remote_instances.health(check) if check else self.remote_instances.snapshot()
+                return _http_json_response(result, extra_headers=_NO_STORE_HEADERS)
             if not getattr(request, _WEBUI_MUTATION_REQUEST_ATTR, False):
                 return _http_error(405, "WebSocket required")
             payload = getattr(request, _WEBUI_MUTATION_PAYLOAD_ATTR, {})
@@ -1051,7 +1085,7 @@ class GatewayHTTPHandler:
         stored_sessions: list[dict[str, Any]],
     ) -> dict[str, Any]:
         assert self.session_manager is not None
-        from nanobot.session.webui_turns import websocket_turn_wall_started_at
+        from nanobot.session.webui_turns import latest_live_websocket_turn
 
         sessions = list_webui_sessions(self.session_manager, stored_sessions)
         cleaned: list[dict[str, Any]] = []
@@ -1071,9 +1105,9 @@ class GatewayHTTPHandler:
             if row.get("recovery_state") is None:
                 row.pop("recovery_state", None)
             chat_id = key.split(":", 1)[1]
-            started_at = websocket_turn_wall_started_at(chat_id)
-            if started_at is not None:
-                row["run_started_at"] = started_at
+            turn = latest_live_websocket_turn(chat_id)
+            if turn is not None:
+                row["run_started_at"] = turn[0]
             if default_scope is None:
                 default_scope = self.workspaces.default_scope()
             scope_present, raw_scope = indexed_workspace_scope(s)

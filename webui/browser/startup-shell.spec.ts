@@ -3,16 +3,27 @@ import { expect, test } from "@playwright/test";
 for (const width of [412, 1440]) {
   test.describe(`${width}px document startup skeleton`, () => {
     test.use({ viewport: { width, height: 922 }, reducedMotion: "reduce" });
-    for (const surface of ["skills", "apps", "channels", "automations", "settings", "chat"]) {
-      test(`${surface} paints before the application and stylesheet download`, async ({ page }) => {
+    for (const route of ["skills", "apps", "channels", "apps?section=skills", "apps?section=channels", "automations", "settings", "chat"]) {
+      const surface = route.includes("section=") ? route.split("section=")[1] : route;
+      test(`${route} paints before the application and stylesheet download`, async ({ page }) => {
         await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
         // Neither React nor the app stylesheet may supply this first paint.
         await page.route(/\/(?:src\/main\.tsx|assets\/index-[^/]+\.(?:js|css))$/, (route) => route.abort());
-        await page.goto(`/#/${surface === "chat" ? "chat/websocket%3Aexample" : surface}`, { waitUntil: "domcontentloaded" });
+        await page.goto(`/#/${surface === "chat" ? "chat/websocket%3Aexample" : route}`, { waitUntil: "domcontentloaded" });
         const shell = page.locator(".startup-shell");
         await expect(shell).toHaveAttribute("data-startup-surface", surface);
         await expect(shell).toHaveAttribute("aria-busy", "true");
         await expect(shell.locator(surface === "chat" ? ".startup-composer" : ".startup-page")).toBeVisible();
+        if (["apps", "skills", "channels"].includes(surface)) {
+          const search = (await shell.locator(".startup-search").boundingBox())!;
+          const controls = (await shell.locator(".startup-controls").boundingBox())!;
+          const tabs = (await shell.locator(".startup-tabs").boundingBox())!;
+          expect(search.x).toBe(tabs.x);
+          expect(search.y).toBe(controls.y + controls.height + (width === 1440 ? 12 : 8));
+          expect(search.width).toBe(controls.x + controls.width - tabs.x);
+          if (width === 1440) expect(controls.y).toBe(tabs.y);
+          else expect(tabs.width).toBe(search.width);
+        }
         const blocks = shell.locator(".startup-block:visible");
         expect(await blocks.count()).toBeGreaterThan(5);
         const box = await blocks.first().boundingBox();

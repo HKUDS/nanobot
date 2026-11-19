@@ -483,7 +483,8 @@ class TestExtractText:
         assert "truncated at 80 chars" in result
         assert visited < 100
 
-    def test_extract_pdf_pages_rejects_large_content_stream(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("streaming", [False, True], ids=["preview", "line-source"])
+    def test_pdf_rejects_large_content_stream(self, tmp_path, monkeypatch, streaming):
         class _Contents:
             @staticmethod
             def get_data():
@@ -505,8 +506,16 @@ class TestExtractText:
         monkeypatch.setattr("pypdf.PdfReader", _Reader)
         monkeypatch.setattr("nanobot.utils.document._MAX_PDF_CONTENT_STREAM_SIZE", 16)
 
-        with pytest.raises(PdfSafetyError, match="content stream exceeds"):
-            extract_pdf_pages(tmp_path / "large.pdf")
+        path = tmp_path / "large.pdf"
+        path.touch()
+        if streaming:
+            source = open_document_line_source(path)
+            assert source is not None
+            with pytest.raises(PdfSafetyError, match="content stream exceeds"):
+                list(source.lines)
+        else:
+            with pytest.raises(PdfSafetyError, match="content stream exceeds"):
+                extract_pdf_pages(path)
 
     def test_extract_text_pdf_not_found(self, tmp_path: Path):
         missing_pdf = tmp_path / "nonexistent.pdf"

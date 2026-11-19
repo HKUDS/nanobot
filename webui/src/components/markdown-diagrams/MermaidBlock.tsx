@@ -6,6 +6,7 @@ import { CodeBlock } from "@/components/CodeBlock";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { HoverHint } from "@/components/ui/hover-hint";
 import { ImageViewport } from "@/components/ui/image-viewport";
+import { useToast } from "@/components/ui/toast";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { useDiagramScope } from "./context";
@@ -26,6 +27,7 @@ function readPalette(element: HTMLElement): DiagramPalette {
 
 export default function MermaidBlock({ source }: { source: string }) {
   const { t } = useTranslation();
+  const showToast = useToast();
   const scope = useDiagramScope();
   const container = useRef<HTMLDivElement>(null);
   const mono = useRef<HTMLSpanElement>(null);
@@ -104,7 +106,10 @@ export default function MermaidBlock({ source }: { source: string }) {
   useEffect(() => () => clearTimeout(copyTimer.current), []);
 
   const copy = async () => {
-    if (!await copyTextToClipboard(source)) return;
+    if (!await copyTextToClipboard(source)) {
+      showToast?.({ message: t("fileActions.failed"), tone: "error", dedupeKey: "copy-failed" });
+      return;
+    }
     setCopied(true);
     clearTimeout(copyTimer.current);
     copyTimer.current = setTimeout(() => setCopied(false), 2000);

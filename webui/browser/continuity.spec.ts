@@ -55,6 +55,44 @@ for (const name of ["Conversation actions", "Quick note"]) {
 }
 }
 
+test("a tooltip scales from the trigger-facing edge after flipping", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.goto("/browser/fixture.html?case=continuity");
+  await page.getByRole("button", { name: "Help", exact: true }).hover();
+  const tip = page.locator('[data-side][data-state="delayed-open"]').filter({ hasText: "Keyboard help" });
+  await expect(tip).toHaveAttribute("data-side", "bottom");
+  await expect(tip).toHaveCSS("transform-origin", /px 0px$/);
+});
+
+for (const input of ["pointer", "keyboard"]) {
+  test(`the file menu scales from its ${input} anchor after shifting into the viewport`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 720 });
+    await page.goto("/browser/fixture.html?case=continuity");
+    const trigger = page.getByRole("button", { name: "Report file" });
+    const bounds = (await trigger.boundingBox())!;
+    const anchorX = input === "pointer" ? Math.floor(bounds.x + bounds.width - 6) : Math.round(bounds.x);
+    if (input === "pointer") await page.mouse.click(anchorX, Math.floor(bounds.y + bounds.height / 2), { button: "right" });
+    else await trigger.press("Shift+F10");
+    const menu = page.getByRole("menu");
+    await expect(menu).toHaveAttribute("data-side", "bottom");
+    await expect.poll(() => menu.evaluate(node => {
+      const [x, y] = getComputedStyle(node).transformOrigin.split(" ").map(Number.parseFloat);
+      return { x: Math.round(node.parentElement!.getBoundingClientRect().left + x), y };
+    })).toEqual({ x: anchorX, y: 0 });
+    await menu.press("Escape");
+    await expect(trigger).toBeFocused();
+  });
+}
+
+test("a tooltip opens without scaling when reduced motion is requested", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/browser/fixture.html?case=continuity");
+  await page.getByRole("button", { name: "Help", exact: true }).focus();
+  const tip = page.locator('[data-side][data-state="instant-open"]').filter({ hasText: "Keyboard help" });
+  await expect(tip).toHaveAttribute("data-side", "bottom");
+  await expect(tip).toHaveCSS("animation-name", "none");
+});
+
 test("a sidebar follows its actual exit and preserves an interrupted editor", async ({ page }) => {
   await page.goto("/browser/fixture.html?case=continuity");
   const toggle = page.getByRole("button", { name: "Toggle details", exact: true });

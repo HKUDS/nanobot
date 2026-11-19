@@ -8,11 +8,11 @@
 
 Scan with WeChat to join group 2 of the Chinese-speaking nanobot community. Tap the image for the full-size version.
 
-<a href="./images/wechat-group-2026-11-05.png"><img src="./images/wechat-group-2026-11-05.png" alt="nanobot 微信交流群 2 群二维码，2026 年 11 月 12 日前有效 / nanobot WeChat group 2 QR code, valid before November 12, 2026" width="400"/></a>
+<a href="./images/wechat-group-2026-11-14.png"><img src="./images/wechat-group-2026-11-14.png" alt="nanobot 微信交流群 2 群二维码，2026 年 11 月 21 日前有效 / nanobot WeChat group 2 QR code, valid before November 21, 2026" width="400"/></a>
 
-**有效期：2026 年 11 月 12 日前。** 群码失效或群已满时，请在[社区欢迎帖](https://github.com/HKUDS/nanobot/discussions/50)留言。
+**有效期：2026 年 11 月 21 日前。** 群码失效或群已满时，请在[社区欢迎帖](https://github.com/HKUDS/nanobot/discussions/50)留言。
 
-**Valid before November 12, 2026.** If the code expires or the group is full, leave a comment in our [welcome discussion](https://github.com/HKUDS/nanobot/discussions/50).
+**Valid before November 21, 2026.** If the code expires or the group is full, leave a comment in our [welcome discussion](https://github.com/HKUDS/nanobot/discussions/50).
 
 ## HKUDS community
 

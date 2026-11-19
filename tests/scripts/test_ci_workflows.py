@@ -84,3 +84,28 @@ def test_windows_gateway_stop_checks_run_serially_without_losing_coverage():
     assert len(steps) == 1
     assert steps[0]["if"] == "runner.os == 'Windows'"
     assert "-n" not in steps[0]["run"].split()
+
+
+def test_webui_full_suite_lanes_run_in_parallel_and_are_all_required():
+    jobs = workflow("ci.yml")["jobs"]
+    lanes = {"webui_checks", "webui_build", "webui_unit", "webui_browser"}
+    assert set(jobs["webui"]["needs"]) == {"changes", *lanes}
+    assert lanes <= set(jobs["required"]["needs"])
+    for name in lanes:
+        assert jobs[name]["needs"] == "changes"
+    strategy = jobs["webui_browser"]["strategy"]
+    assert strategy["fail-fast"] == "false"
+    assert strategy["matrix"]["shard"] == ["1", "2", "3", "4"]
+
+
+def test_webui_coverage_runs_the_full_suite_and_retains_native_reports():
+    steps = workflow("ci.yml")["jobs"]["webui_unit"]["steps"]
+    run = next(step for step in steps if step.get("name") == "Run all unit tests with original coverage thresholds")
+    assert run["run"] == (
+        "bun run test:coverage --reporter=default --reporter=json "
+        "--outputFile.json=test-results/unit/results.json"
+    )
+    upload = next(step for step in steps if step.get("uses") == "actions/upload-artifact@v4")
+    assert upload["if"] == "always()"
+    assert "webui/coverage/coverage-summary.json" in upload["with"]["path"].splitlines()
+    assert upload["with"]["if-no-files-found"] == "error"

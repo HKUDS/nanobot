@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { HoverHint } from "@/components/ui/tooltip";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { useOverlayEscapeFocus } from "@/hooks/useOverlayEscapeFocus";
 import { providerBrand } from "@/lib/provider-brand";
 import type { ResponseSource } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,7 @@ function ResponseSourceBadge({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const escapeFocus = useOverlayEscapeFocus();
   const description = t("message.fallbackResponse", { preset: source.preset });
   const brand = providerBrand(source.provider);
   const { logoUrl, logoLoaded, onLogoLoad, onLogoError } = useLogoFallback(brand?.logoUrls);
@@ -47,7 +49,7 @@ function ResponseSourceBadge({
       <HoverHint content={description} enabled={!open} side="top" align="end"
         contentClassName="max-w-[min(18rem,calc(100vw-2rem))]">
           <PopoverTrigger asChild>
-            <button type="button" aria-label={description} className={cn(
+            <button type="button" {...escapeFocus.triggerProps} aria-label={description} className={cn(
               "touch-target inline-flex min-h-8 min-w-0 max-w-full items-center gap-1.5 rounded-control px-1.5 text-xs",
               "transition-colors hover:bg-muted/55 hover:text-foreground",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -67,7 +69,7 @@ function ResponseSourceBadge({
             </button>
           </PopoverTrigger>
       </HoverHint>
-      <PopoverContent side="top" align="end" aria-label={description}
+      <PopoverContent side="top" align="end" aria-label={description} {...escapeFocus.contentProps}
         onOpenAutoFocus={(event) => event.preventDefault()}
         className="max-w-[min(18rem,calc(100vw-2rem))] rounded-control px-3 py-2 text-xs leading-relaxed break-words">
         {description}

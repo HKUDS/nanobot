@@ -1,7 +1,8 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, vi } from "vitest";
 import { SettingsView } from "@/components/settings/SettingsView";
+import { ToastProvider } from "@/components/ui/toast";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
 import type { NanobotClient } from "@/lib/nanobot-client";
@@ -164,11 +165,22 @@ export function renderSettingsView(options: SettingsViewTestOptions = {}) {
         onRestart={options.onRestart}
       />
     </ClientProvider>,
+    { wrapper: ToastProvider },
   );
 }
 
 export async function openPopover(trigger: HTMLElement) {
   await userEvent.setup().click(trigger);
+}
+
+export async function selectToolType(name: string) {
+  const types = await screen.findByRole("radiogroup", { name: "Tool type" });
+  await userEvent.click(within(types).getByRole("radio", { name }));
+}
+
+export async function showOnlyReadyTools(ready: boolean) {
+  const toggle = await screen.findByRole("switch", { name: "Ready only" });
+  if ((toggle.getAttribute("aria-checked") === "true") !== ready) await userEvent.click(toggle);
 }
 
 export function installSettingsViewTestHooks() {

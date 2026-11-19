@@ -248,6 +248,7 @@ export function AutomationsSettings({
                 "What would you like nanobot to automate?",
               )}
               variant="thread"
+              expandable={false}
               compactWhenIdle
               modelLabel={modelBadgeLabel}
               modelDetail={modelBadge.model}
@@ -690,12 +691,14 @@ const AUTOMATION_EVERY_UNITS: Array<{ value: AutomationEveryUnit; ms: number }> 
 export function AutomationEditDialog({
   job,
   saving,
+  error,
   onOpenChange,
   onCancel,
   onSave,
 }: {
   job: SessionAutomationJob | null;
   saving: boolean;
+  error?: string | null;
   onOpenChange: (open: boolean) => void;
   onCancel?: (job: SessionAutomationJob) => void;
   onSave: (job: SessionAutomationJob, values: AutomationUpdatePayload) => void | Promise<void>;
@@ -727,11 +730,13 @@ export function AutomationEditDialog({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (saving) return;
     const payload = automationUpdatePayloadFromDraft(draft, job);
     if (!job || typeof payload === "string") return;
     void onSave(job, payload);
   };
   const changeOpen = (open: boolean) => {
+    if (!open && saving) return;
     onOpenChange(open);
     if (!open && job) onCancel?.(job);
   };
@@ -745,6 +750,7 @@ export function AutomationEditDialog({
         <DialogContent
           {...dialogFocus}
           aria-describedby={undefined}
+          showCloseButton={!saving}
           className="w-[min(calc(100vw-2rem),34rem)]"
           onEscapeKeyDown={(event) => {
             // Escape in the nested date calendar must not cancel the editor.
@@ -879,6 +885,7 @@ export function AutomationEditDialog({
                 />
               ) : null}
 
+              {error ? <AutomationError message={error} /> : null}
               {validation ? (
                 <div id={validationId} className="rounded-control bg-destructive/8 px-3 py-2 text-[12px] text-destructive">
                   {validation}
@@ -910,11 +917,13 @@ export function AutomationEditDialog({
 export function AutomationDeleteDialog({
   job,
   deleting,
+  error,
   onOpenChange,
   onConfirm,
 }: {
   job: SessionAutomationJob | null;
   deleting: boolean;
+  error?: string | null;
   onOpenChange: (open: boolean) => void;
   onConfirm: (job: SessionAutomationJob) => void | Promise<void>;
 }) {
@@ -923,8 +932,8 @@ export function AutomationDeleteDialog({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   return (
-    <Dialog open={Boolean(job)} onOpenChange={onOpenChange}>
-      <DialogContent {...dialogFocus} className="w-[min(calc(100vw-2rem),26rem)]">
+    <Dialog open={Boolean(job)} onOpenChange={(open) => { if (open || !deleting) onOpenChange(open); }}>
+      <DialogContent {...dialogFocus} showCloseButton={!deleting} className="w-[min(calc(100vw-2rem),26rem)]">
         <DialogHeader>
           <DialogTitle>{tx("settings.automations.deleteTitle", "Delete automation")}</DialogTitle>
           <DialogDescription>
@@ -935,6 +944,7 @@ export function AutomationDeleteDialog({
             )}
           </DialogDescription>
         </DialogHeader>
+        {error ? <AutomationError message={error} /> : null}
         <DialogFooter>
           <Button
             type="button"

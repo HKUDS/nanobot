@@ -60,7 +60,7 @@ export function installSubagentDockApi() {
     if (url.origin !== location.origin || !url.pathname.startsWith("/api/")) return original(input, init);
     if (url.pathname === "/api/settings") return Response.json(settings);
     if (url.pathname === "/api/commands") return Response.json({ commands: [
-      { command: "/history", title: "Chat history", description: "Show recent messages", icon: "history", lifecycle: "side_channel", accepts_args: true },
+      { command: "/inspect", title: "Inspect session", description: "Inspect a session", icon: "history", lifecycle: "side_channel", accepts_args: true },
     ] });
     if (url.pathname.endsWith("/subagents")) return Response.json({ tasks: url.pathname.includes(encodeURIComponent(`websocket:${chatId}`)) ? tasks : [] });
     if (url.pathname.includes("/subagents/") && url.pathname.endsWith("/webui-thread")) {

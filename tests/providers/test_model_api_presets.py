@@ -180,6 +180,37 @@ async def bind_transport():
         await client.close()
 
 
+@pytest.mark.parametrize(("model", "wire_model", "request_api", "path"), [
+    ("deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash", None, "chat/completions"),
+    ("shengsuanyun/deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash", None, "chat/completions"),
+    ("openai/gpt-5.4", "openai/gpt-5.4", "responses", "responses"),
+])
+async def test_shengsuanyun_sends_catalog_model_id_to_router(bind_transport, model, wire_model, request_api, path):
+    preset = ModelPresetConfig(
+        model=model, provider="shengsuanyun",
+        api=ModelAPIConfig(supported_apis=(request_api,)) if request_api else None,
+    )
+    config = Config.model_validate({
+        "providers": {"shengsuanyun": {"apiKey": "fixture"}},
+    })
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return _answer(request)
+
+    provider = make_provider(config, preset=preset)
+    await provider._ensure_client()
+    bind_transport(provider, handler)
+    reply = await provider.chat(messages=[{"role": "user", "content": "hello"}], model=model)
+
+    assert reply.content == "ok"
+    request, = requests
+    assert str(request.url) == f"https://router.shengsuanyun.com/api/v1/{path}"
+    assert request.headers["authorization"] == "Bearer fixture"
+    assert json.loads(request.content)["model"] == wire_model
+
+
 @pytest.mark.parametrize("preset_name", ["chat", "responses", "messages"])
 async def test_preset_overrides_isolate_requests_and_preserve_prompt_prefix(bind_transport, preset_name):
     config = _config()

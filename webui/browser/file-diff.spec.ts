@@ -90,6 +90,31 @@ for (const dark of [false, true]) {
   }
 }
 
+test("a language without a built-in lexer receives its grammar in the diff worker", async ({ page }) => {
+  const worker = page.waitForEvent("worker");
+  await page.goto("/browser/fixture.html?case=file-diff&shiki");
+  await worker;
+  const config = page.getByRole("region", { name: "config.hjson", exact: true });
+  await expectTokenColor(config, "# shared settings", "--code-comment");
+  await expect(config.locator("[data-line][data-line-type=change-addition]")).toHaveText("host: localhost");
+});
+
+test("custom backgrounds remain visible through diff surfaces in both themes", async ({ page }) => {
+  await page.goto("/browser/fixture.html?case=file-diff");
+  const diff = page.getByRole("region", { name: "Status.tsx", exact: true }).getByTestId("file-edit-diff");
+  const context = diff.locator("[data-line][data-line-type=context]").first();
+  await expect(context).toBeVisible();
+  await page.evaluate(() => { document.documentElement.dataset.customBackground = ""; });
+  for (let i = 0; i < 2; i++) {
+    await expect(context).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(diff).toHaveCSS("backdrop-filter", "blur(12px)");
+    await expect(diff.locator("[data-line][data-line-type=change-addition]")).toContainText("ready");
+    await page.getByRole("button", { name: "Toggle theme" }).click();
+  }
+  await page.evaluate(() => { delete document.documentElement.dataset.customBackground; });
+  await expect(context).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+});
+
 test("large diffs retain bounded expansion, release and truncated-file actions", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));

@@ -16,6 +16,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { fmtDateTime, formatMessageHoverTime } from "@/lib/format-time";
 import { leadingDisplayNoopCount, projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
+import { filterThreadDisplayUnits } from "@/lib/thread-display-projection";
 import { withoutSubagentCreateActivity } from "@/lib/subagent-create-activity";
 import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
@@ -109,11 +110,7 @@ export function ThreadMessages({
   const messageListRef = useRef<HTMLDivElement>(null);
   const mobileActions = useMediaQuery("(max-width: 767px)");
   const rawUnits = useMemo(() => buildDisplayUnits(messages), [messages]);
-  const units = useMemo(() => rawUnits.map((unit) => unit.type === "activity"
-    ? { ...unit, messages: unit.messages.flatMap((message) => {
-      const visible = withoutSubagentCreateActivity(message);
-      return visible ? [visible] : [];
-    }) } : unit), [rawUnits]);
+  const units = useMemo(() => filterThreadDisplayUnits(rawUnits), [rawUnits]);
   const forkBoundaryAfterUnitIndex = useMemo(() => {
     if (forkBoundaryMessageCount != null && forkBoundaryMessageCount > 0
       && forkBoundaryMessageCount <= leadingDisplayNoopCount(messages)) return -1;

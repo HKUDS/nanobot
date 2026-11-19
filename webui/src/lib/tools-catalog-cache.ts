@@ -43,6 +43,13 @@ function createToolsCatalog(token: string) {
       snapshot = { ...snapshot, invalidation: snapshot.invalidation + 1 };
       publish();
     },
+    invalidateMcpPresets() {
+      mcpUpdated = -Infinity;
+      mcpRevision++;
+      mcpRequest = null;
+      snapshot = { ...snapshot, invalidation: snapshot.invalidation + 1 };
+      publish();
+    },
     cliFresh: () => snapshot.cliApps !== null && Date.now() - cliUpdated < TOOLS_CATALOG_TTL_MS,
     mcpFresh: () => snapshot.mcpPresets !== null && Date.now() - mcpUpdated < TOOLS_CATALOG_TTL_MS,
     loadCliApps(): Promise<void> {

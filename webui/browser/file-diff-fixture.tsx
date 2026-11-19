@@ -25,7 +25,11 @@ const samples: Array<[string, string]> = [
   ["truncated.ts", patch("truncated.ts", ["+export const truncated = true;"], 0, 1)],
 ];
 
-export function FileDiffFixture() {
+const hjsonSample: [string, string] = ["config.hjson", patch("config.hjson", [
+  " # shared settings", " {", "-  host: old-server", "+  host: localhost", " }",
+], 4, 4)];
+
+export function FileDiffFixture({ shiki = false }: { shiki?: boolean }) {
   const { theme, toggle } = useTheme();
   const [opened, setOpened] = useState("");
   const [changed, setChanged] = useState(false);
@@ -38,7 +42,7 @@ export function FileDiffFixture() {
     <button onClick={toggle}>Toggle theme</button>
     <button onClick={() => setChanged(true)}>Change source</button>
     <button onClick={() => void setAppLanguage("zh-CN")}>Chinese</button>
-    {samples.map(([path, text]) => {
+    {(shiki ? [hjsonSample] : samples).map(([path, text]) => {
       const edit: FileEditSummary = {
         key: path, path, absolute_path: `/fixture/${path}`, added: 1, deleted: 1,
         approximate: false, binary: false, status: "done", pending: false,

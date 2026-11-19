@@ -10,7 +10,7 @@ def isolate_request_overrides(
     if previous_provider is not None and previous_provider == provider:
         return candidate
     return candidate.model_copy(update={
-        "extra_headers": None, "extra_query": None, "extra_body": None,
+        "extra_headers": None, "extra_query": None, "extra_body": None, "codex_fast_mode": None,
     })
 
 

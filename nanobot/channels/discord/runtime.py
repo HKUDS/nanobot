@@ -196,9 +196,9 @@ if DISCORD_AVAILABLE:
             commands = (
                 ("new", "Stop current task and start a new conversation", "/new"),
                 ("stop", "Stop the current task", "/stop"),
+                ("cancel_goal", "Cancel the current goal", "/cancel_goal"),
                 ("restart", "Restart the bot", "/restart"),
                 ("status", "Show bot status", "/status"),
-                ("history", "Show recent conversation messages", "/history"),
             )
 
             for name, description, command_text in commands:

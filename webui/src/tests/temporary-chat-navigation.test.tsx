@@ -154,14 +154,20 @@ describe("temporary chat navigation", () => {
     vi.unstubAllGlobals();
   });
 
-  it.each(["settings", "apps", "automations", "skills", "channels"])(
+  it.each([
+    ["settings", "#/settings"],
+    ["apps", "#/apps"],
+    ["automations", "#/automations"],
+    ["skills", "#/apps?section=skills"],
+    ["channels", "#/apps?section=channels"],
+  ])(
     "opens %s directly without mounting chat or retaining a chat query",
-    async (view) => {
+    async (view, canonicalHash) => {
       window.history.replaceState(null, "", `/#/${view}?chat=websocket%3Aregular`);
       render(<App />);
       await screen.findByRole("button", { name: "Back to chat" });
       act(() => TestSocket.current.open());
-      await waitFor(() => expect(window.location.hash).toBe(`#/${view}`));
+      await waitFor(() => expect(window.location.hash).toBe(canonicalHash));
       expect(window.history.state.nanobotReturnChat.key).toBe("websocket:regular");
       expect(screen.queryByTestId("thread-message-region")).not.toBeInTheDocument();
       const requests = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
@@ -386,7 +392,7 @@ describe("temporary chat navigation", () => {
     expect(within(screen.getByTestId("thread-message-region")).getByText(
       "Count from one to three",
     )).toBeInTheDocument();
-    expect(screen.queryByTestId("hero-greeting")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("thread-welcome-mark")).not.toBeInTheDocument();
   });
 
   it.each(["before leaving", "while away", "after returning"])(
@@ -520,7 +526,7 @@ describe("temporary chat navigation", () => {
     expect(window.location.hash).toBe(`#/temporary/${secondChatId}`);
     await selectTopic("Close temporary chat: List three colors");
     expect(deleteCache).toHaveBeenCalledWith(secondChatId);
-    expect(await screen.findByTestId("hero-greeting")).toBeInTheDocument();
+    expect(await screen.findByTestId("thread-welcome-mark")).toBeInTheDocument();
     for (const cache of deleteCache.mock.contexts) {
       if (!(cache instanceof ThreadMessageCache)) throw new Error("Expected thread message cache");
       expect(cache.get(firstChatId)).toBeUndefined();

@@ -1,4 +1,13 @@
 {
+  "goal": {
+    "title": "GoalIsland · Mục tiêu",
+    "description": "Xem trước mục tiêu và chi tiết.",
+    "options": "Truyền trạng thái, tóm tắt, mục tiêu và báo cáo tùy chọn.",
+    "state": "Trạng thái",
+    "summary": "Chuẩn bị phát hành",
+    "objective": "Xem lại thay đổi và xác minh bản phát hành.\n\n- Kiểm tra thử nghiệm\n- Xem lại tài liệu\n- Xác nhận sẵn sàng",
+    "recap": "Đang chờ phê duyệt."
+  },
   "rename": {
     "title": "RenameDialog · Đổi tên nhóm và dự án",
     "description": "Thử hộp thoại đổi tên nhóm và dự án. Chủ đề được đổi tên ngay trong danh sách trò chuyện.",

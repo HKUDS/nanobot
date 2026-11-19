@@ -24,9 +24,12 @@ describe("Workspace project picker", () => {
   it.each(["pointer", "keyboard"])("restores the opening focus context after %s entry and Escape", async (entry) => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<WorkspaceProjectPicker scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={vi.fn().mockResolvedValue(directory)} onChange={onChange} />);
+    render(<><input aria-label="Draft" /><WorkspaceProjectPicker scope={scope} defaultScope={scope} controls={catalog.controls} onBrowseDirectories={vi.fn().mockResolvedValue(directory)} onChange={onChange} /></>);
     const trigger = screen.getByRole("button", { name: "Switch directory" });
-    if (entry === "pointer") await user.click(trigger);
+    if (entry === "pointer") {
+      await user.click(screen.getByRole("textbox", { name: "Draft" }));
+      await user.click(trigger);
+    }
     else {
       act(() => trigger.focus());
       await user.keyboard("{Enter}");
@@ -37,7 +40,7 @@ describe("Workspace project picker", () => {
     // FocusScope restores focus in a task after its exit cleanup.
     await act(() => new Promise(resolve => setTimeout(resolve, 0)));
     if (entry === "keyboard") expect(trigger).toHaveFocus();
-    else expect(trigger).not.toHaveFocus();
+    else expect(screen.getByRole("textbox", { name: "Draft" })).toHaveFocus();
     expect(onChange).not.toHaveBeenCalled();
   });
 

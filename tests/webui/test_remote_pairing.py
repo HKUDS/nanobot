@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -346,7 +346,7 @@ async def test_rename_paired_instance_updates_only_verified_sibling_grants(tmp_p
     before = manager._read()
     receipts = {item.id: manager.pairing.path(item.id).joinpath("receipt").read_bytes() for item in requests}
     live = SimpleNamespace(tunnel=SimpleNamespace(active=True), error="", gateway_id="live-session",
-                           proxy=SimpleNamespace(pause=AsyncMock()))
+                           health_check=None, health_checked_at=0, proxy=SimpleNamespace(pause=AsyncMock()))
     manager.connections[first.id] = live
     result = await manager.action("rename", {"id": requests[1].id, "name": "My cloud"})
     assert [p["name"] for p in result["profiles"]] == ["My cloud", "My cloud", original.hostname]
@@ -369,7 +369,7 @@ async def test_repair_retains_route_and_reuses_only_a_healthy_existing_connectio
     profiles[first.id].local_port = 23456
     manager._write(profiles)
     live = SimpleNamespace(tunnel=SimpleNamespace(active=True), error="", gateway_id="live-session",
-                           proxy=SimpleNamespace(pause=AsyncMock()))
+                           health_check=None, health_checked_at=0, proxy=SimpleNamespace(pause=AsyncMock()))
     manager.connections[first.id] = live
 
     async def check(connection):
@@ -456,11 +456,53 @@ async def test_paired_profile_follows_moved_data_root(tmp_path, monkeypatch, wit
     assert len(RemoteInstances(moved).snapshot()["profiles"]) == 1
 
 
-def test_model_keys_never_enter_pairing_metadata(tmp_path):
+@pytest.mark.parametrize("field", ["publicWsUrl", "public_ws_url"])
+def test_authorize_with_public_websocket_keeps_only_the_private_gateway_target(pair, tmp_path, monkeypatch, field):
+    store, _, request, original, _ = pair
     path = tmp_path / "config.json"
-    path.write_text(json.dumps({"providers": {"deepseek": {"apiKey": "not-exported"}},
-                                "channels": {"websocket": {"enabled": True, "tokenIssueSecret": "webui-only"}}}))
-    assert "not-exported" not in json.dumps(remote_pair_server.metadata(path))
+    before = json.dumps({
+        "providers": {"deepseek": {"apiKey": "not-exported"}},
+        "channels": {"websocket": {"enabled": True, "port": 8865, "tokenIssueSecret": "webui-only",
+                                    field: "wss://example.test/chat", "path": "/chat"}},
+    })
+    path.write_text(before)
+    install = Mock()
+    monkeypatch.setattr(remote_pair_server, "as_account", install)
+
+    code = remote_pair_server.authorize(request, host=original.host, user=original.user, ssh_port=22,
+                                        config=path, host_key=original.host_key, until=original.authorized_until)
+
+    saved = store.finish(request.id, code)
+    assert saved.port == 8865 and saved.secret == "webui-only"
+    assert saved.config_path == str(path.resolve())
+    assert "wss://" not in saved.model_dump_json() and "not-exported" not in saved.model_dump_json()
+    install.assert_called_once_with(
+        original.user, "install", {"request": request.model_dump(), "port": 8865, "until": original.authorized_until},
+    )
+    assert path.read_text() == before
+
+
+@pytest.mark.parametrize(("settings", "error"), [
+    ({"trustedProxyAuth": {"assertionHeader": "X-User", "trustedPeerCidrs": ["127.0.0.1/32"]}},
+     "incompatible_gateway"),
+    ({"trusted_proxy_auth": {"assertion_header": "X-User", "trusted_peer_cidrs": ["127.0.0.1/32"]}},
+     "incompatible_gateway"),
+    ({"sslCertfile": "/etc/nanobot/cert.pem", "sslKeyfile": "/etc/nanobot/key.pem"}, "incompatible_gateway"),
+    ({"tokenIssueSecret": ""}, "webui_auth_required"),
+])
+def test_public_websocket_does_not_override_ssh_pairing_requirements(pair, tmp_path, monkeypatch, settings, error):
+    _, _, request, original, _ = pair
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"channels": {"websocket": {
+        "enabled": True, "tokenIssueSecret": "webui-only", "publicWsUrl": "wss://example.test/chat",
+        "path": "/chat", **settings,
+    }}}))
+    install = Mock()
+    monkeypatch.setattr(remote_pair_server, "as_account", install)
+    with pytest.raises(RemoteError, match=f"^{error}$"):
+        remote_pair_server.authorize(request, host=original.host, user=original.user, ssh_port=22,
+                                     config=path, host_key=original.host_key, until=original.authorized_until)
+    install.assert_not_called()
 
 
 def test_pairing_modules_can_import_without_posix_server_dependencies():

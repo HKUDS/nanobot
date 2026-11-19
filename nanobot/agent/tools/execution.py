@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from functools import cache
 from typing import Any, cast
@@ -186,10 +185,7 @@ async def _execute_tool_call_inner(
 
     await hook.before_execute_tool(context, tool_call, tool, params)
     try:
-        with (
-            file_read_context(tool_call.id, read_results)
-            if tool_call.name == "read_file" else nullcontext()
-        ):
+        with file_read_context(tool_call.id, read_results):
             if tool is not None:
                 result = await tool.execute(**params)
             else:

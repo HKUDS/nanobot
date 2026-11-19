@@ -20,7 +20,11 @@ from nanobot.context_sources import (
 )
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
-from nanobot.security.workspace_access import build_workspace_scope
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    build_workspace_scope,
+    reset_workspace_scope,
+)
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -164,6 +168,8 @@ def test_subagent_prompt_keeps_agent_paths_for_selected_project(tmp_path):
     assert str(project.resolve()) not in prompt
     assert f"Nanobot's agent workspace: {agent_workspace.resolve()}" in prompt
     assert f"History log: {agent_workspace.resolve() / 'memory' / 'history.jsonl'}" in prompt
+    assert f"Memory wiki: {agent_workspace.resolve()}/memory/wiki/" in prompt
+    assert "Update durable memory only if the main agent assigns that work" in prompt
     assert "global-custom" in prompt
     assert "project-custom" not in prompt
 
@@ -183,6 +189,7 @@ def test_subagent_prompt_uses_relative_paths_in_agent_workspace(tmp_path):
 
     assert str(tmp_path.resolve()) not in prompt
     assert "History log: memory/history.jsonl" in prompt
+    assert "Memory wiki: memory/wiki/" in prompt
     assert "### Workspace skills (`skills`)" in prompt
 
 
@@ -217,8 +224,22 @@ async def test_subagent_keeps_project_runtime_scope_with_agent_owned_tools(tmp_p
 
     spec = manager.runner.run.call_args.args[0]
     assert spec.workspace == project
-    assert spec.tools.get("read_file")._workspace == agent_workspace.resolve()
-    assert spec.tools.get("read_file")._restrict_to_workspace is True
+    (project / "project.txt").write_text("project document", encoding="utf-8")
+    (agent_workspace / "skills").mkdir()
+    (agent_workspace / "skills" / "reference.txt").write_text("agent skill", encoding="utf-8")
+    private = agent_workspace / "private.txt"
+    private.write_text("agent private data", encoding="utf-8")
+    token = bind_workspace_scope(build_workspace_scope(project, "restricted"))
+    try:
+        assert "project document" in await spec.tools.execute("read_file", {"path": "project.txt"})
+        assert "agent skill" in await spec.tools.execute(
+            "read_file", {"path": str(agent_workspace / "skills" / "reference.txt")},
+        )
+        denied = await spec.tools.execute("read_file", {"path": str(private)})
+        assert denied.is_error
+        assert "agent private data" not in denied
+    finally:
+        reset_workspace_scope(token)
     assert manager.tools_config.restrict_to_workspace is False
 
 

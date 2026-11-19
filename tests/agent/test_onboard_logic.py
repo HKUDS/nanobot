@@ -1257,27 +1257,31 @@ class TestMainMenuInteraction:
         assert config.model_dump(by_alias=True) == original
         assert getattr(config.channels, "websocket", None) is None
 
-    def test_quick_start_provider_choice_asks_for_model_id(self, monkeypatch):
+    @pytest.mark.parametrize(("label", "provider", "api_base", "model"), [
+        ("OpenRouter", "openrouter", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
+        ("ShengSuanYun Router", "shengsuanyun", "https://router.shengsuanyun.com/api/v1", "deepseek/deepseek-v4-flash"),
+    ])
+    def test_quick_start_provider_choice_asks_for_model_id(self, monkeypatch, label, provider, api_base, model):
         config = Config()
         model_prompts: list[tuple[str, str, str]] = []
 
         monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
-        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "OpenRouter")
-        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-or-test")
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: label)
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "test-key")
 
         def fake_model_input(prompt, current, provider, *, config):
             model_prompts.append((prompt, current, provider))
-            return "openai/gpt-4o-mini"
+            return model
 
         monkeypatch.setattr(onboard_wizard, "_input_model_with_autocomplete", fake_model_input)
 
         assert onboard_wizard._configure_quick_start_provider(config) is True
 
-        assert model_prompts == [("Model ID", "", "openrouter")]
-        assert config.providers.openrouter.api_key == "sk-or-test"
-        assert config.providers.openrouter.api_base == "https://openrouter.ai/api/v1"
-        assert config.model_presets["primary"].provider == "openrouter"
-        assert config.model_presets["primary"].model == "openai/gpt-4o-mini"
+        assert model_prompts == [("Model ID", "", provider)]
+        assert getattr(config.providers, provider).api_key == "test-key"
+        assert getattr(config.providers, provider).api_base == api_base
+        assert config.model_presets["primary"].provider == provider
+        assert config.model_presets["primary"].model == model
 
     def test_quick_start_local_provider_skips_api_key(self, monkeypatch):
         config = Config()
@@ -1301,6 +1305,18 @@ class TestMainMenuInteraction:
         assert config.providers.ollama.api_base == "http://localhost:11434/v1"
         assert config.model_presets["primary"].provider == "ollama"
         assert config.model_presets["primary"].model == "llama3.2"
+
+    def test_quick_start_does_not_write_over_legacy_custom_connection(self, monkeypatch, capsys):
+        config = Config.model_validate({"providers": {
+            "shengsuanyun": {"apiBase": "https://private-proxy.test/v1"},
+        }})
+        original = config.model_dump()
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "ShengSuanYun Router")
+
+        assert onboard_wizard._configure_quick_start_provider(config) is False
+        assert config.model_dump() == original
+        assert "already names a custom connection" in capsys.readouterr().out
 
     def test_quick_start_openai_stores_key_and_model_without_base(self, monkeypatch):
         config = Config()

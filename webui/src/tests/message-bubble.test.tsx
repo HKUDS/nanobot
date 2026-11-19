@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubble";
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
+import { ToastProvider } from "@/components/ui/toast";
 import { setAppLanguage } from "@/i18n";
 import { parseWebuiThreadPayload } from "@/lib/api";
 import * as clipboard from "@/lib/clipboard";
@@ -375,6 +376,91 @@ describe("MessageBubble", () => {
     expect(bubble).toHaveClass("user-message-surface", "bg-secondary/70");
   });
 
+  it("seals the dashed edge into a solid border when the agent picks up a waiting message", () => {
+    const message: UIMessage = {
+      id: "u-pending",
+      role: "user",
+      content: "One more detail",
+      createdAt: Date.now(),
+      deliveryStatus: "accepted",
+    };
+    const { rerender } = render(<MessageBubble message={message} />);
+    const bubble = screen.getByText(message.content);
+    const originalClasses = bubble.className;
+
+    rerender(<MessageBubble message={{ ...message, processingStatus: "pending" }} />);
+    expect(bubble).toHaveClass("user-message-surface-dashed");
+    expect(bubble).toHaveAttribute("data-pending-edge", "pending");
+    expect(bubble.querySelector("[data-pending-edge-overlay='pending']")).toBeInTheDocument();
+    const waitingStatus = screen.getByRole("status");
+    expect(waitingStatus).toHaveClass("sr-only");
+    expect(waitingStatus).toHaveTextContent("Waiting to be processed");
+
+    rerender(<MessageBubble message={{ ...message, processingStatus: "consumed" }} />);
+    expect(bubble.className).toBe(originalClasses);
+    expect(bubble).toHaveAttribute("data-pending-edge", "sealing");
+    const sealingOverlay = bubble.querySelector("[data-pending-edge-overlay='sealing']");
+    expect(sealingOverlay).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    const endEvent = new Event("animationend", { bubbles: true });
+    Object.defineProperty(endEvent, "animationName", { value: "pending-edge-seal" });
+    fireEvent(sealingOverlay!, endEvent);
+
+    expect(bubble).not.toHaveAttribute("data-pending-edge");
+    expect(bubble.querySelector("[data-pending-edge-overlay]")).not.toBeInTheDocument();
+  });
+
+  it("does not play the seal transition for already-consumed or cancelled user messages", () => {
+    const { container, rerender } = render(
+      <MessageBubble
+        message={{
+          id: "u-history-consumed",
+          role: "user",
+          content: "Already consumed",
+          createdAt: Date.now(),
+          processingStatus: "consumed",
+        }}
+      />,
+    );
+    expect(container.querySelector("[data-pending-edge-overlay]")).not.toBeInTheDocument();
+
+    const pending: UIMessage = {
+      id: "u-waiting",
+      role: "user",
+      content: "Never picked up",
+      createdAt: Date.now(),
+      processingStatus: "pending",
+    };
+    rerender(<MessageBubble message={pending} />);
+    expect(container.querySelector("[data-pending-edge-overlay='pending']")).toBeInTheDocument();
+
+    rerender(<MessageBubble message={{ ...pending, processingStatus: undefined }} />);
+    expect(container.querySelector("[data-pending-edge-overlay]")).not.toBeInTheDocument();
+  });
+
+  it("seals media-only waiting user messages when consumed", () => {
+    const mediaMessage: UIMessage = {
+      id: "u-media-pending",
+      role: "user",
+      content: "",
+      createdAt: Date.now(),
+      processingStatus: "pending",
+      media: [{ kind: "file", name: "notes.txt", url: "/api/files/notes.txt" }],
+    };
+    const { container, rerender } = render(<MessageBubble message={mediaMessage} />);
+    expect(container.querySelector("[data-pending-edge-overlay='pending']")).toBeInTheDocument();
+
+    rerender(<MessageBubble message={{ ...mediaMessage, processingStatus: "consumed" }} />);
+    const sealingOverlay = container.querySelector("[data-pending-edge-overlay='sealing']");
+    expect(sealingOverlay).toBeInTheDocument();
+
+    const endEvent = new Event("animationend", { bubbles: true });
+    Object.defineProperty(endEvent, "animationName", { value: "pending-edge-seal" });
+    fireEvent(sealingOverlay!, endEvent);
+    expect(container.querySelector("[data-pending-edge-overlay]")).not.toBeInTheDocument();
+  });
+
   it("renders completed message branches with static wrapper classes", async () => {
     const messages: UIMessage[] = [
       {
@@ -474,7 +560,10 @@ describe("MessageBubble", () => {
     expect(quote).toHaveTextContent("selected assistant excerpt");
     expect(quote).not.toHaveAttribute("title");
     expect(screen.queryByText("Quoted context")).not.toBeInTheDocument();
-    expect(screen.getByText("What about this?")).toBeInTheDocument();
+    const messageBubble = screen.getByText("What about this?");
+    expect(messageBubble).toBeInTheDocument();
+    expect(quote).toHaveClass("rounded-floating");
+    expect(messageBubble).toHaveClass("rounded-floating");
 
     rerender(
       <MessageBubble
@@ -992,6 +1081,22 @@ describe("MessageBubble", () => {
     );
   });
 
+  it("announces clipboard failure and leaves Copy available for another attempt", async () => {
+    const copy = vi.spyOn(clipboard, "copyTextToClipboard").mockResolvedValue(false);
+    try {
+      const message: UIMessage = { id: "copy-failed", role: "assistant", content: "A reply", createdAt: 1 };
+      const { container } = render(<MessageBlockMenuActions message={message} />, { wrapper: ToastProvider });
+      menuActions(container);
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+      const alert = await screen.findByRole("alert");
+      expect(alert.closest("[data-toast-tone=error]")).not.toBeNull();
+      expect(alert).toHaveTextContent("Could not copy. Please try again.");
+      expect(screen.getByRole("button", { name: "Copy" })).toBeEnabled();
+    } finally {
+      copy.mockRestore();
+    }
+  });
+
   it("copies completed assistant replies with the textarea fallback", async () => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -1292,7 +1397,7 @@ describe("MessageBubble", () => {
     expect(container.querySelector("h3")).not.toBeInTheDocument();
   });
 
-  it("renders inline file paths as compact file references", async () => {
+  it("keeps complete inline file paths and their preview hints", async () => {
     await import("@/components/MarkdownTextRenderer");
     const message: UIMessage = {
       id: "a-file-path",
@@ -1311,10 +1416,8 @@ describe("MessageBubble", () => {
       expect(references[0].parentElement).toHaveClass("align-baseline");
       expect(references[0].parentElement).toHaveClass("leading-[inherit]");
       expect(references[0]).toHaveClass("items-baseline");
-      expect(references[0]).toHaveTextContent("MarkdownTextRenderer.tsx");
-      expect(references[0]).not.toHaveTextContent("webui/src/components");
-      expect(screen.getByText("index.html")).toBeInTheDocument();
-      expect(references[1]).not.toHaveTextContent("/Users/renxubin");
+      expect(references[0].textContent).toBe("webui/src/components/MarkdownTextRenderer.tsx");
+      expect(references[1].textContent).toBe("/Users/renxubin/.nanobot/workspace/minecraft-fps/index.html");
       expect(references[1]).not.toHaveAttribute("title");
       expect(references[1]).toHaveAttribute(
         "aria-label",

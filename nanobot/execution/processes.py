@@ -56,6 +56,7 @@ async def spawn_process_tree(
     login: bool = False,
     *,
     stdin: int = asyncio.subprocess.DEVNULL,
+    capture_output: bool = True,
 ) -> ProcessTree:
     """Start a prepared command in its own process group or Windows job."""
     if isinstance(command, list):
@@ -87,18 +88,17 @@ async def spawn_process_tree(
 
     job = _create_windows_job() if _IS_WINDOWS else None
     creationflags = job.creation_flags if job is not None else 0
+    output = asyncio.subprocess.PIPE if capture_output else asyncio.subprocess.DEVNULL
     process = None
     try:
         if isinstance(launch, str):
             process = await asyncio.create_subprocess_shell(
-                launch, stdin=stdin, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, cwd=cwd, env=env,
+                launch, stdin=stdin, stdout=output, stderr=output, cwd=cwd, env=env,
                 creationflags=creationflags,
             )
         else:
             process = await asyncio.create_subprocess_exec(
-                *launch, stdin=stdin, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, cwd=cwd, env=env,
+                *launch, stdin=stdin, stdout=output, stderr=output, cwd=cwd, env=env,
                 creationflags=creationflags,
                 start_new_session=not _IS_WINDOWS,
             )

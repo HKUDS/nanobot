@@ -13,10 +13,10 @@ import pytest
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.sandbox_check import check_sandbox, sandbox_settings_status
-from nanobot.agent.tools.sandbox_launcher import SandboxLauncherError, resolve_sandbox_launcher
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.shell_config import ExecToolConfig
 from nanobot.config.loader import resolve_config_env_vars
+from nanobot.security.sandbox_launcher import SandboxLauncherError, resolve_sandbox_launcher
 
 
 @pytest.mark.skipif(os.name != "posix", reason="requires Unix launcher preparation")
@@ -28,19 +28,24 @@ async def test_nonstandard_bwrap_is_not_silently_run_without_sandbox(tmp_path, m
     default_bin = tmp_path / "system-bin"
     default_bin.mkdir()
     launcher = extra_bin / "bwrap"
-    launcher.write_text("#!/bin/sh\nprintf launched > \"$1\"\n")
+    launcher.write_text("#!/bin/sh\nprintf launched > launcher-ran\n")
     launcher.chmod(0o700)
     marker = workspace / "command-ran"
 
     monkeypatch.setattr(os, "defpath", str(default_bin))
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setenv("PATH", str(extra_bin))
-    monkeypatch.setattr("nanobot.agent.tools.sandbox.get_media_dir", lambda: workspace)
+    monkeypatch.setattr("nanobot.execution.sandbox.get_media_dir", lambda: workspace)
     tool = ExecTool(working_dir=str(workspace), sandbox="bwrap")
 
     result = await tool.execute(command="printf ran > command-ran")
 
     assert "sandbox launcher not found: bwrap" in result
     assert isinstance(result, ToolResult) and result.error_code == "sandbox_launcher_missing"
+    status = await check_sandbox(ExecToolConfig(sandbox="bwrap"), workspace)
+    assert status["state"] == "unavailable"
+    assert status["reason"] == "launcher_missing"
+    assert not (workspace / "launcher-ran").exists()
     assert not marker.exists()
 
 
@@ -88,7 +93,7 @@ def test_custom_launcher_requires_existing_absolute_file(path, reason):
 
 
 def test_copied_custom_launcher_config_does_not_assume_unix_permissions_on_windows(monkeypatch):
-    monkeypatch.setattr("nanobot.agent.tools.sandbox_launcher.os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr("nanobot.security.sandbox_launcher.os", SimpleNamespace(name="nt"))
     with pytest.raises(SandboxLauncherError, match="platform_unsupported"):
         resolve_sandbox_launcher("bwrap", "C:\\tools\\bwrap.exe")
 
@@ -101,11 +106,20 @@ async def test_disabled_settings_do_not_launch_a_probe(settings, state, tmp_path
     assert (await check_sandbox(ExecToolConfig(**settings), tmp_path))["state"] == state
 
 
-async def test_unsupported_platform_reports_no_isolation_without_running(tmp_path, monkeypatch):
-    monkeypatch.setattr(sys, "platform", "win32")
-    status = await check_sandbox(ExecToolConfig(sandbox="bwrap"), tmp_path)
+@pytest.mark.parametrize(("platform", "backend", "supported"), [
+    ("win32", "bwrap", None),
+    ("linux", "seatbelt", "bwrap"),
+    ("darwin", "bwrap", "seatbelt"),
+])
+async def test_unsupported_backend_does_not_run(tmp_path, monkeypatch, platform, backend, supported):
+    async def unexpected(*args, **kwargs):
+        pytest.fail("unsupported sandbox must not start a process")
+
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", unexpected)
+    status = await check_sandbox(ExecToolConfig(sandbox=backend), tmp_path)
     assert status["state"] == "unsupported"
-    assert status["supported_backend"] is None
+    assert status["supported_backend"] == supported
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Unix native sandbox")
@@ -155,6 +169,9 @@ async def test_native_probe_checks_isolation_without_touching_workspace(tmp_path
     # The same resolver and backend must work for actual command execution.
     tool = ExecTool(working_dir=str(tmp_path), sandbox=backend, sandbox_launcher=result["launcher"])
     assert "actual-command" in await tool.execute(command="printf actual-command")
+    clock = await tool.execute(command="date +%s")
+    assert clock.splitlines()[0].isdigit()
+    assert "Exit code: 0" in clock
     failed_command = await tool.execute(command="printf 'sandbox launcher not found: bwrap'; exit 1")
     assert "Exit code: 1" in failed_command
     assert (failed_command.error_code if isinstance(failed_command, ToolResult) else None) is None
@@ -204,6 +221,10 @@ def test_probe_revision_changes_when_saved_policy_changes(tmp_path):
 @pytest.mark.parametrize("finish", ["timeout", "cancel"])
 async def test_probe_reaps_its_process_on_timeout_or_request_cancellation(tmp_path, monkeypatch, finish):
     started, exited = asyncio.Event(), asyncio.Event()
+    trusted_launcher = tmp_path / "bwrap"
+    trusted_launcher.touch(mode=0o700)
+    monkeypatch.setattr(os, "defpath", str(tmp_path))
+    monkeypatch.setattr(sys, "platform", "linux")
 
     class Process:
         pid = 12345
@@ -217,6 +238,9 @@ async def test_probe_reaps_its_process_on_timeout_or_request_cancellation(tmp_pa
 
     async def spawn(*args, **kwargs):
         assert kwargs["start_new_session"]
+        assert args[0] == str(trusted_launcher)
+        assert kwargs["stdin"] == kwargs["stdout"] == kwargs["stderr"] == asyncio.subprocess.DEVNULL
+        assert kwargs["env"] == {"PATH": str(tmp_path), "HOME": kwargs["cwd"]}
         started.set()
         return process
 
@@ -225,10 +249,6 @@ async def test_probe_reaps_its_process_on_timeout_or_request_cancellation(tmp_pa
         process.returncode = -9
         exited.set()
 
-    monkeypatch.setattr("nanobot.agent.tools.sandbox_check._prepare_settings", lambda config, workspace: (config, workspace, {
-        "state": "unchecked", "reason": "", "launcher": "/test/launcher", "revision": "test", "supported_backend": "bwrap",
-    }))
-    monkeypatch.setattr("nanobot.agent.tools.sandbox_check.resolve_sandbox_launcher", lambda *_args, **_kwargs: "/test/launcher")
     monkeypatch.setattr("nanobot.agent.tools.sandbox_check._PROBE_TIMEOUT_S", 0.01)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
     monkeypatch.setattr(os, "killpg", kill)

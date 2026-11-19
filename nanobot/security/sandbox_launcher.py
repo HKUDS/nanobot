@@ -5,22 +5,24 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import sys
 from pathlib import Path
 from typing import Literal
 
 
 class SandboxLauncherError(ValueError):
-    def __init__(self, reason: str):
+    def __init__(self, reason: str, *, launcher: str = ""):
         self.reason = reason
+        self.launcher = launcher
         super().__init__(reason)
 
 
-def sandbox_platform(backend: str) -> Literal["supported", "unsupported"]:
-    import sys
-
-    return "supported" if (backend == "bwrap" and sys.platform.startswith("linux")) or (
-        backend == "seatbelt" and sys.platform == "darwin"
-    ) else "unsupported"
+def supported_sandbox_backend() -> Literal["bwrap", "seatbelt"] | None:
+    if sys.platform.startswith("linux"):
+        return "bwrap"
+    if sys.platform == "darwin":
+        return "seatbelt"
+    return None
 
 
 def resolve_sandbox_launcher(
@@ -36,7 +38,7 @@ def resolve_sandbox_launcher(
     if not custom_path:
         launcher = shutil.which(name, path=os.defpath)
         if launcher is None:
-            raise SandboxLauncherError("launcher_missing")
+            raise SandboxLauncherError("launcher_missing", launcher=name)
         return str(Path(launcher).absolute())
     if os.name != "posix":
         raise SandboxLauncherError("platform_unsupported")

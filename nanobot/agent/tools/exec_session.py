@@ -671,7 +671,7 @@ DEFAULT_EXEC_SESSION_MANAGER = ExecSessionManager()
 def clamp_session_int(value: int | None, default: int, minimum: int, maximum: int) -> int:
     if value is None:
         return default
-    return min(max(value, minimum), maximum)
+    return int(min(max(value, minimum), maximum))
 
 
 def _truncate_output(output: str, max_output_chars: int) -> tuple[str, int]:

@@ -1,3 +1,4 @@
+import type { ModelOptionsControlProps } from "@/components/thread/ModelOptionsControl";
 import { pastedFilePath, PastedPathRange, type LocalAttachment } from "../../../../packages/client-events/attachments";
 import {
   NewChatIcon,
@@ -27,6 +28,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -36,7 +38,6 @@ import {
   type Ref,
 } from "react";
 
-import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import {
   CapabilityMentionToken,
   cliAppInitials,
@@ -56,10 +57,10 @@ import {
 import { INLINE_REFERENCE_HIGHLIGHT_COLOR, INLINE_TOKEN_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/components/InlineTokenHighlight";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import {
-  ChevronDown,
-  ChevronUp,
   CornerDownRight,
   Loader2,
+  Maximize2,
+  Minimize2,
   Quote,
   Trash2,
   X,
@@ -68,12 +69,12 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 import { AttachmentCard, AttachmentTypeFace, attachmentCardActionClassName } from "@/components/AttachmentCard";
 import { ComposerActionIcon, type ComposerActionState } from "@/components/thread/ComposerActionIcon";
 import {
   floatingItemClassName,
   floatingItemFocusClassName,
-  floatingSurfaceElevationClassName,
   floatingSurfaceVisualClassName,
 } from "@/components/ui/floating-surface";
 import {
@@ -156,8 +157,6 @@ import {
 
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
-const VOICE_ERROR_VISIBLE_MS = 3_500;
-const VOICE_ERROR_FADE_MS = 500;
 type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
 
 function formatBytes(n: number): string {
@@ -227,6 +226,7 @@ interface ThreadComposerProps {
   disabled?: boolean;
   placeholder?: string;
   inputAriaLabel?: string;
+  expandable?: boolean;
   compactWhenIdle?: boolean;
   isStreaming?: boolean;
   activeTurnId?: string | null;
@@ -235,6 +235,8 @@ interface ThreadComposerProps {
   modelDetail?: string | null;
   modelPreset?: string | null;
   modelPresets?: ModelPresetOption[];
+  modelOptionsControl?: ModelOptionsControlProps;
+  onModelMenuOpenChange?: (open: boolean) => void;
   onModelPresetChange?: (name: string) => void;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
@@ -300,7 +302,7 @@ const COMMAND_ICONS: Record<string, LucideIcon> = {
 const BUILTIN_COMMAND_ICONS: Record<string, LucideIcon> = {
   "/new": NewChatIcon, "/compact": CompactIcon, "/stop": StopIcon,
   "/restart": RestartIcon, "/status": StatusIcon, "/model": ModelsIcon,
-  "/history": HistoryIcon, "/goal": GoalIcon, "/trigger": TriggerIcon,
+  "/goal": GoalIcon, "/trigger": TriggerIcon,
   "/dream": DreamIcon, "/dream-log": DreamLogIcon, "/dream-restore": RestoreMemoryIcon,
   "/dream-prompt": PromptTemplateIcon, "/evaluator-prompt": PromptTemplateIcon,
   "/skill": SkillsIcon, "/help": HelpIcon, "/pairing": PairingIcon,
@@ -512,40 +514,6 @@ function getVisibleBounds(el: HTMLElement): { top: number; bottom: number } {
   return { top, bottom };
 }
 
-function goalStateStripPreview(
-  goal: GoalStateWsPayload | undefined,
-  t: (key: string) => string,
-): string | null {
-  if (!goal?.active) return null;
-  const summary = goal.ui_summary?.trim();
-  if (summary) return summary;
-  const obj = goal.objective?.trim();
-  if (obj) return obj.length > 72 ? `${obj.slice(0, 72)}…` : obj;
-  return t("thread.composer.goalStateFallback");
-}
-
-const GOAL_PANEL_VIEWPORT_TOP_PAD = 20;
-const GOAL_PANEL_GAP_ABOVE_STRIP_PX = 10;
-const GOAL_PANEL_MIN_HEIGHT_PX = 112;
-const GOAL_PANEL_MAX_VIEWPORT_RATIO = 0.62;
-
-function measureGoalPanelMaxCssHeight(stripTopY: number): number {
-  const viewport = visualViewportBounds();
-  const spaceAboveStrip =
-    stripTopY - viewport.top - GOAL_PANEL_VIEWPORT_TOP_PAD - GOAL_PANEL_GAP_ABOVE_STRIP_PX;
-  return Math.min(
-    Math.max(spaceAboveStrip, GOAL_PANEL_MIN_HEIGHT_PX),
-    Math.floor(viewport.height * GOAL_PANEL_MAX_VIEWPORT_RATIO),
-  );
-}
-
-function buildGoalMarkdownBody(summary: string, objective: string): string {
-  const s = summary.trim();
-  const o = objective.trim();
-  if (s && o) return `${s}\n\n---\n\n${o}`;
-  return o || s;
-}
-
 function cliAppMentionPayload(app: CliAppInfo): OutboundCliAppMention {
   return {
     name: app.name,
@@ -570,202 +538,17 @@ function mcpPresetMentionPayload(preset: McpPresetInfo): OutboundMcpPresetMentio
   };
 }
 
-function GoalStateStrip({
-  goalState,
-}: {
-  goalState?: GoalStateWsPayload;
-}) {
-  const { t } = useTranslation();
-  const [goalPanelOpen, setGoalPanelOpen] = useState(false);
-  const stripLabel = goalStateStripPreview(goalState, t);
-  const active = !!stripLabel?.trim();
-  const [, setTick] = useState(0);
-  const stripWrapperRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const expandToggleRef = useRef<HTMLButtonElement>(null);
-  const stripSnapshotRef = useRef<{
-    goalState?: GoalStateWsPayload;
-    stripLabel: string | null;
-  } | null>(null);
-  const [panelMaxPx, setPanelMaxPx] = useState(280);
-
-  if (active) {
-    stripSnapshotRef.current = { goalState, stripLabel };
-  }
-
-  useEffect(() => {
-    if (!active) setGoalPanelOpen(false);
-  }, [active]);
-
-  const display = active
-    ? { goalState, stripLabel }
-    : stripSnapshotRef.current;
-  const displayGoalState = display?.goalState;
-  const displayStripLabel = display?.stripLabel ?? null;
-
-  const objectiveFull = displayGoalState?.objective?.trim() ?? "";
-  const summaryFull = displayGoalState?.ui_summary?.trim() ?? "";
-  const canExpandGoal = !!(active && displayGoalState?.active && (objectiveFull || summaryFull));
-
-  const markdownBody =
-    objectiveFull || summaryFull
-      ? buildGoalMarkdownBody(summaryFull, objectiveFull)
-      : "";
-
-  useLayoutEffect(() => {
-    if (!goalPanelOpen) return;
-
-    function relayout(): void {
-      const el = stripWrapperRef.current;
-      if (!el) return;
-      const top = el.getBoundingClientRect().top;
-      setPanelMaxPx(measureGoalPanelMaxCssHeight(top));
-    }
-
-    relayout();
-
-    void preloadMarkdownText();
-    const ro =
-      typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(() => relayout())
-        : null;
-    if (stripWrapperRef.current && ro) {
-      ro.observe(stripWrapperRef.current);
-    }
-    const viewport = window.visualViewport;
-    viewport?.addEventListener("resize", relayout);
-    viewport?.addEventListener("scroll", relayout);
-    window.addEventListener("resize", relayout);
-    window.addEventListener("scroll", relayout, true);
-    return () => {
-      ro?.disconnect();
-      viewport?.removeEventListener("resize", relayout);
-      viewport?.removeEventListener("scroll", relayout);
-      window.removeEventListener("resize", relayout);
-      window.removeEventListener("scroll", relayout, true);
-    };
-  }, [goalPanelOpen]);
-
-  useEffect(() => {
-    if (!goalPanelOpen) return;
-
-    function onPointerDown(ev: MouseEvent): void {
-      const target = ev.target as Node | null;
-      if (!target) return;
-      if (panelRef.current?.contains(target)) return;
-      if (expandToggleRef.current?.contains(target)) return;
-      setGoalPanelOpen(false);
-    }
-
-    function onKey(ev: KeyboardEvent): void {
-      if (ev.key === "Escape") setGoalPanelOpen(false);
-    }
-
-    window.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [goalPanelOpen]);
-
-  if (!display) return null;
-
-  const ariaLabel = displayStripLabel
-    ? t("thread.composer.goalStateStrip", { label: displayStripLabel })
-    : t("thread.composer.goalStateFallback");
-
-  return (
-    <div
-      ref={stripWrapperRef}
-      className="composer-status-drawer relative z-30"
-      data-composer-status-drawer=""
-      data-state={active ? "open" : "closed"}
-      aria-hidden={active ? undefined : true}
-      onTransitionEnd={(event) => {
-        if (active || event.target !== event.currentTarget) return;
-        stripSnapshotRef.current = null;
-        setTick((n) => n + 1);
-      }}
-    >
-      {goalPanelOpen && canExpandGoal && markdownBody ? (
-        <div
-          ref={panelRef}
-          id="nanobot-goal-panel-root"
-          role="dialog"
-          aria-modal="false"
-          aria-label={t("thread.composer.goalStateSheetTitle")}
-          tabIndex={-1}
-          className={cn(
-            "absolute bottom-[calc(100%+8px)] left-3 right-3 z-[50] flex max-w-none flex-col overflow-hidden",
-            "rounded-2xl",
-            floatingSurfaceElevationClassName,
-          )}
-          style={{ maxHeight: `${Math.round(panelMaxPx)}px` }}
-        >
-          <div
-            id="nanobot-goal-panel-scroll"
-            className="min-h-0 flex-1 overflow-y-auto scrollbar-thin p-3"
-          >
-            <MarkdownText className="max-w-none text-foreground/90">
-              {markdownBody}
-            </MarkdownText>
-          </div>
-        </div>
-      ) : null}
-      <div className="composer-status-drawer-clip">
-        {display ? (
-          <div
-            className="composer-status-drawer-content flex min-h-[36px] items-center gap-2 px-3 py-2"
-            role="status"
-            aria-label={ariaLabel}
-          >
-            <GoalIcon className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
-            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
-              {displayStripLabel ? (
-                <span className="truncate">
-                  {t("thread.composer.goalStateStrip", { label: displayStripLabel })}
-                </span>
-              ) : null}
-            </span>
-            {canExpandGoal ? (
-              <button
-                ref={expandToggleRef}
-                type="button"
-                className={cn(
-                  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                  "text-muted-foreground transition-colors hover:text-foreground",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                )}
-                aria-expanded={goalPanelOpen}
-                aria-controls={goalPanelOpen ? "nanobot-goal-panel-root" : undefined}
-                aria-label={t("thread.composer.goalStateExpandAria")}
-                title={t("thread.composer.goalStateExpandAria")}
-                onClick={() => setGoalPanelOpen((o) => !o)}
-              >
-                {goalPanelOpen ? (
-                  <ChevronDown className="h-4 w-4" aria-hidden />
-                ) : (
-                  <ChevronUp className="h-4 w-4" aria-hidden />
-                )}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
 function autosizeTextarea(input: HTMLTextAreaElement) {
   const container = input.parentElement!;
   const previousMinHeight = container.style.minHeight;
+  const scrollTop = input.scrollTop;
   // Measuring the one-row textarea must not expand the sibling transcript and
   // clamp its native scroll offset, even temporarily before paint.
   container.style.minHeight = `${container.getBoundingClientRect().height}px`;
   try {
     input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 260)}px`;
+    input.style.height = `${input.scrollHeight}px`;
+    input.scrollTop = scrollTop;
   } finally {
     container.style.minHeight = previousMinHeight;
   }
@@ -776,6 +559,7 @@ export function ThreadComposer({
   disabled,
   placeholder,
   inputAriaLabel,
+  expandable = true,
   compactWhenIdle = false,
   isStreaming = false,
   activeTurnId = null,
@@ -784,6 +568,8 @@ export function ThreadComposer({
   modelDetail = null,
   modelPreset = null,
   modelPresets = [],
+  modelOptionsControl,
+  onModelMenuOpenChange,
   onModelPresetChange,
   modelProvider = null,
   modelProviderLabel = null,
@@ -841,6 +627,8 @@ export function ThreadComposer({
     end: number;
   } | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [voiceSetupError, setVoiceSetupError] = useState<VoiceRecorderErrorKey | null>(null);
+  const showToast = useToast();
   const [sendPending, setSendPending] = useState(false);
   const [pathInspection, setPathInspection] = useState<{
     generation: number; scope: string; range: PastedPathRange; attachment?: LocalAttachment;
@@ -852,6 +640,9 @@ export function ThreadComposer({
   useEffect(() => () => { pathCheckGeneration.current += 1; }, []);
   const [modelSetupAttentionRequest, setModelSetupAttentionRequest] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaId = useId();
+  const [draftExpanded, setDraftExpanded] = useState(false);
+  const [draftOverflows, setDraftOverflows] = useState(false);
   const focusTextarea = useCallback(() => {
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
@@ -933,7 +724,6 @@ export function ThreadComposer({
   useEffect(() => {
     if (queueSnapshot.error) setInlineError(queueSnapshot.error);
   }, [queueSnapshot.error]);
-  const [voiceErrorFading, setVoiceErrorFading] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [cliAppMenuDismissed, setCliAppMenuDismissed] = useState(false);
@@ -951,32 +741,44 @@ export function ThreadComposer({
   const formRef = useRef<HTMLFormElement>(null);
   const [compactControls, setCompactControls] = useState(false);
 
+  const measureDraft = useCallback(() => {
+    const input = textareaRef.current;
+    if (!input) return;
+    autosizeTextarea(input);
+    if (expandable) setDraftOverflows(input.scrollHeight > input.clientHeight);
+    if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = input.scrollTop;
+  }, [expandable]);
+
   useLayoutEffect(() => {
     const form = formRef.current;
-    if (!form) return;
+    const input = textareaRef.current;
+    if (!form || !input) return;
     let previousWidth = 0;
     const update = () => {
       const width = form.getBoundingClientRect().width;
-      if (width <= 0 || width === previousWidth) return;
-      previousWidth = width;
-      setCompactControls(width <= 512);
-      const input = textareaRef.current;
-      if (input) autosizeTextarea(input);
+      if (width <= 0) return;
+      if (width !== previousWidth) {
+        previousWidth = width;
+        setCompactControls(width <= 512);
+        measureDraft();
+      } else if (expandable) {
+        setDraftOverflows(input.scrollHeight > input.clientHeight);
+      }
     };
     update();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
     observer?.observe(form);
+    if (expandable) observer?.observe(input);
     window.addEventListener("resize", update);
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, []);
+  }, [expandable, measureDraft]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
   const voiceShortcutDownRef = useRef(false);
-  const voiceErrorFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHero = variant === "hero";
   const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
   const projectPickerAvailable =
@@ -1038,6 +840,10 @@ export function ThreadComposer({
       const { rejected } = enqueue(files);
       if (rejected.length > 0) {
         const { reason, file } = rejected[0];
+        if (reason === "empty_file" || reason === "unsupported_type") {
+          showToast?.({ message: formatRejection(reason), tone: "error", dedupeKey: `attachment:${reason}` });
+          return;
+        }
         setInlineError(reason === "too_large"
           ? formatUploadTooLarge(file.size, acceptedAttachmentKind(file) === "video" ? MAX_VIDEO_BYTES : maxFileBytes)
           : formatRejection(reason));
@@ -1045,7 +851,7 @@ export function ThreadComposer({
         setInlineError(null);
       }
     },
-    [enqueue, formatRejection, formatUploadTooLarge, interactionDisabled, maxFileBytes],
+    [enqueue, formatRejection, formatUploadTooLarge, interactionDisabled, maxFileBytes, showToast],
   );
 
   const {
@@ -1232,8 +1038,6 @@ export function ThreadComposer({
             : t("thread.composer.slash.details.goalReady");
         } else if (command.command === "/stop" && isStreaming) {
           detail = t("thread.composer.slash.details.stopRunning");
-        } else if (command.command === "/history") {
-          detail = t("thread.composer.slash.details.history");
         }
         return {
           ...command,
@@ -1595,17 +1399,15 @@ export function ThreadComposer({
   }, [filteredMentionCandidates.length, filteredSlashCommands.length, showAnyPalette]);
 
   useLayoutEffect(() => {
-    const el = textareaRef.current;
-    if (!el || mentionInput.isComposing) return;
-    autosizeTextarea(el);
-    if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = el.scrollTop;
-  }, [compactControls, mentionInput.isComposing, mentionInput.value]);
+    if (mentionInput.isComposing) return;
+    if (!mentionInput.value) setDraftExpanded(false);
+    measureDraft();
+  }, [compactControls, measureDraft, mentionInput.isComposing, mentionInput.value]);
 
   useEffect(() => {
     // The parent projects typography tokens in its layout effect; measure after it.
-    const input = textareaRef.current;
-    if (input) autosizeTextarea(input);
-  }, [readingTextSize, customReadingTextSize]);
+    measureDraft();
+  }, [readingTextSize, customReadingTextSize, measureDraft]);
 
   // Runs before paint so switching sessions never flashes stale draft text.
   useLayoutEffect(() => {
@@ -1613,6 +1415,7 @@ export function ThreadComposer({
     previousPendingQueueKeyRef.current = pendingQueueKey;
     setValue("");
     setInlineError(null);
+    setVoiceSetupError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     setCursorPosition(0);
@@ -1629,42 +1432,26 @@ export function ThreadComposer({
     });
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
-    setInlineError(null);
     focusTextarea();
   }, [focusTextarea]);
 
-  const clearVoiceErrorTimers = useCallback(() => {
-    if (voiceErrorFadeTimerRef.current !== null) clearTimeout(voiceErrorFadeTimerRef.current);
-    voiceErrorFadeTimerRef.current = null;
-  }, []);
-  const clearInlineError = useCallback(() => {
-    clearVoiceErrorTimers();
-    setVoiceErrorFading(false);
-    setInlineError(null);
-  }, [clearVoiceErrorTimers]);
+  const clearVoiceSetupError = useCallback(() => setVoiceSetupError(null), []);
   const setVoiceError = useCallback((key: VoiceRecorderErrorKey) => {
-    clearVoiceErrorTimers();
-    setVoiceErrorFading(false);
-    setInlineError(t(`thread.composer.voiceErrors.${key}`));
-    voiceErrorFadeTimerRef.current = setTimeout(() => {
-      setVoiceErrorFading(true);
-      voiceErrorFadeTimerRef.current = setTimeout(() => {
-        setInlineError(null);
-        setVoiceErrorFading(false);
-        voiceErrorFadeTimerRef.current = null;
-      }, VOICE_ERROR_FADE_MS);
-    }, VOICE_ERROR_VISIBLE_MS);
-  }, [clearVoiceErrorTimers, t]);
+    // Setup blockers carry instructions users may need to keep in view while fixing them.
+    if (key === "insecureContext" || key === "permission" || key === "notConfigured") {
+      setVoiceSetupError(key);
+      return;
+    }
+    showToast?.({ message: t(`thread.composer.voiceErrors.${key}`), tone: "error", dedupeKey: "voice-input" });
+  }, [showToast, t]);
   const voiceRecorder = useVoiceRecorder({
     disabled: interactionDisabled,
-    onClearError: clearInlineError,
+    onClearError: clearVoiceSetupError,
     onError: setVoiceError,
     onTranscript: appendTranscription,
     onTranscribeAudio,
     wantsWav: transcriptionProvider === "xiaomi_mimo",
   });
-
-  useEffect(() => () => clearVoiceErrorTimers(), [clearVoiceErrorTimers]);
 
   useEffect(() => {
     if (!onTranscribeAudio) return;
@@ -2162,8 +1949,8 @@ export function ThreadComposer({
     : showStopButton ? "stop" : requiresModelSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
-    && value.length === 0 && images.length === 0 && !inlineError
-    && !normalizedQuotedContext && !queuedPrompt && !goalState?.active
+    && value.length === 0 && images.length === 0 && !inlineError && !(onTranscribeAudio && voiceSetupError)
+    && !normalizedQuotedContext && !queuedPrompt
     && !isDragging && !sessionDragPreview && !voiceRecorder.isRecording && !showProjectPicker;
   useLayoutEffect(() => {
     if (!compactWhenIdle || compactControls) return;
@@ -2215,6 +2002,8 @@ export function ThreadComposer({
       modelDetail={modelDetail}
       modelPreset={modelPreset}
       modelPresets={modelPresets}
+      modelOptionsControl={modelOptionsControl}
+      onMenuOpenChange={onModelMenuOpenChange}
       onPresetChange={onModelPresetChange}
       onManageModels={onManageModels}
       onRequestComposerFocus={() => textareaRef.current?.focus()}
@@ -2230,8 +2019,8 @@ export function ThreadComposer({
   const usageControl = !voiceRecorder.isRecording
     ? renderContextUsage?.({ showLabel: usageInMeta, compactLabel: mobileWorkspaceControls }) : null;
   const inputTextClasses = cn(
-    // Keep the overlay's CJK/Latin spacing aligned with the native textarea caret.
-    "w-full resize-none bg-transparent text-composer [text-autospace:no-autospace]",
+    // The native input and its reference overlay must wrap and space text alike.
+    "inset-scrollbar w-full resize-none bg-transparent text-composer [scrollbar-gutter:stable] [text-autospace:no-autospace]",
     compactControls
       ? "min-h-[52px] px-4 pb-2 pt-3"
       : isHero
@@ -2242,6 +2031,16 @@ export function ThreadComposer({
         : "min-h-[50px] px-3.5 pb-1.5 pt-3 sm:px-4",
   );
   const paletteBeside = showAnyPalette && slashPaletteLayout.placement === "beside";
+  const draftResizeLabel = t(draftExpanded ? "thread.composer.collapseDraft" : "thread.composer.expandDraft");
+  const toggleDraftSize = () => {
+    const input = textareaRef.current;
+    if (!input) return;
+    const followCaret = draftExpanded && input.selectionStart === input.value.length
+      && input.scrollHeight - input.clientHeight - input.scrollTop <= 1;
+    setDraftExpanded(!draftExpanded);
+    input.focus({ preventScroll: true });
+    if (followCaret) requestAnimationFrame(() => { input.scrollTop = input.scrollHeight; });
+  };
 
   return (
     <form
@@ -2328,8 +2127,6 @@ export function ThreadComposer({
           interactionDisabled && "opacity-60",
           sessionDragPreview && "ring-1 ring-primary/25",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
-          goalState?.active &&
-            "ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
         )}
       >
         {queuedPrompt ? (
@@ -2398,8 +2195,12 @@ export function ThreadComposer({
             </button>
           </div>
         ) : null}
-        <GoalStateStrip goalState={goalState} />
-        <div className="thread-composer-input relative min-w-0">
+        <div
+          className="thread-composer-input relative min-w-0"
+          data-expandable={expandable || undefined}
+          data-expanded={draftExpanded || undefined}
+          data-overflowing={draftOverflows || undefined}
+        >
           {placeholder === undefined ? (
             <span className="pointer-events-none invisible absolute h-0 w-0 overflow-hidden">
               <span ref={placeholderMeasureRef} aria-hidden className="inline-block whitespace-pre text-composer [text-autospace:no-autospace]">{resolvedPlaceholder}</span>
@@ -2419,6 +2220,7 @@ export function ThreadComposer({
             />
           ) : null}
           <textarea
+            id={textareaId}
             ref={textareaRef}
             value={mentionInput.value}
             onFocus={() => {
@@ -2452,16 +2254,9 @@ export function ThreadComposer({
             )}
           />
         </div>
-        {inlineError ? (
-          <div
-            role="alert"
-            className={cn(
-              "mx-3 mb-1 max-h-24 overflow-hidden rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1",
-              "text-[11.5px] font-medium text-destructive transition-[max-height,margin,padding,opacity] [transition-duration:220ms] ease-out motion-reduce:transition-none",
-              voiceErrorFading && "mb-0 max-h-0 border-transparent py-0 opacity-0",
-            )}
-          >
-            {inlineError}
+        {inlineError || (onTranscribeAudio && voiceSetupError) ? (
+          <div role="alert" className="mx-3 mb-1 break-words rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1 text-[11.5px] font-medium text-destructive">
+            {inlineError ?? t(`thread.composer.voiceErrors.${voiceSetupError}`)}
           </div>
         ) : null}
         <div
@@ -2520,6 +2315,29 @@ export function ThreadComposer({
               isHero ? "gap-1.5" : "gap-2",
             )}
           >
+            {expandable && (draftExpanded || draftOverflows) ? (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="icon"
+                      disabled={interactionDisabled}
+                      aria-label={draftResizeLabel}
+                      aria-expanded={draftExpanded}
+                      aria-controls={textareaId}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={toggleDraftSize}
+                      className="thread-composer-action thread-composer-round-action touch-target h-[var(--composer-action-size)] w-[var(--composer-action-size)] shrink-0 rounded-xl text-muted-foreground hover:text-foreground"
+                    >
+                      {draftExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{draftResizeLabel}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : null}
             {modelControl}
             {!usageInMeta ? usageControl : null}
             <TooltipProvider>

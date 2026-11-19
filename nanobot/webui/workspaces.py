@@ -24,7 +24,7 @@ from nanobot.security.workspace_access import (
     default_workspace_scope,
     validate_workspace_scope_payload,
 )
-from nanobot.session.webui_turns import websocket_turn_wall_started_at
+from nanobot.session.webui_turns import latest_live_websocket_turn
 from nanobot.webui.session_identity import webui_session_key
 
 if TYPE_CHECKING:
@@ -532,7 +532,7 @@ class WebUIWorkspaceController:
     async def stage_scope(self, chat_id: str, scope: WorkspaceScope) -> WorkspaceScope:
         """Keep a new chat's scope transient until its first accepted message."""
         async with self._scope_lock(chat_id):
-            if websocket_turn_wall_started_at(chat_id) is not None:
+            if latest_live_websocket_turn(chat_id) is not None:
                 raise WorkspaceScopeError("chat_running", status=409)
             session_key = webui_session_key(chat_id)
             if (

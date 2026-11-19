@@ -3,7 +3,7 @@ import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 export default {
   presentation: {
-    logoUrl: "https://telegram.org/favicon.ico",
+    logoUrl: "/brand/channels/telegram.svg",
     displayName: "Telegram",
     initials: "TG",
     color: "#229ED9",

@@ -6,10 +6,10 @@ from loguru import logger as default_logger
 
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.providers.base import LLMUsage
-from nanobot.session.model_selection import model_preset_from_metadata
+from nanobot.session.model_selection import SessionModelPreset
 from nanobot.session.recovery import recovery_state_from_metadata
 from nanobot.session.state import SessionState
-from nanobot.session.webui_turns import websocket_turn_id, websocket_turn_wall_started_at
+from nanobot.session.webui_turns import latest_live_websocket_turn
 from nanobot.webui.goal_state import goal_state_ws_blob
 
 if TYPE_CHECKING:
@@ -54,12 +54,15 @@ class WebUISessionProjection:
         raw_metadata = snapshot.get("metadata") if snapshot is not None else None
         metadata = cast(dict[str, object], raw_metadata) if isinstance(raw_metadata, dict) else None
 
-        fields: dict[str, Any] = {}
         try:
-            fields["model_preset"] = model_preset_from_metadata(metadata)
+            selection = SessionModelPreset.from_metadata(metadata)
         except ValueError:
             self._log.warning("ignoring invalid model preset metadata for session_key={}", session_key)
-            fields["model_preset"] = None
+            selection = SessionModelPreset()
+        fields: dict[str, Any] = {
+            "model_preset": selection.base_preset,
+            "model_options": selection.overrides.to_dict(),
+        }
         if metadata is None:
             return fields
 
@@ -111,7 +114,4 @@ class WebUISessionProjection:
     @staticmethod
     def active_turn_status(chat_id: str) -> tuple[float, str | None] | None:
         """Return same-process running-turn state for reconnect hydration."""
-        started_at = websocket_turn_wall_started_at(chat_id)
-        if started_at is None:
-            return None
-        return started_at, websocket_turn_id(chat_id)
+        return latest_live_websocket_turn(chat_id)

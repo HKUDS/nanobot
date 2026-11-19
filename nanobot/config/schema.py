@@ -3,7 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 
-from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
@@ -134,6 +142,7 @@ class InlineFallbackConfig(RequestOverrides):
 
     model: str
     provider: str
+    supports_images: bool = True
     max_tokens: int | None = None
     context_window_tokens: int | None = None
     temperature: float | None = None
@@ -149,10 +158,12 @@ class ModelPresetConfig(RequestOverrides):
 
     model: str
     provider: str = "auto"
+    supports_images: bool = True
     max_tokens: int = 8192
     context_window_tokens: int = 200_000
     temperature: float = 0.1
     reasoning_effort: str | None = None
+    codex_fast_mode: StrictBool | Literal["ultrafast"] | None = None
     api: ModelAPIConfig | None = None
 
     def to_generation_settings(self) -> GenerationSettings:
@@ -172,6 +183,7 @@ class AgentDefaults(Base):
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
+    supports_images: bool = True
     max_tokens: int = 8192
     context_window_tokens: int = 200_000
     temperature: float = 0.1
@@ -321,6 +333,7 @@ class ProvidersConfig(Base):
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
     orcarouter: ProviderConfig = Field(default_factory=ProviderConfig)
+    shengsuanyun: ProviderConfig = Field(default_factory=ProviderConfig)
     assemblyai: ProviderConfig = Field(default_factory=ProviderConfig)
     huggingface: ProviderConfig = Field(default_factory=ProviderConfig)
     skywork: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -552,7 +565,8 @@ class Config(BaseSettings):
         """Return the implicit `default` preset from agents.defaults fields."""
         d = self.agents.defaults
         return ModelPresetConfig(
-            model=d.model, provider=d.provider, max_tokens=d.max_tokens,
+            model=d.model, provider=d.provider, supports_images=d.supports_images,
+            max_tokens=d.max_tokens,
             context_window_tokens=d.context_window_tokens,
             temperature=d.temperature, reasoning_effort=d.reasoning_effort, api=d.api,
         )
@@ -608,6 +622,13 @@ class Config(BaseSettings):
         model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
         normalized_prefix = model_prefix.replace("-", "_")
         prefixed_provider = find_by_name(model_prefix) if model_prefix else None
+        legacy_connections = {
+            spec.name: provider
+            for spec in PROVIDERS
+            if spec.accepts_legacy_custom_config
+            and isinstance(provider := getattr(self.providers, spec.name, None), ProviderConfig)
+            and spec.uses_legacy_custom_config(provider)
+        }
 
         def _kw_matches(kw: str) -> bool:
             kw = kw.lower()
@@ -619,7 +640,7 @@ class Config(BaseSettings):
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
+                if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key or spec.name in legacy_connections:
                     return p, spec.name
 
         # Check for custom provider by prefix (e.g., "companyProxy/gpt-4").
@@ -632,7 +653,7 @@ class Config(BaseSettings):
                 return custom
 
         for spec in PROVIDERS:
-            if spec.is_transcription_only:
+            if spec.is_transcription_only or spec.name in legacy_connections:
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
@@ -676,7 +697,7 @@ class Config(BaseSettings):
 
         # OAuth providers are NOT valid fallbacks — they require explicit model selection
         for spec in PROVIDERS:
-            if spec.is_oauth or spec.is_transcription_only:
+            if spec.is_oauth or spec.is_transcription_only or spec.name in legacy_connections:
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
@@ -684,6 +705,10 @@ class Config(BaseSettings):
 
         for attr_name, p in (self.providers.model_extra or {}).items():
             if isinstance(p, ProviderConfig) and p.api_base:
+                return p, attr_name
+
+        for attr_name, p in legacy_connections.items():
+            if p.api_base:
                 return p, attr_name
 
         return None, None
@@ -732,7 +757,7 @@ class Config(BaseSettings):
             return p.api_base
         if name:
             spec = find_by_name(name)
-            if spec and spec.default_api_base:
+            if spec and spec.default_api_base and (p is None or not spec.uses_legacy_custom_config(p)):
                 return spec.default_api_base
         return None
 

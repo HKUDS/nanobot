@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
+import { finishSessionTransition } from "@/components/thread/session-transition";
 import "./theme-transition.css";
 
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -93,6 +94,7 @@ export function useTheme(): {
     // Same-palette choices, such as switching to System, must remain selectable.
     if (changesPalette) {
       if (switchTimer.current !== null || viewTransition.current !== null) return;
+      finishSessionTransition();
       root.dataset.themeTransition = next;
       switchTimer.current = setTimeout(() => {
         switchTimer.current = null;

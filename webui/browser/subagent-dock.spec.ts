@@ -702,7 +702,7 @@ for (const width of [1440, 390]) {
     await trigger.click();
     await settledMotion(page.getByTestId("subagent-task-dock"));
     const input = page.getByRole("textbox").first();
-    for (const [query, inserted] of [["/", "/history"], ["@ref", "@reference "]]) {
+    for (const [query, inserted] of [["/", "/inspect"], ["@ref", "@reference "]]) {
       await input.fill(query);
       const option = page.getByRole("option").first();
       await expect(option).toBeVisible();

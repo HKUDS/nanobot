@@ -2,242 +2,121 @@
 
 <!-- Meta description: Create, run, and manage nanobot scheduled automations, local triggers, and heartbeat-backed background checks. -->
 
-Automations are agent turns that run later in a linked topic. Use them when nanobot should do work without someone actively typing: reminders, recurring checks, nightly summaries, CI follow-ups, local script reports, or webhook-driven events.
+Automations let nanobot run tasks on its own—reminders, daily summaries, CI follow-ups, local script reports, or quiet background checks.
 
-Create automations from the chat channel or WebUI topic where the result should appear. That lets nanobot keep the right session history, workspace, and reply target.
+Always create an automation from the WebUI topic or chat channel where you want its replies to appear. Keep `nanobot gateway` running (your WebUI or TUI already runs one; use `nanobot gateway --background` to keep it alive after closing the terminal).
 
 ## Choose an Automation Type
 
-| Type | Starts from | Best for | Created with |
+| Type | Starts from | Best for | How to create |
 |---|---|---|---|
-| Scheduled automation | Time, interval, or cron expression | Recurring reminders, scheduled summaries, one-time future tasks | Ask nanobot in the target topic to schedule it with the `cron` tool |
-| Local trigger | A local `nanobot trigger ...` command | CI jobs, webhooks, shell scripts, generated reports | `/trigger <name>` in the target topic |
-| Heartbeat | Protected system schedule | Quiet recurring checks that should only report useful results | Edit `<workspace>/HEARTBEAT.md` |
-
-The two user-created automation types are scheduled automations and local triggers. Heartbeat uses the same background service but is system-managed and protected from normal automation edits.
-
-## Before You Create One
-
-Keep the gateway running. Your WebUI or TUI already uses one; you do not need a second gateway. To keep it alive after closing interactive launchers, run `nanobot gateway --background` with the same instance selectors, or use `/detach` in the TUI. The gateway owns background delivery for chat apps, WebUI topics, scheduled automations, local triggers, heartbeat, and Dream jobs.
-
-Use the same workspace and config for the gateway and any process that sends local trigger messages. If you run multiple nanobot instances, pass the matching `--config` or `--workspace` option to `nanobot trigger`.
-
-Create each automation from the target topic. An automation without a linked topic cannot be enabled or run from the WebUI because nanobot would not know where to deliver the turn.
+| **Scheduled automation** | A time, interval, or cron schedule | Reminders, daily reports, one-time future tasks | Ask nanobot in the target chat |
+| **Local trigger** | Running `nanobot trigger ...` from a script or webhook | CI failures, local scripts, external event alerts | Send `/trigger <name>` in the target chat |
+| **Heartbeat** | Built-in periodic check | Quiet background monitoring that only messages you when action is needed | Edit `<workspace>/HEARTBEAT.md` |
 
 ## Scheduled Automations
 
-Scheduled automations are created by the agent's `cron` tool. In practice, ask nanobot from the target chat or WebUI topic:
+To create a scheduled task, just ask nanobot in the chat where you want the results delivered:
 
 ```text
 Every weekday at 9am, check open pull requests and summarize blockers here.
 ```
 
-or:
-
 ```text
 Tomorrow at 4pm, remind me to send the release notes.
 ```
 
-The cron tool supports interval schedules, cron expressions, and one-time scheduled tasks. Cron expressions can include an IANA timezone such as `America/Vancouver`; otherwise nanobot uses the runtime default timezone.
+- **Schedules:** Supports one-time dates, recurring intervals, and cron expressions (with optional IANA timezones like `America/Vancouver`).
+- **Delivery:** By default, nanobot sends the final reply back to the chat where the task was created—you do not need to mention a chat ID or channel name. If you want a task to send to additional chats or recipients, say so explicitly in the instructions.
+- **Edit, pause, or inspect runs:** You can manage tasks right in chat—for example, *"Move my daily report from 9am to 10am"*, *"Pause my daily report"*, or *"Show the last five runs of my daily report"*—or use the WebUI **Automations** view.
 
-Scheduled automations normally deliver the result back to the session where they were created. Use them for work that should run on a predictable schedule and report each run.
+### Change the chat for a scheduled task
 
-Write what the task should do, such as "Remind me to drink water". nanobot sends the final reply to the task's saved chat. You do not need to put a channel, chat ID, or a `message` tool call in the instructions for that reply.
+To move a scheduled task to a different chat:
 
-For separate sends, specify the recipients in the instructions. The agent can still use `message` to send to other chats, send to several recipients, or attach files. Existing tasks that explicitly request this tool remain supported.
+1. Open the task in WebUI **Automations**.
+2. Pick a new destination under **Run and reply in** (chat-app destinations appear once their channel is running and nanobot has received a message there).
+3. Review the task instructions—click **Edit instructions** if you need to update any hardcoded destination text.
+4. Click **Confirm change** (or **Save and change**).
 
-Writing "send to WhatsApp" in the instructions does not change the task's saved chat. Its normal reply still returns to that chat. A separate send requires the agent to call `message` with the other destination. For a fixed destination, create the task in that chat or use [Change the Chat for a Scheduled Task](#change-the-chat-for-a-scheduled-task). Keep explicit `message` instructions when you want separate sends or several recipients.
-
-If a result does not arrive, check that the task finished, then check its saved chat and destination. For a separate send, review the run's `message` calls and the gateway's channel send errors. `Turn completed` means the task finished; it does not confirm that the chat service delivered the message. A successful `message` result means nanobot accepted it for sending, not that it arrived. Check the destination before trying again to avoid duplicates.
-
-For background checks that should stay quiet unless there is something useful to report, use heartbeat instead of a user-created scheduled automation.
-
-Repetition alone does not select heartbeat. "Every day at 8am, remind me to drink water" needs a cron schedule. "Keep an eye on open issues and tell me when one needs attention" can use heartbeat if the check time is flexible. Heartbeat does not guarantee a requested time or interval.
-
-An upgrade does not overwrite your workspace's `AGENTS.md` or convert existing heartbeat entries into cron jobs. The current scheduling rules are included in the system prompt. If an old workspace rule directs all recurring tasks to heartbeat, update that rule too. To correct an existing reminder, remove its old heartbeat entry and create the cron task once. Check the task list to avoid duplicates.
-
-### Change a Scheduled Task
-
-Ask nanobot, "Move my daily report from 9am to 10am." The agent can use `cron(action="update", job_id="...", cron_expr="0 10 * * *")` without deleting and recreating the task. It can also update `name` or `message` independently. Supply one complete schedule when changing its timing; omitted fields keep their values. Cron edits retain the existing timezone unless another `tz` is supplied with the expression. Naive `at` values use the runtime default timezone.
-
-The task keeps its ID, linked chat, execution history, enabled state, and automatic-deletion setting. A paused task stays paused. Changing only the name or instruction preserves the next run time. Existing tasks configured to delete after a one-time run still do so; tasks configured to remain keep that behavior. System-managed tasks remain protected. Invalid updates leave the task unchanged.
-
-### Pause and Resume a Scheduled Task
-
-Ask nanobot to pause a scheduled task instead of removing it. The agent can use `cron(action="disable", job_id="...")`, then `cron(action="enable", job_id="...")` to resume it with the same ID, schedule, chat, and run history. Use `cron(action="list", include_disabled=True)` to find paused tasks; the default list still shows only enabled jobs.
-
-Disabling affects future runs. It does not cancel a running task or recall an already queued result. System-managed heartbeat and Dream jobs remain protected; change their configuration instead.
-
-### Inspect Recent Runs
-
-Ask nanobot, "Show the last five runs of my daily report." The agent can use `cron(action="history", job_id="...", limit=5)` to read the retained execution time, status, duration, and error for that task. Results are newest first, using the task's timezone or the runtime default. The default is five records; `limit` accepts 1–20.
-
-This also works for disabled tasks and does not change their schedule or state. Only retained execution records are available: deleted jobs and automatically deleted one-time tasks cannot be queried. Run history does not include the generated reply or confirm message delivery.
-
-### Scheduled Result Delivery
-
-The gateway saves final scheduled messages before it accepts them into the outgoing queue. This includes explicit `message` calls in existing tasks. Each recipient has a separate delivery record. Progress, reasoning, and streaming events do not enter this queue. WebUI streaming and saved chat history keep their existing behavior. External channels receive a complete scheduled reply instead of a streamed reply. Ordinary chat streaming is unchanged.
-
-The queue cannot recover a send that the agent never requested. If an expected recipient has no delivery record, check the task's saved chat and the run's `message` calls first.
-
-If a channel reports that it has not sent any part of a message, the gateway retries every 30 seconds, for up to one hour after queue acceptance. It sends the saved message to the saved destination. It does not run the task or call the model again. A gateway restart resumes pending messages. Deleting or resetting the source chat cancels pending messages from that chat generation. Disabling a channel prevents its pending messages from being sent. Changing, pausing, or deleting a task affects future runs; it does not redirect or recall an already queued result.
-
-If a request times out after sending starts, or the gateway stops during a send, delivery is unknown. The gateway does not retry that message automatically: the service might already have accepted it. Check the destination before sending the result again. This is not an exactly-once delivery guarantee. Adapter or service-specific retries still follow their own protocol.
-
-Look for `Channel delivery` in the gateway log. The run ID links execution to each delivery ID:
-
-| Status | Meaning |
-|---|---|
-| `pending` | Saved locally; waiting for an attempt or a channel connection |
-| `sent` | The channel adapter completed its send; not a recipient read receipt |
-| `failed` | Not sent: expired, disabled channel, replaced source chat, or rejected destination/policy |
-| `unknown` | An interrupted or failed attempt might have reached the service; no automatic retry |
-
-The queue is stored in `delivery/outbox.sqlite3`, beside the active config file. Include this directory in instance backups; stop the gateway before copying it. It holds at most 256 pending messages, with a 1 MiB serialized limit per message. A full queue or storage error rejects the enqueue operation instead of reporting it as accepted. Terminal records discard message text and keep status for up to seven days, capped at 1,000 records. Existing job and session files are not converted. Older versions ignore this queue. After an upgrade, pending messages can resume only within the original one-hour limit.
+Future runs will use the new chat's history and reply there. Previous messages stay in the original chat. Note that members of the new chat will see future results, and moving a task does not isolate workspace files or shared memory.
 
 ## Local Triggers
 
-Local triggers let a local script or external service send a message into a specific nanobot session later.
+Local triggers let a shell script, CI job, or external webhook wake nanobot inside a specific chat.
 
-Create the trigger from the chat or WebUI topic where future messages should arrive:
+1. In the target chat or WebUI topic, create a trigger:
 
 ```text
 /trigger PR review
 ```
 
-nanobot replies with a trigger ID and a command shaped like:
+2. nanobot replies with a trigger ID and ready-to-use command:
 
 ```bash
 nanobot trigger trg_8K4P2Q9X "Review PR #4502"
 ```
 
-Replace the quoted text with the message nanobot should receive. For generated or longer content, pipe stdin:
+3. Run that command whenever an event happens, or pipe longer output through stdin:
 
 ```bash
 generate-report | nanobot trigger trg_8K4P2Q9X
 ```
 
-For multiple instances, use the same config or workspace selector as the gateway:
+If you run multiple nanobot instances, pass the same `--config` or `--workspace` (your configured agent workspace) used by that gateway:
 
 ```bash
-nanobot trigger --config ./bot-a/config.json trg_8K4P2Q9X "Nightly report"
 nanobot trigger --workspace ./bot-a/workspace trg_8K4P2Q9X "Nightly report"
 ```
 
-nanobot does not provide a built-in public webhook receiver for local triggers. If GitHub, CI, or another external system should wake nanobot, run your own small webhook service and have it call `nanobot trigger` after it builds the final message.
+> [!NOTE]
+> nanobot does not expose a public webhook server for local triggers. To connect GitHub, CI, or another external service, have your own small webhook receiver call `nanobot trigger`.
 
 ## Heartbeat
 
-Heartbeat is for recurring workspace checks that should usually stay quiet. It reads `<workspace>/HEARTBEAT.md`, executes active tasks, and sends only useful or actionable results to the most recently active chat target.
+Use **Heartbeat** for recurring checks that should stay silent unless something needs your attention—for example, watching a repo for failures or scanning an inbox for urgent messages. (Use a scheduled automation instead when you want a reminder at a specific time every day.)
 
-Use heartbeat for checks such as "watch this repo for important failures" or "periodically inspect this workspace and only tell me when action is needed." Use a scheduled automation instead when every run should produce a visible reminder or report.
+Edit `~/.nanobot/workspace/HEARTBEAT.md` (or ask nanobot to add a periodic check):
 
-Heartbeat is enabled by default when `nanobot gateway` starts. Configure it in [`configuration.md#gateway-heartbeat`](./configuration.md#gateway-heartbeat).
+```markdown
+## Active Tasks
 
-## Manage Automations
+- Check weather forecast and notify me only if storms are expected
+- Scan inbox for urgent emails and notify me if any are found
+```
 
-Use the WebUI Automations view to:
+Heartbeat is enabled by default while `nanobot gateway` is running and sends actionable results to your most recently active chat. Configure its interval or disable it in [`configuration.md#gateway-heartbeat`](./configuration.md#gateway-heartbeat).
 
-- filter by all, active, paused, needs-attention, or system jobs;
-- search by task name, message, trigger command, linked topic, schedule, or status;
-- sort by next run, last run, updated time, or name;
-- run scheduled automations now;
-- pause or resume, rename, or delete user-created automations;
-- copy the CLI command for local triggers;
-- inspect protected system automations without changing them.
+## Manage Automations in WebUI
 
-Local triggers do not have a WebUI "Run now" action because each run needs a message. Copy the `nanobot trigger ...` command from the WebUI and replace `"message"` with the content that should be delivered.
+Open **Automations** in the WebUI to:
 
-### Change the Chat for a Scheduled Task
+- Filter by all, active, paused, needs-attention, or system jobs.
+- Search by name, instructions, chat, schedule, or status (e.g. `chat:WeChat`, `status:paused`).
+- Run a scheduled automation immediately, pause/resume it, rename it, or delete it.
+- Copy the `nanobot trigger ...` command for a local trigger.
 
-Open a scheduled task in **Automations**. **Run and reply in** shows its saved chat, with the channel logo and name. WebUI chats use the same display names as the sidebar. A renamed chat keeps its identity and task binding. Chats with the same name show an `@handle` to help you tell them apart.
-
-To change the chat:
-
-1. Select another chat from **Run and reply in**.
-2. Review the task instructions, which are read-only by default. If they need changes, select **Edit instructions**. Remove recipients you no longer want, but keep intended separate sends. Members of the new chat can see future task messages and results.
-3. Select **Confirm change**. Wait for the saved confirmation.
-
-If you edit the instructions, the button becomes **Save and change**. Both changes are saved together; nothing is saved when you select **Edit instructions**. To change the task name or schedule, use **Edit** in the task details instead.
-
-Select **Cancel** before saving to return to the task without changes. After a successful save, select **Change back to** to review a return to the previous chat. You must confirm this change too. You can also select a previous chat from the list later. This changes future runs; it does not recall messages already sent.
-
-Future runs use the new chat's history and reply there by default. Previous messages stay in their original chat. Previous run results remain available. Changing the chat does not run the task, enable it, or change its schedule.
-
-You can discuss each new result in that same chat. Background task results also return there. If you delete that chat, nanobot asks you to confirm deletion of its scheduled tasks as well. Cancelling the deletion keeps the chat and tasks.
-
-The list shows chats available on this gateway that use the same workspace and access permissions. A chat-app destination appears only after its channel is running and nanobot has received a message there. If the chat you want is missing, first send nanobot a message in that chat, then confirm its channel is running. You cannot choose a raw recipient ID, a chat on another host, a system job, or a local trigger. Older gateway versions show this list as read-only.
-
-If a scheduled turn is running or queued, wait for it to finish before changing the chat. The current scheduler also rejects a change while another scheduled turn is active. If another editor changes the task, reopen the task and review the latest instructions. A rejected save leaves the draft visible.
-
-This changes the whole task chat, not a separate forwarding address. Explicit `message` tool instructions can still send elsewhere. Shared workspace files and memory remain shared; changing the chat does not create a new security boundary. The confirmation screen lets you edit instructions such as "send to the original chat" before you save. nanobot does not silently rewrite those instructions.
-
-### Back Up Before Downgrading
-
-Chat changes store a binding version and the session used by each previous run. Existing jobs do not need a manual migration when upgrading. Older nanobot versions can discard these new fields when they write the cron store. After a chat change, that can make old run results unavailable in the WebUI and remove protection against stale CLI updates.
-
-Before trying this feature, stop the gateway and other cron writers, then back up the complete `cron/` directory in the configured agent workspace (`~/.nanobot/workspace/cron/` by default), including `jobs.json` and `runs/`. For a downgrade after changing a chat, stop those processes again and restore that coherent pre-change cron backup. This also restores the old schedules and task settings; later changes are not included. Chat messages are not moved or deleted.
+Protected system jobs (such as Heartbeat and Dream) appear as read-only.
 
 ## Delivery and Reliability
 
-Automation storage and queue delivery belong to the gateway's configured agent workspace. Scheduled and triggered turns linked to WebUI/TUI chats use the chat's saved project context and access mode; chat-app turns use the gateway's configured workspace. The selected project can differ from the agent workspace that stores jobs, memory, and queues. Starting the TUI inside a project selects that project for the chat but does not by itself create a separate gateway instance. Select the matching configured agent workspace when invoking `nanobot trigger --workspace`, not merely the project directory. See [Multiple Instances](multiple-instances.md) when these need to be separate.
+Keep these behaviors in mind when relying on automations:
 
-Schedules do not replay missed occurrences after a gateway restart:
-
-| Schedule | Behavior after restart |
-|---|---|
-| One-time (`at`) | A time already in the past has no next run and is not automatically executed. Review the task and run it manually or create a replacement. |
-| Interval (`every`) | If the next run is still in the future and no more than one interval away, nanobot keeps that time. If it has already passed, that run is skipped and the next run is scheduled; missed runs are not replayed. |
-| Cron expression | The next matching time after restart is used; missed matches are not replayed. |
-
-Intervals are also recalculated after a run finishes, so a long-running task can shift its next interval. Use a cron expression for wall-clock scheduling, and keep the host awake and gateway running when timing matters. These rules concern scheduled jobs; queued local trigger messages have the separate recovery behavior below.
-
-Local trigger messages are written to a durable queue. If the gateway is not running yet, the message waits in that workspace. If the linked topic is already running a turn, the trigger waits until the session becomes idle instead of being injected into the active turn.
-
-The local trigger queue is at-least-once, not exactly-once. If the gateway exits after claiming a delivery but before the linked turn completes, the next gateway start requeues that delivery. External scripts should make repeated trigger messages safe. If the delivery reaches the agent and the turn fails, the delivery is marked failed instead of retrying forever.
-
-Each local trigger delivery writes an audit record under `<workspace>/triggers/runs`. Run one gateway consumer per workspace; the local queue is not a distributed multi-consumer queue.
-
-## Common Patterns
-
-For a nightly report, ask from the target topic:
-
-```text
-Every night at 9pm, review today's workspace changes and summarize anything I should handle tomorrow.
-```
-
-For a CI follow-up, create a trigger once:
-
-```text
-/trigger CI follow-up
-```
-
-Then have your CI or webhook adapter call:
-
-```bash
-nanobot trigger <trigger-id> "Build failed on main. Inspect the logs and suggest the next fix."
-```
-
-For a local report script:
-
-```bash
-generate-report | nanobot trigger <trigger-id>
-```
+- **Missed schedules after downtime:** If the gateway was stopped during a scheduled time, nanobot does **not** replay missed runs when it restarts. Recurring schedules simply wait for their next future run; one-time tasks in the past will not run automatically.
+- **Exact clock times:** Use a cron expression (not an interval) when exact wall-clock timing matters, since intervals recalculate after a run finishes.
+- **Retry on channel failure:** If a chat app is temporarily unreachable before a scheduled reply is sent, the gateway automatically retries for up to one hour (without re-running the model). If a send times out mid-flight, nanobot will not auto-retry to avoid duplicate messages—check the destination first.
+- **Local triggers:** Trigger messages wait in a durable workspace queue if the gateway is offline or if the target chat is busy. Delivery is **at-least-once** (a restart mid-run can replay a trigger), so external scripts should tolerate duplicate messages safely.
 
 ## Troubleshooting
 
-If an automation does not run, check that `nanobot gateway` is running, the automation is enabled, and it was created from a linked topic.
-
-If a local trigger waits forever, confirm the command uses the same workspace or config as the gateway.
-
-If a trigger message appears twice after a restart, treat it as expected at-least-once delivery and make the external message idempotent.
-
-If you need to edit, pause, resume, rename, delete, or inspect automations, use the WebUI Automations view.
+- **Automation never runs:** Confirm `nanobot gateway` is running, the automation is enabled, and it is linked to a chat.
+- **Local trigger sits waiting:** Make sure `nanobot trigger` uses the same `--config` or `--workspace` as the running gateway.
+- **Scheduled message did not arrive:** Check the task's run history in **Automations** and `nanobot gateway logs` for channel errors.
 
 ## Related Docs
 
-- [`webui.md#automations`](./webui.md#automations) for the browser management view
-- [`chat-commands.md#local-triggers`](./chat-commands.md#local-triggers) for `/trigger`
-- [`cli-reference.md#local-triggers`](./cli-reference.md#local-triggers) for `nanobot trigger`
-- [`configuration.md#gateway-heartbeat`](./configuration.md#gateway-heartbeat) for heartbeat settings
-- [`guides/long-running-ai-agent.md`](./guides/long-running-ai-agent.md) for long-running agent work
+- [WebUI Automations](./webui.md#automations)
+- [In-Chat Commands: Local Triggers](./chat-commands.md#local-triggers)
+- [CLI Reference: Local Triggers](./cli-reference.md#local-triggers)
+- [Configuration: Heartbeat](./configuration.md#gateway-heartbeat)
+- [Long-Running AI Agent Guide](./guides/long-running-ai-agent.md)

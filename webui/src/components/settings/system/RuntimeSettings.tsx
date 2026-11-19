@@ -11,6 +11,7 @@ import {
   StatusPill,
 } from "@/components/settings/shared/SettingsControls";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 import { getRuntimeHost, isNativeRuntime } from "@/lib/runtime";
 import type { NanobotFeatureInfo, SettingsPayload } from "@/lib/types";
 
@@ -38,6 +39,7 @@ export function RuntimeSettings({
   onInstallCapability: (name: string) => void;
 }) {
   const { t } = useTranslation();
+  const showToast = useToast();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const runtimeSurface = settings.surface ?? settings.runtime_surface;
   const runtimeHost = getRuntimeHost(runtimeSurface, settings.runtime_capabilities);
@@ -84,7 +86,11 @@ export function RuntimeSettings({
       const result = await action();
       setHostActionMessage({ target, message: successMessage(result) });
     } catch {
-      setHostActionMessage({ target, message: failureMessage });
+      if (showToast) {
+        showToast({ tone: "error", message: failureMessage, dedupeKey: `settings:runtime:${target}` });
+      } else {
+        setHostActionMessage({ target, message: failureMessage });
+      }
     } finally {
       setHostActionBusy(null);
     }

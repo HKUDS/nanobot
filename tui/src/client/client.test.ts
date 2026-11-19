@@ -1218,9 +1218,9 @@ describe("gateway protocol", () => {
       return Promise.resolve(new Response(JSON.stringify({
         commands: [
           {
-            command: "/history",
+            command: "/inspect",
             title: "History",
-            description: "Show recent messages",
+            description: "Inspect a session",
             arg_hint: "[n]",
             accepts_args: true,
             lifecycle: "side_channel",
@@ -1232,9 +1232,9 @@ describe("gateway protocol", () => {
 
     try {
       expect(await fetchSlashCommands("http://nanobot.test", "secret")).toEqual([{
-        command: "/history",
+        command: "/inspect",
         title: "History",
-        description: "Show recent messages",
+        description: "Inspect a session",
         argHint: "[n]",
         lifecycle: "side_channel",
         acceptsArgs: true,

@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RemoteInstances } from "@/components/remote/RemoteInstances";
 import { useRemoteConnections } from "@/components/remote/remote-context";
 import { RemoteConnectionsPage } from "@/components/remote/RemoteConnectionsPage";
+import { PairingCodePopup } from "@/components/pairing/PairingCodePopup";
+import { ToastProvider } from "@/components/ui/toast";
 import { Sidebar } from "@/components/Sidebar";
 import { HOST_BRIDGE } from "@/components/remote/host-bridge";
 import { readSelectedRemote, readRecentRemotes, rememberSelectedRemote, validateRemoteConnection, type RemoteConnection } from "@/lib/remote-instances";
@@ -44,11 +46,11 @@ function LocalShell({ collapsed = false, initialRemote = false }) {
     return () => window.removeEventListener("hashchange", route);
   }, []);
   return <>
-  <Sidebar collapsed={collapsed} sessions={[]} activeKey={null} loading={false} newChatActive={false}
+  <Sidebar collapsed={collapsed} sessions={[]} activeKey={null} loading={false}
     onNewChat={() => { if (connections?.managing) connections.selectLocal(); window.location.hash = "/new"; setRemotePage(false); }} onSelect={noop} onRequestDelete={noop} onTogglePin={noop}
     onRequestRename={async () => {}} onToggleArchive={noop} onToggleGroup={noop}
     onRequestRenameProject={noop} onNewChatInProject={noop} onOpenSettings={noop}
-    onOpenApps={noop} onOpenSkills={noop} onOpenAutomations={noop} onOpenChannels={noop}
+    onOpenApps={noop} onOpenAutomations={noop}
     onOpenSearch={noop} onToggleArchived={noop} />
   <main><div hidden={connections?.managing} aria-hidden={connections?.managing || undefined}>
     {remotePage ? <RemoteConnectionsPage onBackToChat={() => setRemotePage(false)} /> : <><p>Local conversations</p><textarea aria-label="Local draft" /></>}
@@ -58,6 +60,7 @@ function LocalShell({ collapsed = false, initialRemote = false }) {
 const view = (collapsed = false, initialRemote = false) => render(<RemoteInstances><LocalShell collapsed={collapsed} initialRemote={initialRemote} /></RemoteInstances>);
 
 beforeEach(async () => {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
   await i18n.changeLanguage("en");
   window.sessionStorage.clear(); window.localStorage.clear();
   window.history.replaceState(null, "", "#/new");
@@ -66,7 +69,12 @@ beforeEach(async () => {
   mocks.discover.mockReset().mockResolvedValue({ hosts: [], files: [], incomplete: false });
   mocks.inspect.mockReset().mockResolvedValue({ hostname: "team-host", candidates: [{ config_path: "~/.nanobot/config.json", runtime_user: "", service: "" }], incomplete: false });
   mocks.request.mockReset().mockImplementation(async (action: string) => {
-    if (action === "remote.connect") return connection;
+    if (action === "remote.connect") {
+      const current = await mocks.read.getMockImplementation()?.("local-token", []);
+      mocks.read.mockResolvedValue({ ...current, profiles: current.profiles.map((item: typeof profile) => item.id === profile.id
+        ? { ...item, connected: true, gateway_id: connection.gateway_id, health_check: 1 } : item) });
+      return connection;
+    }
     if (action === "remote.save") return { id: profile.id };
     if (action === "remote.disconnect") return { available: true, profiles: [profile] };
     return {};
@@ -149,6 +157,28 @@ describe("remote instance UX", () => {
     expect(within(dialog).queryByRole("textbox", { name: "SSH address" })).not.toBeInTheDocument();
     expect(readSelectedRemote()).toBeNull();
     expect(mocks.request).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["toast", "no provider", "pairing popup"])("reports an attempt to open the local gateway (%s)", async (surface) => {
+    mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, paired: true }] });
+    mocks.request.mockRejectedValueOnce(new Error("same_instance"));
+    const shell = <>
+      <LocalShell initialRemote />
+      {surface === "pairing popup" && <PairingCodePopup
+        requests={[{ code: "ABCD-EFGH", channel: "telegram", sender_id: "alice" }]}
+        total={1} busyCode={null} error={null} onApprove={noop} onDismiss={noop} />}
+    </>;
+    render(<RemoteInstances>{surface === "no provider" ? shell : <ToastProvider>{shell}</ToastProvider>}</RemoteInstances>);
+
+    const directory = await screen.findByRole("region", { name: i18n.t("remote.title") });
+    const server = await within(directory).findByRole("button", { name: "Team server ubuntu@example.test" });
+    fireEvent.click(server);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(i18n.t("remote.errors.same_instance"));
+    if (surface === "toast") expect(alert.closest("[data-toast-tone]")).toHaveAttribute("data-toast-tone", "error");
+    else expect(within(directory).getByRole("alert")).toBe(alert);
+    expect(server).toBeEnabled();
+    expect(readSelectedRemote()).toBeNull();
   });
 
   it.each([false, true])("renames an open server without reloading its view (paired: %s)", async (paired) => {
@@ -1312,17 +1342,18 @@ describe("remote instance UX", () => {
 
   it("tolerates transient health failures and covers, rather than reloads, the remote frame", async () => {
     let tick: (() => void) | undefined;
-    const setInterval = globalThis.setInterval;
-    vi.spyOn(window, "setInterval").mockImplementation((callback, delay) => {
-      if (delay === 5_000) tick = callback;
-      const timer = setInterval(callback, delay);
-      globalThis.clearInterval(timer);
+    const setTimeout = globalThis.setTimeout;
+    vi.spyOn(window, "setTimeout").mockImplementation((callback, delay) => {
+      const timer = setTimeout(callback, delay);
+      if (delay === 5_000) { tick = callback; globalThis.clearTimeout(timer); }
       return timer;
     });
     view(); await openDirectory();
     fireEvent.click(screen.getByRole("button", { name: "Team server ubuntu@example.test" }));
     const frame = await readyRemote();
     fireEvent.load(frame);
+    let check = 1;
+    mocks.read.mockImplementation(async () => ({ available: true, profiles: [{ ...profile, gateway_id: connection.gateway_id, health_check: ++check }] }));
     await act(async () => { tick?.(); });
     expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument();
     await act(async () => { tick?.(); });
@@ -1338,19 +1369,26 @@ describe("remote instance UX", () => {
   });
 
   it("rechecks on wake and network recovery without reloading or switching hosts", async () => {
-    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    let visibility: DocumentVisibilityState = "visible";
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
     const rendered = view(); await openDirectory();
     fireEvent.click(screen.getByRole("button", { name: "Team server ubuntu@example.test" }));
     const frame = await readyRemote();
-    mocks.read.mockClear();
+    let check = 1;
+    mocks.read.mockClear().mockImplementation(async (_token, ids: string[]) => {
+      if (ids.length) check++;
+      return { available: true, profiles: [{ ...profile, gateway_id: connection.gateway_id, health_check: check }] };
+    });
+    const probes = () => mocks.read.mock.calls.filter(([, ids]) => ids?.length);
     await act(async () => { window.dispatchEvent(new Event("online")); });
-    expect(mocks.read).toHaveBeenCalledTimes(1);
-    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
-    expect(mocks.read).toHaveBeenCalledTimes(2);
+    expect(probes()).toHaveLength(1);
+    act(() => { visibility = "hidden"; document.dispatchEvent(new Event("visibilitychange")); });
+    await act(async () => { visibility = "visible"; document.dispatchEvent(new Event("visibilitychange")); });
+    expect(probes()).toHaveLength(2);
     await screen.findByRole("region", { name: "Server connection lost" });
-    mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, connected: true }] });
+    mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, connected: true, gateway_id: connection.gateway_id, health_check: ++check }] });
     await act(async () => { window.dispatchEvent(new Event("pageshow")); });
-    expect(mocks.read).toHaveBeenCalledTimes(3);
+    expect(probes()).toHaveLength(3);
     expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument();
     expect(screen.getByTitle("nanobot on Team server")).toBe(frame);
     expect(readSelectedRemote()?.id).toBe(profile.id);

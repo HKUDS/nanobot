@@ -108,6 +108,7 @@ class ModelRequestWirePayload(_ChatWirePayload):
     usage: NotRequired[dict[str, int]]
     round_usages: NotRequired[list[dict[str, int]]]
     context_window_tokens: NotRequired[int]
+    response_input_ids: NotRequired[list[str]]
 
 
 class ContextCompactionWirePayload(_ChatWirePayload):
@@ -272,6 +273,8 @@ def project_notification(
         }
         if context_graph is not None:
             payload["context_graph"] = context_graph
+        if event.phase == "started" and event.response_input_ids:
+            payload["response_input_ids"] = list(event.response_input_ids)
         if event.usage is not None:
             payload["usage"] = event.usage.to_turn_dict()
         payload["round_usages"] = [usage.to_turn_dict() for usage in event.round_usages[-8:]]

@@ -54,6 +54,11 @@
     "model": "Example model",
     "disabledModel": "Disabled model"
   },
+  "codexSpeed": {
+    "title": "Codex speed",
+    "description": "Choose Fast or Ultrafast. Select the active speed again to turn it off.",
+    "options": "Show Ultrafast for supported models."
+  },
   "segmented": {
     "title": "Segmented choices",
     "description": "A short, always-visible set of choices.",
@@ -100,6 +105,15 @@
     "confirm": "Confirm removal",
     "removed": "Example removed.",
     "available": "Example available."
+  },
+  "toast": {
+    "title": "Toasts",
+    "description": "Short notices for errors, success, and actions you can undo.",
+    "options": "Mount ToastProvider and call useToast to show a notice. An optional action gives the user more time to respond.",
+    "showError": "Show error",
+    "error": "Could not save the example.",
+    "pending": "Example will be removed.",
+    "restored": "Example restored."
   },
   "sheet": {
     "title": "Side panels",

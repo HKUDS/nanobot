@@ -163,7 +163,8 @@ async def test_structured_calls_keep_arguments_out_of_text_and_preserve_validati
         call = result.tool_calls[0]
         assert (call.id, call.name, call.arguments) == ("call_fixture", "exec_session", arguments)
         assert tool.validate_params(call.arguments) == (
-            ["timeout_ms should be integer"] if isinstance(timeout_ms, dict) else []
+            [f"timeout_ms: {timeout_ms!r} is not of type 'integer', 'null'"]
+            if isinstance(timeout_ms, dict) else []
         )
         if stream:
             assert "".join(deltas) == text

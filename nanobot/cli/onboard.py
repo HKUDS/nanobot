@@ -1565,6 +1565,8 @@ def _select_quick_start_api_base(
 
 
 def _configure_quick_start_provider(config: Config) -> bool | object:
+    from nanobot.providers.registry import find_by_name
+
     while True:
         _show_quick_start_progress(1)
 
@@ -1578,6 +1580,14 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
         assert isinstance(answer, str)
         provider_name = provider_choices[answer]
         provider_info = _get_quick_start_provider_info().get(provider_name)
+        provider_config = getattr(config.providers, provider_name, None)
+        spec = find_by_name(provider_name)
+        if spec and provider_config and spec.uses_legacy_custom_config(provider_config):
+            console.print(
+                f"[yellow]! {answer} already names a custom connection. "
+                "Keep using it, or rename it and its model references before configuring the built-in provider.[/yellow]"
+            )
+            return False
 
         api_base = provider_info.default_api_base if provider_info else ""
         base_was_prompted = False
@@ -1618,7 +1628,6 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
                 api_base_result,
             )
 
-        provider_config = getattr(config.providers, provider_name, None)
         if provider_config is None:
             console.print(f"[red]Unknown provider: {provider_name}[/red]")
             return False
