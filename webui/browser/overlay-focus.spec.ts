@@ -53,6 +53,30 @@ test("model picker keyboard Escape returns visible focus to its trigger", async 
   expect(await trigger.evaluate((node) => node.matches(":focus-visible"))).toBe(true);
 });
 
+test("the model picker enters from the trigger after flipping below it", async () => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  const trigger = page.getByRole("button", { name: "First model", exact: true });
+  // Leave no room above the trigger so the preferred top placement must flip.
+  await trigger.evaluate(node => Object.assign(node.style, { position: "fixed", top: "4px" }));
+  await page.evaluate(() => {
+    document.addEventListener("animationstart", event => {
+      const node = event.target;
+      if (!(node instanceof HTMLElement) || node.getAttribute("role") !== "dialog") return;
+      const entry = node.getAnimations().find(animation => animation instanceof CSSAnimation);
+      if (!entry) return;
+      entry.pause();
+      entry.currentTime = 0;
+    });
+  });
+  await trigger.click();
+  const picker = page.getByRole("dialog");
+  await expect(picker).toHaveAttribute("data-side", "bottom");
+  await expect.poll(() => picker.evaluate(node => {
+    const transform = getComputedStyle(node).transform;
+    return transform === "none" ? 0 : new DOMMatrixReadOnly(transform).m42;
+  })).toBeLessThan(0);
+});
+
 test("model picker management handoff keeps focus in the new dialog", async () => {
   await page.getByRole("button", { name: "First model", exact: true }).click();
   await settleClose(() => page.getByRole("button", { name: "Manage presets" }).click());

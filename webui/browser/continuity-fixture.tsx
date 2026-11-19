@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 
+import { FileActions } from "@/components/FileActions";
 import { Button } from "@/components/ui/button";
 import { Disclosure } from "@/components/ui/disclosure";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -7,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { sidePanelSurfaceClassName } from "@/components/ui/floating-surface";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SidebarPanel } from "@/components/ui/sidebar-panel";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export function ContinuityFixture() {
   const [open, setOpen] = useState(false);
@@ -14,6 +16,17 @@ export function ContinuityFixture() {
   const close = () => { setOpen(false); trigger.current?.focus(); };
   return <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-5 py-12">
     <h1 className="text-title">Interaction continuity</h1>
+    <div className="fixed right-4 top-1 z-10 flex gap-2">
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild><Button>Help</Button></TooltipTrigger>
+          <TooltipContent side="top">Keyboard help</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <FileActions path="notes/report.md" metadata={{ path: "notes/report.md", relative_path: "notes/report.md" }}>
+        <Button>Report file</Button>
+      </FileActions>
+    </div>
     <div className="flex flex-wrap gap-3">
       <DropdownMenu>
         <DropdownMenuTrigger asChild><Button variant="outline">Conversation actions</Button></DropdownMenuTrigger>
