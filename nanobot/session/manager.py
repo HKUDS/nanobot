@@ -35,9 +35,6 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T")
 SESSION_CACHE_MAX_SIZE = 128
-_MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
-_LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
-_TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
 _SESSION_PREVIEW_MAX_CHARS = 120
 _FORK_VOLATILE_METADATA_KEYS = {
     "_stopped_at_iteration_limit",
@@ -51,22 +48,6 @@ _FORK_VOLATILE_METADATA_KEYS = {
     "title",
     "title_user_edited",
 }
-
-
-def _sanitize_assistant_replay_text(content: str) -> str:
-    """Remove internal replay artifacts that the model may have copied before.
-
-    These strings are useful as runtime/session metadata, but when they appear
-    in assistant examples they become demonstrations for the model to repeat.
-    """
-    content = _MESSAGE_TIME_PREFIX_RE.sub("", content, count=1)
-    lines = [
-        line
-        for line in content.splitlines()
-        if not _LOCAL_IMAGE_BREADCRUMB_RE.match(line)
-        and not _TOOL_CALL_ECHO_RE.match(line)
-    ]
-    return "\n".join(lines).strip()
 
 
 def _text_preview(content: object) -> str:
@@ -85,7 +66,6 @@ def _text_preview(content: object) -> str:
         text = " ".join(parts)
     else:
         return ""
-    text = _sanitize_assistant_replay_text(text)
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) > _SESSION_PREVIEW_MAX_CHARS:
         text = text[: _SESSION_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
@@ -259,8 +239,6 @@ class Session:
                 message = public_history_message(message)
             content = message.get("content", "")
             role = message.get("role")
-            if role == "assistant" and isinstance(content, str):
-                content = _sanitize_assistant_replay_text(content)
             cli_apps = cast(object, message.get("cli_apps"))
             if (
                 include_runtime_context

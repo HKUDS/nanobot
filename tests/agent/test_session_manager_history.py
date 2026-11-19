@@ -89,6 +89,17 @@ def test_list_sessions_includes_user_preview(tmp_path):
     assert rows[0]["preview"] == "帮我总结一下 OpenAI 的最新硬件计划"
 
 
+def test_list_sessions_previews_literal_image_marker_as_text(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-image-marker")
+    marker = "[image: /tmp/example.png]"
+    session.add_message("user", marker)
+    session.add_message("assistant", "That's an image marker.")
+    manager.save(session)
+
+    assert manager.list_sessions()[0]["preview"] == marker
+
+
 def test_list_sessions_bounds_preview_scan(tmp_path):
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:chat-long-preview")
@@ -662,24 +673,30 @@ def test_get_history_does_not_paste_assistant_media_paths_into_replay():
     assert history == [{"role": "assistant", "content": "来了 🎨"}]
 
 
-def test_get_history_sanitizes_existing_assistant_replay_artifacts():
-    session = Session(key="test:polluted-assistant")
-    session.messages.append(
-        {
-            "role": "assistant",
-            "content": (
-                "[Message Time: 2026-05-09 00:33:48]\n"
-                "来了 🎨\n"
-                "[image: /home/user/.nanobot/media/generated/img_old.png]\n\n"
-                "generate_image(\"16:9\")\n"
-                "message(\"来了 🎨\")"
-            ),
-        }
+def test_get_history_preserves_assistant_text_verbatim():
+    session = Session(key="test:assistant-example")
+    draft = 'message("欢迎加入")'
+    image_marker = "[image: /tmp/example.png]"
+    example = (
+        "[Message Time: 2026-05-09 00:33:48]\r\n"
+        "Here is the photo delivery example:\r\n"
+        '    generate_image("16:9")\r\n'
+        '    message("来了 🎨")\r\n'
     )
+    session.add_message("user", "Draft a welcome message.")
+    session.add_message("assistant", draft)
+    session.add_message("user", "Show a photo delivery example.")
+    session.add_message("assistant", example)
+    session.add_message("user", "Repeat the image marker exactly.")
+    session.add_message("assistant", image_marker)
 
-    history = session.get_history(max_messages=500)
+    history = session.get_history()
 
-    assert history == [{"role": "assistant", "content": "来了 🎨"}]
+    assert [message["content"] for message in history if message["role"] == "assistant"] == [
+        draft,
+        example,
+        image_marker,
+    ]
 
 
 def test_get_history_respects_max_tokens(monkeypatch):
