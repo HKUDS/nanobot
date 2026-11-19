@@ -461,6 +461,59 @@ async def test_attach_exposes_the_session_canonical_model_preset(bus, tmp_path) 
     }
 
 
+@pytest.mark.parametrize("persisted", [True, False])
+async def test_reattach_during_terminal_write_observes_the_end(
+    history, bus, start_listener, monkeypatch, persisted: bool,
+) -> None:
+    channel = _ch(bus, session_manager=history.sessions)
+    port, _ = await start_listener(channel)
+    chat_id = "reconnect-during-terminal"
+    turn_id = "turn-1"
+    metadata = {"webui": True, WEBUI_TURN_METADATA_KEY: turn_id, WEBSOCKET_TURN_OWNER_METADATA_KEY: "owner"}
+    await wth.publish_turn_run_status(
+        MessageBus(), InboundMessage(channel="websocket", sender_id="test", chat_id=chat_id,
+                                     content="question", metadata=metadata),
+        "running",
+    )
+    writing, release = asyncio.Event(), asyncio.Event()
+
+    async def persist_terminal(*args, **kwargs):
+        writing.set()
+        await release.wait()
+        return persisted
+
+    monkeypatch.setattr(channel._outbound._transcripts, "prepare_and_append", persist_terminal)
+    terminal = asyncio.create_task(channel.send(OutboundMessage(
+        channel="websocket", chat_id=chat_id, content="", metadata=metadata, event=TurnEndEvent(),
+    )))
+    token = channel.gateway.tokens.issue_token(300, audience="webui")
+    attach = json.dumps({"type": "attach", "chat_id": chat_id})
+    try:
+        await asyncio.wait_for(writing.wait(), timeout=2)
+        async with websockets.connect(f"ws://127.0.0.1:{port}/ws?token={token}") as client:
+            await client.send(attach)
+            attached = await _recv_ws_event(client, "attached")
+            release.set()
+            await terminal
+            async with asyncio.timeout(2):
+                events = []
+                while True:
+                    event = json.loads(await client.recv())
+                    if event["event"] == "session_updated":
+                        break
+                    events.append(event)
+            assert [event["turn_id"] for event in events if event["event"] == "turn_end"] == [turn_id]
+            assert attached["live_turn_ids"] == [turn_id]
+            await client.send(attach)
+            assert (await _recv_ws_event(client, "attached"))["live_turn_ids"] == []
+            # Keeping an incomplete history marker must not assert liveness.
+            assert wth.websocket_turn_id(chat_id) == (None if persisted else turn_id)
+    finally:
+        release.set()
+        await terminal
+        wth.clear_websocket_turns(chat_id)
+
+
 @pytest.mark.asyncio
 async def test_temporary_chat_is_transient_and_discarded(history, bus, tmp_path) -> None:
     sessions = history.sessions
@@ -5953,7 +6006,8 @@ def test_parse_envelope_rejects_legacy_and_garbage() -> None:
     assert _parse_envelope('{"type":123}') is None
 
 
-def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
+@pytest.mark.parametrize("retired", [False, True])
+def test_sessions_list_reports_only_live_runs(monkeypatch, retired: bool) -> None:
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
@@ -6000,7 +6054,10 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
 
     wth.clear_websocket_turns("chat-1")
     try:
-        asyncio.run(_register_running_turn("chat-1", 1_700_000_000.0))
+        asyncio.run(_register_running_turn("chat-1", 1_700_000_000.0, owner="owner-1"))
+        if retired:
+            assert wth.mark_websocket_turn_transcript_persistence_failed("chat-1", "owner-1")
+            wth.clear_websocket_turn_if_current("chat-1", "owner-1", preserve_persistence_failure=True)
         req = Request("/api/sessions", Headers([("Authorization", "Bearer tok")]))
         resp = asyncio.run(channel.gateway.http._handle_sessions_list(req))
     finally:
@@ -6019,7 +6076,7 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
             "title": "Running",
             "preview": "work",
             "model_preset": "fast",
-            "run_started_at": 1_700_000_000.0,
+            **({} if retired else {"run_started_at": 1_700_000_000.0}),
             "project_locked": True,
             "handle": handle.public_payload(),
         }
