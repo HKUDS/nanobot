@@ -7,10 +7,10 @@ import threading
 from collections.abc import Callable, Iterator
 from contextlib import closing
 from dataclasses import asdict
-from types import SimpleNamespace
 
 import pytest
 
+from nanobot.config.schema import ModelPresetConfig
 from nanobot.llm_usage.context import current_llm_usage_source, llm_usage_source
 from nanobot.llm_usage.models import LLMCallRecord
 from nanobot.llm_usage.service import record_llm_call
@@ -473,13 +473,7 @@ async def test_fallback_provider_propagates_observer_to_every_leaf() -> None:
             ]
         )
     )
-    preset = SimpleNamespace(
-        model="fallback-model",
-        max_tokens=256,
-        temperature=0.2,
-        reasoning_effort=None,
-        context_window_tokens=4_096,
-    )
+    preset = ModelPresetConfig(model="fallback-model")
     provider = FallbackProvider(primary, [preset], lambda _preset: fallback)
     events: list[LLMCallRecord] = []
     provider.set_llm_call_observer(events.append)
