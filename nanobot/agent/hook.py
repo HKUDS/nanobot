@@ -92,15 +92,6 @@ class AgentHook:
     async def on_finally(self, context: AgentRunHookContext) -> None:
         pass
 
-    def on_inputs_taken(self, input_ids: tuple[str, ...]) -> None:
-        """Observe a nonempty, ordered batch of newly accepted user input IDs.
-
-        Called after the fresh input is prepared or follow-ups are appended to
-        the run transcript. History and model retries do not trigger it. Keep
-        handlers synchronous and nonblocking; enqueue work that needs I/O.
-        """
-        pass
-
     async def before_model_request(self) -> None:
         """Observe a prepared logical request, including recovery requests."""
         pass
@@ -185,8 +176,9 @@ AgentTurnHookFactory = Callable[[AgentTurnHookContext], AgentHook | None]
 class CompositeHook(AgentHook):
     """Fan-out hook that delegates to an ordered list of hooks.
 
-    Lifecycle notifications isolate per-hook exceptions unless a hook opts in
-    to propagation. ``finalize_content`` is a pipeline without isolation.
+    Error isolation: async methods catch and log per-hook exceptions
+    so a faulty custom hook cannot crash the agent loop.
+    ``finalize_content`` is a pipeline (no isolation — bugs should surface).
     """
 
     __slots__ = ("_hooks",)
@@ -217,17 +209,6 @@ class CompositeHook(AgentHook):
             except Exception:
                 logger.opt(exception=tool_log_content_allowed()).error(
                     "AgentHook.{} error in {}", method_name, type(h).__name__,
-                )
-
-    def on_inputs_taken(self, input_ids: tuple[str, ...]) -> None:
-        for hook in self._hooks:
-            try:
-                hook.on_inputs_taken(input_ids)
-            except Exception:
-                if getattr(hook, "_reraise", False):
-                    raise
-                logger.opt(exception=tool_log_content_allowed()).error(
-                    "AgentHook.on_inputs_taken error in {}", type(hook).__name__,
                 )
 
     async def before_model_request(self) -> None:

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agent.runner_helpers import make_run_spec
+from nanobot.agent.context_governance import ContextWindowExceededError
 from nanobot.agent.hook import AgentHookContext
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import AgentRunner
@@ -53,6 +54,73 @@ async def test_requests_arrive_before_runner_finishes_and_cancel_is_terminal():
     assert requests[0].request_id == requests[1].request_id
     assert [e.sequence for e in requests] == [1, 2]
     assert requests[1].usage is None
+
+
+@pytest.mark.asyncio
+async def test_started_identifies_the_inputs_in_the_request_being_answered():
+    requests = []
+    pending = []
+
+    async def publish(event):
+        if isinstance(event, ModelRequestEvent):
+            requests.append(event)
+
+    def user(input_id, content):
+        return {"role": "user", "content": content, "_meta": {"input_id": input_id}}
+
+    async def drain():
+        batch = pending.copy()
+        pending.clear()
+        return batch
+
+    async def provider_call(*, messages, **kwargs):
+        started = requests[-1]
+        assert started.phase == "started"
+        user_prompt = "\n".join(message["content"] for message in messages if message["role"] == "user")
+        if len(requests) == 1:
+            pending.extend([user("b", "second question"), user("c", "third question")])
+            assert "second question" not in user_prompt
+            assert started.response_input_ids == ("a",)
+            return LLMResponse(content="first answer")
+        assert "first question" in user_prompt  # Prior input is still context, not a response target.
+        assert "second question" in user_prompt and "third question" in user_prompt
+        assert started.response_input_ids == ("b", "c")
+        return LLMResponse(content="follow-up answer")
+
+    provider = MagicMock()
+    provider.chat_stream_with_retry = provider_call
+    run_spec = spec(provider, EventSink(publish), injection_callback=drain)
+    run_spec.initial_messages = [user("a", "first question")]
+    result = await AgentRunner().run(run_spec)
+
+    assert [(event.phase, event.response_input_ids) for event in requests] == [
+        ("started", ("a",)), ("completed", ()), ("started", ("b", "c")), ("completed", ()),
+    ]
+    answers = [message for message in result.messages if message["role"] == "assistant"]
+    assert [message["_meta"]["response_input_ids"] for message in answers] == [["a"], ["b", "c"]]
+
+
+@pytest.mark.asyncio
+async def test_rejected_prompt_never_starts_a_model_request(monkeypatch):
+    events = []
+
+    async def publish(event):
+        events.append(event)
+
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (600, "test-counter"),
+    )
+    provider = MagicMock()
+    provider.chat_stream_with_retry = AsyncMock()
+    run_spec = spec(provider, EventSink(publish), context_window_tokens=1_624, max_tokens=100)
+    run_spec.initial_messages = [{"role": "user", "content": "hi", "_meta": {"input_id": "a"}}]
+
+    with pytest.raises(ContextWindowExceededError):
+        await AgentRunner().run(run_spec)
+
+    provider.chat_stream_with_retry.assert_not_awaited()
+    assert not any(isinstance(event, ModelRequestEvent) for event in events)
 
 
 @pytest.mark.asyncio

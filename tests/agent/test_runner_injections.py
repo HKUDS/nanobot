@@ -8,7 +8,7 @@ import pytest
 
 from agent.runner_helpers import make_run_spec
 from agent.session_helpers import run_session, visible_message
-from nanobot.agent.context import ContextBuilder, TranscriptInput
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.session_inbox import SessionInbox
 from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
@@ -286,66 +286,6 @@ async def test_checkpoint1_injects_after_tool_execution():
     last_messages = captured_messages[-1]
     injected = [m for m in last_messages if m.get("role") == "user" and m.get("content") == "follow-up question"]
     assert len(injected) == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("terminal", [False, True], ids=["regular", "terminal"])
-async def test_on_inputs_taken_reports_fresh_batches_at_handoff(tmp_path, terminal):
-    from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunner
-
-    observed = []
-    batch = [
-        {"role": "user", "content": "first follow-up", "_meta": {"input_id": "follow-up-a"}},
-        {"role": "user", "content": " ", "_meta": {"input_id": "blank"}},
-        {"role": "user", "content": "unidentified"},
-        {"role": "user", "content": "second follow-up", "_meta": {"input_id": "follow-up-b"}},
-    ]
-
-    class RecordHandoff(AgentHook):
-        def on_inputs_taken(self, input_ids: tuple[str, ...]) -> None:
-            observed.append(("taken", input_ids))
-
-        async def after_iteration(self, context: AgentHookContext) -> None:
-            observed.append(("finished", context.iteration))
-
-    calls = 0
-
-    async def respond(**_kwargs):
-        nonlocal calls
-        observed.append(("request", calls))
-        calls += 1
-        return LLMResponse(content="answer")
-
-    async def drain():
-        if calls != 1:
-            return []
-        inputs = list(batch)
-        batch.clear()
-        return inputs
-
-    provider = MagicMock(chat_stream_with_retry=respond)
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-    result = await AgentRunner().run(make_run_spec(
-        provider, initial_messages=None, tools=tools, model="test-model",
-        max_iterations=3, max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=RecordHandoff(),
-        transcript_input=TranscriptInput(
-            history=[{"role": "user", "content": "previous prompt", "_meta": {"input_id": "history"}}],
-            current_message="current prompt", input_metadata={"input_id": "current"},
-        ),
-        transcript_builder=ContextBuilder(tmp_path).build_transcript,
-        injection_callback=drain if not terminal else None,
-        terminal_injection_callback=drain if terminal else None,
-    ))
-
-    assert observed == [
-        ("taken", ("current",)), ("request", 0),
-        ("taken", ("follow-up-a", "follow-up-b")), ("finished", 0),
-        ("request", 1), ("finished", 1),
-    ]
-    assert result.had_injections
 
 
 @pytest.mark.asyncio
