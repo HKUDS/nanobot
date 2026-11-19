@@ -247,14 +247,12 @@ class TestBuildUserContent:
         builder = _builder(tmp_path)
         result = builder.build_user_content("hello", [str(png)])
         assert isinstance(result, list)
-        assert len(result) == 3
-        assert result[0] == {"type": "text", "text": f"[image: {png}]"}
-        assert result[1]["type"] == "image_url"
-        assert result[1]["image_url"]["url"].startswith("data:image/png;base64,")
-        assert result[2]["type"] == "text"
-        assert result[2]["text"] == "hello"
+        assert len(result) == 2
+        assert result[0]["type"] == "image_url"
+        assert result[0]["image_url"]["url"].startswith("data:image/png;base64,")
+        assert result[1] == {"type": "text", "text": "hello"}
 
-    def test_images_keep_paired_paths_in_provider_visible_content(self, tmp_path):
+    def test_images_convert_to_structured_provider_content(self, tmp_path):
         from nanobot.providers.base import LLMProvider
         from nanobot.providers.openai_responses.converters import convert_user_message
 
@@ -266,17 +264,8 @@ class TestBuildUserContent:
         converted = convert_user_message(clean["content"])["content"]
         image_indexes = [index for index, block in enumerate(converted) if block["type"] == "input_image"]
         assert len(image_indexes) == 2
-        for index, path in zip(image_indexes, paths, strict=True):
-            assert index > 0
-            assert converted[index - 1] == {"type": "input_text", "text": f"[image: {path}]"}
-        assert converted[-1] == {"type": "input_text", "text": "compare these"}
-
-    def test_image_meta_includes_path(self, tmp_path):
-        png = tmp_path / "test.png"
-        png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
-        builder = _builder(tmp_path)
-        result = builder.build_user_content("hello", [str(png)])
-        assert result[1]["_meta"]["path"] == str(png)
+        assert image_indexes == [0, 1]
+        assert converted[2:] == [{"type": "input_text", "text": "compare these"}]
 
 
 class TestBuildSystemPrompt:

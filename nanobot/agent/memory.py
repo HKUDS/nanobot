@@ -24,15 +24,16 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.runtime_context import public_history_messages
+from nanobot.session.image_attachments import replay_user_image_blocks
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
 from nanobot.utils.gitstore import MEMORY_CONTENT_PATHS, MEMORY_WIKI_PATH, GitStore
 from nanobot.utils.helpers import (
     atomic_write_lines,
     build_assistant_message,
-    content_with_media_breadcrumbs,
     ensure_dir,
     estimate_prompt_tokens_chain,
+    stringify_text_blocks,
     strip_think,
     truncate_text,
     truncate_text_to_tokens,
@@ -615,11 +616,11 @@ class MemoryStore:
     def _format_messages(messages: list[dict[str, Any]]) -> str:
         lines: list[str] = []
         for message in messages:
-            content = content_with_media_breadcrumbs(
-                message.get("role"),
-                message.get("content", ""),
-                message.get("media"),
-            )
+            content = message.get("content", "")
+            if message.get("role") == "user" and isinstance(content, list):
+                blocks = replay_user_image_blocks(content, load_images=False)
+                text = stringify_text_blocks(blocks)
+                content = blocks if text is None else text
             if not content:
                 continue
             tools_used = message.get("tools_used")

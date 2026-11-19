@@ -385,35 +385,24 @@ def test_window_cuts_mid_tool_group():
     assert history[0]["role"] == "user"
 
 
-def test_get_history_synthesizes_image_breadcrumb_from_media_kwarg():
-    """Persisted user turns carry image paths as a ``media`` kwarg; LLM
-    replay must still see an ``[image: path]`` breadcrumb so the assistant's
-    follow-up reply has a referent instead of trailing an empty user row."""
+def test_get_history_preserves_user_text_with_media_metadata():
     session = Session(key="test:media")
-    session.messages.append(
-        {"role": "user", "content": "look", "media": ["/m/a.png", "/m/b.png"]}
-    )
-    session.messages.append({"role": "assistant", "content": "nice"})
+    session.add_message("user", "look", media=["/m/pic.png"])
 
-    history = session.get_history(max_messages=500)
+    assert session.get_history() == [{"role": "user", "content": "look"}]
 
-    assert history == [
-        {"role": "user", "content": "look\n[image: /m/a.png]\n[image: /m/b.png]"},
-        {"role": "assistant", "content": "nice"},
+
+def test_get_history_marks_missing_image_snapshot():
+    session = Session(key="test:missing-image")
+    session.add_message("user", [
+        {"type": "image_attachment", "id": "a" * 64},
+        {"type": "text", "text": "look"},
+    ])
+
+    assert session.get_history()[0]["content"] == [
+        {"type": "text", "text": "[Previous image unavailable]"},
+        {"type": "text", "text": "look"},
     ]
-
-
-def test_get_history_synthesizes_breadcrumb_for_image_only_turn():
-    """Turns with no text but attached images must not replay as empty
-    strings — the LLM would otherwise see a bare user turn followed by an
-    unexplained assistant answer."""
-    session = Session(key="test:image-only")
-    session.messages.append({"role": "user", "content": "", "media": ["/m/pic.png"]})
-    session.messages.append({"role": "assistant", "content": "I see a cat"})
-
-    history = session.get_history(max_messages=500)
-
-    assert history[0] == {"role": "user", "content": "[image: /m/pic.png]"}
 
 
 def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
@@ -646,9 +635,6 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_archived_prefix(tm
 
 
 def test_get_history_ignores_media_kwarg_on_non_user_rows():
-    """``media`` only ever appears on user entries in practice, but the
-    synthesizer must be defensive: assistants / tools with list content
-    don't get the breadcrumb pasted on top."""
     session = Session(key="test:defensive")
     session.messages.append(
         {

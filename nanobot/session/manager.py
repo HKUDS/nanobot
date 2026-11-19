@@ -18,11 +18,11 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.display_history import HistoryFact, HistoryReader
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
+from nanobot.session.image_attachments import replay_user_image_blocks
 from nanobot.session.location import SessionLocation
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionTypes
 from nanobot.utils.helpers import (
-    content_with_media_breadcrumbs,
     estimate_message_tokens,
     find_legal_message_start,
     recent_message_start_index,
@@ -175,7 +175,7 @@ class Session:
     def last_archived(self, value: int) -> None:
         self.last_consolidated = value
 
-    def add_message(self, role: str, content: str, **kwargs: Any) -> None:
+    def add_message(self, role: str, content: str | list[_T], **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
             "role": role,
@@ -261,16 +261,6 @@ class Session:
             role = message.get("role")
             if role == "assistant" and isinstance(content, str):
                 content = _sanitize_assistant_replay_text(content)
-            # Synthesize an ``[image: path]`` breadcrumb from the persisted
-            # ``media`` kwarg so LLM replay still sees *something* where the
-            # image used to be. Without this, an image-only user turn
-            # replays as an empty user message — the assistant's reply then
-            # looks like it's responding to nothing.
-            content = content_with_media_breadcrumbs(
-                role,
-                content,
-                message.get("media"),
-            )
             cli_apps = cast(object, message.get("cli_apps"))
             if (
                 include_runtime_context
@@ -344,6 +334,11 @@ class Session:
             if start:
                 kept = kept[start:]
             out = kept
+        for entry in out:
+            if entry["role"] == "user":
+                entry["content"] = replay_user_image_blocks(
+                    entry["content"], load_images=include_runtime_context,
+                )
         return out
 
     def clear(self) -> None:

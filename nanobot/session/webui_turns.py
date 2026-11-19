@@ -41,6 +41,7 @@ from nanobot.providers.fallback_provider import FallbackModelObserver, FallbackM
 from nanobot.runtime_context import public_history_message
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.session.image_attachments import user_message_text
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.session_messages import (
     SESSION_MESSAGE_METADATA_KEY,
@@ -136,7 +137,7 @@ def _title_inputs(session: Session) -> tuple[str, str]:
             continue
         message = public_history_message(message)
         role = message.get("role")
-        content = message.get("content")
+        content = user_message_text(message.get("content")) if role == "user" else message.get("content")
         if not isinstance(content, str) or not content.strip():
             continue
         content = strip_think(content)

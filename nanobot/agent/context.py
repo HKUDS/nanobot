@@ -19,7 +19,7 @@ from nanobot.runtime_context import (
 from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.session.manager import Session
 from nanobot.session.summary import SessionSummary
-from nanobot.utils.helpers import detect_image_mime, image_placeholder_text, load_bundled_template
+from nanobot.utils.helpers import detect_image_mime, load_bundled_template
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -354,28 +354,26 @@ class ContextBuilder:
         image_paths: list[str] | None,
     ) -> str | list[dict[str, Any]]:
         """Build user message content from prefiltered image paths."""
-        if not image_paths:
-            return text
-
         media_blocks: list[dict[str, Any]] = []
-        for path in image_paths:
+        for path in image_paths or ():
             p = Path(path)
-            if not p.is_file():
+            try:
+                if not p.is_file():
+                    continue
+                raw = p.read_bytes()
+            except OSError:
                 continue
-            raw = p.read_bytes()
-            # Re-detect from the bytes used for the request: the file may have
-            # changed since attachment routing, and the data URL needs its MIME.
             mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
             if not mime or not mime.startswith("image/"):
                 continue
             b64 = base64.b64encode(raw).decode()
-            media_blocks.append({"type": "text", "text": image_placeholder_text(str(p))})
             media_blocks.append({
                 "type": "image_url",
                 "image_url": {"url": f"data:{mime};base64,{b64}"},
-                "_meta": {"path": str(p)},
             })
 
         if not media_blocks:
             return text
-        return media_blocks + [{"type": "text", "text": text}]
+        if text:
+            media_blocks.append({"type": "text", "text": text})
+        return media_blocks

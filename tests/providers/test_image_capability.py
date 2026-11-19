@@ -12,6 +12,7 @@ from nanobot.providers.base import (
 )
 from nanobot.providers.factory import make_provider, provider_signature
 from nanobot.providers.fallback_provider import FallbackProvider
+from nanobot.providers.images import REPLAYED_IMAGE_META
 
 _IMAGE = {"type": "image_url", "image_url": {"url": "data:image/png;base64,c3ludGhldGlj"}}
 
@@ -51,6 +52,39 @@ async def test_text_only_preset_rejects_images_before_request(stream, native):
     text_response = await call(messages=[{"role": "user", "content": "Text only"}])
     assert text_response.content == "accepted"
     assert len(provider.calls) == 1
+
+
+async def test_text_only_preset_omits_history_but_still_rejects_fresh_images():
+    provider = ImageProvider(False)
+    history = {**_IMAGE, "_meta": {REPLAYED_IMAGE_META: True}}
+    prompt = {"type": "text", "text": "Continue"}
+    messages = [{"role": "user", "content": [history, prompt]}]
+
+    response = await provider.chat_with_retry(messages=messages)
+    assert response.content == "accepted"
+    forwarded = provider.calls[0]["messages"][0]["content"]
+    assert forwarded == [
+        {"type": "text", "text": "[Previous image omitted: model does not support images]"},
+        prompt,
+    ]
+    assert messages[0]["content"] == [history, prompt]
+
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": [history, _IMAGE]}])
+    assert response.error_code == "unsupported_image"
+    assert len(provider.calls) == 1
+
+
+async def test_text_fallback_accepts_history_after_vision_provider_fails():
+    vision = ImageProvider(True, LLMResponse("unavailable", finish_reason="error", error_status_code=503))
+    text = ImageProvider(False)
+    chain = FallbackProvider(vision, [ModelPresetConfig(model="text", supports_images=False)], lambda _: text)
+    messages = [{"role": "user", "content": [{**_IMAGE, "_meta": {REPLAYED_IMAGE_META: True}}]}]
+
+    assert (await chain.chat(messages=messages)).content == "accepted"
+    assert vision.calls[0]["messages"] == messages
+    assert text.calls[0]["messages"][0]["content"] == [
+        {"type": "text", "text": "[Previous image omitted: model does not support images]"},
+    ]
 
 
 @pytest.mark.parametrize("stream", [False, True])

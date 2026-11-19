@@ -34,6 +34,7 @@ from nanobot.providers.compaction import (
     provider_compaction_scope,
 )
 from nanobot.providers.generation import GenerationSettings as GenerationSettings
+from nanobot.providers.images import replace_replayed_images
 from nanobot.providers.model_options import ModelOptions
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import sanitize_surrogates_deep
@@ -1384,6 +1385,8 @@ class LLMProvider(ABC):
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
+        if not self.supports_images:
+            kw = {**kw, "messages": replace_replayed_images(kw["messages"])}
         if error := self._image_input_error(kw["messages"], kw.get("provider_context")):
             return error
         call = self._safe_chat_stream if stream else self._safe_chat

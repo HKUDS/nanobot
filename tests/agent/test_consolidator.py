@@ -276,19 +276,13 @@ class TestTurnTranscriptSummary:
 
 
 class TestConsolidatorSummarize:
-    def test_format_messages_keeps_media_only_user_turn(self):
-        path = "/home/user/.nanobot/media/websocket/clip.mp4"
-
+    def test_format_messages_renders_user_text_and_image_blocks(self):
         formatted = MemoryStore._format_messages([
-            {
-                "role": "user",
-                "content": "",
-                "media": [path],
-                "timestamp": "2026-07-27",
-            }
+            {"role": "user", "content": "look", "media": ["/m/pic.png"]},
+            {"role": "user", "content": [{"type": "image_attachment", "id": "a" * 64}]},
         ])
 
-        assert formatted == f"[2026-07-27] USER: [image: {path}]"
+        assert formatted == "[?] USER: look\n[?] USER: [image]"
 
     async def test_archive_uses_captured_generation(
         self, consolidator, mock_provider, runtime

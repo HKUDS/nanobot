@@ -22,6 +22,7 @@ from nanobot.providers.base import (
     RetryStatusCallback,
 )
 from nanobot.providers.compaction import ProviderStateCommitError, provider_compaction_scope
+from nanobot.providers.images import replace_replayed_images
 from nanobot.providers.model_options import ModelOptions
 from nanobot.providers.oauth_catalog_cache import oauth_catalog_auth_rejected
 from nanobot.providers.registry import find_by_name
@@ -503,15 +504,19 @@ class FallbackProvider(LLMProvider):
         # continuation, so the incoming primary state remains reusable.
         preserve_primary_state = True
 
-        has_images = self._request_contains_images(kwargs["messages"], kwargs.get("provider_context"))
-        image_error = self._primary._image_input_error(kwargs["messages"], kwargs.get("provider_context"))
+        messages = kwargs["messages"]
+        text_messages = replace_replayed_images(messages)
+        primary_messages = messages if self._primary.supports_images else text_messages
+        provider_context = kwargs.get("provider_context")
+        has_fresh_images = self._request_contains_images(text_messages, provider_context)
+        image_error = self._primary._image_input_error(primary_messages, provider_context)
         if image_error is not None:
             primary_response = image_error
             primary_error = image_error.content or primary_error
         elif self._primary_available():
             primary_was_attempted = True
             response, primary_exception = await self._call_provider(
-                call, self._primary, kwargs
+                call, self._primary, {**kwargs, "messages": primary_messages}
             )
             if primary_exception is not None:
                 logger.warning(
@@ -565,7 +570,7 @@ class FallbackProvider(LLMProvider):
         last_response = primary_response
         primary_skipped = not primary_was_attempted
         for idx, fallback in enumerate(self._fallback_presets):
-            if has_images and not fallback.supports_images:
+            if has_fresh_images and not fallback.supports_images:
                 continue
             fallback_model = fallback.model
             if has_streamed is not None and has_streamed[0]:
@@ -613,6 +618,7 @@ class FallbackProvider(LLMProvider):
 
             fallback_kwargs = {
                 **kwargs,
+                "messages": messages if fallback.supports_images else text_messages,
                 "model": fallback_model,
                 "max_tokens": fallback.max_tokens,
                 "temperature": fallback.temperature,
