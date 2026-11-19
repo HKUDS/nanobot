@@ -261,6 +261,7 @@ interface ThreadShellProps {
   settingsSnapshot?: SettingsPayload | null;
   settingsLoading?: boolean;
   onOpenModelSettings?: () => void;
+  onInspectImagePreset?: (name: string) => void;
   onOpenSandboxSettings?: (target: "sandbox" | "sandbox-launcher") => void;
   skills?: SkillSummary[];
 }
@@ -401,6 +402,7 @@ export function ThreadShell({
   settingsSnapshot = null,
   settingsLoading = false,
   onOpenModelSettings,
+  onInspectImagePreset,
   onOpenSandboxSettings,
   skills = [],
 }: ThreadShellProps) {
@@ -802,6 +804,11 @@ export function ThreadShell({
     || settings?.agent.model_preset
     || "default"
   );
+  const imageInputBlocked = settings?.image_fallback_configured === false
+    && settings.model_presets.find((preset) => preset.name === activeModelPreset)?.supports_images === false;
+  const inspectImagePreset = onInspectImagePreset
+    ? () => onInspectImagePreset(activeModelPreset)
+    : onOpenModelSettings;
   useEffect(() => {
     setModelFallback(null);
     if (!chatId) return;
@@ -1295,6 +1302,8 @@ export function ThreadShell({
           onContinue={continueRecovery}
           onDismiss={dismissRecovery}
           onOpenSettings={onOpenModelSettings}
+          onInspectImagePreset={inspectImagePreset}
+          imageInputBlocked={imageInputBlocked}
         />
       ) : null}
       {streamError && !hasInlineDeliveryError(messages, streamError) ? (
@@ -1302,6 +1311,7 @@ export function ThreadShell({
           error={streamError}
           onDismiss={dismissStreamError}
           onOpenSettings={onOpenModelSettings}
+          onInspectImagePreset={inspectImagePreset}
         />
       ) : null}
       {sandboxNotice.issue && onOpenSandboxSettings && !streamError && !recoveryState ? (
@@ -1322,6 +1332,8 @@ export function ThreadShell({
           draftStore={draftStore}
           persistDraft={persistDraft}
           onSend={handleThreadSend}
+          imageInputBlocked={imageInputBlocked}
+          onInspectImagePreset={inspectImagePreset}
           disabled={!chatId}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
@@ -1380,6 +1392,8 @@ export function ThreadShell({
           draftStore={draftStore}
           persistDraft={persistDraft}
           onSend={handleWelcomeSend}
+          imageInputBlocked={imageInputBlocked}
+          onInspectImagePreset={inspectImagePreset}
           disabled={booting}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}

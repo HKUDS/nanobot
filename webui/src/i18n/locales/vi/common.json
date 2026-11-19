@@ -1067,7 +1067,8 @@
       "maxTokens": "Token đầu ra tối đa",
       "temperature": "Nhiệt độ",
       "imageInput": "Đầu vào hình ảnh",
-      "imageInputHelp": "Khi tắt, yêu cầu chứa hình ảnh sẽ bỏ qua cấu hình này.",
+      "imageInputHelp": "Chỉ bật nếu mô hình hỗ trợ hình ảnh. Khi tắt, yêu cầu chứa hình ảnh sẽ bỏ qua cấu hình này.",
+      "viewPreset": "Xem cấu hình",
       "reasoningEffort": "Mức suy luận",
       "convertTitle": "Chuyển thiết lập",
       "convertHelp": "Chuyển mô hình chính và dự phòng thành bộ thiết lập.",
@@ -2577,6 +2578,8 @@
       "timeoutTitle": "Yêu cầu tới nhà cung cấp mô hình đã hết thời gian chờ",
       "rateLimitTitle": "Đã đạt giới hạn yêu cầu của nhà cung cấp mô hình",
       "serverTitle": "Lỗi dịch vụ nhà cung cấp mô hình",
+      "imageInputTitle": "Đầu vào hình ảnh đã tắt cho cấu hình này",
+      "imageInputBody": "Yêu cầu này có hình ảnh. Hãy kiểm tra cấu hình hoặc dùng cấu hình hỗ trợ hình ảnh.",
       "unknownTitle": "Yêu cầu tới nhà cung cấp mô hình không thành công",
       "bodyWithAttempt": "Đã dừng sau {{attempts}} lần thử. Hãy thử lại sau hoặc chọn mô hình khác.",
       "body": "Hãy thử lại sau hoặc chọn mô hình khác."

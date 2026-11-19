@@ -1067,7 +1067,8 @@
       "maxTokens": "Maks. token keluaran",
       "temperature": "Temperatur",
       "imageInput": "Input gambar",
-      "imageInputHelp": "Jika dinonaktifkan, permintaan berisi gambar akan melewati preset ini.",
+      "imageInputHelp": "Aktifkan hanya jika model mendukung gambar. Jika dinonaktifkan, permintaan berisi gambar akan melewati preset ini.",
+      "viewPreset": "Lihat preset",
       "reasoningEffort": "Upaya penalaran",
       "convertTitle": "Konversi pengaturan",
       "convertHelp": "Ubah model utama dan cadangan menjadi preset.",
@@ -2577,6 +2578,8 @@
       "timeoutTitle": "Permintaan ke penyedia model kehabisan waktu",
       "rateLimitTitle": "Batas permintaan penyedia model tercapai",
       "serverTitle": "Kesalahan layanan penyedia model",
+      "imageInputTitle": "Input gambar dinonaktifkan untuk preset ini",
+      "imageInputBody": "Permintaan ini berisi gambar. Periksa preset ini atau gunakan preset yang mendukung gambar.",
       "unknownTitle": "Permintaan ke penyedia model gagal",
       "bodyWithAttempt": "Dihentikan setelah {{attempts}} percobaan. Coba lagi nanti atau pilih model lain.",
       "body": "Coba lagi nanti atau pilih model lain."

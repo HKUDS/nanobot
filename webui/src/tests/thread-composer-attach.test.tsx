@@ -88,6 +88,35 @@ beforeEach(() => {
 });
 
 describe("ThreadComposer — attachments", () => {
+  it("keeps a blocked image draft and opens the preset from the toast", async () => {
+    const file = pngFile("screenshot.png");
+    encodeImage.mockResolvedValueOnce(resolveReady(file));
+    const onSend = vi.fn();
+    const onInspectImagePreset = vi.fn();
+    const renderComposer = (imageInputBlocked: boolean) => (
+      <ThreadComposer {...{ onSend, imageInputBlocked, onInspectImagePreset }} />
+    );
+    const { rerender } = render(renderComposer(true), { wrapper: ToastProvider });
+    const textarea = screen.getByLabelText(/message input/i);
+    const input = textarea.closest("form")!.querySelector('input[type="file"]')!;
+    await act(async () => fireEvent.change(input, { target: { files: [file] } }));
+    fireEvent.change(textarea, { target: { value: "Please describe this" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Image input is off for this preset");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue("Please describe this");
+    expect(screen.getByTestId("composer-chip")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "View preset" }));
+    expect(onInspectImagePreset).toHaveBeenCalledOnce();
+
+    rerender(renderComposer(false));
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("Please describe this", [expect.objectContaining({
+      preview: expect.objectContaining({ name: file.name, kind: "image" }),
+    })], undefined);
+  });
+
   it("previews a picked image with size details on hover and includes its data url on send", async () => {
     const user = userEvent.setup();
     const file = pngFile("a.png", 100);
@@ -150,11 +179,11 @@ describe("ThreadComposer — attachments", () => {
     expect(onSend.mock.calls[0][1].map((attachment: { media: { name: string } }) => attachment.media.name)).toEqual([first.name]);
   });
 
-  it("attaches a picked PDF and includes its data url on send", async () => {
+  it("attaches and sends a PDF even when the preset does not accept images", async () => {
     const file = pdfFile();
     const onSend = vi.fn();
 
-    render(<ThreadComposer onSend={onSend} />);
+    render(<ThreadComposer onSend={onSend} imageInputBlocked />);
 
     const input = screen
       .getByLabelText(/message input/i)

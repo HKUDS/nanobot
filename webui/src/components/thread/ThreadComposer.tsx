@@ -238,6 +238,8 @@ interface ThreadComposerProps {
   modelOptionsControl?: ModelOptionsControlProps;
   onModelMenuOpenChange?: (open: boolean) => void;
   onModelPresetChange?: (name: string) => void;
+  imageInputBlocked?: boolean;
+  onInspectImagePreset?: () => void;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
@@ -571,6 +573,8 @@ export function ThreadComposer({
   modelOptionsControl,
   onModelMenuOpenChange,
   onModelPresetChange,
+  imageInputBlocked = false,
+  onInspectImagePreset,
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
@@ -1657,6 +1661,17 @@ export function ThreadComposer({
       return;
     }
     if (!canSend) return;
+    if (!isUserShell && imageInputBlocked && (readyImages.some(({ kind }) => kind === "image")
+      || queuedPrompt?.images?.some(({ kind }) => kind === "image"))) {
+      showToast?.({
+        message: t("errors.modelRequestFailed.imageInputTitle"),
+        tone: "error",
+        action: onInspectImagePreset
+          ? { label: t("settings.models.viewPreset"), run: onInspectImagePreset }
+          : undefined,
+      });
+      return;
+    }
     if (isUserShell && (images.length > 0 || normalizedQuotedContext)) {
       setInlineError(t("thread.composer.shell.removeContext"));
       return;
@@ -1780,7 +1795,10 @@ export function ThreadComposer({
     hasTouchPrimaryPointer,
     hasComposerContent,
     handleStop,
+    imageInputBlocked,
     images.length,
+    onInspectImagePreset,
+    showToast,
     isStreaming,
     isUserShell,
     maxTextBytes,

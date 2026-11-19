@@ -3012,3 +3012,6 @@ def test_preset_image_capability_persists_and_preserves_unrelated_edits(tmp_path
     assert json.loads(config_path.read_text(encoding="utf-8"))["modelPresets"]["Text"]["supportsImages"] is True
     defaulted = create_model_configuration({"name": ["Default vision"], "provider": ["openai"], "model": ["gpt-4.1"]})
     assert next(row for row in defaulted["model_presets"] if row["name"] == "Default vision")["supports_images"] is True
+    assert defaulted["image_fallback_configured"] is False
+    order = update_model_call_order({"order": [json.dumps(["Text", "Default vision"])]})
+    assert order["image_fallback_configured"] is True

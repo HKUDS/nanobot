@@ -83,6 +83,19 @@ function autoDynamicProviderPayload(
   };
 }
 
+it("opens the targeted backup preset and focuses its Image input switch", async () => {
+  const { payload, backupPreset } = settingsPayloadWithBackup();
+  payload.model_presets[1] = { ...backupPreset, supports_images: false };
+  requestMutationMock.mockResolvedValue(payload);
+  renderSettingsView({ initialSection: "models", initialSettings: payload, focusTarget: "image-input:backup" });
+
+  const editor = await screen.findByRole("dialog", { name: "backup" });
+  const toggle = within(editor).getByRole("switch", { name: "Image input" });
+  expect(toggle).not.toBeChecked();
+  await waitFor(() => expect(toggle).toHaveFocus());
+  expect(requestMutationMock).not.toHaveBeenCalledWith("settings.model_configuration.update", expect.anything(), expect.anything());
+});
+
 async function togglePresetEditor(name = "primary") {
   const row = await screen.findByTestId(`model-call-order-row-${name}`);
   fireEvent.click(within(row).getAllByRole("button")[0]);

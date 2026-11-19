@@ -1067,7 +1067,8 @@
       "maxTokens": "輸出 Token 上限",
       "temperature": "溫度",
       "imageInput": "圖像輸入",
-      "imageInputHelp": "關閉後，含圖片的請求會略過此預設。",
+      "imageInputHelp": "僅在模型支援圖片時開啟。關閉後，含圖片的請求會略過此預設。",
+      "viewPreset": "查看預設",
       "reasoningEffort": "推理強度",
       "convertTitle": "轉換設定",
       "convertHelp": "將主模型和備用模型轉為預設",
@@ -2577,6 +2578,8 @@
       "timeoutTitle": "模型供應商請求逾時",
       "rateLimitTitle": "模型供應商請求受到限制",
       "serverTitle": "模型供應商服務發生錯誤",
+      "imageInputTitle": "此預設的圖像輸入已關閉",
+      "imageInputBody": "這次請求包含圖片。請檢查此預設，或使用支援圖片的預設。",
       "unknownTitle": "模型供應商請求失敗",
       "bodyWithAttempt": "已嘗試 {{attempts}} 次，仍未成功。可稍後繼續或切換模型。",
       "body": "可稍後繼續或切換模型。"

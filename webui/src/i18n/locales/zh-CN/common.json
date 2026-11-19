@@ -877,7 +877,8 @@
       "maxTokens": "输出 Token 上限",
       "temperature": "温度",
       "imageInput": "图像输入",
-      "imageInputHelp": "关闭后，含图片的请求会跳过此预设。",
+      "imageInputHelp": "仅当模型支持图片时开启。关闭后，含图片的请求会跳过此预设。",
+      "viewPreset": "查看预设",
       "reasoningEffort": "推理强度",
       "convertTitle": "转换设置",
       "convertHelp": "将主模型和备用模型转为预设",
@@ -2759,6 +2760,8 @@
       "timeoutTitle": "模型提供商请求超时",
       "rateLimitTitle": "模型提供商请求受限",
       "serverTitle": "模型提供商服务异常",
+      "imageInputTitle": "此预设的图像输入已关闭",
+      "imageInputBody": "这次请求包含图片。请检查此预设，或使用支持图片的预设。",
       "unknownTitle": "模型提供商请求失败",
       "bodyWithAttempt": "已尝试 {{attempts}} 次，仍未成功。可稍后继续或切换模型。",
       "body": "可稍后继续或切换模型。"

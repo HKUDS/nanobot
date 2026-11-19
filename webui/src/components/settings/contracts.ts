@@ -46,4 +46,8 @@ export type ApplySettingsPayload = (
 ) => void;
 
 export type MaybeRestartHostEngine = (payload: RestartAwarePayload) => Promise<void>;
-export type SettingsFocusTarget = "sandbox" | "sandbox-launcher";
+export type SettingsFocusTarget = "sandbox" | "sandbox-launcher" | `image-input:${string}`;
+
+export function imageInputPresetFromFocus(target?: SettingsFocusTarget): string | undefined {
+  return target?.startsWith("image-input:") ? target.slice("image-input:".length) : undefined;
+}

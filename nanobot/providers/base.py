@@ -1044,7 +1044,7 @@ class LLMProvider(ABC):
             return None
         return LLMResponse(
             content="This model preset does not support image input. Select an image-capable preset in model settings.",
-            finish_reason="error", error_kind="invalid_request", error_code="unsupported_image",
+            finish_reason="error", error_kind="unsupported_image", error_code="unsupported_image",
             error_should_retry=False,
         )
 
@@ -1571,6 +1571,8 @@ class LLMProvider(ABC):
     @classmethod
     def public_error_kind(cls, response: LLMResponse) -> str:
         """Return a stable public category without exposing provider details."""
+        if response.error_kind == "unsupported_image":
+            return "unsupported_image"
         if response.primary_error_kind is not None:
             return response.primary_error_kind
         if cls.is_arrearage_response(response):

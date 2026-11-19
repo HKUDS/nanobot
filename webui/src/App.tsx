@@ -272,7 +272,11 @@ function readShellRoute(): ShellRoute {
       activeKey,
       temporary,
       settingsSection,
-      settingsFocus: settingsSection === "advanced" && (focus === "sandbox" || focus === "sandbox-launcher") ? focus : undefined,
+      settingsFocus: settingsSection === "advanced" && (focus === "sandbox" || focus === "sandbox-launcher")
+        ? focus
+        : settingsSection === "models" && focus?.startsWith("image-input:")
+          ? `image-input:${focus.slice("image-input:".length)}`
+          : undefined,
     };
   }
   if (path === "/apps") {
@@ -333,7 +337,7 @@ function shellRouteHash(route: ShellRoute): string {
   const params = new URLSearchParams();
   if (route.view === "settings" && route.settingsSection !== "overview") {
     params.set("section", route.settingsSection);
-    if (route.settingsSection === "advanced" && route.settingsFocus) params.set("focus", route.settingsFocus);
+    if (route.settingsFocus) params.set("focus", route.settingsFocus);
   }
   if (route.view === "apps" && route.settingsSection !== "apps") {
     params.set("section", route.settingsSection);
@@ -1890,6 +1894,11 @@ function Shell({
   const onOpenModelSettings = useCallback(() => {
     onOpenSettings("models");
   }, [onOpenSettings]);
+  const onInspectImagePreset = useCallback((name: string) => {
+    setSessionSearchOpen(false);
+    navigate({ view: "settings", activeKey, settingsSection: "models", settingsFocus: `image-input:${name}` });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
   const onOpenSandboxSettings = useCallback((target: SettingsFocusTarget) => {
     setSessionSearchOpen(false);
     navigate({ view: "settings", activeKey, settingsSection: "advanced", settingsFocus: target });
@@ -2693,6 +2702,7 @@ function Shell({
                             settingsSnapshot={settingsSnapshot}
                             settingsLoading={settingsLoading}
                             onOpenModelSettings={onOpenModelSettings}
+                            onInspectImagePreset={onInspectImagePreset}
                             onOpenSandboxSettings={onOpenSandboxSettings}
                             skills={skills}
                           />
@@ -2760,6 +2770,7 @@ function Shell({
                           settingsSnapshot={settingsSnapshot}
                           settingsLoading={settingsLoading}
                           onOpenModelSettings={onOpenModelSettings}
+                          onInspectImagePreset={onInspectImagePreset}
                           onOpenSandboxSettings={onOpenSandboxSettings}
                           skills={skills}
                         />

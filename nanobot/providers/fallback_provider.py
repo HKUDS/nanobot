@@ -701,7 +701,8 @@ class FallbackProvider(LLMProvider):
                 last_response,
                 preserve_provider_state_on_error=preserve_primary_state,
                 primary_error_kind=(
-                    self.public_error_kind(primary_response) if primary_response is not None else None
+                    self.public_error_kind(primary_response)
+                    if primary_response is not None and image_error is None else None
                 ),
             )
         # Primary was skipped and no fallback returned a response. Keep the result

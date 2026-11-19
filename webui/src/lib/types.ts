@@ -797,6 +797,7 @@ export interface SettingsPayload {
   }>;
   model_call_order: string[];
   model_call_order_editable: boolean;
+  image_fallback_configured?: boolean;
   /** Whether an actual legacy model configuration is available to convert. */
   model_configuration_migratable?: boolean;
   /** Host can resolve the default request API for an unsaved model configuration. */

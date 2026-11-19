@@ -9,6 +9,12 @@ export function resolveModelRequestFailureCopy(
   details: ModelRequestFailureDetails,
   t: TFunction,
 ): { title: string; body: string } {
+  if (details.errorKind === "unsupported_image") {
+    return {
+      title: t("errors.modelRequestFailed.imageInputTitle"),
+      body: t("errors.modelRequestFailed.imageInputBody"),
+    };
+  }
   let titleKey = "errors.modelRequestFailed.unknownTitle";
   if (details.errorKind === "billing") {
     titleKey = "errors.modelRequestFailed.billingTitle";

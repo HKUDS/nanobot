@@ -212,6 +212,7 @@ export function ModelsSettings({
   form,
   setForm,
   editingPresetName,
+  imageInputPreset,
   presetNameError,
   error,
   settings,
@@ -243,6 +244,7 @@ export function ModelsSettings({
   form: AgentSettingsDraft;
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
   editingPresetName: string;
+  imageInputPreset?: string;
   presetNameError: string | null;
   error?: string | null;
   settings: SettingsPayload;
@@ -286,6 +288,9 @@ export function ModelsSettings({
   });
   const editorTriggerRef = useRef<HTMLElement | null>(null);
   const presetNameInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLButtonElement>(null);
+  const openedImagePreset = useRef<string>();
+  const focusImageInput = useRef(false);
   const suggestedPresetNameRef = useRef<string | null>(null);
   const presetContextInitializedRef = useRef(false);
   const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
@@ -404,20 +409,11 @@ export function ModelsSettings({
     disabled: callOrderBusy,
     onReorder: (keys) => onChangeCallOrder(keys.map((key) => presetRows.find((row) => row.key === key)!.name)),
   });
-  const selectPreset = async (
+  const openPreset = (
     preset: SettingsPayload["model_presets"][number],
     rowKey: string,
   ) => {
-    setHideEditorReturnFocus(false);
-    editorTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const toggleCurrentPreset =
-      !creating && selectedPreset?.name === preset.name && activeEditorRowKey === rowKey;
-    if (edits.needsCompletion() && !(await edits.commit())) return;
     onSelectConfiguration(preset.name);
-    if (toggleCurrentPreset) {
-      setEditorOpen((open) => !open);
-      return;
-    }
     setForm((prev) => ({
       ...prev,
       modelPreset: preset.name,
@@ -437,6 +433,28 @@ export function ModelsSettings({
     setEditorRowKey(rowKey);
     setEditorOpen(true);
   };
+  const selectPreset = async (
+    preset: SettingsPayload["model_presets"][number],
+    rowKey: string,
+  ) => {
+    setHideEditorReturnFocus(false);
+    editorTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (edits.needsCompletion() && !(await edits.commit())) return;
+    if (!creating && selectedPreset?.name === preset.name && activeEditorRowKey === rowKey) {
+      setEditorOpen((open) => !open);
+    } else {
+      openPreset(preset, rowKey);
+    }
+  };
+
+  useEffect(() => {
+    if (openedImagePreset.current === imageInputPreset) return;
+    const row = presetRows.find(({ name }) => name === imageInputPreset);
+    openedImagePreset.current = imageInputPreset;
+    if (!row?.preset) return;
+    focusImageInput.current = true;
+    openPreset(row.preset, row.key);
+  });
 
   const moveCallOrderItem = (index: number, offset: -1 | 1) => {
     if (callOrderBusy) return;
@@ -575,6 +593,7 @@ export function ModelsSettings({
         description={t("settings.models.imageInputHelp")}
       >
         <ToggleButton
+          ref={imageInputRef}
           checked={form.supportsImages}
           label={t("settings.models.imageInput")}
           disabled={saving || creatingSaving}
@@ -994,6 +1013,12 @@ export function ModelsSettings({
           onBlurCapture={edits.onBlurCapture}
           onEscapeKeyDown={() => setHideEditorReturnFocus(true)}
           className="relative max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none gap-0 overflow-y-auto p-0"
+          onOpenAutoFocus={(event) => {
+            if (!focusImageInput.current || !imageInputRef.current) return;
+            focusImageInput.current = false;
+            event.preventDefault();
+            imageInputRef.current.focus();
+          }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             editorTriggerRef.current?.focus();

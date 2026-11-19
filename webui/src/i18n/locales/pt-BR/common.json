@@ -697,7 +697,8 @@
       "maxTokens": "Máx. de tokens de saída",
       "temperature": "Temperatura",
       "imageInput": "Entrada de imagens",
-      "imageInputHelp": "Quando desativada, solicitações com imagens ignoram esta predefinição.",
+      "imageInputHelp": "Ative apenas se o modelo aceitar imagens. Quando desativada, solicitações com imagens ignoram esta predefinição.",
+      "viewPreset": "Ver predefinição",
       "reasoningEffort": "Esforço de raciocínio",
       "convertTitle": "Converter ajustes",
       "convertHelp": "Converta os modelos principal e alternativo em presets.",
@@ -2579,6 +2580,8 @@
       "timeoutTitle": "A solicitação ao provedor do modelo expirou",
       "rateLimitTitle": "Limite de solicitações do provedor do modelo atingido",
       "serverTitle": "Erro no serviço do provedor do modelo",
+      "imageInputTitle": "A entrada de imagens está desativada nesta predefinição",
+      "imageInputBody": "Esta solicitação inclui imagens. Confira a predefinição ou use uma que aceite imagens.",
       "unknownTitle": "Falha na solicitação ao provedor do modelo",
       "bodyWithAttempt": "Interrompido após {{attempts}} tentativas. Tente mais tarde ou escolha outro modelo.",
       "body": "Tente mais tarde ou escolha outro modelo."
