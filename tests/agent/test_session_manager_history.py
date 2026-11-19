@@ -676,25 +676,29 @@ def test_get_history_does_not_paste_assistant_media_paths_into_replay():
     assert history == [{"role": "assistant", "content": "来了 🎨"}]
 
 
-def test_get_history_preserves_literal_examples_and_filters_local_image_breadcrumb():
+def test_get_history_preserves_assistant_text_verbatim():
     session = Session(key="test:assistant-example")
     draft = 'message("欢迎加入")'
+    image_marker = "[image: /tmp/example.png]"
     example = (
-        "[Message Time: 2026-05-09 00:33:48]\n"
-        "Here is the photo delivery example:\n"
-        'generate_image("16:9")\n'
-        'message("来了 🎨")'
+        "[Message Time: 2026-05-09 00:33:48]\r\n"
+        "Here is the photo delivery example:\r\n"
+        '    generate_image("16:9")\r\n'
+        '    message("来了 🎨")\r\n'
     )
     session.add_message("user", "Draft a welcome message.")
     session.add_message("assistant", draft)
     session.add_message("user", "Show a photo delivery example.")
-    session.add_message("assistant", f"{example}\n[image: /home/user/.nanobot/media/generated/img_old.png]")
+    session.add_message("assistant", example)
+    session.add_message("user", "Repeat the image marker exactly.")
+    session.add_message("assistant", image_marker)
 
     history = session.get_history()
 
     assert [message["content"] for message in history if message["role"] == "assistant"] == [
         draft,
         example,
+        image_marker,
     ]
 
 

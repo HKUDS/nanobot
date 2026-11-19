@@ -51,16 +51,6 @@ _FORK_VOLATILE_METADATA_KEYS = {
 }
 
 
-def _sanitize_assistant_replay_text(content: str) -> str:
-    """Remove copied local image breadcrumbs before reusing the text."""
-    lines = [
-        line
-        for line in content.splitlines()
-        if not _LOCAL_IMAGE_BREADCRUMB_RE.match(line)
-    ]
-    return "\n".join(lines).strip()
-
-
 def _text_preview(content: object) -> str:
     if isinstance(content, str):
         text = content
@@ -77,7 +67,9 @@ def _text_preview(content: object) -> str:
         text = " ".join(parts)
     else:
         return ""
-    text = _sanitize_assistant_replay_text(text)
+    text = "\n".join(
+        line for line in text.splitlines() if not _LOCAL_IMAGE_BREADCRUMB_RE.match(line)
+    )
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) > _SESSION_PREVIEW_MAX_CHARS:
         text = text[: _SESSION_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
@@ -251,8 +243,6 @@ class Session:
                 message = public_history_message(message)
             content = message.get("content", "")
             role = message.get("role")
-            if role == "assistant" and isinstance(content, str):
-                content = _sanitize_assistant_replay_text(content)
             # Synthesize an ``[image: path]`` breadcrumb from the persisted
             # ``media`` kwarg so LLM replay still sees *something* where the
             # image used to be. Without this, an image-only user turn
