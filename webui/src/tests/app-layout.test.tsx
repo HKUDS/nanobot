@@ -24,7 +24,6 @@ let clientOptions: NanobotClientOptions | undefined;
 const refreshSpy = vi.fn();
 const createChatSpy = vi.fn().mockResolvedValue("chat-1");
 const deleteChatSpy = vi.fn();
-const getSessionAutomationsSpy = vi.fn<(key: string) => Promise<SessionAutomationJob[]>>();
 const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
@@ -210,7 +209,6 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
           return chatId;
         },
         forkChat: async () => "fork-chat",
-        getSessionAutomations: getSessionAutomationsSpy,
         deleteChat: async (key: string, options?: { deleteAutomations?: boolean }) => {
           const result = options === undefined ? await deleteChatSpy(key) : await deleteChatSpy(key, options);
           if (result && !result.deleted) return result;
@@ -348,7 +346,6 @@ describe("App layout", () => {
     refreshSpy.mockReset();
     createChatSpy.mockClear();
     deleteChatSpy.mockReset();
-    getSessionAutomationsSpy.mockReset().mockResolvedValue([]);
     toggleThemeSpy.mockReset();
     attachSpy.mockReset();
     setSidebarStateSpy.mockReset().mockImplementation(
@@ -2468,18 +2465,14 @@ describe("App layout", () => {
         preview: "Second chat",
       },
     ];
+    window.history.replaceState(null, "", "/#/chat/websocket%3Achat-a");
 
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    await waitFor(() =>
-      expect(
-        within(sidebar).getByRole("button", { name: /^First chat$/ }),
-      ).toBeInTheDocument(),
-    );
-
-    fireEvent.click(within(sidebar).getByRole("button", { name: "First chat" }));
+    expect(await within(sidebar).findByRole("button", { name: "First chat" }))
+      .toHaveAttribute("aria-current", "page");
     fireEvent.pointerDown(screen.getByLabelText("Topic actions for First chat"), {
       button: 0,
     });
@@ -2644,14 +2637,8 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Second chat" }));
     expect(within(sidebar).getByText("2 selected")).toBeInTheDocument();
 
-    const automationReads: Array<(jobs: SessionAutomationJob[]) => void> = [];
-    getSessionAutomationsSpy.mockImplementation(() => new Promise((resolve) => automationReads.push(resolve)));
     vi.useFakeTimers();
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Delete" }));
-    fireEvent.click(document.body);
-    expect(screen.getByTestId("delete-selection-bar")).toHaveTextContent("2 selected");
-    expect(deleteChatSpy).not.toHaveBeenCalled();
-    await act(async () => automationReads.forEach((resolve) => resolve([])));
+    await clickDeleteAction(within(sidebar).getByRole("button", { name: "Delete" }));
     expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
     expect(screen.getByText("2 topics will be deleted")).toBeVisible();
     expect(screen.getAllByRole("button", { name: "Undo" })).toHaveLength(1);
@@ -2662,8 +2649,6 @@ describe("App layout", () => {
       "websocket:chat-a",
       "websocket:chat-b",
     ]);
-    expect(getSessionAutomationsSpy).toHaveBeenCalledWith("websocket:chat-a");
-    expect(getSessionAutomationsSpy).toHaveBeenCalledWith("websocket:chat-b");
     expect(within(sidebar).getByRole("button", { name: "Third chat" }))
       .toBeInTheDocument();
   }, 15_000);
@@ -2704,7 +2689,7 @@ describe("App layout", () => {
     }
   });
 
-  it("asks again only for the topic whose automations appeared during the delete window", async () => {
+  it("confirms only the topic whose deletion was blocked by linked automations", async () => {
     mockSessions = ["a", "b"].map((id) => ({
       key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`, title: `Topic ${id}`, preview: "",
       createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
@@ -2735,7 +2720,7 @@ describe("App layout", () => {
     expect(deleteChatSpy).toHaveBeenLastCalledWith("websocket:chat-b", { deleteAutomations: true });
   }, 15_000);
 
-  it("shows localized bound automations in the first delete confirmation", async () => {
+  it("shows a localized automation warning and keeps the topic when cancelled", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -2754,16 +2739,18 @@ describe("App layout", () => {
         preview: "Second chat",
       },
     ];
-    getSessionAutomationsSpy.mockResolvedValue([
-      {
+    deleteChatSpy.mockResolvedValueOnce({
+      deleted: false,
+      blocked_by_automations: true,
+      automations: [{
         id: "job-1",
         name: "Daily repo check",
         enabled: true,
         schedule: { kind: "every", every_ms: 86_400_000 },
         payload: { message: "Check the repo" },
         state: { next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0) },
-      },
-    ]);
+      }],
+    });
     await i18n.changeLanguage("zh-CN");
 
     render(<App />);
@@ -2779,12 +2766,14 @@ describe("App layout", () => {
     fireEvent.pointerDown(screen.getByLabelText(/First chat.*话题操作/), {
       button: 0,
     });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "删除" }));
+    const deleteItem = await screen.findByRole("menuitem", { name: "删除" });
+    vi.useFakeTimers();
+    await clickDeleteAction(deleteItem);
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    vi.useRealTimers();
 
-    await waitFor(() =>
-      expect(screen.getByText("Daily repo check")).toBeInTheDocument(),
-    );
-    expect(getSessionAutomationsSpy).toHaveBeenCalledWith("websocket:chat-a");
+    const dialog = await screen.findByRole("alertdialog", { name: "删除这个话题？" });
+    expect(within(dialog).getByText("Daily repo check")).toBeVisible();
     expect(
       screen.getByText("删除话题也会删除关联的自动任务"),
     ).toBeInTheDocument();
@@ -2793,12 +2782,10 @@ describe("App layout", () => {
     ).not.toBeInTheDocument();
 
     vi.useFakeTimers();
-    await clickDeleteAction(screen.getByRole("button", { name: "删除" }));
-    expect(deleteChatSpy).not.toHaveBeenCalled();
+    await clickDeleteAction(within(dialog).getByRole("button", { name: "取消" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
-    expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a", { deleteAutomations: true });
-    expect(deleteChatSpy).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument();
+    expect(deleteChatSpy.mock.calls).toEqual([["websocket:chat-a"]]);
+    expect(within(sidebar).getByRole("button", { name: "First chat" })).toBeVisible();
   }, 15_000);
 
   it("closes the mobile drawer when selecting a new or current topic without a search tooltip", async () => {
