@@ -2184,6 +2184,7 @@
     "actions": "Ações da mensagem",
     "streaming": "transmitindo",
     "delivery": {
+      "waiting": "Aguardando processamento",
       "sending": "Enviando",
       "failed": "Não enviada"
     },

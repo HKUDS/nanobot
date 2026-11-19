@@ -9,6 +9,7 @@ interface TurnRecord {
   // Only openOrder marks unsettled ownership; a timestamp alone does not.
   openOrder: number | null;
   startedAt: number | null;
+  needsLiveCheck: boolean;
 }
 
 interface ChatRecord {
@@ -59,6 +60,7 @@ type Command =
   | { kind: "transport-lost" }
   | { kind: "local-stop" | "forget"; chatId: string }
   | { kind: "fence" | "settle-completed-lifecycle"; chatId: string; completedTurnIds: readonly string[] }
+  | { kind: "reattach"; chatId: string; liveTurnIds: readonly string[] }
   | { kind: "restore-pending"; chatId: string; generation: number; turnId: string | null };
 
 export type RunEffect =
@@ -176,6 +178,7 @@ export class ClientRunLedger {
       case "transport-lost":
         for (const chat of this.chats.values()) {
           for (const turn of chat.turns.values()) {
+            turn.needsLiveCheck = turn.openOrder !== null && (!turn.delivery || turn.delivery.phase === "accepted");
             if (turn.delivery?.phase === "sent") {
               turn.delivery = { phase: "unknown", role: turn.delivery.role };
             }
@@ -205,6 +208,20 @@ export class ClientRunLedger {
           : chat.generation !== 0 || chat.closed.size > 0 || chat.fenced.size > 0) break;
         this.advance(chat, command.turnId);
         chat.anonymousActive = command.turnId === null;
+        break;
+      }
+      case "reattach": {
+        const chat = this.chats.get(command.chatId);
+        if (!chat) break;
+        const live = new Set(command.liveTurnIds);
+        const retired: string[] = [];
+        for (const [turnId, turn] of chat.turns) {
+          if (turn.needsLiveCheck && !live.has(turnId)) retired.push(turnId);
+          turn.needsLiveCheck = false;
+        }
+        // Absence only retires previously observed owners, not new/uncertain sends.
+        // It does not report an outcome or claim that the transcript is complete.
+        if (retired.length > 0) this.completeTurns(command.chatId, retired, "lifecycle", effects);
         break;
       }
       case "fence":
@@ -391,7 +408,7 @@ export class ClientRunLedger {
   private ensureTurn(chat: ChatRecord, turnId: string): TurnRecord {
     let turn = chat.turns.get(turnId);
     if (!turn) {
-      turn = { delivery: null, openOrder: null, startedAt: null };
+      turn = { delivery: null, openOrder: null, startedAt: null, needsLiveCheck: false };
       chat.turns.set(turnId, turn);
     }
     return turn;

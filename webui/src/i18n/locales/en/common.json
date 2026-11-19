@@ -2364,6 +2364,7 @@
     "actions": "Message actions",
     "streaming": "streaming",
     "delivery": {
+      "waiting": "Waiting to be processed",
       "sending": "Sending",
       "failed": "Not sent"
     },

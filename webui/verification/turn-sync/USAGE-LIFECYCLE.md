@@ -28,7 +28,7 @@ Cache publication and its synchronous owner callback are one model action; navig
 | `handoff-fullpage-active` | `CacheHandoff.tla` | exit 0, no error, queue 0 | 80 |
 | `handoff-fullpage-idle` | `CacheHandoff.tla` | exit 0, no error, queue 0 | 80 |
 
-The dynamic case has one chat, two sequential server turns, two outages and two selection changes, starting unselected. Selected and actually mounted owners are separate: a scheduled refresh may remain pending until selection away. Mounted-history H and reconnect R capture/processing are separate. The workload includes pending/active metadata, stale generations, transcript admission choices and independent anonymous activity. Full pages contain all bounded persisted completion IDs. Read failures and fragments are excluded from this positive workload, not hidden by fairness or state constraints.
+The dynamic case has one chat, two sequential server turns, two outages and two selection changes, starting unselected. Selected and actually mounted owners are separate: a scheduled refresh may remain pending until selection away. Mounted-history H and reconnect R capture/processing are separate. The workload includes pending/active metadata, stale generations, transcript admission choices and independent anonymous activity. This partition covers successful full pages that contain all bounded persisted completion IDs. [Attach reconciliation](ATTACH-RECONCILIATION.md) checks lifecycle convergence when history supplies no completion ID.
 
 The config checks `TypeOK`, `NoOlderCompletionClearsNewer`, `PartialCompletionPreservesRecovery`, `LifecycleOnlyPreservesContentAndRecovery`, `ActiveUnmountedSnapshotIsNotAdopted`, `CachePrecedesIdleNotification`, `SoleCanonicalActor` and `ExplicitCompletionHandoffSettles`. It checks `RawExplicitCompletionsSettle` and `EventuallyIdle` in the same run. Raw learning includes every processed full-page ID even when cache admission fails: `learned ∩ open = {}`.
 
@@ -45,12 +45,6 @@ The handoff cases start at a source-reachable checkpoint: observed turn 1, lost 
 
 The maintained actual-hooks regression exercises the deferred-refresh boundary: a mounted reconnect full page completes 1 while 2 is still open; preflight rejects content adoption; selection away cancels the pending history refresh. Lifecycle observation closes only 1, preserving 2's owner/clock and uncovered content. Ending 2 can then leave idle without another refresh. This concrete regression and the model graph are separate forms of verification.
 
-## Current-policy limits
-
-`--limits` runs two cases separately from positive checks. Each must retain exit 13 and the temporal-property violation signature. Their runner status is `LIMITATION_COUNTEREXAMPLE`, not a passing liveness result; reached-state counts depend on concurrent search order.
-
-- `lifecycle-failed-read-limit` allows needed reads to fail. A lost terminal plus failed recovery can leave an owner unresolved; fairness cannot manufacture a later retry.
-- `lifecycle-fragment-id-limit` allows fragments with omitted completion IDs and no switches. Without an owner/bridge/future read, completion evidence may never arrive. This is not an assertion about a particular native Gateway payload.
-- Larger current-policy two-chat products remain optional and are not claimed exhausted. Separate request/ledger/lifecycle graphs and other-chat sentinels are not a checked compositional liveness theorem.
+The larger two-chat configuration remains optional. The separate request, ledger and lifecycle models do not establish a compositional liveness theorem.
 
 H/R captures overapproximate independent producers; concrete request sharing/abort is a separate `SharedRequests` partition. Transcript fragment joining, token/auth/client replacement, backend execution, eviction, multiple tabs/hosts, send queues and unbounded workloads are outside this model. Logs, states, source snapshots and the jar stay outside the checkout.

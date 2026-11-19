@@ -2182,6 +2182,7 @@
     "actions": "Thao tác tin nhắn",
     "streaming": "đang truyền",
     "delivery": {
+      "waiting": "Đang chờ xử lý",
       "sending": "Đang gửi",
       "failed": "Chưa gửi"
     },

@@ -1085,7 +1085,7 @@ class GatewayHTTPHandler:
         stored_sessions: list[dict[str, Any]],
     ) -> dict[str, Any]:
         assert self.session_manager is not None
-        from nanobot.session.webui_turns import websocket_turn_wall_started_at
+        from nanobot.session.webui_turns import latest_live_websocket_turn
 
         sessions = list_webui_sessions(self.session_manager, stored_sessions)
         cleaned: list[dict[str, Any]] = []
@@ -1105,9 +1105,9 @@ class GatewayHTTPHandler:
             if row.get("recovery_state") is None:
                 row.pop("recovery_state", None)
             chat_id = key.split(":", 1)[1]
-            started_at = websocket_turn_wall_started_at(chat_id)
-            if started_at is not None:
-                row["run_started_at"] = started_at
+            turn = latest_live_websocket_turn(chat_id)
+            if turn is not None:
+                row["run_started_at"] = turn[0]
             if default_scope is None:
                 default_scope = self.workspaces.default_scope()
             scope_present, raw_scope = indexed_workspace_scope(s)

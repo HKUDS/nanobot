@@ -81,7 +81,7 @@ Open the model preset menu beside the composer to adjust **Reasoning effort** (a
 The composer supports text, images, documents, videos, voice input, slash commands, and `@` mentions.
 
 - **Sending:** On desktop, `Enter` sends and `Shift+Enter` adds a newline. On touch devices, `Enter` adds a newline and the send button submits.
-- **Queuing while busy:** While nanobot is replying on desktop, pressing `Enter` adds to a waiting message that sends automatically when the reply finishes. Use **Send now** (or press `Enter` on an empty box) to send it immediately as guidance.
+- **Queuing while busy:** While nanobot is replying on desktop, pressing `Enter` adds to a waiting message that sends automatically when the reply finishes. Use **Send now** (or press `Enter` on an empty box) to send it immediately as guidance—a dashed border shows when a follow-up is waiting for the model, returning to normal once the model picks it up.
 - **Attachments:** Drop or select images, PDFs, Office documents, or videos (MP4/WebM/MOV, one per message up to 20 MiB; videos play in the WebUI, though the agent cannot analyze video contents yet).
 - **Attach host files by path:** Paste a file path on the nanobot host on its own line to reference it without uploading or copying (respects the topic's workspace permissions).
 - **Direct shell commands:** Start a message with `!` (such as `!git status`) to run a command directly in the topic's workspace without calling the model.

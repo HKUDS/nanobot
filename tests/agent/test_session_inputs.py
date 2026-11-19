@@ -102,11 +102,11 @@ async def test_session_message_text_is_not_dispatched_as_a_slash_command(
     loop: AgentLoop,
 ) -> None:
     loop.sessions.save(loop.sessions.get_or_create("telegram:target"))
-    await loop._dispatch_inbound(_message("/stop"))
-    await asyncio.wait_for(
-        asyncio.gather(*loop._active_tasks["telegram:target"]), timeout=2,
-    )
-    response = await asyncio.wait_for(loop.bus.consume_outbound(), timeout=2)
+    # Bound hangs without imposing a tight deadline on SQLite checkpoint writes.
+    async with asyncio.timeout(10):
+        await loop._dispatch_inbound(_message("/stop"))
+        await asyncio.gather(*loop._active_tasks["telegram:target"])
+    response = loop.bus.outbound.get_nowait()
 
     assert response.content == "Reviewed"
     loop.provider.chat_stream_with_retry.assert_awaited_once()

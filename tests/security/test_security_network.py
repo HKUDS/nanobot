@@ -179,6 +179,17 @@ def test_resolve_url_target_returns_validated_public_ips():
     assert resolved_ips == ("93.184.216.34",)
 
 
+@pytest.mark.parametrize("character", ["\x00", "\t", " ", "\x7f"], ids=["nul", "tab", "space", "del"])
+def test_resolve_url_target_rejects_invalid_hostname_before_dns(character: str) -> None:
+    with patch("nanobot.security.network.socket.getaddrinfo") as getaddrinfo:
+        ok, error, resolved_ips = resolve_url_target(f"https://mail{character}host.invalid/")
+
+    assert not ok
+    assert error.startswith(("Invalid URL:", "Invalid hostname:"))
+    assert resolved_ips == ()
+    getaddrinfo.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("trust_remote_dns", "expected_ok"),
     [(False, False), (True, True)],

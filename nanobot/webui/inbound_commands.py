@@ -38,9 +38,9 @@ from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
+    latest_live_websocket_turn,
+    live_websocket_turns,
     register_queued_websocket_turn_if_idle,
-    websocket_turn_id,
-    websocket_turn_wall_started_at,
 )
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import safe_filename
@@ -248,6 +248,7 @@ class WebUICommandRouter:
         *,
         turn_id: str | None,
         starts_turn: bool,
+        waiting_for_model: bool,
         media: list[dict[str, Any]],
         cli_apps: list[dict[str, Any]],
         mcp_presets: list[dict[str, Any]],
@@ -262,6 +263,8 @@ class WebUICommandRouter:
         if turn_id is not None:
             body["turn_id"] = turn_id
             body["input_id"] = f"user:{turn_id}"
+        if waiting_for_model:
+            body["waiting_for_model"] = True
         if media:
             body["media_urls"] = media
         if cli_apps:
@@ -270,12 +273,9 @@ class WebUICommandRouter:
             body["mcp_presets"] = mcp_presets
         if session_mentions:
             body["session_mentions"] = session_mentions
-        active_turn_id = websocket_turn_id(chat_id)
-        if active_turn_id is not None:
-            body["active_turn_id"] = active_turn_id
-        started_at = websocket_turn_wall_started_at(chat_id)
-        if active_turn_id is not None and started_at is not None:
-            body["started_at"] = started_at
+        live_turn = latest_live_websocket_turn(chat_id)
+        if live_turn is not None and live_turn[1] is not None:
+            body["started_at"], body["active_turn_id"] = live_turn
         raw = json.dumps(body, ensure_ascii=False)
         for connection in self._transport.webui_subscribers(chat_id):
             if connection is not origin:
@@ -445,12 +445,13 @@ class WebUICommandRouter:
                 )
                 return
             self._transport.webui_attach(connection, chat_id)
-            await self._transport.webui_send_event(
-                connection,
-                "attached",
-                chat_id=chat_id,
-                **(await self._session_projection.attach_fields(webui_session_key(chat_id))),
-            )
+            fields = await self._session_projection.attach_fields(webui_session_key(chat_id))
+            if connection in self._webui_connections:
+                # Sample after the metadata read and enqueue without another yield.
+                fields["live_turn_ids"] = [
+                    turn_id for _, turn_id in live_websocket_turns(chat_id) if turn_id is not None
+                ]
+            await self._transport.webui_send_event(connection, "attached", chat_id=chat_id, **fields)
             await self._outbound.hydrate(chat_id)
             return
         if command_type == "set_sidebar_state":
@@ -500,7 +501,7 @@ class WebUICommandRouter:
                 lambda: self._workspaces.scope_for_set_request(
                     envelope,
                     chat_id=chat_id,
-                    chat_running=websocket_turn_wall_started_at(chat_id) is not None,
+                    chat_running=latest_live_websocket_turn(chat_id) is not None,
                     can_change_project=self.workspace_project_selection_available(connection),
                 ),
                 chat_id=chat_id,
@@ -689,7 +690,7 @@ class WebUICommandRouter:
                 lambda: self._workspaces.scope_for_message(
                     envelope,
                     chat_id=chat_id,
-                    chat_running=websocket_turn_wall_started_at(chat_id) is not None,
+                    chat_running=latest_live_websocket_turn(chat_id) is not None,
                     can_change_project=self.workspace_project_selection_available(connection),
                 ),
                 chat_id=chat_id,
@@ -812,6 +813,12 @@ class WebUICommandRouter:
             if queued_owner is not None:
                 metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
+        # Live presentation only: a follow-up accepted while another turn owns the chat.
+        waiting_for_model = (
+            is_webui and temporary_policy is None and turn_id is not None
+            and not restart_control and not is_user_shell and not content.lstrip().startswith("/")
+            and queued_owner is None and websocket_turn_id(chat_id) is not None
+        )
         accepted = False
         session_generation: str | None = None
         session_created = False
@@ -905,20 +912,21 @@ class WebUICommandRouter:
                 content,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
+                waiting_for_model=waiting_for_model,
                 media=media,
                 cli_apps=cli_apps,
                 mcp_presets=mcp_presets,
                 session_mentions=session_mentions,
             )
         if is_webui and turn_id:
-            active_turn_id = websocket_turn_id(chat_id)
-            started_at = websocket_turn_wall_started_at(chat_id)
+            started_at, active_turn_id = latest_live_websocket_turn(chat_id) or (None, None)
             await self._transport.webui_send_event(
                 connection,
                 "message_accepted",
                 chat_id=chat_id,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
+                **({"waiting_for_model": True} if waiting_for_model else {}),
                 **({"media_urls": media} if media else {}),
                 **(
                     {"active_turn_id": active_turn_id}
@@ -996,7 +1004,7 @@ class WebUICommandRouter:
                     scope = policy.workspace_scope if policy is not None else (
                         await self._workspaces.scope_for_message(
                             payload, chat_id=chat_id,
-                            chat_running=websocket_turn_wall_started_at(chat_id) is not None,
+                            chat_running=latest_live_websocket_turn(chat_id) is not None,
                             can_change_project=self.workspace_project_selection_available(connection),
                         )
                     )

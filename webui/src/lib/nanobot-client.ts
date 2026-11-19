@@ -1069,6 +1069,10 @@ export class NanobotClient {
       } else {
         this.knownChats.add(parsed.chat_id);
       }
+      const live = parsed.live_turn_ids;
+      if (Array.isArray(live) && live.every((id) => typeof id === "string" && id.length > 0)) {
+        this.applyRunEffects(this.runs.transition({ kind: "reattach", chatId: parsed.chat_id, liveTurnIds: live }));
+      }
       this.dispatch(parsed.chat_id, parsed);
       return;
     }

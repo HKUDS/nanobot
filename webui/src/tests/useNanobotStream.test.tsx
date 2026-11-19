@@ -2564,6 +2564,57 @@ describe("useNanobotStream", () => {
     ]);
   });
 
+  it("ends the live waiting hint only when a request starts for that input", () => {
+    const fake = fakeClient();
+    const chat = "chat-processing";
+    const { result } = renderHook(() => useNanobotStream(chat, EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    const peerInput = (id: string, waiting = false) => fake.emit(chat, {
+      event: "user_message", chat_id: chat, turn_id: id, input_id: `user:${id}`,
+      starts_turn: !waiting, text: "identical prompt", ...(waiting ? { waiting_for_model: true } : {}),
+    });
+    let sequence = 0;
+    const request = (id: string, phase: "started" | "completed" = "started") => fake.emit(chat, {
+      event: "model_request", chat_id: chat, turn_id: "first", request_id: id, run_id: "run",
+      sequence: ++sequence, phase, response_input_ids: [`user:${id}`],
+    });
+    const state = (id: string) => result.current.messages.find((row) => row.inputId === `user:${id}`)?.processingStatus;
+    act(() => {
+      peerInput("first");
+      peerInput("followup", true);
+      request("first");
+      request("first", "completed");
+    });
+    expect(state("first")).toBeUndefined();
+    expect(state("followup")).toBe("pending");
+    act(() => request("followup"));
+    expect(state("followup")).toBe("consumed");
+
+    act(() => {
+      request("late-echo");
+      peerInput("late-echo", true);
+    });
+    expect(state("late-echo")).toBeUndefined();
+  });
+
+  it.each(["stop", "cancelled by another tab", "disconnect"])("drops the temporary waiting hint on %s", (event) => {
+    const fake = fakeClient();
+    const chat = "chat-processing";
+    const { result } = renderHook(() => useNanobotStream(chat, EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    let turnId = "";
+    act(() => { turnId = result.current.send("follow-up")!.turnId; });
+    act(() => fake.emit(chat, {
+      event: "message_accepted", chat_id: chat, turn_id: turnId, active_turn_id: "active", waiting_for_model: true,
+    }));
+    expect(result.current.messages[0]).toMatchObject({ processingStatus: "pending", deliveryStatus: "accepted" });
+    act(() => {
+      if (event === "stop") result.current.stop();
+      else if (event === "disconnect") fake.emitStatus("reconnecting");
+      else fake.emit(chat, { event: "turn_end", chat_id: chat, turn_id: "active", outcome: "cancelled" });
+    });
+    expect(result.current.messages[0]).toMatchObject({ content: "follow-up", deliveryStatus: "accepted" });
+    expect(result.current.messages[0].processingStatus).toBeUndefined();
+  });
+
   it("projects a user turn submitted from another attached client exactly once", () => {
     const fake = fakeClient();
     const { result } = renderHook(
