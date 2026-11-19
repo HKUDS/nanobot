@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T")
 SESSION_CACHE_MAX_SIZE = 128
-_LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _SESSION_PREVIEW_MAX_CHARS = 120
 _FORK_VOLATILE_METADATA_KEYS = {
     "_stopped_at_iteration_limit",
@@ -67,9 +66,6 @@ def _text_preview(content: object) -> str:
         text = " ".join(parts)
     else:
         return ""
-    text = "\n".join(
-        line for line in text.splitlines() if not _LOCAL_IMAGE_BREADCRUMB_RE.match(line)
-    )
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) > _SESSION_PREVIEW_MAX_CHARS:
         text = text[: _SESSION_PREVIEW_MAX_CHARS - 1].rstrip() + "…"

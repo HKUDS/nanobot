@@ -89,6 +89,17 @@ def test_list_sessions_includes_user_preview(tmp_path):
     assert rows[0]["preview"] == "帮我总结一下 OpenAI 的最新硬件计划"
 
 
+def test_list_sessions_previews_literal_image_marker_as_text(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-image-marker")
+    marker = "[image: /tmp/example.png]"
+    session.add_message("user", marker)
+    session.add_message("assistant", "That's an image marker.")
+    manager.save(session)
+
+    assert manager.list_sessions()[0]["preview"] == marker
+
+
 def test_list_sessions_bounds_preview_scan(tmp_path):
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:chat-long-preview")
