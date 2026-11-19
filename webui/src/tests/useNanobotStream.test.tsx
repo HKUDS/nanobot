@@ -2564,22 +2564,38 @@ describe("useNanobotStream", () => {
     ]);
   });
 
-  it("settles only the named pending message, even if a peer's outcome arrives before its bubble", () => {
+  it("shows only live waiting inputs and ignores queue events older than attach", () => {
     const fake = fakeClient();
     const chat = "chat-processing";
     const { result } = renderHook(() => useNanobotStream(chat, EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    const processing = (input_revision: number, processing_status: "pending" | "consumed" | "released" | "cancelled", ...input_ids: string[]) => {
+      fake.emit(chat, { event: "input_processing", chat_id: chat, input_ids, input_revision, processing_status });
+    };
+    const states = () => result.current.messages.map((row) => row.processingStatus);
     act(() => {
-      const first = result.current.send("same text")!;
-      const second = result.current.send("same text", undefined, { continueActiveTurn: true })!;
-      for (const { turnId } of [first, second]) fake.emit(chat, {
-        event: "message_accepted", chat_id: chat, turn_id: turnId, processing_status: "pending",
+      fake.emit(chat, { event: "attached", chat_id: chat, pending_input_ids: ["user:one", "user:two"], input_revision: 3 });
+      processing(2, "pending", "user:failed");
+      for (const id of ["one", "two", "failed"]) fake.emit(chat, {
+        event: "user_message", chat_id: chat, turn_id: id, input_id: `user:${id}`,
+        starts_turn: false, text: "identical prompt",
       });
-      fake.emit(chat, { event: "input_processing", chat_id: chat,
-        input_ids: [`user:${second.turnId}`, "user:peer"], processing_status: "consumed" });
-      fake.emit(chat, { event: "user_message", chat_id: chat, turn_id: "peer", input_id: "user:peer",
-        starts_turn: false, text: "peer prompt", processing_status: "pending" });
     });
-    expect(result.current.messages.map((row) => row.processingStatus)).toEqual(["pending", "consumed", "consumed"]);
+    expect(states()).toEqual(["pending", "pending", undefined]);
+    act(() => processing(4, "consumed", "user:two"));
+    expect(states()).toEqual(["pending", "consumed", undefined]);
+    act(() => processing(5, "released", "user:one"));
+    expect(states()).toEqual([undefined, undefined, undefined]);
+
+    act(() => processing(6, "pending", "user:two"));
+    expect(states()).toEqual([undefined, "pending", undefined]);
+    act(() => fake.emitStatus("reconnecting"));
+    expect(states()).toEqual([undefined, undefined, undefined]);
+    act(() => {
+      fake.emitStatus("open");
+      fake.emit(chat, { event: "attached", chat_id: chat, pending_input_ids: [], input_revision: 2 });
+      processing(2, "cancelled", "user:two");
+    });
+    expect(states()).toEqual([undefined, "cancelled", undefined]);
   });
 
   it("projects a user turn submitted from another attached client exactly once", () => {

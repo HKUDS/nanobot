@@ -12,7 +12,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
-from nanobot.events import InputProcessingOutcome
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
 from nanobot.session.history_graph import history_record_size
@@ -508,13 +507,13 @@ class SqliteSessionStore:
             row = db.execute("SELECT generation, revision FROM sessions WHERE key=?", (key,)).fetchone()
             return (str(row[0]), int(row[1])) if row is not None else None
 
-    def read_metadata(self, key: str) -> SessionMetadataPayload | None:
+    def read_metadata(self, key: str) -> SessionHistoryPayload | None:
         with self.transaction(write=False) as db:
-            row = db.execute("SELECT created_at, updated_at, metadata FROM sessions WHERE key=?", (key,)).fetchone()
+            row = db.execute("SELECT created_at, updated_at, metadata, generation FROM sessions WHERE key=?", (key,)).fetchone()
             if row is None:
                 return None
             return {"key": key, "created_at": row[0], "updated_at": row[1],
-                    "metadata": self._metadata(db, key, row[2])}
+                    "metadata": self._metadata(db, key, row[2]), "generation": row[3]}
 
     def recovery_candidates(self, key_prefix: str) -> list[tuple[str, bool]]:
         """Return (key, unfinished display tail) in the same order as list_sessions.
@@ -712,21 +711,21 @@ class SqliteSessionStore:
                 db.execute("UPDATE history_heads SET revision=revision+1 WHERE session_key=?", (key,))
         return errors
 
-    def settle_history_inputs(
-        self, key: str, input_ids: tuple[str, ...], status: InputProcessingOutcome, *, expected_generation: str,
+    def cancel_history_inputs(
+        self, key: str, input_ids: tuple[str, ...], *, expected_generation: str,
     ) -> tuple[str, ...]:
         with self.transaction() as db:
             rows = db.execute(
                 """SELECT turn_ordinal, position, record FROM history_entries WHERE session_key=? AND kind='input'
                    AND (SELECT generation FROM sessions WHERE key=?)=?
-                   AND json_extract(record, '$.content.processing_status')='pending'
+                   AND json_extract(record, '$.content.processing_status') IS NOT 'cancelled'
                    AND json_extract(record, '$.content.input_id') IN (SELECT value FROM json_each(?))""",
                 (key, key, expected_generation, _encode(input_ids)),
             ).fetchall()
             changed: list[str] = []
             for ordinal, position, record in rows:
                 fact = HistoryFact.decode(record)
-                encoded = replace(fact, content={**fact.content, "processing_status": status}).encode()
+                encoded = replace(fact, content={**fact.content, "processing_status": "cancelled"}).encode()
                 db.execute("UPDATE history_entries SET record=? WHERE session_key=? AND turn_ordinal=? AND position=?",
                            (encoded, key, ordinal, position))
                 db.execute("UPDATE history_turns SET byte_count=byte_count+? WHERE session_key=? AND ordinal=?",

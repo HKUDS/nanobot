@@ -972,7 +972,7 @@ function reduceThreadEvent(
     const row: UIMessage = {
       id: !options.persisted && sessionMessageId ? `session-message:${sessionMessageId}` : projectionMessageId(event, options),
       inputId: event.input_id,
-      ...(event.processing_status ? { processingStatus: event.processing_status } : {}),
+      ...(event.processing_status === "cancelled" ? { processingStatus: "cancelled" as const } : {}),
       role: "user",
       content: event.text,
       createdAt: projectionCreatedAt(event, options),

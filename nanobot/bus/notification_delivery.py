@@ -11,7 +11,6 @@ from nanobot.context_sources import PromptSourcesEvent
 from nanobot.events import (
     AgentEvent,
     ContextCompactionEvent,
-    InputProcessingEvent,
     ModelRequestEvent,
     RecoveryStateEvent,
     ResponseSourceEvent,
@@ -31,7 +30,6 @@ NOTIFICATION_AUDIENCES: dict[type[AgentEvent], NotificationAudience] = {
     RetryStatusEvent: "interactive",
     ResponseSourceEvent: "interactive",
     ModelRequestEvent: "interactive",
-    InputProcessingEvent: "interactive",
     PromptSourcesEvent: "interactive",
 }
 

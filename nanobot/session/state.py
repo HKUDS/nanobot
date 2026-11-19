@@ -12,7 +12,6 @@ from datetime import datetime
 from typing import Any, TypeVar, cast
 
 from nanobot.bus.events import InboundMessage
-from nanobot.events import InputProcessingOutcome
 from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import (
@@ -744,12 +743,12 @@ class SessionState:
             operation_name="append_history",
         )
 
-    async def settle_history_inputs(
-        self, key: str, input_ids: tuple[str, ...], status: InputProcessingOutcome, *, expected_generation: str,
+    async def cancel_history_inputs(
+        self, key: str, input_ids: tuple[str, ...], *, expected_generation: str,
     ) -> tuple[str, ...]:
         return await self._execute(
             key,
-            lambda: self._store.settle_history_inputs(key, input_ids, status, expected_generation=expected_generation),
+            lambda: self._store.cancel_history_inputs(key, input_ids, expected_generation=expected_generation),
             operation_name="settle_history_inputs",
         )
 

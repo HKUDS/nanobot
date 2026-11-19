@@ -16,6 +16,7 @@ from websockets.asyncio.server import ServerConnection
 from nanobot.bus.events import (
     INBOUND_META_LOCAL_MEDIA,
     INBOUND_META_MODEL_OPTIONS,
+    INBOUND_META_PENDING_INPUT_GENERATION,
     INBOUND_META_USER_SHELL,
 )
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
@@ -252,7 +253,6 @@ class WebUICommandRouter:
         cli_apps: list[dict[str, Any]],
         mcp_presets: list[dict[str, Any]],
         session_mentions: list[SessionMention],
-        awaiting_processing: bool,
     ) -> None:
         body: dict[str, Any] = {
             "event": "user_message",
@@ -263,8 +263,6 @@ class WebUICommandRouter:
         if turn_id is not None:
             body["turn_id"] = turn_id
             body["input_id"] = f"user:{turn_id}"
-        if awaiting_processing:
-            body["processing_status"] = "pending"
         if media:
             body["media_urls"] = media
         if cli_apps:
@@ -820,7 +818,6 @@ class WebUICommandRouter:
             and not restart_control and not is_user_shell and not content.lstrip().startswith("/")
             and turn_id is not None
         )
-        awaiting_processing = False
         accepted = False
         session_generation: str | None = None
         session_created = False
@@ -849,14 +846,14 @@ class WebUICommandRouter:
                 recorded = await self._transcripts.append_user_message(
                     chat_id,
                     content,
-                    awaiting_processing=track_processing,
                     metadata=metadata,
                     media_paths=media_paths or None,
                     cli_apps=cli_apps or None,
                     mcp_presets=mcp_presets or None,
                     session_mentions=session_mentions or None,
                 )
-                awaiting_processing = track_processing and recorded
+                if track_processing and recorded and session_generation is not None:
+                    metadata[INBOUND_META_PENDING_INPUT_GENERATION] = session_generation
             if trusted_webui:
                 context_blocks: list[RuntimeContextBlock] = []
                 if not is_user_shell and envelope.get("intent") == "create_automation":
@@ -920,7 +917,6 @@ class WebUICommandRouter:
                 cli_apps=cli_apps,
                 mcp_presets=mcp_presets,
                 session_mentions=session_mentions,
-                awaiting_processing=awaiting_processing,
             )
         if is_webui and turn_id:
             active_turn_id = websocket_turn_id(chat_id)
@@ -931,7 +927,6 @@ class WebUICommandRouter:
                 chat_id=chat_id,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
-                **({"processing_status": "pending"} if awaiting_processing else {}),
                 **({"media_urls": media} if media else {}),
                 **(
                     {"active_turn_id": active_turn_id}

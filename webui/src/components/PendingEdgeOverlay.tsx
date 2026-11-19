@@ -32,8 +32,8 @@ export function usePendingEdgeState(
     const shouldSeal =
       !disabled &&
       tracked.id === messageId &&
-      tracked.status === "pending" &&
-      processingStatus === "consumed";
+      ((tracked.status === "pending" && processingStatus === "consumed") ||
+        (tracked.sealing && processingStatus === undefined));
     setTracked({
       id: messageId,
       status: processingStatus,

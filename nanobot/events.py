@@ -29,15 +29,16 @@ class ModelRequestEvent(AgentEvent):
     response_input_ids: tuple[str, ...] = ()
 
 
-InputProcessingOutcome = Literal["consumed", "cancelled"]
+InputProcessingOutcome = Literal["consumed", "cancelled", "released"]
 
 
 @dataclass(frozen=True)
 class InputProcessingEvent(AgentEvent):
-    """A batch of inputs entered the run or was discarded before processing."""
+    """A change in which display inputs are still waiting for the agent."""
 
     input_ids: tuple[str, ...]
-    status: InputProcessingOutcome
+    status: InputProcessingOutcome | Literal["pending"]
+    revision: int
 
 
 @dataclass(frozen=True)

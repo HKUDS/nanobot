@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
 
 from loguru import logger
 
-from nanobot.bus.events import INBOUND_META_USER_SHELL, OUTBOUND_META_AGENT_UI, OutboundMessage
+from nanobot.bus.events import (
+    INBOUND_META_PENDING_INPUT_GENERATION,
+    INBOUND_META_USER_SHELL,
+    OUTBOUND_META_AGENT_UI,
+    OutboundMessage,
+)
 from nanobot.bus.outbound_events import (
     ContextCompactionEvent,
     GoalStateSyncEvent,
@@ -292,20 +297,30 @@ class WebUIOutboundDelivery:
             await self._send_runtime_model_updated(event.model, event.model_preset)
             return
 
-        recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
         if isinstance(event, InputProcessingEvent):
             sessions = self._transcripts.sessions
-            generation = msg.metadata.get(HISTORY_GENERATION_METADATA_KEY)
-            if sessions is not None and isinstance(generation, str):
-                changed = await sessions.state.settle_history_inputs(
-                    webui_session_key(msg.chat_id), event.input_ids, event.status, expected_generation=generation,
-                )
-                if changed:
-                    await self._fanout(recipients, {
-                        "event": "input_processing", "chat_id": msg.chat_id,
-                        "input_ids": changed, "processing_status": event.status,
-                    }, label=" input_processing ")
+            generation = msg.metadata.get(INBOUND_META_PENDING_INPUT_GENERATION)
+            if sessions is None or not isinstance(generation, str):
+                return
+            key = webui_session_key(msg.chat_id)
+            header = sessions.state.peek_header(key)
+            if header is not None and header.generation != generation:
+                return
+            status = "released" if event.status == "cancelled" else event.status
+            try:
+                if event.status == "cancelled" and await sessions.state.cancel_history_inputs(
+                    key, event.input_ids, expected_generation=generation,
+                ):
+                    status = "cancelled"
+            finally:
+                # Clearing live waiting state does not depend on a history write succeeding.
+                await self._fanout(self._transport.webui_recipients(ChatAudience(msg.chat_id)), {
+                    "event": "input_processing", "chat_id": msg.chat_id,
+                    "input_ids": event.input_ids, "processing_status": status,
+                    "input_revision": event.revision,
+                }, label=" input_processing ")
             return
+        recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
         if not recipients:
             quiet_events = (
                 ModelRequestEvent, ProgressEvent, RetryStatusEvent, UserInputEvent, TurnEndEvent, SessionUpdatedEvent,

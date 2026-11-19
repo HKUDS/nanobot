@@ -609,7 +609,6 @@ class WebUITranscriptRecorder:
         media_paths: list[str] | None = None, cli_apps: list[dict[str, Any]] | None = None,
         mcp_presets: list[dict[str, Any]] | None = None,
         session_mentions: Sequence[Mapping[str, Any]] | None = None,
-        awaiting_processing: bool = False,
     ) -> bool:
         envelope = session_message_envelope(metadata)
         if envelope is not None and envelope["target_session_key"] != webui_session_key(chat_id):
@@ -633,8 +632,6 @@ class WebUITranscriptRecorder:
                 session_message=session_message_public_metadata(envelope),
                 input_id=f"session-message:{envelope['message_id']}",
             )
-        if awaiting_processing:
-            event["processing_status"] = "pending"
         return await self.prepare_and_append(chat_id, event, metadata=metadata, phase="user")
 
     async def append(
@@ -1492,8 +1489,8 @@ def _client_projection_event(
             "text": record.get("text") if isinstance(record.get("text"), str) else "",
             "starts_turn": True,
         }
-        if record.get("processing_status") in ("pending", "consumed", "cancelled"):
-            projected["processing_status"] = record["processing_status"]
+        if record.get("processing_status") == "cancelled":
+            projected["processing_status"] = "cancelled"
         raw_paths = record.get("media_paths")
         paths = [
             str(path)

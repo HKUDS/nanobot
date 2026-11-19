@@ -49,7 +49,6 @@ from nanobot.channels.websocket.runtime import (
 )
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelAPIConfig, ModelPresetConfig
-from nanobot.events import InputProcessingEvent
 from nanobot.pairing.events import PairingChanged
 from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
@@ -5374,39 +5373,116 @@ async def test_authorized_webui_turn_is_acked_after_bus_acceptance(history,
         "chat_id": "chat-accepted",
         "turn_id": "turn-accepted",
         "starts_turn": True,
-        "processing_status": "pending",
         "active_turn_id": "turn-accepted",
         "started_at": wth.websocket_turn_wall_started_at("chat-accepted"),
     }
 
 
 @pytest.mark.asyncio
-async def test_processing_outcome_updates_only_the_named_input_in_live_and_replayed_history(history, bus):
+async def test_stop_marks_only_the_input_the_agent_has_not_taken(history, tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.providers.base import GenerationSettings
+
+    bus = MessageBus()
     channel = _ch(bus, session_manager=history.sessions)
+    chat = "processing-chat"
+    key = f"websocket:{chat}"
     peer = AsyncMock()
     peer.remote_address = ("127.0.0.1", 50123)
-    channel._attach(peer, "processing-chat")
-    for turn_id in ("picked-up", "waiting"):
+    channel._attach(peer, chat)
+    entered_model = asyncio.Event()
+
+    async def wait_for_stop(**_kwargs):
+        entered_model.set()
+        await asyncio.Future()
+
+    provider = MagicMock(aclose=AsyncMock(), generation=GenerationSettings())
+    provider.get_default_model.return_value = "test-model"
+    provider.can_resume_conversation_state.return_value = False
+    provider.chat_stream_with_retry = AsyncMock(side_effect=wait_for_stop)
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model", session_manager=history.sessions)
+    worker = asyncio.create_task(loop.run())
+
+    async def send(turn_id, content="identical prompts"):
         await channel._dispatch_envelope(peer, "webui-client", {
-            "type": "message", "chat_id": "processing-chat", "turn_id": turn_id,
-            "content": "identical prompts", "webui": True,
+            "type": "message", "chat_id": chat, "turn_id": turn_id, "content": content, "webui": True,
         })
 
-    consumed = await history.message(channel="websocket", chat_id="processing-chat", content="",
-                                     event=InputProcessingEvent(("user:picked-up",), "consumed"))
-    await channel.send(consumed)
-    frames = [payload for payload in _sent_ws_payloads(peer) if payload["event"] == "input_processing"]
-    assert frames == [{"event": "input_processing", "chat_id": "processing-chat",
-                       "input_ids": ["user:picked-up"], "processing_status": "consumed"}]
+    try:
+        await send("picked-up")
+        await asyncio.wait_for(entered_model.wait(), 5)
+        await send("waiting")
+        await channel._dispatch_envelope(peer, "webui-client", {"type": "attach", "chat_id": chat})
+        attached = next(frame for frame in _sent_ws_payloads(peer) if frame["event"] == "attached")
+        assert attached["pending_input_ids"] == ["user:waiting"]
+        await send("stop", "/stop")
+        async with asyncio.timeout(5):
+            while not any(f.get("processing_status") == "cancelled" for f in _sent_ws_payloads(peer)):
+                await channel.send(await bus.consume_outbound())
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
 
-    def states():
-        body = history.build("websocket:processing-chat")
-        return [(row["input_id"], row["processing_status"]) for row in body["events"] if row["event"] == "user_message"]
+    frames = [frame for frame in _sent_ws_payloads(peer) if frame["event"] == "input_processing"]
+    assert [(frame["input_ids"], frame["processing_status"]) for frame in frames] == [
+        (["user:picked-up"], "pending"), (["user:picked-up"], "consumed"),
+        (["user:waiting"], "pending"), (["user:waiting"], "cancelled"),
+    ]
+    states = {row.get("input_id"): row.get("processing_status") for row in history.build(key)["events"]
+              if row["event"] == "user_message"}
+    assert {k: states[k] for k in ("user:picked-up", "user:waiting")} == {
+        "user:picked-up": None, "user:waiting": "cancelled",
+    }
 
-    assert states() == [("user:picked-up", "consumed"), ("user:waiting", "pending")]
-    await channel.send(await history.message(channel="websocket", chat_id="processing-chat", content="",
-        event=InputProcessingEvent(("user:picked-up", "user:waiting"), "cancelled")))
-    assert states() == [("user:picked-up", "consumed"), ("user:waiting", "cancelled")]
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails_before_take", [True, False])
+async def test_failed_or_orphaned_input_does_not_stay_queued(history, tmp_path, monkeypatch, fails_before_take):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.webui import history as history_module
+    from nanobot.webui.recovery import RecoveryCoordinator
+
+    webui_dir = tmp_path / "isolated-webui"
+    webui_dir.mkdir()
+    monkeypatch.setattr(history_module, "get_webui_dir", lambda: webui_dir)
+    bus = MessageBus()
+    chat = "failed-input"
+    key = f"websocket:{chat}"
+    peer = AsyncMock()
+    peer.remote_address = ("127.0.0.1", 50123)
+    channel = _ch(bus, session_manager=history.sessions)
+    provider = MagicMock(aclose=AsyncMock())
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model", session_manager=history.sessions)
+    try:
+        await channel._dispatch_envelope(peer, "webui-client", {
+            "type": "message", "chat_id": chat, "turn_id": "first", "content": "hello", "webui": True,
+        })
+        msg = bus.inbound.get_nowait()
+        await channel._dispatch_envelope(peer, "webui-client", {"type": "attach", "chat_id": chat})
+        assert [f["pending_input_ids"] for f in _sent_ws_payloads(peer) if f["event"] == "attached"] == [["user:first"]]
+        if fails_before_take:
+            monkeypatch.setattr(loop, "runtime_for_session", AsyncMock(side_effect=ValueError("setup failed")))
+            await loop._dispatch_one(msg, asyncio.Queue())
+            while bus.outbound_size:
+                await channel.send(bus.outbound.get_nowait())
+            assert any(f.get("processing_status") == "released" for f in _sent_ws_payloads(peer))
+            await channel._dispatch_envelope(peer, "webui-client", {"type": "attach", "chat_id": chat})
+            assert [f["pending_input_ids"] for f in _sent_ws_payloads(peer) if f["event"] == "attached"][-1] == []
+    finally:
+        await loop.aclose()
+
+    restarted = SessionManager(tmp_path)
+    new_bus = MessageBus()
+    try:
+        await RecoveryCoordinator(restarted, new_bus).scan()
+        new_channel = _ch(new_bus, session_manager=restarted)
+        await new_channel._dispatch_envelope(peer, "webui-client", {"type": "attach", "chat_id": chat})
+        assert [f["pending_input_ids"] for f in _sent_ws_payloads(peer) if f["event"] == "attached"][-1] == []
+        assert new_bus.inbound_size == 0
+        inputs = [row for row in history.build(key)["events"] if row["event"] == "user_message"]
+        assert [(row["input_id"], row.get("processing_status")) for row in inputs] == [("user:first", None)]
+    finally:
+        await restarted.state.aclose()
 
 
 @pytest.mark.asyncio

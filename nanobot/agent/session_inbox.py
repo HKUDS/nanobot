@@ -88,6 +88,9 @@ class SessionInboxes(Mapping[str, SessionInbox]):
                 del self._controls[key]
             finished.set()
 
+    def is_stopping(self, key: str) -> bool:
+        return any(not discard for _, discard in self._controls.get(key, {}).values())
+
     def is_discarding(self, key: str) -> bool:
         return any(discard for _, discard in self._controls.get(key, {}).values())
 

@@ -29,7 +29,6 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.events import (
     NO_EVENTS,
     EventSink,
-    InputProcessingEvent,
     ModelRequestEvent,
     ResponseInputsEvent,
 )
@@ -146,6 +145,7 @@ class AgentRunSpec:
     provider_state: ProviderConversationState | None = None
     llm_usage_source: LLMUsageSource | None = None
     events: EventSink = NO_EVENTS
+    on_inputs_taken: Callable[[tuple[str, ...]], None] | None = None
 
 
 @dataclass(slots=True)
@@ -236,7 +236,7 @@ class AgentRunner:
         if not injections:
             return False
         self._append_injected_messages(messages, injections)
-        await self._report_consumed_inputs(spec, injections)
+        self._report_consumed_inputs(spec, injections)
         preview = "[content hidden]"
         if tool_log_content_allowed():
             preview = "\n\n".join(
@@ -252,8 +252,8 @@ class AgentRunner:
         return True
 
     @staticmethod
-    async def _report_consumed_inputs(spec: AgentRunSpec, inputs: list[dict[str, Any]]) -> None:
-        if not spec.events.accepts(InputProcessingEvent):
+    def _report_consumed_inputs(spec: AgentRunSpec, inputs: list[dict[str, Any]]) -> None:
+        if spec.on_inputs_taken is None:
             return
         input_ids: list[str] = []
         for row in inputs:
@@ -264,7 +264,7 @@ class AgentRunner:
             if isinstance(input_id, str) and input_id:
                 input_ids.append(input_id)
         if input_ids:
-            await spec.events.emit(InputProcessingEvent(tuple(input_ids), "consumed"))
+            spec.on_inputs_taken(tuple(input_ids))
 
     @staticmethod
     async def _continuation_prompt(spec: AgentRunSpec) -> str | None:
@@ -333,7 +333,7 @@ class AgentRunner:
                 try:
                     messages, compaction = await self.prepare_prompt(self._initial_transcript_and_compaction, spec)
                     if spec.transcript_input is not None and spec.transcript_input.current_message is not None:
-                        await self._report_consumed_inputs(spec, messages[-1:])
+                        self._report_consumed_inputs(spec, messages[-1:])
                     context.messages = await self._run_context_snapshot(hook, messages) if has_run_hooks else []
                     await hook.before_run(context)
                     result = await self._run_core(spec, hook, messages, compaction)
