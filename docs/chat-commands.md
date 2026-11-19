@@ -1,68 +1,53 @@
 # In-Chat Commands
 
-These commands work inside chat channels and interactive agent sessions:
+Use these slash commands inside the WebUI, terminal chat, or connected chat apps:
 
 | Command | Description |
 |---------|-------------|
-| `/new` | Stop current task and start a new conversation |
+| `/new` | Stop the current task and start a new conversation |
 | `/compact` | Summarize the current conversation context while keeping saved chat history |
 | `/stop` | Stop the current task without cancelling its saved goal |
 | `/goal <task>` | Start a sustained goal for this conversation |
-| `/cancel_goal` | Cancel the active or blocked goal; also stop work on an active goal |
+| `/cancel_goal` | Cancel the active or blocked goal (also stops work on an active goal) |
 | `/restart` | Restart the bot |
 | `/status` | Show bot status |
 | `/model` | Show the current model and available model presets |
-| `/model <preset>` | Switch and persist the model preset for the current session |
+| `/model <preset>` | Switch and save the model preset for this conversation |
 | `/dream` | Run Dream memory consolidation now |
 | `/dream-log` | Show the latest Dream memory change |
 | `/dream-log <sha>` | Show a specific Dream memory change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
-| `/dream-prompt` | Show how Dream is being guided for memory |
-| `/dream-prompt init` | Create an editable Dream memory guide at `prompts/dream.md` |
+| `/dream-prompt` | Show how Dream is guided for memory |
+| `/dream-prompt init` | Create an editable Dream guide at `prompts/dream.md` |
 | `/skill` | List enabled skills and their descriptions |
-| `/trigger` | Show local trigger usage |
-| `/trigger <name>` | Create a named local trigger for the current chat/session |
+| `/trigger <name>` | Create a named local trigger for the current chat |
 | `/pairing` | List pending pairing requests |
 | `/pairing approve <code>` | Approve a pairing code |
 | `/pairing deny <code>` | Deny a pending pairing request |
-| `/pairing revoke <user_id>` | Revoke a previously approved user on the current channel |
-| `/pairing revoke <channel> <user_id>` | Revoke a previously approved user on a specific channel |
-| `/help` | Show available in-chat commands |
+| `/pairing revoke <user_id>` | Revoke an approved user on the current channel |
+| `/pairing revoke <channel> <user_id>` | Revoke an approved user on a specific channel |
+| `/help` | Show available commands |
 
-## Commands and file paths
+## Commands and File Paths
 
-The gateway treats a message as a command only when its first word matches a registered command name. Names are case-insensitive. Arguments must follow the command's supported form.
+Only recognized command names (case-insensitive) are handled as commands. Anything else—including file paths like `/tmp` or `/Users/alice/report.md`—is sent to the agent normally. If a folder happens to match a command name (like `/new`), add a trailing slash (`/new/`) or write it in a sentence (`Look at /new`).
 
-Other text goes to the agent unchanged. This includes `/tmp`, `/home/user/project`, and `/Users/alice/report.md`. Unknown names such as `/neaw` also go to the agent; the gateway no longer returns a spelling suggestion. Use `/help` or the command menu to find a command.
-
-In the WebUI, Enter queues ordinary text while a response is running. Paths follow the same rule. Registered commands still go to the gateway immediately. If the command list is unavailable, slash-prefixed input goes to the gateway immediately, so commands such as `/stop` do not wait in the queue.
-
-A path can have the same name as a command. For example, `/new` starts a new conversation. To discuss that directory, write `/new/` or `Look at /new`. Chat platforms can apply their own command rules before a message reaches the gateway.
+In the WebUI, recognized commands run immediately even while a reply is in progress (so `/stop` does not wait in the queue).
 
 ## Pairing
 
-When someone sends a DM to the bot and isn't on the allowlist — whether it's a new user or an existing user on a new channel — nanobot automatically replies with a **pairing code** (like `ABCD-EFGH`) that expires in 10 minutes. To grant them access:
+When an unapproved user sends a DM on a pairing-enabled chat app, nanobot replies with a short **pairing code** (such as `ABCD-EFGH`) that expires in 10 minutes. Approve them from any authorized chat or in the WebUI:
 
 ```text
 /pairing approve ABCD-EFGH
 ```
 
-To see who's waiting, use `/pairing`. To remove someone later, use `/pairing revoke <user_id>` — you can find user IDs in the `/pairing list` output.
-
-See [Configuration: Pairing](./configuration.md#pairing) for the full setup guide.
+Use `/pairing` to see pending requests and `/pairing revoke <user_id>` to remove access later. See [Configuration: Pairing](./configuration.md#pairing) for setup options.
 
 ## Model Presets
 
-Use `/model` to inspect the current runtime model:
-
-```text
-/model
-```
-
-The response shows which model this conversation is using and the names of models you can switch to. `default` is also available and uses the instance's default model settings.
-
-To switch presets for future turns:
+Run `/model` to see your active model and available presets, or switch presets for the current conversation:
 
 ```text
 /model fast
@@ -70,62 +55,37 @@ To switch presets for future turns:
 /model default
 ```
 
-Switching changes the model used for future replies in this conversation and keeps that choice for later turns, including after a restart. It does not change other conversations or interrupt a reply already in progress. To add or configure model choices, see [Configuration: Model presets](./configuration.md#model-presets).
+Switching persists for future turns in this conversation (even across restarts) without affecting other conversations or interrupting a reply in progress. To add presets, open **Settings → Models** or see [Configuration: Model presets](./configuration.md#model-presets).
 
 ## Goals
 
-Only you can cancel a goal: use `/cancel_goal`, or expand the goal in WebUI and select **Cancel goal**. Cancelling an active goal also stops its work; cancelling a blocked goal leaves unrelated replies running. Chat history is kept. Asking the agent to stop can block the goal, but does not cancel it.
+Use `/goal <task>` to start a sustained goal. Only you can cancel a goal—either run `/cancel_goal` or expand the goal in the WebUI and click **Cancel goal**. Cancelling an active goal stops its work while keeping chat history; cancelling a blocked goal leaves unrelated replies running.
 
-## Local triggers
+## Local Triggers
 
-Use `/trigger <name>` when a local script or another service should be able to send a message into the current chat/session later. A name is required; plain `/trigger` only shows the usage hint.
-
-Create the trigger from the chat where future messages should arrive:
+Create a local trigger inside the chat where future messages should appear:
 
 ```text
 /trigger PR review
 ```
 
-nanobot replies with a trigger ID and a command shaped like:
+nanobot replies with a trigger ID and CLI command:
 
 ```bash
 nanobot trigger trg_8K4P2Q9X "Review PR #4502"
 ```
 
-Replace `"Review PR #4502"` with the message you want nanobot to receive. The trigger is bound to the session where it was created, so the message goes back to that same chat. Keep `nanobot gateway` running so trigger messages can be delivered. The trigger message starts an automation turn recorded in that session with the message you passed to the CLI; it is not treated as a normal user message. If that session is already running a turn, the trigger waits until the session is idle instead of being injected into the active turn.
-
-Trigger deliveries are stored in the workspace until their linked agent turn finishes successfully. If the gateway exits after claiming a delivery but before the turn completes, the next gateway start requeues that delivery. This is an at-least-once local queue: a delivery may run more than once if the process exits at the wrong time, so external scripts should make repeated trigger messages safe. If the delivery reaches the agent and the agent turn fails, the delivery is marked failed in Automations instead of retrying forever.
-
-For longer or generated content, omit the message argument and pipe stdin:
+You can also pipe longer content from a script:
 
 ```bash
 printf '%s\n' "Review the latest failed CI job" | nanobot trigger trg_8K4P2Q9X
 ```
 
-If an external webhook should wake nanobot up, run your own small webhook service and have it call the trigger command after it builds the final message:
+For multiple instances, pass the same `--config` or `--workspace` used by the running gateway. Keep `nanobot gateway` running so trigger messages can be delivered. Manage existing triggers in the WebUI **Automations** view, and see [Automations](./automations.md) for delivery behavior and examples.
 
-```bash
-nanobot trigger <trigger-id> "<message>"
-```
+## Periodic Tasks (Heartbeat)
 
-If you run multiple nanobot instances, pass the same config or workspace selector used by the gateway:
-
-```bash
-nanobot trigger --config ./bot-a/config.json trg_8K4P2Q9X "Nightly report"
-nanobot trigger --workspace ./bot-a/workspace trg_8K4P2Q9X "Nightly report"
-```
-
-Manage triggers from the WebUI Automations view. You can search, pause/resume, rename, delete, and copy the trigger command there. A session may have multiple triggers, just like it may have multiple scheduled automations.
-
-See [Automations](./automations.md) for how local triggers fit with scheduled automations, heartbeat, and gateway delivery.
-
-## Periodic Tasks
-
-Periodic background checks are driven by `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). When `nanobot gateway` starts, it registers a protected heartbeat cron job by default. Every 30 minutes, that job checks the file; if it finds tasks under `## Active Tasks`, the agent executes them and delivers only results that pass the notification gate to your most recently active chat channel. If there are no active tasks, or the result is routine with nothing useful to report, the heartbeat is skipped silently.
-
-Use heartbeat for recurring checks that should usually stay quiet. User-created cron jobs are different: they run as scheduled turns in the chat/session where they were created and normally deliver the result back to that channel.
-
-**Setup:** edit `~/.nanobot/workspace/HEARTBEAT.md` (created automatically by `nanobot onboard`):
+Heartbeat runs quiet background checks from `~/.nanobot/workspace/HEARTBEAT.md` every 30 minutes while `nanobot gateway` is running, and only messages you when something needs attention. Add tasks under `## Active Tasks` (or ask nanobot to add one for you):
 
 ```markdown
 ## Active Tasks
@@ -134,21 +94,4 @@ Use heartbeat for recurring checks that should usually stay quiet. User-created 
 - Scan inbox for urgent emails and notify me if any are found
 ```
 
-The agent can also manage this file itself - ask it to "add a periodic background check" or "check this periodically but only notify me if something changes" and it will update `HEARTBEAT.md` for you. Completed tasks should be deleted from the file, not moved to another section.
-
-You can change the interval or disable the built-in heartbeat in `~/.nanobot/config.json`:
-
-```json
-{
-  "gateway": {
-    "heartbeat": {
-      "enabled": true,
-      "intervalS": 1800
-    }
-  }
-}
-```
-
-The heartbeat job is visible in `cron(action="list")` as `heartbeat`, but it is system-managed and cannot be removed with the `cron` tool. To stop it, set `gateway.heartbeat.enabled` to `false` and restart the gateway.
-
-> **Note:** The gateway must be running (`nanobot gateway`) and you must have chatted with the bot at least once so it knows which channel to deliver to.
+Remove completed tasks from the file when they are no longer needed. To change the interval or disable heartbeat, see [Configuration: Heartbeat](./configuration.md#gateway-heartbeat).
