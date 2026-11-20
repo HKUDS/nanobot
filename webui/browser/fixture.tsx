@@ -73,6 +73,10 @@ async function loadFixture() {
       const { MobileChatLayoutFixture } = await import("./mobile-chat-layout-fixture");
       return withClient(<MobileChatLayoutFixture parameters={parameters} />);
     }
+    case "long-user-message": {
+      const { LongUserMessageFixture } = await import("./long-user-message-fixture");
+      return withClient(<LongUserMessageFixture parameters={parameters} />);
+    }
     case "composer-action": {
       const { ComposerActionFixture, installMissingMicrophonePreview } = await import("./composer-action-fixture");
       if (parameters.get("voiceError") === "noDevice") installMissingMicrophonePreview();
@@ -228,7 +232,7 @@ if (fixtureCase === "toast" && parameters.has("lang")) {
   if (previous === null) localStorage.removeItem(LOCALE_STORAGE_KEY);
   else localStorage.setItem(LOCALE_STORAGE_KEY, previous);
 }
-if ((["appearance", "session-transition", "tools-catalog"].includes(fixtureCase ?? "") || historyPreview) && parameters.has("lang")) {
+if ((["appearance", "long-user-message", "session-transition", "tools-catalog"].includes(fixtureCase ?? "") || historyPreview) && parameters.has("lang")) {
   await setAppLanguage(normalizeLocale(parameters.get("lang")));
 }
 createRoot(document.getElementById("root")!).render(<TooltipProvider>{fixture}</TooltipProvider>);

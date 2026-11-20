@@ -2188,6 +2188,8 @@
     "fallbackResponse": "Cette réponse utilise un modèle de secours : {{preset}}.",
     "copyReply": "Copier",
     "copiedReply": "Copié",
+    "expandUserMessage": "Afficher plus",
+    "collapseUserMessage": "Afficher moins",
     "turnLatencyTitle": "Temps de réponse (de bout en bout)",
     "fileEditViewDiff": "Voir les modifications",
     "fileEditViewLargeDiff": "Déplier les modifications",

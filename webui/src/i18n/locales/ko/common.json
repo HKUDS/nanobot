@@ -2188,6 +2188,8 @@
     "fallbackResponse": "이 응답은 대체 모델로 전환되어 {{preset}}이(가) 답변합니다.",
     "copyReply": "복사",
     "copiedReply": "복사됨",
+    "expandUserMessage": "더 보기",
+    "collapseUserMessage": "접기",
     "turnLatencyTitle": "응답 시간(엔드투엔드)",
     "fileEditViewDiff": "변경 보기",
     "fileEditViewLargeDiff": "변경 펼치기",
