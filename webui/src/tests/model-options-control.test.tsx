@@ -49,10 +49,12 @@ it("keeps a custom preset effort selectable without giving it a position on the 
   const onChange = vi.fn();
   render(<Control defaultEffort="extended" onChange={onChange} />);
   const effort = screen.getByRole("combobox", { name: "Reasoning effort" });
-  expect(effort).toHaveDisplayValue("extended");
-  fireEvent.change(effort, { target: { value: "1" } });
-  expect(effort).toHaveDisplayValue("medium");
-  fireEvent.change(effort, { target: { value: "3" } });
+  expect(effort).toHaveTextContent("extended");
+  fireEvent.keyDown(effort, { key: "Enter" });
+  fireEvent.click(screen.getByRole("option", { name: "medium" }));
+  expect(effort).toHaveTextContent("medium");
+  fireEvent.keyDown(effort, { key: "Enter" });
+  fireEvent.click(screen.getByRole("option", { name: "extended" }));
   expect(onChange).toHaveBeenLastCalledWith({ reasoning_effort: "extended", codex_fast_mode: null });
 });
 
