@@ -2546,15 +2546,15 @@ describe("ThreadComposer", () => {
 
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "/git", selectionStart: 4 } });
-    expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "please use $arxiv", selectionStart: 17 } });
 
-    const palette = screen.getByRole("listbox", { name: "Slash commands" });
+    const palette = screen.getByRole("listbox", { name: "Skills" });
     const option = within(palette).getByRole("option", { name: new RegExp(skillName, "i") });
-    const name = within(option).getByText(skillName);
+    const name = option.querySelector("[data-palette-skill-name]");
+    expect(name).toHaveTextContent(skillName);
     expect(name).not.toHaveClass("truncate");
-    expect(within(option).queryByText(`$${skillName}`)).not.toBeInTheDocument();
     expect(within(palette).queryByText("arxiv-disabled")).not.toBeInTheDocument();
     expect(within(palette).queryByText("arxiv-unavailable")).not.toBeInTheDocument();
     expect(within(palette).queryByText("/model")).not.toBeInTheDocument();
@@ -2603,23 +2603,31 @@ describe("ThreadComposer", () => {
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "$up", selectionStart: 3 } });
 
-    const options = within(screen.getByRole("listbox", { name: "Slash commands" }))
+    const options = within(screen.getByRole("listbox", { name: "Skills" }))
       .getAllByRole("option");
-    expect(options.map((option) => option.textContent)).toEqual([
-      "upExact match",
-      "upload-filesTransfer local files",
-      "setup-updateConfigure upgrades",
-      "skill-creatorCreate or update AgentSkills",
-    ]);
+    expect(options).toHaveLength(4);
+    expect(options[0]).toHaveTextContent("$up");
+    expect(options[0]).toHaveTextContent("Custom");
+    expect(options[1]).toHaveTextContent("$upload-files");
+    expect(options[2]).toHaveTextContent("$setup-update");
+    expect(options[3]).toHaveTextContent("$skill-creator");
   });
 
-  it("keeps a recently selected skill visible at the top of the blank skill menu", () => {
-    const skills = Array.from({ length: 9 }, (_, index) => ({
-      name: `skill-${index}`,
-      description: `Skill ${index}`,
-      source: "builtin",
-      available: true,
-    }));
+  it("groups mixed-source skills and keeps a recently selected skill at the top of the blank menu", () => {
+    const skills = [
+      ...Array.from({ length: 8 }, (_, index) => ({
+        name: `skill-${index}`,
+        description: `Skill ${index}`,
+        source: "builtin",
+        available: true,
+      })),
+      {
+        name: "workspace-deploy",
+        description: "Deploy workspace build",
+        source: "workspace",
+        available: true,
+      },
+    ];
     render(
       <ThreadComposer
         onSend={vi.fn()}
@@ -2629,15 +2637,18 @@ describe("ThreadComposer", () => {
     );
 
     const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "$skill-8", selectionStart: 8 } });
+    fireEvent.change(input, { target: { value: "$skill-7", selectionStart: 8 } });
     fireEvent.keyDown(input, { key: "Tab" });
     fireEvent.change(input, { target: { value: "$", selectionStart: 1 } });
 
-    const options = within(screen.getByRole("listbox", { name: "Slash commands" }))
-      .getAllByRole("option");
-    expect(options).toHaveLength(8);
-    expect(options[0]).toHaveTextContent("skill-8");
-    expect(options[0]).toHaveTextContent("Recent");
+    const palette = screen.getByRole("listbox", { name: "Skills" });
+    expect(within(palette).getByRole("group", { name: "Recent" })).toBeInTheDocument();
+    expect(within(palette).getByRole("group", { name: "Custom" })).toBeInTheDocument();
+    expect(within(palette).getByRole("group", { name: "Built-in" })).toBeInTheDocument();
+    const options = within(palette).getAllByRole("option");
+    expect(options).toHaveLength(9);
+    expect(options[0]).toHaveTextContent("$skill-7");
+    expect(options[1]).toHaveTextContent("$workspace-deploy");
   });
 
   it("shows session handles without an icon and preserves app icons after their identifiers", () => {

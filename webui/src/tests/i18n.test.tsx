@@ -576,9 +576,10 @@ describe("webui i18n", () => {
     });
 
     expect(screen.getByRole("listbox", { name: "斜杠命令" })).toBeInTheDocument();
-    expect(screen.getByText("压缩上下文")).toBeInTheDocument();
-    expect(screen.getByText("压缩上下文后继续对话")).toBeInTheDocument();
-    expect(screen.getByText("/compact")).toBeInTheDocument();
+    const option = screen.getByRole("option", { name: /\/compact/ });
+    expect(option).toHaveTextContent("/compact");
+    expect(option).toHaveTextContent("压缩上下文");
+    expect(option).toHaveTextContent("压缩上下文后继续对话");
   });
 
   it("keeps empty landing resources localized for every registered locale", () => {

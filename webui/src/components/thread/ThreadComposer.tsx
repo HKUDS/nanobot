@@ -1,29 +1,9 @@
 import type { ModelOptionsControlProps } from "@/components/thread/ModelOptionsControl";
 import { pastedFilePath, PastedPathRange, type LocalAttachment } from "../../../../packages/client-events/attachments";
 import {
-  NewChatIcon,
-  CompactIcon,
-  StatusIcon,
-  ModelsIcon,
-  TriggerIcon,
-  DreamLogIcon,
-  PromptTemplateIcon,
-  PairingIcon,
   ToolRunIcon,
-  ActivityIcon,
-  ArchiveIcon,
-  SkillsIcon,
-  MemoryIcon,
-  HelpIcon,
-  HistoryIcon,
   AttachIcon,
-  RestartIcon,
-  RestrictedAccessIcon,
-  DreamIcon,
-  StopIcon,
   EditIcon,
-  GoalIcon,
-  RestoreMemoryIcon,
 } from "@/components/icons/product-icons";
 import {
   useCallback,
@@ -54,7 +34,7 @@ import {
   isCapabilityMentionStart,
   type CapabilityMentionSegment,
 } from "@/lib/composer-mention-text";
-import { INLINE_REFERENCE_HIGHLIGHT_COLOR, INLINE_TOKEN_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/components/InlineTokenHighlight";
+import { INLINE_REFERENCE_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/components/InlineTokenHighlight";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import {
   CornerDownRight,
@@ -64,7 +44,6 @@ import {
   Quote,
   Trash2,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -73,10 +52,17 @@ import { useToast } from "@/components/ui/toast";
 import { AttachmentCard, AttachmentTypeFace, attachmentCardActionClassName } from "@/components/AttachmentCard";
 import { ComposerActionIcon, type ComposerActionState } from "@/components/thread/ComposerActionIcon";
 import {
-  floatingItemClassName,
-  floatingItemFocusClassName,
-  floatingSurfaceVisualClassName,
-} from "@/components/ui/floating-surface";
+  CliAppMentionPalette,
+  SkillPalette,
+  SlashCommandPalette,
+  skillSourceBucket,
+  slashCommandI18nKey,
+  type MentionCandidate,
+  type SkillPaletteItem,
+  type SlashPaletteCommand,
+  type SlashPaletteLayout,
+  type SlashPalettePlacement,
+} from "@/components/thread/ComposerPalette";
 import {
   Tooltip,
   TooltipContent,
@@ -107,7 +93,6 @@ import {
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
 import { useComposerMentionInput } from "@/hooks/useComposerMentionInput";
-import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import { useComposerVoiceInput } from "@/hooks/useComposerVoiceInput";
@@ -127,10 +112,6 @@ import type {
   ProjectDirectory,
   WorkspaceDirectoriesPayload,
 } from "@/lib/types";
-import {
-  logoFallbackUrls,
-} from "@/lib/provider-brand";
-import { sessionHandleColor } from "@/lib/session-handle";
 import { requestSkillsRefresh } from "@/lib/skill-events";
 import {
   isRegisteredSlashCommand,
@@ -144,7 +125,6 @@ import {
   readDraggedSession,
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
-import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
@@ -232,37 +212,9 @@ interface ThreadComposerProps {
   onQuotedContextChange?: (text: string | null) => void;
 }
 
-const COMMAND_ICONS: Record<string, LucideIcon> = {
-  activity: ActivityIcon,
-  archive: ArchiveIcon,
-  "book-open": SkillsIcon,
-  brain: MemoryIcon,
-  "circle-help": HelpIcon,
-  history: HistoryIcon,
-  "rotate-cw": RestartIcon,
-  shield: RestrictedAccessIcon,
-  sparkles: DreamIcon,
-  square: StopIcon,
-  "square-pen": EditIcon,
-  "undo-2": RestoreMemoryIcon,
-  zap: TriggerIcon,
-  "file-text": PromptTemplateIcon,
-  wrench: ToolRunIcon,
-};
-
-const BUILTIN_COMMAND_ICONS: Record<string, LucideIcon> = {
-  "/new": NewChatIcon, "/compact": CompactIcon, "/stop": StopIcon,
-  "/restart": RestartIcon, "/status": StatusIcon, "/model": ModelsIcon,
-  "/goal": GoalIcon, "/trigger": TriggerIcon,
-  "/dream": DreamIcon, "/dream-log": DreamLogIcon, "/dream-restore": RestoreMemoryIcon,
-  "/dream-prompt": PromptTemplateIcon, "/evaluator-prompt": PromptTemplateIcon,
-  "/skill": SkillsIcon, "/help": HelpIcon, "/pairing": PairingIcon,
-};
-
 const SLASH_PALETTE_GAP_PX = 8;
 const SLASH_PALETTE_MAX_HEIGHT_PX = 288;
 const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
-const SLASH_PALETTE_CHROME_PX = 12;
 const SLASH_RECENTS_STORAGE_KEY = "nanobot.webui.slashCommandRecents";
 const SLASH_RECENTS_LIMIT = 5;
 const SESSION_MENTIONS_LIMIT = 8;
@@ -306,31 +258,11 @@ function VoiceRecordingMeter({
   );
 }
 
-type SlashPalettePlacement = "above" | "below" | "beside";
-
-interface SlashPaletteLayout {
-  placement: SlashPalettePlacement;
-  maxHeight: number;
-}
-
 interface CliAppMentionQuery {
   query: string;
   start: number;
   end: number;
 }
-
-type MentionCandidate = {
-  name: string;
-  displayName: string;
-} & (
-  | { kind: "session"; mention: SessionMention }
-  | {
-      kind: "cli" | "mcp";
-      brandColor: string | null;
-      logoUrl: string | null;
-      initials: string;
-    }
-);
 
 interface MentionInsertion {
   value: string;
@@ -373,18 +305,6 @@ function sessionMentionOptions(sessions: ChatSummary[]): SessionMention[] {
   });
 }
 
-interface SlashPaletteCommand {
-  command: string;
-  title: string;
-  description: string;
-  icon: string;
-  kind?: "skill";
-  argHint?: string;
-  detail: string;
-  badge?: string;
-  recent: boolean;
-}
-
 function skillMatchRank(skill: SkillSummary, query: string): number | null {
   if (!query) return 0;
   const name = skill.name.toLowerCase();
@@ -395,8 +315,29 @@ function skillMatchRank(skill: SkillSummary, query: string): number | null {
   return null;
 }
 
-function slashCommandI18nKey(command: string): string {
-  return command.replace(/^\//, "").replace(/-/g, "_");
+function skillSourceOrder(source: string): number {
+  const bucket = skillSourceBucket(source);
+  if (bucket === "workspace") return 0;
+  if (bucket === "builtin") return 1;
+  return 2;
+}
+
+function slashCommandMatchRank(
+  command: SlashCommand,
+  title: string,
+  description: string,
+  query: string,
+): number | null {
+  if (!query) return 0;
+  const name = command.command.replace(/^\//, "").toLowerCase();
+  if (name === query) return 0;
+  if (name.startsWith(query)) return 1;
+  if (name.includes(query)) return 2;
+  if (title.toLowerCase().includes(query) || command.title.toLowerCase().includes(query)) return 3;
+  const haystack = [command.command, command.description, command.argHint ?? "", description]
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query) ? 4 : null;
 }
 
 function readSlashRecents(): string[] {
@@ -919,48 +860,46 @@ export function ThreadComposer({
     ];
   }, [isStreaming, onStop, slashCommands]);
 
-  const filteredSlashCommands = useMemo<SlashPaletteCommand[]>(() => {
-    if (skillQuery !== null) {
-      const query = skillQuery.text;
-      return skills
-        .filter((skill) => skill.enabled !== false && skill.available)
-        .flatMap((skill) => {
-          const matchRank = skillMatchRank(skill, query);
-          return matchRank === null
-            ? []
-            : [{
-                command: `$${skill.name}`,
-                matchRank,
-                skill,
-              }];
-        })
-        .sort((a, b) => {
-          if (a.matchRank !== b.matchRank) return a.matchRank - b.matchRank;
-          if (query !== "") return 0;
-          const aRecent = recentSlashCommands.indexOf(a.command);
-          const bRecent = recentSlashCommands.indexOf(b.command);
-          if (aRecent === -1 && bRecent === -1) return 0;
+  const filteredSkills = useMemo<SkillPaletteItem[]>(() => {
+    if (skillQuery === null) return [];
+    const query = skillQuery.text;
+    return skills
+      .filter((skill) => skill.enabled !== false && skill.available)
+      .flatMap((skill) => {
+        const matchRank = skillMatchRank(skill, query);
+        return matchRank === null
+          ? []
+          : [{
+              command: `$${skill.name}`,
+              matchRank,
+              skill,
+            }];
+      })
+      .sort((a, b) => {
+        if (a.matchRank !== b.matchRank) return a.matchRank - b.matchRank;
+        if (query !== "") return 0;
+        const aRecent = recentSlashCommands.indexOf(a.command);
+        const bRecent = recentSlashCommands.indexOf(b.command);
+        if (aRecent !== -1 || bRecent !== -1) {
           if (aRecent === -1) return 1;
           if (bRecent === -1) return -1;
           return aRecent - bRecent;
-        })
-        .slice(0, 8)
-        .map(({ command, skill }) => {
-          const description = skill.description || skill.name;
-          return {
-            command,
-            title: skill.name,
-            description,
-            detail: description,
-            icon: "brain",
-            kind: "skill" as const,
-            recent: recentSlashCommands.includes(command),
-          };
-        });
-    }
-    if (slashQuery === null) return [];
-    const withDetails = visibleSlashCommands
-      .filter((command) => {
+        }
+        return skillSourceOrder(a.skill.source) - skillSourceOrder(b.skill.source);
+      })
+      .map(({ command, skill }) => ({
+        name: skill.name,
+        command,
+        description: skill.description || skill.name,
+        source: skill.source,
+        recent: recentSlashCommands.includes(command),
+      }));
+  }, [recentSlashCommands, skills, skillQuery]);
+
+  const filteredSlashCommands = useMemo<SlashPaletteCommand[]>(() => {
+    if (skillQuery !== null || slashQuery === null) return [];
+    return visibleSlashCommands
+      .flatMap((command) => {
         if (
           slashQuery === ""
           && (
@@ -968,7 +907,7 @@ export function ThreadComposer({
             || (command.command === "/stop" && !(isStreaming && onStop))
           )
         ) {
-          return false;
+          return [];
         }
         const commandKey = slashCommandI18nKey(command.command);
         const title = t(`thread.composer.slash.commands.${commandKey}.title`, {
@@ -977,21 +916,8 @@ export function ThreadComposer({
         const description = t(`thread.composer.slash.commands.${commandKey}.description`, {
           defaultValue: command.description,
         });
-        const haystack = [
-          command.command,
-          command.title,
-          command.description,
-          command.argHint ?? "",
-          title,
-          description,
-        ].join(" ").toLowerCase();
-        return haystack.includes(slashQuery);
-      })
-      .map((command) => {
-        const commandKey = slashCommandI18nKey(command.command);
-        const description = t(`thread.composer.slash.commands.${commandKey}.description`, {
-          defaultValue: command.description,
-        });
+        const matchRank = slashCommandMatchRank(command, title, description, slashQuery);
+        if (matchRank === null) return [];
         let detail = description;
         let badge: string | undefined;
         if (command.command === "/model" && modelLabel) {
@@ -1004,34 +930,37 @@ export function ThreadComposer({
         } else if (command.command === "/stop" && isStreaming) {
           detail = t("thread.composer.slash.details.stopRunning");
         }
-        return {
-          ...command,
-          detail,
-          badge,
-          recent: recentSlashCommands.includes(command.command),
-        };
+        return [{
+          matchRank,
+          item: {
+            ...command,
+            detail,
+            badge,
+            recent: recentSlashCommands.includes(command.command),
+          },
+        }];
       })
       .sort((a, b) => {
         if (isStreaming) {
-          if (a.command === "/stop") return -1;
-          if (b.command === "/stop") return 1;
+          if (a.item.command === "/stop") return -1;
+          if (b.item.command === "/stop") return 1;
         }
+        if (a.matchRank !== b.matchRank) return a.matchRank - b.matchRank;
         if (slashQuery !== "") return 0;
-        const aRecent = recentSlashCommands.indexOf(a.command);
-        const bRecent = recentSlashCommands.indexOf(b.command);
+        const aRecent = recentSlashCommands.indexOf(a.item.command);
+        const bRecent = recentSlashCommands.indexOf(b.item.command);
         if (aRecent !== -1 || bRecent !== -1) {
           if (aRecent === -1) return 1;
           if (bRecent === -1) return -1;
           return aRecent - bRecent;
         }
         return 0;
-      });
+      })
+      .map(({ item }) => item);
+  }, [goalState?.active, isStreaming, modelLabel, onStop, recentSlashCommands, skillQuery, slashQuery, t, visibleSlashCommands]);
 
-    return withDetails
-      .slice(0, 8);
-  }, [goalState?.active, isStreaming, modelLabel, recentSlashCommands, skills, skillQuery, slashQuery, t, visibleSlashCommands]);
-
-  const showSlashMenu = filteredSlashCommands.length > 0;
+  const showSkillMenu = filteredSkills.length > 0;
+  const showSlashMenu = !showSkillMenu && filteredSlashCommands.length > 0;
   const cliAppMention = useMemo<CliAppMentionQuery | null>(() => {
     if (interactionDisabled || isUserShell || cliAppMenuDismissed) return null;
     const caret = Math.min(Math.max(cursorPosition, 0), value.length);
@@ -1249,7 +1178,7 @@ export function ThreadComposer({
   }, [cliAppMention, cliApps, insertableSessionMentions, mcpPresets, sessionMentionCatalog]);
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
-  const showAnyPalette = showSlashMenu || showCliAppMenu;
+  const showAnyPalette = showSlashMenu || showSkillMenu || showCliAppMenu;
   const inlineSegments = useMemo(
     () => isUserShell ? displayMentionSegments : withSkillReferences(displayMentionSegments),
     [displayMentionSegments, isUserShell],
@@ -1277,19 +1206,21 @@ export function ThreadComposer({
     maxHeight: SLASH_PALETTE_MAX_HEIGHT_PX,
   });
 
+  const activeCommandCount = showSkillMenu ? filteredSkills.length : filteredSlashCommands.length;
+
   useEffect(() => {
     setSelectedCommandIndex(0);
-  }, [slashQuery]);
+  }, [skillQuery?.text, slashQuery]);
 
   useEffect(() => {
     setSelectedCliAppIndex(0);
   }, [cliAppMention?.query]);
 
   useEffect(() => {
-    if (selectedCommandIndex >= filteredSlashCommands.length) {
+    if (selectedCommandIndex >= activeCommandCount) {
       setSelectedCommandIndex(0);
     }
-  }, [filteredSlashCommands.length, selectedCommandIndex]);
+  }, [activeCommandCount, selectedCommandIndex]);
 
   useEffect(() => {
     if (selectedCliAppIndex >= filteredMentionCandidates.length) {
@@ -1361,7 +1292,7 @@ export function ThreadComposer({
       window.removeEventListener("resize", updateLayout);
       document.removeEventListener("scroll", updateLayout, true);
     };
-  }, [filteredMentionCandidates.length, filteredSlashCommands.length, showAnyPalette]);
+  }, [filteredMentionCandidates.length, filteredSkills.length, filteredSlashCommands.length, showAnyPalette]);
 
   useLayoutEffect(() => {
     if (mentionInput.isComposing) return;
@@ -1413,6 +1344,32 @@ export function ThreadComposer({
     onStop?.();
   }, [onStop, pauseQueue]);
 
+  const recordSlashRecent = useCallback((command: string) => {
+    const nextRecents = [
+      command,
+      ...recentSlashCommands.filter((item) => item !== command),
+    ].slice(0, SLASH_RECENTS_LIMIT);
+    setRecentSlashCommands(nextRecents);
+    storeSlashRecents(nextRecents);
+  }, [recentSlashCommands]);
+
+  const chooseSkill = useCallback(
+    (skill: SkillPaletteItem) => {
+      if (skillQuery === null) return;
+      recordSlashRecent(skill.command);
+      const suffix = value.slice(skillQuery.end);
+      const inserted = `${skill.command}${suffix.startsWith(" ") ? "" : " "}`;
+      const next = `${value.slice(0, skillQuery.start)}${inserted}${suffix}`;
+      const nextCursor = skillQuery.start + inserted.length;
+      replaceMentionInput(next, nextCursor);
+      setSlashMenuDismissed(true);
+      setCliAppMenuDismissed(false);
+      setInlineError(null);
+      focusTextarea();
+    },
+    [focusTextarea, recordSlashRecent, replaceMentionInput, skillQuery, value],
+  );
+
   const chooseSlashCommand = useCallback(
     (command: SlashPaletteCommand) => {
       if (command.command === "/stop" && isStreaming && onStop) {
@@ -1425,28 +1382,14 @@ export function ThreadComposer({
         return;
       }
 
-      const nextRecents = [
-        command.command,
-        ...recentSlashCommands.filter((item) => item !== command.command),
-      ].slice(0, SLASH_RECENTS_LIMIT);
-      setRecentSlashCommands(nextRecents);
-      storeSlashRecents(nextRecents);
-
-      if (skillQuery !== null) {
-        const suffix = value.slice(skillQuery.end);
-        const inserted = `${command.command}${suffix.startsWith(" ") ? "" : " "}`;
-        const next = `${value.slice(0, skillQuery.start)}${inserted}${suffix}`;
-        const nextCursor = skillQuery.start + inserted.length;
-        replaceMentionInput(next, nextCursor);
-      } else {
-        setValue(command.argHint ? `${command.command} ` : command.command);
-      }
+      recordSlashRecent(command.command);
+      setValue(command.argHint ? `${command.command} ` : command.command);
       setSlashMenuDismissed(true);
       setCliAppMenuDismissed(false);
       setInlineError(null);
       focusTextarea();
     },
-    [handleStop, isStreaming, onStop, recentSlashCommands, replaceMentionInput, focusTextarea, skillQuery, value],
+    [focusTextarea, handleStop, isStreaming, onStop, recordSlashRecent],
   );
 
   const insertMention = useCallback(
@@ -1741,6 +1684,30 @@ export function ThreadComposer({
         return;
       }
     }
+    if (showSkillMenu) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedCommandIndex((idx) => (idx + 1) % filteredSkills.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedCommandIndex(
+          (idx) => (idx - 1 + filteredSkills.length) % filteredSkills.length,
+        );
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        e.preventDefault();
+        chooseSkill(filteredSkills[selectedCommandIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashMenuDismissed(true);
+        return;
+      }
+    }
     if (showSlashMenu) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -2011,9 +1978,20 @@ export function ThreadComposer({
         paletteBeside && "grid grid-cols-2 items-start gap-2 p-0",
       )}
     >
-      {showSlashMenu ? (
+      {showSkillMenu ? (
+        <SkillPalette
+          skills={filteredSkills}
+          query={skillQuery?.text ?? ""}
+          selectedIndex={selectedCommandIndex}
+          layout={slashPaletteLayout}
+          isHero={isHero}
+          onHover={setSelectedCommandIndex}
+          onChoose={chooseSkill}
+        />
+      ) : showSlashMenu ? (
         <SlashCommandPalette
           commands={filteredSlashCommands}
+          query={slashQuery ?? ""}
           selectedIndex={selectedCommandIndex}
           layout={slashPaletteLayout}
           isHero={isHero}
@@ -2024,6 +2002,7 @@ export function ThreadComposer({
       {showCliAppMenu ? (
         <CliAppMentionPalette
           candidates={filteredMentionCandidates}
+          query={cliAppMention?.query ?? ""}
           selectedIndex={selectedCliAppIndex}
           layout={slashPaletteLayout}
           isHero={isHero}
@@ -2504,315 +2483,6 @@ function ComposerInlineReferenceOverlay({
         );
       })}
       {segments.at(-1)?.text.endsWith("\n") ? "\u200b" : null}
-    </div>
-  );
-}
-interface SlashCommandPaletteProps {
-  commands: SlashPaletteCommand[];
-  selectedIndex: number;
-  layout: SlashPaletteLayout;
-  isHero: boolean;
-  onHover: (index: number) => void;
-  onChoose: (command: SlashPaletteCommand) => void;
-}
-
-interface CliAppMentionPaletteProps {
-  candidates: MentionCandidate[];
-  selectedIndex: number;
-  layout: SlashPaletteLayout;
-  isHero: boolean;
-  onHover: (index: number) => void;
-  onChoose: (candidate: MentionCandidate) => void;
-}
-
-function useSelectedOptionScroll(selectedIndex: number) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useLayoutEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const option = container.querySelector<HTMLElement>(
-      `[data-palette-index="${selectedIndex}"]`,
-    );
-    if (typeof option?.scrollIntoView === "function") {
-      option.scrollIntoView({ block: "nearest" });
-    }
-  }, [selectedIndex]);
-
-  return containerRef;
-}
-
-function CliAppMentionPalette({
-  candidates,
-  selectedIndex,
-  layout,
-  isHero,
-  onHover,
-  onChoose,
-}: CliAppMentionPaletteProps) {
-  const { t } = useTranslation();
-  const listMaxHeight = Math.max(
-    0,
-    layout.maxHeight - SLASH_PALETTE_CHROME_PX,
-  );
-  const listRef = useSelectedOptionScroll(selectedIndex);
-  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("overlay");
-  const groupedCandidates = (["session", "cli", "mcp"] as const)
-    .map((kind) => ({
-      kind,
-      label: kind === "session"
-        ? t("thread.composer.mentions.sessionGroup")
-        : kind === "cli"
-          ? t("thread.composer.mentions.cliGroup")
-          : t("thread.composer.mentions.mcpGroup"),
-      items: candidates
-        .map((candidate, index) => ({ candidate, index }))
-        .filter(({ candidate }) => candidate.kind === kind),
-    }))
-    .filter((group) => group.items.length > 0);
-  return (
-    <div
-      ref={surfaceRef}
-      role="listbox"
-      aria-label={t("thread.composer.mentions.ariaLabel")}
-      style={{ maxHeight: layout.maxHeight }}
-      className={cn(
-        floatingSurfaceVisualClassName,
-        "z-30 overflow-hidden",
-        layout.placement === "beside"
-          ? "relative col-start-2 row-start-1 w-full"
-          : cn("absolute left-1/2 w-[calc(100%-0.5rem)] -translate-x-1/2",
-            layout.placement === "above" ? "bottom-full mb-2" : "top-full mt-2"),
-        isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
-      )}
-    >
-      <div ref={listRef} className="overflow-y-auto" style={{ maxHeight: listMaxHeight }}>
-        {groupedCandidates.map((group) => (
-          <div key={group.kind} role="group" aria-label={group.label} className="mt-1.5 first:mt-0">
-            <div className="px-2 pb-1 pt-1 text-[12px] font-medium text-muted-foreground/72">
-              {group.label}
-            </div>
-            {group.items.map(({ candidate, index }) => {
-              const selected = index === selectedIndex;
-              const name = candidate.name;
-              const handleColor = candidate.kind === "session"
-                ? candidate.mention.id ? sessionHandleColor(candidate.mention.id) : INLINE_TOKEN_HIGHLIGHT_COLOR
-                : undefined;
-              const typeLabel = candidate.kind === "cli"
-                ? t("thread.composer.mentions.cliBadge")
-                : candidate.kind === "mcp"
-                  ? t("thread.composer.mentions.mcpBadge")
-                  : t("thread.composer.mentions.sessionBadge");
-              const ariaDescription = candidate.kind === "cli"
-                ? t("thread.composer.mentions.cliDescription", { name })
-                : candidate.kind === "mcp"
-                  ? t("thread.composer.mentions.mcpDescription", { name })
-                  : t("thread.composer.mentions.sessionDescription", { name });
-              return (
-                <button
-                  key={`${candidate.kind}-${name}`}
-                  type="button"
-                  role="option"
-                  data-palette-index={index}
-                  aria-selected={selected}
-                  aria-label={`@${name} ${candidate.displayName} ${ariaDescription} ${typeLabel}`}
-                  onMouseEnter={() => onHover(index)}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    onChoose(candidate);
-                  }}
-                  className={cn(
-                    floatingItemClassName,
-                    floatingItemFocusClassName,
-                    "touch-target flex min-h-10 w-full flex-wrap items-center gap-x-2.5 gap-y-1 px-2.5 py-1.5 text-left transition-colors",
-                    selected
-                      ? "bg-foreground/[0.055] text-foreground dark:bg-black/[0.12]"
-                      : "text-foreground/90 hover:bg-foreground/[0.04]",
-                  )}
-                >
-                  <span
-                    className="max-w-full shrink-0 truncate text-[15px] font-normal tracking-normal text-muted-foreground/72"
-                    style={{ color: handleColor }}
-                  >
-                    @{name}
-                  </span>
-                  <span className={cn(
-                    "flex max-w-full flex-1 flex-wrap items-center gap-x-2.5 gap-y-1",
-                    candidate.kind === "session" ? "min-w-[min(4rem,100%)]" : "min-w-[min(8rem,100%)]",
-                  )}>
-                    {candidate.kind !== "session" ? <MentionCandidateLogo candidate={candidate} selected={selected} /> : null}
-                    <span className="min-w-[min(4rem,100%)] flex-1 truncate text-[15px] font-medium tracking-normal text-foreground">
-                      {candidate.displayName}
-                    </span>
-                    {candidate.kind !== "session" ? (
-                      <span
-                        className={cn(
-                          "ml-2 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-normal",
-                          candidate.kind === "cli"
-                            ? "bg-orange-500/10 text-orange-600 dark:text-orange-300"
-                            : "bg-sky-500/10 text-sky-600 dark:text-sky-300",
-                        )}
-                      >
-                        {typeLabel}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function MentionCandidateLogo({
-  candidate,
-  selected,
-}: {
-  candidate: Extract<MentionCandidate, { kind: "cli" | "mcp" }>;
-  selected: boolean;
-}) {
-  const color = candidate.brandColor || INLINE_TOKEN_HIGHLIGHT_COLOR;
-  const logoUrls = useMemo(() => logoFallbackUrls(candidate.logoUrl), [candidate.logoUrl]);
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
-
-  if (logoUrl) {
-    return (
-      <span
-        className={cn(
-          "flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-compact",
-          selected ? "bg-background/55" : "bg-transparent",
-        )}
-      >
-        <img
-          src={logoUrl}
-          alt=""
-          decoding="async"
-          loading="lazy"
-          className="h-5 w-5 object-contain"
-          onLoad={onLogoLoad}
-          onError={onLogoError}
-        />
-      </span>
-    );
-  }
-  return (
-    <span
-      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-compact text-[7.5px] font-semibold text-white"
-      style={{ backgroundColor: color }}
-    >
-      {candidate.initials}
-    </span>
-  );
-}
-
-function SlashCommandPalette({
-  commands,
-  selectedIndex,
-  layout,
-  isHero,
-  onHover,
-  onChoose,
-}: SlashCommandPaletteProps) {
-  const { t } = useTranslation();
-  const listMaxHeight = Math.max(
-    0,
-    layout.maxHeight - SLASH_PALETTE_CHROME_PX,
-  );
-  const listRef = useSelectedOptionScroll(selectedIndex);
-  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("overlay");
-  return (
-    <div
-      ref={surfaceRef}
-      role="listbox"
-      aria-label={t("thread.composer.slash.ariaLabel")}
-      style={{ maxHeight: layout.maxHeight }}
-      className={cn(
-        floatingSurfaceVisualClassName,
-        "z-30 overflow-hidden",
-        layout.placement === "beside"
-          ? "relative col-start-2 row-start-1 w-full"
-          : cn("absolute left-1/2 w-[calc(100%-0.5rem)] -translate-x-1/2",
-            layout.placement === "above" ? "bottom-full mb-2" : "top-full mt-2"),
-        isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
-      )}
-    >
-      <div ref={listRef} className="overflow-y-auto pr-0.5" style={{ maxHeight: listMaxHeight }}>
-        {commands.map((command, index) => {
-          const Icon = command.kind === "skill" ? SkillsIcon : BUILTIN_COMMAND_ICONS[command.command] ?? COMMAND_ICONS[command.icon] ?? HelpIcon;
-          const selected = index === selectedIndex;
-          const isSkill = command.kind === "skill";
-          const commandKey = slashCommandI18nKey(command.command);
-          const title = t(`thread.composer.slash.commands.${commandKey}.title`, {
-            defaultValue: command.title,
-          });
-          const description = t(`thread.composer.slash.commands.${commandKey}.description`, {
-            defaultValue: command.description,
-          });
-          return (
-            <button
-              key={command.command}
-              type="button"
-              role="option"
-              data-palette-index={index}
-              aria-selected={selected}
-              onMouseEnter={() => onHover(index)}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onChoose(command);
-              }}
-              className={cn(
-                floatingItemClassName,
-                floatingItemFocusClassName,
-                "flex min-h-[44px] w-full items-center gap-3 px-3 py-2 text-left transition-colors",
-                selected
-                  ? "bg-foreground/[0.065] text-foreground dark:bg-white/[0.09]"
-                  : "text-foreground/86 hover:bg-foreground/[0.045] dark:hover:bg-white/[0.065]",
-              )}
-            >
-              <span
-                className={cn(
-                  "flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground transition-colors",
-                  selected && "text-foreground",
-                )}
-              >
-                <Icon className="h-4 w-4" />
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
-                <span
-                  className={cn(
-                    "text-[13.5px] font-semibold tracking-normal text-foreground",
-                    isSkill
-                      ? "max-w-full shrink-0 break-all sm:max-w-[55%]"
-                      : "min-w-0 truncate",
-                  )}
-                >
-                  {title}
-                </span>
-                <span className="min-w-0 truncate text-[13px] text-muted-foreground">
-                  {command.detail || description}
-                </span>
-              </span>
-              {!isSkill || command.badge || command.recent ? (
-                <span className="ml-2 flex max-w-[42%] shrink-0 items-center gap-1.5 sm:max-w-none">
-                  {command.badge || command.recent ? (
-                    <span className="hidden rounded-full bg-foreground/[0.055] px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex">
-                      {command.badge ?? t("thread.composer.slash.badges.recent")}
-                    </span>
-                  ) : null}
-                  {!isSkill ? (
-                    <span className="font-mono text-[12px] text-muted-foreground/60">
-                      {command.argHint ? `${command.command} ${command.argHint}` : command.command}
-                    </span>
-                  ) : null}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 }
