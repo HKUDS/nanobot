@@ -162,8 +162,8 @@ const paletteBadgeClassName =
 
 function paletteItemSelectionClassName(selected: boolean): string {
   return selected
-    ? "bg-foreground/[0.06] text-foreground dark:bg-white/[0.085]"
-    : "text-foreground/90 hover:bg-foreground/[0.04] dark:hover:bg-white/[0.05]";
+    ? "bg-foreground/[0.06] text-foreground dark:bg-black/[0.16]"
+    : "text-foreground/90 hover:bg-foreground/[0.04] dark:hover:bg-black/[0.10]";
 }
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
