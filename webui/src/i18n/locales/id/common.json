@@ -1766,29 +1766,6 @@
     "description": "Percakapan tetap tersimpan. Anda dapat membatalkan arsipnya kapan saja.",
     "unarchiveDescription": "Topik ini akan kembali muncul di bilah samping."
   },
-  "deleteConfirm": {
-    "title": "Hapus obrolan ini?",
-    "titleMany": "Hapus {{count}} percakapan?",
-    "cancel": "Batal",
-    "confirm": "Hapus",
-    "automationsDescription": "Menghapus topik ini juga menghapus tugas otomatis terkait.",
-    "automationsDescriptionMany": "Automasi terkait juga akan dihapus.",
-    "moreAutomations": "+ {{count}} lagi",
-    "schedule": {
-      "at": "{{time}}",
-      "every": "Setiap {{duration}}",
-      "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} ({{tz}})",
-      "local": "Pemicu lokal",
-      "unknown": "Jadwal khusus"
-    },
-    "next": {
-      "label": "Berikutnya: {{time}}",
-      "disabled": "Dijeda",
-      "local": "Menunggu pemicu",
-      "none": "Tidak ada jadwal berikutnya"
-    }
-  },
   "connection": {
     "idle": "Tidak aktif",
     "connecting": "Menghubungkan…",
@@ -2548,7 +2525,13 @@
     "pendingDelete": "{{count}} percakapan akan dihapus",
     "archived": "{{count}} percakapan diarsipkan",
     "unarchived": "{{count}} percakapan dikeluarkan dari arsip",
-    "deleteFailed": "Gagal menghapus {{count}} percakapan"
+    "deleteFailed": "Gagal menghapus {{count}} percakapan",
+    "confirmDeleteAutomationsSingle": "Hapus percakapan dan otomatisasi terkait?",
+    "confirmDeleteAutomations": "Hapus {{count}} percakapan dan otomatisasi terkait?",
+    "automationCountSingle": "1 otomatisasi",
+    "automationCount": "{{count}} otomatisasi",
+    "excludeSession": "Simpan",
+    "excludeSessionAria": "Keluarkan {{title}} dari penghapusan ini"
   },
   "common": {
     "retry": "Coba lagi",

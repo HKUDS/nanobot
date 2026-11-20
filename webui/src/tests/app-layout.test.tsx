@@ -24,6 +24,7 @@ let clientOptions: NanobotClientOptions | undefined;
 const refreshSpy = vi.fn();
 const createChatSpy = vi.fn().mockResolvedValue("chat-1");
 const deleteChatSpy = vi.fn();
+const getSessionAutomationsSpy = vi.fn<(key: string) => Promise<SessionAutomationJob[]>>().mockResolvedValue([]);
 const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
@@ -215,6 +216,7 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
           setSessions((prev: ChatSummary[]) => prev.filter((s) => s.key !== key));
           return { deleted: true };
         },
+        getSessionAutomations: (key: string) => getSessionAutomationsSpy(key),
       };
     }),
   };
@@ -346,6 +348,7 @@ describe("App layout", () => {
     refreshSpy.mockReset();
     createChatSpy.mockClear();
     deleteChatSpy.mockReset();
+    getSessionAutomationsSpy.mockReset().mockResolvedValue([]);
     toggleThemeSpy.mockReset();
     attachSpy.mockReset();
     setSidebarStateSpy.mockReset().mockImplementation(
@@ -2708,17 +2711,27 @@ describe("App layout", () => {
     expect(screen.getByText("2 topics will be deleted")).toBeVisible();
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
     expect(deleteChatSpy.mock.calls).toEqual([["websocket:chat-a"], ["websocket:chat-b"]]);
-    vi.useRealTimers();
-    const retry = await screen.findByRole("alertdialog", { name: "Delete this topic?" });
-    expect(within(retry).getByText("Added during undo")).toBeVisible();
-    vi.useFakeTimers();
-    await clickDeleteAction(within(retry).getByRole("button", { name: "Delete" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+
+    const confirmToast = screen.getByText("Delete topic and linked automations?").closest<HTMLElement>("[data-toast-tone]")!;
+    expect(confirmToast).toHaveAttribute("data-toast-timed", "false");
+    expect(within(confirmToast).getByRole("status")).not.toHaveAttribute("title");
+    await clickDeleteAction(within(confirmToast).getByRole("button", { name: "1 automation" }));
+    const popover = screen.getByRole("dialog");
+    expect(within(popover).getByText("Topic b")).toBeVisible();
+    expect(within(popover).getByText("Added during undo")).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS * 3); });
+    expect(deleteChatSpy).toHaveBeenCalledTimes(2);
+
+    await clickDeleteAction(within(confirmToast).getByRole("button", { name: "Delete" }));
+    expect(confirmToast).toHaveAttribute("data-toast-timed", "true");
+    expect(within(confirmToast).getByText("Topic will be deleted")).toBeVisible();
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
     expect(deleteChatSpy).toHaveBeenCalledTimes(3);
     expect(deleteChatSpy).toHaveBeenLastCalledWith("websocket:chat-b", { deleteAutomations: true });
   }, 15_000);
 
-  it("shows a localized automation warning and keeps the topic when cancelled", async () => {
+  it("lists linked automations by session in a toast dropdown and lets the user exclude a session from deletion", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -2737,18 +2750,18 @@ describe("App layout", () => {
         preview: "Second chat",
       },
     ];
-    deleteChatSpy.mockResolvedValueOnce({
-      deleted: false,
-      blocked_by_automations: true,
-      automations: [{
-        id: "job-1",
-        name: "Daily repo check",
-        enabled: true,
-        schedule: { kind: "every", every_ms: 86_400_000 },
-        payload: { message: "Check the repo" },
-        state: { next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0) },
-      }],
-    });
+    getSessionAutomationsSpy.mockImplementation(async (key: string) => (
+      key === "websocket:chat-a"
+        ? [{
+            id: "job-1",
+            name: "Daily repo check",
+            enabled: true,
+            schedule: { kind: "every", every_ms: 86_400_000 },
+            payload: { message: "Check the repo" },
+            state: { next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0) },
+          }]
+        : []
+    ));
     await i18n.changeLanguage("zh-CN");
 
     render(<App />);
@@ -2767,23 +2780,74 @@ describe("App layout", () => {
     const deleteItem = await screen.findByRole("menuitem", { name: "删除" });
     vi.useFakeTimers();
     await clickDeleteAction(deleteItem);
-    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
-    vi.useRealTimers();
 
-    const dialog = await screen.findByRole("alertdialog", { name: "删除这个话题？" });
-    expect(within(dialog).getByText("Daily repo check")).toBeVisible();
-    expect(
-      screen.getByText("删除话题也会删除关联的自动任务"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText("Deleting this topic also deletes its linked automations."),
-    ).not.toBeInTheDocument();
-
-    vi.useFakeTimers();
-    await clickDeleteAction(within(dialog).getByRole("button", { name: "取消" }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
-    expect(deleteChatSpy.mock.calls).toEqual([["websocket:chat-a"]]);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "First chat" })).toBeVisible();
+    const toast = screen.getByText("删除会话及关联自动任务？").closest<HTMLElement>("[data-toast-tone]")!;
+    expect(toast).toHaveAttribute("data-toast-timed", "false");
+    expect(within(toast).getByRole("status")).not.toHaveAttribute("title");
+    expect(toast.textContent).not.toContain("·");
+
+    await clickDeleteAction(within(toast).getByRole("button", { name: "1 个任务" }));
+    const details = screen.getByRole("dialog");
+    expect(within(details).getByText("First chat")).toBeVisible();
+    expect(within(details).getByText("Daily repo check")).toBeVisible();
+    expect(details.textContent).not.toContain("·");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS * 3); });
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+    expect(within(sidebar).getByRole("button", { name: "First chat" })).toBeVisible();
+
+    await clickDeleteAction(within(details).getByRole("button", { name: "从本次删除中移除「First chat」" }));
+    expect(screen.queryByText("删除会话及关联自动任务？")).not.toBeInTheDocument();
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+    expect(within(sidebar).getByRole("button", { name: "First chat" })).toBeVisible();
+
+    vi.useRealTimers();
+    fireEvent.pointerDown(within(sidebar).getByLabelText(/First chat.*话题操作/), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "选择" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Second chat" }));
+    vi.useFakeTimers();
+    await clickDeleteAction(within(sidebar).getByRole("button", { name: "删除" }));
+
+    const bulkToast = screen.getByText("删除 2 个会话及关联自动任务？").closest<HTMLElement>("[data-toast-tone]")!;
+    expect(bulkToast).toHaveAttribute("data-toast-timed", "false");
+    await clickDeleteAction(within(bulkToast).getByRole("button", { name: "1 个任务" }));
+    const bulkDetails = screen.getByRole("dialog");
+    await clickDeleteAction(within(bulkDetails).getByRole("button", { name: "从本次删除中移除「First chat」" }));
+
+    expect(document.querySelectorAll("[data-toast-tone]")).toHaveLength(1);
+    expect(bulkToast).toHaveAttribute("data-toast-timed", "true");
+    expect(within(bulkToast).getByText("即将删除会话")).toBeVisible();
+    expect(within(bulkToast).getByText("Second chat")).toBeVisible();
+    expect(within(sidebar).getByRole("button", { name: "First chat" })).toBeVisible();
+    expect(within(sidebar).queryByRole("button", { name: "Second chat" })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(deleteChatSpy).toHaveBeenCalledTimes(1);
+    expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-b");
+
+    vi.useRealTimers();
+    fireEvent.pointerDown(within(sidebar).getByLabelText(/First chat.*话题操作/), { button: 0 });
+    const deleteAgain = await screen.findByRole("menuitem", { name: "删除" });
+    vi.useFakeTimers();
+    await clickDeleteAction(deleteAgain);
+
+    const confirmToast = screen.getByText("删除会话及关联自动任务？").closest<HTMLElement>("[data-toast-tone]")!;
+    expect(document.querySelectorAll("[data-toast-tone]")).toHaveLength(1);
+    await clickDeleteAction(within(confirmToast).getByRole("button", { name: "删除" }));
+
+    expect(document.querySelectorAll("[data-toast-tone]")).toHaveLength(1);
+    expect(confirmToast).toHaveAttribute("data-toast-timed", "true");
+    expect(within(confirmToast).getByText("即将删除会话")).toBeVisible();
+    expect(within(confirmToast).getByRole("button", { name: "撤销" })).toBeVisible();
+    expect(within(sidebar).queryByRole("button", { name: "First chat" })).not.toBeInTheDocument();
+    expect(deleteChatSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS - 1); });
+    expect(deleteChatSpy).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(deleteChatSpy).toHaveBeenCalledTimes(2);
+    expect(deleteChatSpy).toHaveBeenLastCalledWith("websocket:chat-a", { deleteAutomations: true });
   }, 15_000);
 
   it("closes the mobile drawer when selecting a new or current topic without a search tooltip", async () => {

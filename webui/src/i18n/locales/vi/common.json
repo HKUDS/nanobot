@@ -1766,29 +1766,6 @@
     "description": "Lịch sử trò chuyện vẫn được giữ lại. Bạn có thể bỏ lưu trữ bất cứ lúc nào.",
     "unarchiveDescription": "Các chủ đề này sẽ xuất hiện lại trên thanh bên."
   },
-  "deleteConfirm": {
-    "title": "Xóa cuộc trò chuyện này?",
-    "titleMany": "Xóa {{count}} cuộc trò chuyện?",
-    "cancel": "Hủy",
-    "confirm": "Xóa",
-    "automationsDescription": "Xóa chủ đề này cũng xóa các tác vụ tự động liên quan.",
-    "automationsDescriptionMany": "Các tự động hóa liên kết cũng sẽ bị xóa.",
-    "moreAutomations": "+ {{count}} mục nữa",
-    "schedule": {
-      "at": "{{time}}",
-      "every": "Mỗi {{duration}}",
-      "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} ({{tz}})",
-      "local": "Trình kích hoạt cục bộ",
-      "unknown": "Lịch tùy chỉnh"
-    },
-    "next": {
-      "label": "Tiếp theo: {{time}}",
-      "disabled": "Đã tạm dừng",
-      "local": "Đang chờ kích hoạt",
-      "none": "Không có lần chạy tiếp theo"
-    }
-  },
   "connection": {
     "idle": "Rảnh",
     "connecting": "Đang kết nối…",
@@ -2548,7 +2525,13 @@
     "pendingDelete": "Sắp xóa {{count}} cuộc trò chuyện",
     "archived": "Đã lưu trữ {{count}} cuộc trò chuyện",
     "unarchived": "Đã bỏ lưu trữ {{count}} cuộc trò chuyện",
-    "deleteFailed": "Không thể xóa {{count}} cuộc trò chuyện"
+    "deleteFailed": "Không thể xóa {{count}} cuộc trò chuyện",
+    "confirmDeleteAutomationsSingle": "Xóa cuộc trò chuyện và các tác vụ tự động?",
+    "confirmDeleteAutomations": "Xóa {{count}} cuộc trò chuyện và các tác vụ tự động?",
+    "automationCountSingle": "1 tác vụ",
+    "automationCount": "{{count}} tác vụ",
+    "excludeSession": "Giữ lại",
+    "excludeSessionAria": "Bỏ {{title}} khỏi lần xóa này"
   },
   "common": {
     "retry": "Thử lại",

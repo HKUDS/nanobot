@@ -14,15 +14,6 @@
     "options": "呼叫端提供 dialogTitle、description 與 placeholder。title 設定初始值，onConfirm 接收去除頭尾空白的標題。空標題無法儲存。",
     "hint": "儲存後更新上方標題。"
   },
-  "delete": {
-    "title": "DeleteConfirm · 刪除確認",
-    "description": "比較單筆、多筆與含自動任務的刪除確認。",
-    "options": "count 控制批次刪除文案；automations 顯示關聯任務、排程與下次執行時間。確認按鈕呼叫 onConfirm。",
-    "scenario": "刪除情境",
-    "open": "開啟刪除確認",
-    "confirmed": "已確認刪除範例。",
-    "hint": "選擇單一、多個或含自動任務的對話。"
-  },
   "inlineTokens": {
     "title": "Inline tokens · 指令與對話識別",
     "description": "編輯指令與識別碼，查看醒目樣式與色彩。",

@@ -1948,29 +1948,6 @@
     "description": "聊天记录会保留，可随时取消归档。",
     "unarchiveDescription": "这些话题将重新显示在侧栏中。"
   },
-  "deleteConfirm": {
-    "title": "删除这个话题？",
-    "titleMany": "删除这 {{count}} 个对话？",
-    "cancel": "取消",
-    "confirm": "删除",
-    "automationsDescription": "删除话题也会删除关联的自动任务",
-    "automationsDescriptionMany": "关联的自动任务也会一并删除。",
-    "moreAutomations": "另有 {{count}} 个",
-    "schedule": {
-      "at": "{{time}}",
-      "every": "每 {{duration}}",
-      "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}}（{{tz}}）",
-      "local": "本地触发器",
-      "unknown": "自定义计划"
-    },
-    "next": {
-      "label": "下次：{{time}}",
-      "disabled": "已暂停",
-      "local": "等待触发",
-      "none": "没有下次运行"
-    }
-  },
   "connection": {
     "idle": "空闲",
     "connecting": "连接中…",
@@ -2730,7 +2707,13 @@
     "pendingDelete": "即将删除 {{count}} 个会话",
     "archived": "已归档 {{count}} 个会话",
     "unarchived": "已取消归档 {{count}} 个会话",
-    "deleteFailed": "{{count}} 个会话删除失败"
+    "deleteFailed": "{{count}} 个会话删除失败",
+    "confirmDeleteAutomationsSingle": "删除会话及关联自动任务？",
+    "confirmDeleteAutomations": "删除 {{count}} 个会话及关联自动任务？",
+    "automationCountSingle": "1 个任务",
+    "automationCount": "{{count}} 个任务",
+    "excludeSession": "保留",
+    "excludeSessionAria": "从本次删除中移除「{{title}}」"
   },
   "common": {
     "retry": "重试",

@@ -14,15 +14,6 @@
     "options": "Bên gọi cung cấp dialogTitle, description và placeholder. title đặt giá trị ban đầu; onConfirm nhận tên đã bỏ khoảng trắng ở hai đầu. Không thể lưu tên trống.",
     "hint": "Khi lưu, tiêu đề phía trên sẽ được cập nhật."
   },
-  "delete": {
-    "title": "DeleteConfirm · Xác nhận xóa",
-    "description": "So sánh việc xóa một cuộc trò chuyện, nhiều cuộc trò chuyện hoặc cuộc trò chuyện có tác vụ tự động.",
-    "options": "count điều khiển nội dung xóa hàng loạt. automations hiển thị tác vụ liên kết, lịch và lần chạy tiếp theo. Xác nhận sẽ gọi onConfirm.",
-    "scenario": "Tình huống xóa",
-    "open": "Mở xác nhận xóa",
-    "confirmed": "Đã xác nhận xóa ví dụ.",
-    "hint": "Chọn một, nhiều hoặc cuộc trò chuyện có tác vụ tự động."
-  },
   "inlineTokens": {
     "title": "Inline tokens · Lệnh và định danh phiên",
     "description": "Sửa lệnh và định danh để xem phần tô sáng và màu ổn định của phiên.",

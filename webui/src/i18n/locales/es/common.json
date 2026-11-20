@@ -1766,29 +1766,6 @@
     "description": "Las conversaciones se conservan. Puedes desarchivarlas en cualquier momento.",
     "unarchiveDescription": "Estos temas volverán a la barra lateral."
   },
-  "deleteConfirm": {
-    "title": "¿Eliminar este chat?",
-    "titleMany": "¿Eliminar {{count}} conversaciones?",
-    "cancel": "Cancelar",
-    "confirm": "Eliminar",
-    "automationsDescription": "Eliminar este tema también elimina sus tareas automáticas vinculadas.",
-    "automationsDescriptionMany": "También se eliminarán las automatizaciones vinculadas.",
-    "moreAutomations": "+ {{count}} más",
-    "schedule": {
-      "at": "{{time}}",
-      "every": "Cada {{duration}}",
-      "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} ({{tz}})",
-      "local": "Activador local",
-      "unknown": "Programación personalizada"
-    },
-    "next": {
-      "label": "Siguiente: {{time}}",
-      "disabled": "Pausada",
-      "local": "Esperando activador",
-      "none": "Sin próxima ejecución"
-    }
-  },
   "connection": {
     "idle": "Inactivo",
     "connecting": "Conectando…",
@@ -2548,7 +2525,13 @@
     "pendingDelete": "Se eliminarán {{count}} conversaciones",
     "archived": "{{count}} conversaciones archivadas",
     "unarchived": "{{count}} conversaciones desarchivadas",
-    "deleteFailed": "No se pudieron eliminar {{count}} conversaciones"
+    "deleteFailed": "No se pudieron eliminar {{count}} conversaciones",
+    "confirmDeleteAutomationsSingle": "¿Eliminar la conversación y sus automatizaciones?",
+    "confirmDeleteAutomations": "¿Eliminar {{count}} conversaciones y sus automatizaciones?",
+    "automationCountSingle": "1 automatización",
+    "automationCount": "{{count}} automatizaciones",
+    "excludeSession": "Conservar",
+    "excludeSessionAria": "Quitar {{title}} de esta eliminación"
   },
   "common": {
     "retry": "Reintentar",

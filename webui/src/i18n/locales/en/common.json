@@ -1948,29 +1948,6 @@
     "description": "Conversations are kept. You can unarchive them at any time.",
     "unarchiveDescription": "These topics will return to the sidebar."
   },
-  "deleteConfirm": {
-    "title": "Delete this topic?",
-    "titleMany": "Delete {{count}} conversations?",
-    "cancel": "Cancel",
-    "confirm": "Delete",
-    "automationsDescription": "Deleting this topic also deletes its linked automations.",
-    "automationsDescriptionMany": "Linked automations will also be deleted.",
-    "moreAutomations": "+ {{count}} more",
-    "schedule": {
-      "at": "{{time}}",
-      "every": "Every {{duration}}",
-      "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} ({{tz}})",
-      "local": "Local trigger",
-      "unknown": "Custom schedule"
-    },
-    "next": {
-      "label": "Next: {{time}}",
-      "disabled": "Paused",
-      "local": "Waiting for trigger",
-      "none": "No next run"
-    }
-  },
   "connection": {
     "idle": "Idle",
     "connecting": "Connecting…",
@@ -2730,7 +2707,13 @@
     "pendingDelete": "{{count}} topics will be deleted",
     "archived": "{{count}} topics archived",
     "unarchived": "{{count}} topics unarchived",
-    "deleteFailed": "Could not delete {{count}} topics"
+    "deleteFailed": "Could not delete {{count}} topics",
+    "confirmDeleteAutomationsSingle": "Delete topic and linked automations?",
+    "confirmDeleteAutomations": "Delete {{count}} topics and linked automations?",
+    "automationCountSingle": "1 automation",
+    "automationCount": "{{count}} automations",
+    "excludeSession": "Keep",
+    "excludeSessionAria": "Exclude {{title}} from deletion"
   },
   "common": {
     "retry": "Retry",

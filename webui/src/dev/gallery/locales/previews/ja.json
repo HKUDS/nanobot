@@ -14,15 +14,6 @@
     "options": "呼び出し元が dialogTitle、description、placeholder を渡します。title が初期値になり、onConfirm は前後の空白を除いた名前を受け取ります。空の名前は保存できません。",
     "hint": "保存すると上の名前が更新されます。"
   },
-  "delete": {
-    "title": "DeleteConfirm · 削除の確認",
-    "description": "単一、複数、自動化タスク付きチャットの削除確認を比較できます。",
-    "options": "count が一括削除の文言を制御します。automations は関連タスク、スケジュール、次回実行日時を表示します。確認すると onConfirm を呼び出します。",
-    "scenario": "削除のシナリオ",
-    "open": "削除確認を開く",
-    "confirmed": "サンプルの削除を確認しました。",
-    "hint": "単一、複数、または自動化タスク付きのチャットを選択してください。"
-  },
   "inlineTokens": {
     "title": "Inline tokens · コマンドとセッション識別子",
     "description": "コマンドや識別子を編集して、強調表示とセッション固有の色を確認できます。",

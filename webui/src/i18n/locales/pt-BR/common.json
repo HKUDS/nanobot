@@ -1768,29 +1768,6 @@
     "description": "As conversas são mantidas. Você pode desarquivá-las a qualquer momento.",
     "unarchiveDescription": "Estes tópicos voltarão à barra lateral."
   },
-  "deleteConfirm": {
-    "title": "Excluir esta conversa?",
-    "titleMany": "Excluir {{count}} conversas?",
-    "cancel": "Cancelar",
-    "confirm": "Excluir",
-    "automationsDescription": "Excluir este tópico também exclui suas automações vinculadas.",
-    "automationsDescriptionMany": "As automações vinculadas também serão excluídas.",
-    "moreAutomations": "+ {{count}} a mais",
-    "schedule": {
-      "at": "{{time}}",
-      "every": "A cada {{duration}}",
-      "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} ({{tz}})",
-      "local": "Gatilho local",
-      "unknown": "Agendamento personalizado"
-    },
-    "next": {
-      "label": "Próxima: {{time}}",
-      "disabled": "Pausada",
-      "local": "Aguardando gatilho",
-      "none": "Sem próxima execução"
-    }
-  },
   "connection": {
     "idle": "Ocioso",
     "connecting": "Conectando…",
@@ -2550,7 +2527,13 @@
     "pendingDelete": "{{count}} conversas serão excluídas",
     "archived": "{{count}} conversas arquivadas",
     "unarchived": "{{count}} conversas desarquivadas",
-    "deleteFailed": "Não foi possível excluir {{count}} conversas"
+    "deleteFailed": "Não foi possível excluir {{count}} conversas",
+    "confirmDeleteAutomationsSingle": "Excluir a conversa e as automações vinculadas?",
+    "confirmDeleteAutomations": "Excluir {{count}} conversas e as automações vinculadas?",
+    "automationCountSingle": "1 automação",
+    "automationCount": "{{count}} automações",
+    "excludeSession": "Manter",
+    "excludeSessionAria": "Remover {{title}} desta exclusão"
   },
   "common": {
     "retry": "Tentar novamente",
