@@ -71,7 +71,7 @@
 .goal-island-trigger:focus-visible {
   outline: none;
 }
-.goal-island-trigger:focus-visible > span:last-child {
+:where(:root:not([data-focus-modality="pointer"])) .goal-island-trigger:focus-visible > span:last-child {
   text-decoration: underline;
   text-decoration-thickness: 2px;
   text-underline-offset: 4px;

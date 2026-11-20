@@ -130,7 +130,7 @@
   cursor: grabbing;
 }
 
-.reasoning-effort-slider:has(input:focus-visible) .reasoning-effort-track {
+:where(:root:not([data-focus-modality="pointer"])) .reasoning-effort-slider:has(input:focus-visible) .reasoning-effort-track {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 5px;
 }

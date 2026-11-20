@@ -217,6 +217,7 @@ function FileUnifiedDiff({
             className={cn(
               "inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium",
               "text-muted-foreground transition-colors hover:bg-muted/65 hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
             data-testid="file-edit-diff-expand-lines"
             onClick={() => setExpandedLines(true)}
@@ -235,6 +236,7 @@ function FileUnifiedDiff({
             className={cn(
               "inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium",
               "text-muted-foreground transition-colors hover:bg-muted/65 hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
             data-testid="file-edit-diff-collapse-lines"
             onClick={() => setExpandedLines(false)}
@@ -258,6 +260,7 @@ function FileUnifiedDiff({
               className={cn(
                 "inline-flex items-center gap-1 rounded px-1 py-0.5 font-medium",
                 "text-muted-foreground transition-colors hover:bg-muted/65 hover:text-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               )}
               data-testid="file-edit-diff-open-file"
               onClick={() => onOpenFilePreview(previewPath)}
@@ -284,6 +287,7 @@ function FileUnifiedDiff({
         className={cn(
           "flex w-full cursor-pointer items-center gap-2 rounded-md border border-border/45 bg-muted/35 px-2 py-1 text-left",
           "text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/50",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         )}
       >
         <ChevronRight
