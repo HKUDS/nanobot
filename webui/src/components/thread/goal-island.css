@@ -11,7 +11,7 @@
 @property --goal-island-radius {
   syntax: "<length>";
   inherits: true;
-  initial-value: 15px;
+  initial-value: 14px;
 }
 
 .thread-header-container {
@@ -39,44 +39,52 @@
 .goal-island-panel {
   --goal-island-width: 100%;
   --goal-island-height: 100%;
-  --goal-island-radius: 15px;
-  --goal-surface: hsl(240 6% 12% / 94%);
-  --goal-surface-hover: hsl(240 6% 16% / 97%);
-  --goal-border: rgb(255 255 255 / 12%);
-  --goal-outer-ring: rgb(15 23 42 / 22%);
-  --goal-highlight: rgb(255 255 255 / 15%);
-  --goal-shadow: 0 2px 6px rgb(15 23 42 / 14%), 0 10px 24px -4px rgb(15 23 42 / 24%);
-  --goal-panel-shadow: 0 4px 12px rgb(15 23 42 / 18%), 0 20px 44px -8px rgb(15 23 42 / 32%);
-  --goal-dot-color: hsl(158 68% 54%);
-  --goal-dot-halo: rgb(52 211 153 / 30%);
-  --goal-blocked-color: hsl(0 86% 74%);
-  --goal-divider: rgb(255 255 255 / 9%);
-  color: hsl(240 5% 96%);
+  --goal-island-radius: 14px;
+  --goal-surface: hsl(40 12% 95.5% / 95%);
+  --goal-surface-hover: hsl(40 12% 93.5% / 98%);
+  --goal-panel-surface: hsl(0 0% 100% / 96%);
+  --goal-border: rgb(15 23 42 / 12%);
+  --goal-border-hover: rgb(15 23 42 / 18%);
+  --goal-highlight: rgb(255 255 255 / 90%);
+  --goal-shadow: 0 1px 2px rgb(15 23 42 / 5%), 0 4px 12px rgb(15 23 42 / 6%);
+  --goal-panel-shadow: 0 2px 6px rgb(15 23 42 / 4%), 0 10px 26px rgb(15 23 42 / 10%);
+  --goal-dot-color: hsl(158 55% 40%);
+  --goal-blocked-color: hsl(0 58% 45%);
+  --goal-blocked-bg: hsl(0 72% 52% / 7%);
+  --goal-blocked-border: hsl(0 58% 52% / 22%);
+  --goal-divider: hsl(var(--border) / 70%);
+  color: hsl(var(--foreground));
 }
 :where(.dark) .goal-island,
 :where(.dark) .goal-island-panel {
-  --goal-surface: hsl(240 8% 8.5% / 95%);
-  --goal-surface-hover: hsl(240 8% 12% / 98%);
-  --goal-border: rgb(255 255 255 / 16%);
-  --goal-outer-ring: rgb(0 0 0 / 55%);
-  --goal-highlight: rgb(255 255 255 / 18%);
-  --goal-shadow: 0 2px 8px rgb(0 0 0 / 42%), 0 12px 28px -4px rgb(0 0 0 / 58%);
-  --goal-panel-shadow: 0 6px 16px rgb(0 0 0 / 48%), 0 22px 48px -8px rgb(0 0 0 / 68%);
+  --goal-surface: hsl(0 0% 25.5% / 94%);
+  --goal-surface-hover: hsl(0 0% 28% / 98%);
+  --goal-panel-surface: hsl(0 0% 23.5% / 96%);
+  --goal-border: rgb(255 255 255 / 14%);
+  --goal-border-hover: rgb(255 255 255 / 22%);
+  --goal-highlight: rgb(255 255 255 / 7%);
+  --goal-shadow: 0 2px 6px rgb(0 0 0 / 24%), 0 6px 16px rgb(0 0 0 / 18%);
+  --goal-panel-shadow: 0 4px 12px rgb(0 0 0 / 28%), 0 14px 32px rgb(0 0 0 / 34%);
+  --goal-dot-color: hsl(158 58% 58%);
+  --goal-blocked-color: hsl(0 72% 74%);
+  --goal-blocked-bg: hsl(0 65% 60% / 11%);
+  --goal-blocked-border: hsl(0 65% 68% / 26%);
 }
 .goal-island[data-goal-status="blocked"],
 .goal-island-panel[data-goal-status="blocked"] {
-  --goal-surface: hsl(354 38% 15% / 95%);
-  --goal-surface-hover: hsl(354 38% 19% / 98%);
-  --goal-border: hsl(0 78% 68% / 36%);
-  --goal-outer-ring: hsl(354 60% 10% / 34%);
-  --goal-highlight: hsl(0 86% 80% / 18%);
+  --goal-surface: hsl(0 65% 97.5% / 96%);
+  --goal-surface-hover: hsl(0 65% 95.5% / 98%);
+  --goal-panel-surface: hsl(0 50% 99% / 97%);
+  --goal-border: hsl(0 58% 54% / 28%);
+  --goal-border-hover: hsl(0 58% 54% / 40%);
 }
 :where(.dark) .goal-island[data-goal-status="blocked"],
 :where(.dark) .goal-island-panel[data-goal-status="blocked"] {
-  --goal-surface: hsl(354 40% 12.5% / 96%);
-  --goal-surface-hover: hsl(354 40% 16% / 98%);
-  --goal-border: hsl(0 78% 66% / 44%);
-  --goal-outer-ring: rgb(0 0 0 / 58%);
+  --goal-surface: hsl(0 20% 25% / 95%);
+  --goal-surface-hover: hsl(0 22% 28% / 98%);
+  --goal-panel-surface: hsl(0 16% 23.5% / 96%);
+  --goal-border: hsl(0 65% 68% / 30%);
+  --goal-border-hover: hsl(0 65% 68% / 42%);
 }
 .goal-island-trigger {
   position: relative;
@@ -84,100 +92,65 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 6px;
   max-width: 100%;
-  height: 30px;
-  padding: 0 11px 0 12px;
-  border-radius: 15px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 14px;
   corner-shape: round;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: -0.005em;
   line-height: 1;
   text-align: center;
   cursor: pointer;
-  transition: transform 140ms cubic-bezier(0.2, 0.9, 0.2, 1), opacity 120ms ease;
-}
-.goal-island-trigger:active {
-  transform: scale(0.98);
+  transition: opacity 120ms ease;
 }
 .goal-island-trigger:hover > .goal-island-surface::before {
   background: var(--goal-surface-hover);
-  border-color: rgb(255 255 255 / 20%);
-}
-.goal-island[data-goal-status="blocked"] .goal-island-trigger:hover > .goal-island-surface::before {
-  border-color: hsl(0 78% 68% / 52%);
+  border-color: var(--goal-border-hover);
 }
 .goal-island[data-detail-mounted="true"] .goal-island-trigger {
   opacity: 0;
 }
 .goal-island-trigger:focus-visible {
-  outline: 2px solid hsl(var(--ring) / 65%);
+  outline: 2px solid hsl(var(--ring) / 55%);
   outline-offset: 2px;
 }
 .goal-island-label {
   color: inherit;
 }
 .goal-island-dot {
-  position: relative;
-  width: 7px;
-  height: 7px;
-  flex: none;
-  border-radius: 9999px;
-  background: var(--goal-dot-color);
-  box-shadow: 0 0 0 2.5px var(--goal-dot-halo);
-}
-.goal-island-dot::after {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border-radius: 9999px;
-  background: var(--goal-dot-color);
-  opacity: 0.45;
-  animation: goal-island-pulse 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-.goal-island-dot-header {
-  margin-top: 6px;
-}
-.goal-island-dot-blocked {
   width: 6px;
   height: 6px;
-  background: var(--goal-blocked-color);
-  box-shadow: none;
+  flex: none;
+  border-radius: 9999px;
+  background: var(--goal-dot-color);
+  animation: goal-island-breathe 2.6s ease-in-out infinite;
 }
-.goal-island-dot-blocked::after {
-  display: none;
+.goal-island-dot-header {
+  margin-top: 6.5px;
+}
+.goal-island-dot-blocked {
+  width: 5.5px;
+  height: 5.5px;
+  background: var(--goal-blocked-color);
+  animation: none;
 }
 .goal-island-chevron {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
   flex: none;
-  opacity: 0.52;
-  transition: opacity 140ms ease, transform 160ms ease;
+  opacity: 0.44;
+  transition: opacity 140ms ease;
 }
 .goal-island-trigger:hover .goal-island-chevron {
-  opacity: 0.92;
-  transform: translateY(1px);
+  opacity: 0.78;
 }
 .goal-island-panel {
-  --goal-island-radius: 20px;
-  color-scheme: dark;
-  --foreground: 240 5% 96%;
-  --muted-foreground: 240 4% 72%;
-  --muted: 240 5% 18%;
-  --accent: 240 5% 22%;
-  --accent-foreground: 0 0% 98%;
-  --border: 240 5% 26%;
-  --ring: 0 0% 83.1%;
-  --content-link: #93c5fd;
-  --content-link-hover: #bfdbfe;
-  --code-comment: #c8c8d0;
-  --code-string: #b5d99c;
-  --code-keyword: #e3a5f7;
-  --code-function: #93c5fd;
-  --code-property: #f6c177;
+  --goal-island-radius: 18px;
   isolation: isolate;
-  width: min(34rem, calc(100vw - 48px));
+  width: min(33rem, calc(100vw - 48px));
   outline: none;
 }
 .goal-island-surface {
@@ -198,13 +171,14 @@
   corner-shape: round;
   border: 1px solid var(--goal-border);
   background: var(--goal-surface);
-  box-shadow: inset 0 1px 0 var(--goal-highlight), 0 0 0 1px var(--goal-outer-ring), var(--goal-shadow);
-  backdrop-filter: blur(20px) saturate(1.3);
-  -webkit-backdrop-filter: blur(20px) saturate(1.3);
-  transition: background-color 150ms ease, border-color 150ms ease;
+  box-shadow: inset 0 1px 0 var(--goal-highlight), var(--goal-shadow);
+  backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  transition: background-color 140ms ease, border-color 140ms ease;
 }
 .goal-island-panel > .goal-island-surface::before {
-  box-shadow: inset 0 1px 0 var(--goal-highlight), 0 0 0 1px var(--goal-outer-ring), var(--goal-panel-shadow);
+  background: var(--goal-panel-surface);
+  box-shadow: inset 0 1px 0 var(--goal-highlight), var(--goal-panel-shadow);
 }
 .goal-island-panel-content {
   display: flex;
@@ -217,14 +191,14 @@
   gap: 10px;
   flex-shrink: 0;
   margin: 0;
-  padding: 13px 14px 11px 16px;
+  padding: 12px 12px 10px 16px;
   border-bottom: 1px solid var(--goal-divider);
   color: hsl(var(--foreground));
 }
 .goal-island-summary-main {
   display: flex;
   align-items: flex-start;
-  gap: 9px;
+  gap: 8px;
   min-width: 0;
   flex: 1;
 }
@@ -238,7 +212,7 @@
   margin: 0;
   overflow: hidden;
   overflow-wrap: anywhere;
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 600;
   line-height: 1.35;
   letter-spacing: -0.01em;
@@ -246,26 +220,18 @@
 .goal-island-blocked-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex: none;
   margin-top: 1px;
-  padding: 2px 8px 2px 7px;
+  padding: 2px 8px 2px 6px;
   border-radius: 9999px;
   corner-shape: round;
-  background: hsl(0 72% 58% / 18%);
-  border: 1px solid hsl(0 80% 70% / 28%);
+  background: var(--goal-blocked-bg);
+  border: 1px solid var(--goal-blocked-border);
   color: var(--goal-blocked-color);
   font-size: 11.5px;
   font-weight: 600;
-  line-height: 1.35;
-}
-.goal-island-cancel {
-  color: rgb(255 255 255 / 72%);
-  background: rgb(255 255 255 / 7%);
-}
-.goal-island-cancel:hover:not(:disabled) {
-  color: hsl(0 90% 80%);
-  background: hsl(0 72% 56% / 20%);
+  line-height: 1.3;
 }
 .goal-island-body {
   --goal-fade-top: 0px;
@@ -287,7 +253,7 @@
   --goal-fade-bottom: min(30px, 22%);
 }
 .goal-island-document {
-  padding: 12px 16px 16px;
+  padding: 12px 16px 14px;
 }
 .goal-island-body .markdown-content {
   --text-reading-size: 13.5px;
@@ -298,11 +264,11 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 9px 11px;
-  border-radius: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
   corner-shape: round;
-  background: hsl(0 70% 56% / 14%);
-  border: 1px solid hsl(0 80% 70% / 24%);
+  background: var(--goal-blocked-bg);
+  border: 1px solid var(--goal-blocked-border);
   color: var(--goal-blocked-color);
   font-size: 13px;
   line-height: 1.45;
@@ -319,16 +285,16 @@
   line-height: 1.45;
 }
 .goal-island-recap {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px solid var(--goal-divider);
 }
 .goal-island-panel[data-goal-status="blocked"] .goal-island-body[data-overflow-bottom] {
   --goal-fade-bottom: 16px;
 }
 .goal-island-status-icon {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   flex: none;
   color: var(--goal-blocked-color);
 }
@@ -336,34 +302,34 @@
   color: var(--goal-blocked-color);
 }
 .goal-island-blocked .goal-island-status-icon {
-  margin-top: 2.5px;
+  margin-top: 3px;
 }
 .goal-island-panel[data-state="open"] {
-  animation: goal-island-expand 360ms cubic-bezier(0.2, 0.9, 0.15, 1) both;
+  animation: goal-island-expand 320ms cubic-bezier(0.2, 0.9, 0.15, 1) both;
 }
 .goal-island-panel[data-state="open"] .goal-island-panel-content {
-  animation: goal-island-content-in 190ms ease-out 80ms both;
+  animation: goal-island-content-in 170ms ease-out 70ms both;
 }
 .goal-island-panel[data-state="closed"] {
-  animation: goal-island-collapse 220ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: goal-island-collapse 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
   pointer-events: none;
 }
 [data-radix-popper-content-wrapper]:has(> .goal-island-panel[data-state="closed"]) {
   pointer-events: none;
 }
 .goal-island-panel[data-state="closed"] .goal-island-panel-content {
-  animation: goal-island-content-out 80ms ease-in both;
+  animation: goal-island-content-out 70ms ease-in both;
 }
 @keyframes goal-island-expand {
   from {
     --goal-island-width: var(--goal-from-width, var(--radix-popover-trigger-width));
-    --goal-island-height: var(--goal-from-height, 30px);
-    --goal-island-radius: var(--goal-from-radius, 15px);
+    --goal-island-height: var(--goal-from-height, 28px);
+    --goal-island-radius: var(--goal-from-radius, 14px);
   }
   to {
     --goal-island-width: 100%;
     --goal-island-height: 100%;
-    --goal-island-radius: 20px;
+    --goal-island-radius: 18px;
   }
 }
 @keyframes goal-island-collapse {
@@ -374,37 +340,37 @@
   }
   to {
     --goal-island-width: var(--radix-popover-trigger-width);
-    --goal-island-height: 30px;
-    --goal-island-radius: 15px;
+    --goal-island-height: 28px;
+    --goal-island-radius: 14px;
   }
 }
 @keyframes goal-island-content-in {
-  from { opacity: var(--goal-from-opacity, 0); transform: var(--goal-from-transform, translateY(-6px)); }
+  from { opacity: var(--goal-from-opacity, 0); transform: var(--goal-from-transform, translateY(-4px)); }
   to { opacity: 1; transform: translateY(0); }
 }
 @keyframes goal-island-content-out {
   from { opacity: var(--goal-from-opacity); transform: var(--goal-from-transform); }
-  to { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 0; transform: translateY(-4px); }
 }
-@keyframes goal-island-pulse {
-  0%, 100% { transform: scale(1); opacity: 0.45; }
-  50% { transform: scale(1.75); opacity: 0; }
+@keyframes goal-island-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 @media (max-width: 767px) {
   .goal-island-panel[data-narrow="true"][data-state="open"] > .goal-island-surface {
-    animation: goal-island-mobile-drop-in 360ms cubic-bezier(0.2, 0.9, 0.15, 1) both;
+    animation: goal-island-mobile-drop-in 320ms cubic-bezier(0.2, 0.9, 0.15, 1) both;
   }
   .goal-island-panel[data-narrow="true"][data-state="closed"] > .goal-island-surface {
-    animation: goal-island-mobile-drop-out 220ms cubic-bezier(0.4, 0, 0.2, 1) both;
+    animation: goal-island-mobile-drop-out 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
   }
 }
 @keyframes goal-island-mobile-drop-in {
-  from { translate: 0 -38px; }
+  from { translate: 0 -36px; }
   to { translate: 0 0; }
 }
 @keyframes goal-island-mobile-drop-out {
   from { translate: 0 0; }
-  to { translate: 0 -38px; }
+  to { translate: 0 -36px; }
 }
 @media (max-height: 600px) {
   .goal-island-summary .markdown-content h2 {
@@ -417,9 +383,8 @@
   .goal-island-surface::before {
     transition: none;
   }
-  .goal-island-dot::after {
+  .goal-island-dot {
     animation: none;
-    display: none;
   }
   .goal-island-panel[data-state],
   .goal-island-panel[data-state] > .goal-island-surface,
@@ -430,15 +395,17 @@
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .goal-island,
   .goal-island-panel {
-    --goal-surface: hsl(240 8% 10%);
-    --goal-surface-hover: hsl(240 8% 14%);
-    --goal-border: rgb(255 255 255 / 35%);
+    --goal-surface: hsl(40 12% 95%);
+    --goal-surface-hover: hsl(40 12% 92%);
+    --goal-panel-surface: hsl(0 0% 100%);
+    --goal-border: rgb(15 23 42 / 26%);
   }
-  .goal-island[data-goal-status="blocked"],
-  .goal-island-panel[data-goal-status="blocked"] {
-    --goal-surface: hsl(354 44% 13%);
-    --goal-surface-hover: hsl(354 44% 17%);
-    --goal-border: hsl(0 82% 72% / 60%);
+  :where(.dark) .goal-island,
+  :where(.dark) .goal-island-panel {
+    --goal-surface: hsl(0 0% 26%);
+    --goal-surface-hover: hsl(0 0% 29%);
+    --goal-panel-surface: hsl(0 0% 24%);
+    --goal-border: rgb(255 255 255 / 30%);
   }
   .goal-island-surface::before {
     backdrop-filter: none;
@@ -450,6 +417,7 @@
   .goal-island-panel {
     --goal-surface: Canvas;
     --goal-surface-hover: Canvas;
+    --goal-panel-surface: Canvas;
     --goal-border: CanvasText;
     color: CanvasText;
   }
@@ -458,6 +426,5 @@
   }
   .goal-island-dot {
     background: Highlight;
-    box-shadow: none;
   }
 }

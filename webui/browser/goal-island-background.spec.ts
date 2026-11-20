@@ -36,7 +36,7 @@ async function expectBackgroundToCover(page: Page, owner: Locator) {
     context.drawImage(bitmap, 0, 0);
     return Array.from(context.getImageData(0, 0, 1, 1).data);
   }, Array.from(image));
-  expect(pixel.slice(0, 3).every(channel => channel < 80)).toBe(true);
+  expect(pixel.slice(0, 3).every(channel => channel > 180)).toBe(true);
 }
 
 for (const reducedMotion of ["no-preference", "reduce"] as const) {
@@ -45,7 +45,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
     await page.addInitScript(() => { localStorage.setItem("nanobot.locale", "en"); });
     await disableGoalPropertyRegistration(page);
     await page.goto("/browser/fixture.html?case=session-transition&preview&topic=goal");
-    await page.addStyleTag({ content: '[data-testid="thread-header"] { background: rgb(0, 255, 0) !important; }' });
+    await page.addStyleTag({ content: '[data-testid="thread-header"] { background: black !important; }' });
 
     const trigger = page.getByRole("button", { name: "Show full goal" });
     await expect(trigger).toBeVisible();
