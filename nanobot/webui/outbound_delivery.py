@@ -315,7 +315,14 @@ class WebUIOutboundDelivery:
 
     async def send(self, msg: OutboundMessage) -> None:
         async with self.history_lock(msg.chat_id):
-            if not await self._current_delivery(msg):
+            current = await self._current_delivery(msg)
+            if isinstance(msg.event, GoalStatusEvent) and msg.event.status == "idle":
+                # Retire this run's owner even when its display destination was replaced.
+                # The owner token cannot clear the replacement's run.
+                owner = msg.metadata.get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
+                if isinstance(owner, str):
+                    clear_websocket_turn_if_current(msg.chat_id, owner, preserve_persistence_failure=current)
+            if not current:
                 return
             generation = msg.metadata.get(HISTORY_GENERATION_METADATA_KEY)
             delivery = msg.delivery
@@ -389,10 +396,6 @@ class WebUIOutboundDelivery:
             return
         if isinstance(event, GoalStatusEvent):
             turn_id = msg.metadata.get(WEBUI_TURN_METADATA_KEY)
-            turn_owner = msg.metadata.get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
-            owner = turn_owner if isinstance(turn_owner, str) else None
-            if event.status == "idle":
-                clear_websocket_turn_if_current(msg.chat_id, owner, preserve_persistence_failure=True)
             if recipients and event.status in ("running", "idle"):
                 await self._send_goal_status(
                     msg.chat_id, event.status, started_at=event.started_at,
