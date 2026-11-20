@@ -89,7 +89,6 @@
   line-height: 18px;
   text-align: left;
   cursor: pointer;
-  transition: opacity 120ms ease;
 }
 .goal-island-trigger:hover > .goal-island-surface::before {
   background: var(--goal-surface-hover);
@@ -327,7 +326,6 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .goal-island-trigger,
   .goal-island-surface::before {
     transition: none;
   }
