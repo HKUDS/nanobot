@@ -324,7 +324,7 @@ export function UpdateFlowProvider({ client, token, enabled, canSettleHandoff = 
         </div> : blocked ? ownerInstructions : null}
         <div className={`mt-6 grid shrink-0 ${done || blocked ? "grid-cols-1" : "grid-cols-2"} gap-2.5`}>
           {!done && !blocked && <Button variant="secondary" onClick={close}>
-            {t(done || failed || error || blocked ? "updates.close" : busy ? "updates.hide" : "updates.cancel")}
+            {t(failed || error ? "updates.close" : busy ? "updates.hide" : "updates.cancel")}
           </Button>}
           <Button variant="accent" className="min-w-0 whitespace-normal" disabled={!blocked && busy} aria-busy={busy}
             onClick={blocked ? close : primary}>

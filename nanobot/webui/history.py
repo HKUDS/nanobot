@@ -108,10 +108,6 @@ def _records_from_entries(
             for position, fact in entries]
 
 
-def turn_records(history: HistoryReader, ordinal: int) -> list[dict[str, Any]]:
-    return _records_from_entries(history, ordinal, history.read_entries(ordinal))
-
-
 def turn_record_page(
     history: HistoryReader, ordinal: int, *, start: int, end: int, reverse: bool,
     max_records: int, max_bytes: int, allow_oversized: bool = False,

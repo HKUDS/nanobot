@@ -2239,18 +2239,14 @@ class WeixinChannel(BaseChannel):
         to_user_id: str,
         text: str,
         context_token: str,
-        *,
-        client_id: str | None = None,
-        run_id: str = "",
     ) -> None:
         options = _SEND_OPTIONS.get()
         self._ensure_context_budget(
             context_token,
             reserve=options.reserve_budget if options else 0,
         )
-        client_id = client_id or (options.client_id if options else None)
-        client_id = client_id or f"nanobot-{uuid.uuid4().hex[:12]}"
-        run_id = run_id or (options.run_id if options else "")
+        client_id = (options.client_id if options else None) or f"nanobot-{uuid.uuid4().hex[:12]}"
+        run_id = options.run_id if options else ""
 
         item_list: list[dict[str, Any]] = []
         if text:
@@ -2284,11 +2280,6 @@ class WeixinChannel(BaseChannel):
         to_user_id: str,
         media_path: str,
         context_token: str,
-        *,
-        client_id: str | None = None,
-        file_key: str | None = None,
-        aes_key_raw: bytes | None = None,
-        run_id: str = "",
     ) -> None:
         """Upload a local file to WeChat CDN and send it as a media message.
 
@@ -2327,16 +2318,14 @@ class WeixinChannel(BaseChannel):
             item_key = "file_item"
 
         options = _SEND_OPTIONS.get()
-        aes_key_raw = aes_key_raw or (options.aes_key_raw if options else None)
-        aes_key_raw = aes_key_raw or os.urandom(16)
+        aes_key_raw = (options.aes_key_raw if options else None) or os.urandom(16)
         aes_key_hex = aes_key_raw.hex()
 
         # Compute encrypted size: PKCS7 padding to 16-byte boundary
         # Matches aesEcbPaddedSize: Math.ceil((size + 1) / 16) * 16
         padded_size = ((raw_size + 1 + 15) // 16) * 16
 
-        file_key = file_key or (options.file_key if options else None)
-        file_key = file_key or os.urandom(16).hex()
+        file_key = (options.file_key if options else None) or os.urandom(16).hex()
         upload_body: dict[str, Any] = {
             "filekey": file_key,
             "media_type": upload_type,
@@ -2408,9 +2397,8 @@ class WeixinChannel(BaseChannel):
             media_item["len"] = str(raw_size)
 
         # Send each media item as its own message (matching reference plugin)
-        client_id = client_id or (options.client_id if options else None)
-        client_id = client_id or f"nanobot-{uuid.uuid4().hex[:12]}"
-        run_id = run_id or (options.run_id if options else "")
+        client_id = (options.client_id if options else None) or f"nanobot-{uuid.uuid4().hex[:12]}"
+        run_id = options.run_id if options else ""
         item_list: list[dict[str, Any]] = [
             {"type": item_type, item_key: media_item}
         ]

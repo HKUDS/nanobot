@@ -557,11 +557,11 @@ class SubagentManager:
 
     def _build_tools(
         self,
-        workspace: Path | None = None,
+        *,
         tools_config: ToolsConfig | None = None,
         exec_manager: ExecSessionManager | None = None,
     ) -> ToolRegistry:
-        root = self.workspace if workspace is None else workspace
+        root = self.workspace
         registry = ToolRegistry()
         cfg = tools_config if tools_config is not None else self._subagent_tools_config()
         ctx = ToolContext(

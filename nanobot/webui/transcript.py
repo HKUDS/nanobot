@@ -44,7 +44,6 @@ from nanobot.webui.history import (
     initialize_history,
     record_from_fact,
     turn_record_page,
-    turn_records,
 )
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 from nanobot.webui.outbound_wire import project_tool_events
@@ -943,14 +942,7 @@ def has_pending_tool_calls(
             "file_edit",
         }:
             return True
-        if ev in {WEBUI_FORK_MARKER_EVENT}:
-            continue
     return False
-
-
-def has_unfinished_transcript_tail(session_key: str, *, history: HistoryReader) -> bool:
-    count = history.turn_count
-    return bool(count and has_pending_tool_calls(turn_records(history, count - 1)))
 
 
 def completed_turn_ids(lines: list[dict[str, Any]]) -> list[str]:

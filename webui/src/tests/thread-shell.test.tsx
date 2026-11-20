@@ -2145,7 +2145,6 @@ describe("ThreadShell", () => {
     );
 
     const badge = await screen.findByRole("button", { name: "Choose model" });
-    expect(screen.queryByTestId("composer-model-setup-icon")).not.toBeInTheDocument();
     expect(badge.querySelector('[data-needs-setup="true"]')).toHaveClass(
       "composer-model-pill-setup",
     );

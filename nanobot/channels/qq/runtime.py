@@ -514,7 +514,6 @@ class QQChannel(BaseChannel):
                 file_type=file_type,
                 file_data=file_data_b64,
                 file_name=filename,
-                srv_send_msg=False,
             )
             if not media_obj:
                 self.logger.error("media upload failed: empty response")
@@ -608,7 +607,6 @@ class QQChannel(BaseChannel):
         file_type: int,
         file_data: str,
         file_name: str | None = None,
-        srv_send_msg: bool = False,
     ) -> dict[str, Any]:
         if not self._client:
             raise RuntimeError("QQ client not initialized")
@@ -624,7 +622,7 @@ class QQChannel(BaseChannel):
             id_key: chat_id,
             "file_type": file_type,
             "file_data": file_data,
-            "srv_send_msg": srv_send_msg,
+            "srv_send_msg": False,
         }
         # Only pass file_name for non-image types (file_type=4).
         # Passing file_name for images causes QQ client to render them as

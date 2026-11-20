@@ -6,7 +6,6 @@ import re
 import shutil
 import time
 from contextlib import suppress
-from datetime import datetime
 from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
@@ -349,11 +348,6 @@ def build_image_content_blocks(
         },
         {"type": "text", "text": label},
     ]
-
-
-def timestamp() -> str:
-    """Current ISO timestamp."""
-    return datetime.now().isoformat()
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')

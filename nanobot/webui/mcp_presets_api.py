@@ -658,39 +658,36 @@ def _display_name_for(name: str, preset: McpPreset | None = None) -> str:
     return preset.display_name if preset is not None else name
 
 
-def _action_message(action: str, preset: McpPreset, *, ok: bool = True) -> dict[str, Any]:
-    verb = {
-        "enable": "Enabled",
-        "remove": "Removed",
-        "test": "Checked",
-    }.get(action, "Updated")
-    payload: dict[str, Any] = {
-        "ok": ok,
-        "message": f"{verb} MCP preset for {preset.display_name}.",
-    }
+def _action_message(action: Literal["enable", "remove"], preset: McpPreset) -> dict[str, Any]:
     if action == "enable":
-        payload["installed"] = True
-        payload["verification"] = ["config_present"]
-    elif action == "remove":
-        payload["removed"] = True
-        payload["verification"] = ["config_absent"]
-    return payload
+        return {
+            "ok": True,
+            "message": f"Enabled MCP preset for {preset.display_name}.",
+            "installed": True,
+            "verification": ["config_present"],
+        }
+    return {
+        "ok": True,
+        "message": f"Removed MCP preset for {preset.display_name}.",
+        "removed": True,
+        "verification": ["config_absent"],
+    }
 
 
-def _server_action_message(action: str, name: str, *, ok: bool = True) -> dict[str, Any]:
+def _server_action_message(
+    action: Literal["custom", "tools", "remove", "reconnect"], name: str,
+) -> dict[str, Any]:
     verb = {
         "custom": "Saved",
-        "import": "Imported",
-        "import-cursor": "Imported",
         "tools": "Updated tools for",
         "remove": "Removed",
         "reconnect": "Retried connection for",
-    }.get(action, "Updated")
+    }[action]
     payload: dict[str, Any] = {
-        "ok": ok,
+        "ok": True,
         "message": f"{verb} MCP server {name}.",
     }
-    if action in {"custom", "import", "import-cursor"}:
+    if action == "custom":
         payload["installed"] = True
         payload["verification"] = ["config_present"]
     elif action == "remove":
