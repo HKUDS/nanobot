@@ -1,5 +1,3 @@
-"""Subscription persistence and update ownership, without touching user installs."""
-
 import sys
 import time
 from pathlib import Path
@@ -34,7 +32,6 @@ def test_channel_is_installation_owned_persistent_and_revision_bound(environment
     assert not (environment / "channel.json").exists()
     selected = change("preview", 0)
     assert (selected.channel, selected.revision) == ("preview", 1)
-    # A second profile/process view retains the subscription, not a browser cache.
     original_home = get_selected_home_path()
     try:
         set_home_path(tmp_path / "another-profile")
@@ -46,7 +43,7 @@ def test_channel_is_installation_owned_persistent_and_revision_bound(environment
         change("stable", 0)
     assert change("stable", 1).revision == 2
     with pytest.raises(ValueError, match="channel changed"):
-        validate_channel_revision(0, sys.prefix)  # Stable → Preview → Stable is not the old consent.
+        validate_channel_revision(0, sys.prefix)
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "other-installation"))
     assert read_update_channel().revision == 0
     assert not (environment / "jobs").exists(), "Changing channels must not create an installation job"

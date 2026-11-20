@@ -1,5 +1,3 @@
-"""A replacement installer program retains its own installation and store leases."""
-
 import os
 import selectors
 import subprocess
@@ -49,7 +47,7 @@ def test_exec_retains_both_leases_until_installer_exits(tmp_path, monkeypatch, c
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     try:
-        ready(process)  # Same PID; the program no longer imports nanobot or owns Python lease objects.
+        ready(process)
         for updating in (False, True):
             with pytest.raises(InstallationBusyError):
                 with installation_access(updating=updating, environment=environment):
@@ -58,7 +56,7 @@ def test_exec_retains_both_leases_until_installer_exits(tmp_path, monkeypatch, c
             with data_access([store / "conversation.jsonl"]):
                 pytest.fail("Exec lost the overlapping store lease")
         with data_access([tmp_path / "other sessions"]):
-            pass  # A disjoint runtime remains usable.
+            pass
         if crash:
             process.kill()
         else:
@@ -68,7 +66,7 @@ def test_exec_retains_both_leases_until_installer_exits(tmp_path, monkeypatch, c
     finally:
         finish(process)
     with installation_access(updating=True, environment=environment), data_access([store], updating=True):
-        pass  # Actual installer exit, including a crash, releases all OS leases.
+        pass
 
 
 @pytest.mark.parametrize("high_stdout_fd", [False, True])

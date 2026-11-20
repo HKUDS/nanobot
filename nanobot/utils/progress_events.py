@@ -1,5 +1,3 @@
-"""Structured progress-event helpers shared by agent runtimes."""
-
 from __future__ import annotations
 
 import inspect
@@ -135,6 +133,8 @@ def build_tool_event_finish_payloads(context: AgentHookContext) -> list[dict[str
             "embeds": embeds,
         }
         if phase == "error":
+            if event.get("error_code"):
+                payload["error_code"] = event["error_code"]
             if isinstance(result, str) and result.strip():
                 payload["error"] = result.strip()
             else:

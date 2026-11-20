@@ -29,14 +29,32 @@ export function useReconnectRuns(client: NanobotClient, getToken: () => string):
         const body = await fetchLatestWebuiThread(client, getToken(), key, signal);
         if (!body || signal.aborted) return;
         const { completedTurnIds, snapshot } = persistedCanonicalRunState(body);
+        const mounted = client.hasTranscript(chatId);
+        if (body.page?.record_range) {
+          if (!Array.isArray(body.completed_turn_ids)) return;
+          if (client.canReconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot)) {
+            webuiThreadCache.set(key, body);
+          }
+          // A mounted owner must accept (or stage) the fragment before settling.
+          // Explicit completion is otherwise independent of a newer run, but the
+          // fragment is not proof that its WS content is covered.
+          if (!mounted) client.settleCompletedRunLifecycle(chatId, completedTurnIds);
+          return;
+        }
         const explicitlyCompleted = turnId !== null && completedTurnIds.includes(turnId);
-        if (!explicitlyCompleted && (snapshot.hasPendingToolCalls || snapshot.activeTurnId)) return;
-        if (turnId && !explicitlyCompleted && !snapshot.observedTurnIds.includes(turnId)) return;
-        if (!client.canReconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot)) return;
-        // Preserve the result before completion fences prune queued fragments.
-        // Returning to an inactive chat can hydrate from this canonical page.
-        webuiThreadCache.set(key, body);
-        client.reconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot);
+        const canCache = (explicitlyCompleted || (!snapshot.hasPendingToolCalls && !snapshot.activeTurnId))
+          && (!turnId || explicitlyCompleted || snapshot.observedTurnIds.includes(turnId))
+          && client.canReconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot);
+        // Preserve adoptable history before notifying completion subscribers.
+        if (canCache) webuiThreadCache.set(key, body);
+        // Full-page completion facts belong to the ledger regardless of whether
+        // a transcript can adopt this page. Retain content for its later owner.
+        client.settleCompletedRunLifecycle(chatId, completedTurnIds);
+        // Mounted owners alone adopt whole snapshots. Only an idle snapshot can
+        // settle activity without a named identity.
+        if (!mounted && canCache && !snapshot.hasPendingToolCalls && !snapshot.activeTurnId) {
+          client.reconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot);
+        }
       };
       let nextJob = 0;
       const worker = async () => {

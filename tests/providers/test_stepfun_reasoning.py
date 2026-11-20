@@ -24,11 +24,7 @@ _STEPFUN_SPEC = ProviderSpec(
 )
 
 
-# ── _parse: dict branch ─────────────────────────────────────────────────────
-
-
 def test_parse_dict_stepfun_reasoning_fallback() -> None:
-    """When content is None and reasoning exists, content falls back to reasoning."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(spec=_STEPFUN_SPEC)
 
@@ -45,12 +41,10 @@ def test_parse_dict_stepfun_reasoning_fallback() -> None:
     result = provider._parse(response)
 
     assert result.content == "Let me think... The answer is 42."
-    # reasoning_content should also be populated from reasoning
     assert result.reasoning_content == "Let me think... The answer is 42."
 
 
 def test_parse_dict_stepfun_reasoning_priority() -> None:
-    """reasoning_content field takes priority over reasoning when both present."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(spec=_STEPFUN_SPEC)
 
@@ -68,11 +62,7 @@ def test_parse_dict_stepfun_reasoning_priority() -> None:
     result = provider._parse(response)
 
     assert result.content == "informal thinking"
-    # reasoning_content uses the dedicated field, not reasoning
     assert result.reasoning_content == "formal reasoning content"
-
-
-# ── _parse: SDK objects ────────────────────────────────────────────────────
 
 
 def _make_sdk_response(content, reasoning=None, reasoning_content=None) -> ChatCompletion:
@@ -95,7 +85,6 @@ def _make_sdk_response(content, reasoning=None, reasoning_content=None) -> ChatC
 
 
 def test_parse_sdk_stepfun_reasoning_fallback() -> None:
-    """SDK branch: content falls back to msg.reasoning when content is None."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(spec=_STEPFUN_SPEC)
 
@@ -108,7 +97,6 @@ def test_parse_sdk_stepfun_reasoning_fallback() -> None:
 
 
 def test_parse_sdk_stepfun_reasoning_priority() -> None:
-    """reasoning_content field takes priority over reasoning in SDK branch."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(spec=_STEPFUN_SPEC)
 
@@ -124,11 +112,7 @@ def test_parse_sdk_stepfun_reasoning_priority() -> None:
     assert result.reasoning_content == "formal reasoning"
 
 
-# ── _parse_chunks: streaming dict branch ────────────────────────────────────
-
-
 def test_parse_chunks_dict_stepfun_reasoning_fallback() -> None:
-    """Streaming dict: reasoning field used when reasoning_content is absent."""
     chunks = [
         {
             "choices": [{
@@ -156,11 +140,7 @@ def test_parse_chunks_dict_stepfun_reasoning_fallback() -> None:
     assert result.reasoning_content == "Thinking step 1... step 2."
 
 
-# ── Regression: normal models unaffected ────────────────────────────────────
-
-
 def test_parse_dict_normal_model_with_reasoning_content_unaffected() -> None:
-    """Models that use reasoning_content (e.g. DeepSeek-R1) are not affected."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -181,7 +161,6 @@ def test_parse_dict_normal_model_with_reasoning_content_unaffected() -> None:
 
 
 def test_parse_dict_standard_model_no_reasoning_unaffected() -> None:
-    """Standard models (no reasoning fields at all) work exactly as before."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -199,7 +178,6 @@ def test_parse_dict_standard_model_no_reasoning_unaffected() -> None:
 
 
 def test_parse_chunks_dict_reasoning_precedence() -> None:
-    """reasoning_content takes precedence over reasoning in dict chunks."""
     chunks = [
         {
             "choices": [{
@@ -224,9 +202,6 @@ def test_parse_chunks_dict_reasoning_precedence() -> None:
     assert result.reasoning_content == "formal: "
 
 
-# ── _parse_chunks: streaming SDK objects ───────────────────────────────────
-
-
 def _make_sdk_chunk(
     reasoning_content=None, reasoning=None, content=None, finish=None,
 ) -> ChatCompletionChunk:
@@ -248,7 +223,6 @@ def _make_sdk_chunk(
 
 
 def test_parse_chunks_sdk_stepfun_reasoning_fallback() -> None:
-    """SDK streaming: reasoning field used when reasoning_content is None."""
     chunks = [
         _make_sdk_chunk(reasoning="Thinking... ", content=None, finish=None),
         _make_sdk_chunk(reasoning=None, content="answer", finish="stop"),
@@ -261,7 +235,6 @@ def test_parse_chunks_sdk_stepfun_reasoning_fallback() -> None:
 
 
 def test_parse_chunks_sdk_reasoning_precedence() -> None:
-    """reasoning_content takes precedence over reasoning in SDK chunks."""
     chunks = [
         _make_sdk_chunk(reasoning_content="formal: ", reasoning="informal: ", content=None),
         _make_sdk_chunk(reasoning_content=None, reasoning=None, content="result", finish="stop"),
@@ -272,11 +245,7 @@ def test_parse_chunks_sdk_reasoning_precedence() -> None:
     assert result.reasoning_content == "formal: "
 
 
-# ── Regression: non-StepFun providers must NOT promote reasoning to content ─
-
-
 def test_parse_dict_non_stepfun_no_reasoning_as_content() -> None:
-    """Providers without reasoning_as_content flag must not treat reasoning as content."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -292,14 +261,11 @@ def test_parse_dict_non_stepfun_no_reasoning_as_content() -> None:
 
     result = provider._parse(response)
 
-    # content stays None — reasoning is NOT promoted
     assert result.content is None
-    # reasoning still goes to reasoning_content for display as thinking
     assert result.reasoning_content == "internal thought process that should NOT be shown to user"
 
 
 def test_parse_sdk_non_stepfun_no_reasoning_as_content() -> None:
-    """SDK branch: providers without flag must not treat reasoning as content."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 

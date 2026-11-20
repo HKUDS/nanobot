@@ -112,6 +112,42 @@ def _patch_neonize_api(monkeypatch, detect_mime=None, detect_buffer=None) -> Non
     )
 
 
+@pytest.mark.parametrize(
+    ("installed_version", "needs_upgrade"),
+    [("0.4.3.post0", True), ("0.5.2", False), ("0.10.0", False)],
+)
+def test_startup_preserves_compatible_neonize(monkeypatch, installed_version, needs_upgrade):
+    from nanobot import optional_features
+    from nanobot.channels.whatsapp.manifest import PLUGIN
+
+    versions = {
+        "neonize": installed_version,
+        "python-magic": "0.4.27",
+        "python-magic-bin": "0.4.14",
+        "segno": "1.6.1",
+    }
+    monkeypatch.setattr(
+        optional_features,
+        "distribution",
+        lambda name: SimpleNamespace(version=versions[name]),
+    )
+    installs: list[tuple[str, list[str]]] = []
+
+    def install_extra(name, dependencies, *, runner):
+        installs.append((name, dependencies))
+        versions["neonize"] = "0.5.2"
+        return optional_features.InstallResult(True, name, ["pip"])
+
+    monkeypatch.setattr(optional_features, "install_extra", install_extra)
+
+    failures = optional_features.ensure_enabled_channel_dependencies(
+        {"whatsapp"}, {"whatsapp": PLUGIN},
+    )
+
+    assert failures == {}
+    assert installs == ([("whatsapp", list(PLUGIN.dependencies))] if needs_upgrade else [])
+
+
 def _patch_receipt_type(monkeypatch):
     neonize = types.ModuleType("neonize")
     utils = types.ModuleType("neonize.utils")

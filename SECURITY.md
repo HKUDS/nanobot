@@ -60,10 +60,10 @@ chmod 600 ~/.nanobot/config.json
 ```
 
 **Security Notes:**
-- In `v0.1.4.post3` and earlier, an empty `allowFrom` allowed all users. Since `v0.1.4.post4`, empty `allowFrom` denies all access by default — set `["*"]` to explicitly allow everyone.
-- Get your Telegram user ID from `@userinfobot`
-- Use WhatsApp sender IDs as full phone numbers with country code and no leading `+`
-- Review access logs regularly for unauthorized access attempts
+- An empty `allowFrom` denies all access by default (or uses DM pairing where supported). Set `["*"]` only if you intentionally want public access.
+- Get your Telegram user ID from `@userinfobot`.
+- Use WhatsApp sender IDs as full phone numbers with country code and no leading `+`.
+- Review access logs regularly for unauthorized access attempts.
 
 ### 3. Shell Command Execution
 
@@ -92,15 +92,10 @@ Set `"tools.exec.sandbox"` to wrap every shell command in an OS sandbox. Both ba
 | [bubblewrap](https://github.com/containers/bubblewrap) | `"bwrap"` | Linux | `bwrap` (`apt install bubblewrap`). Pre-installed in the official Docker image. |
 | Seatbelt | `"seatbelt"` | macOS | `sandbox-exec(1)`, shipped with macOS. |
 
-**Windows has no backend**: nanobot logs a warning and runs the command unsandboxed.
+**Windows has no OS shell sandbox:** nanobot logs a warning and runs commands unsandboxed (disable shell execution if workspace guards are not enough).
 
-The backends protect the workspace's parent differently. `bwrap` masks it with a tmpfs and re-exposes the workspace and allowed binds. Seatbelt has no mount namespace: it denies the parent, re-allows traversal metadata, and exposes the workspace and allowed roots. Keep configuration and credentials outside the workspace and extra binds; choosing an overly broad workspace or explicitly exposing secret-bearing paths defeats that separation.
-
-Seatbelt does **not** expose the host's shared `/tmp`, `/var/folders`, `/Library`, or `/etc` trees. It allows system code, device reads and selected system configuration/certificate paths. `HOME` and `TMPDIR` point to the workspace. Tools must use that scratch location; on macOS use an explicit template such as `mktemp "$TMPDIR/job.XXXXXX"`, since bare `mktemp` may prefer the host's system temp directory. Tools that require other installations or caches need narrow `sandboxRoBinds` / `sandboxRwBinds`. Read-only binds revoke workspace writes beneath them; explicit read-write binds take precedence, matching bwrap's operator-controlled policy. Seatbelt also prevents renaming or removing ancestor directories of media and read-only roots, so moving a writable parent cannot bypass a read-only rule; unrelated children of those ancestors remain writable where otherwise allowed. An explicit read-write bind covering an entire read-only root overrides that root's protection, but a writable descendant does not unlock its ancestors. This is filesystem containment, not a VM or separate user identity.
-
-Neither backend restricts network access.
-
-Enabling the sandbox also automatically activates `restrictToWorkspace` for file tools.
+> [!NOTE]
+> The OS sandbox isolates the filesystem (not network access) and automatically enables `restrictToWorkspace` for file tools. Keep `~/.nanobot/config.json` and secrets outside your workspace, and use narrow `sandboxRoBinds` / `sandboxRwBinds` only when a tool needs extra paths. On macOS Seatbelt, `HOME` and `TMPDIR` point inside the workspace.
 
 **Blocked patterns:**
 - `rm -rf /` - Root filesystem deletion
@@ -124,7 +119,6 @@ File operations have path traversal protection, but:
 **API Calls:**
 - All external API calls use HTTPS by default
 - Timeouts are configured to prevent hanging requests
-- The OpenAI-compatible API server must set `api.api_key` when binding to `0.0.0.0` or `::`; otherwise startup fails to prevent unauthenticated network access
 - Consider using a firewall to restrict outbound connections if needed
 
 **WhatsApp:**
@@ -146,9 +140,9 @@ pip install --upgrade nanobot-ai
 ```
 
 **Important Notes:**
-- Keep `litellm` updated to the latest version for security fixes
-- Run `pip-audit` regularly after enabling the channels used in production; their manifest-declared dependencies are installed into the same environment
-- Subscribe to security advisories for nanobot and its dependencies
+- Keep `nanobot-ai` and its dependencies up to date for security fixes.
+- Run `pip-audit` regularly after enabling chat channels in production.
+- Subscribe to security advisories for nanobot and its dependencies.
 
 ### 7. Production Deployment
 

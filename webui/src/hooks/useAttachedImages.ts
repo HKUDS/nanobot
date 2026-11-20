@@ -4,12 +4,6 @@ import type { LocalAttachment } from "../../../packages/client-events/attachment
 import { encodeImage, type EncodeFailure } from "@/lib/imageEncode";
 import type { WebUIIngressLimits } from "@/lib/types";
 
-/** Lifecycle stages of one attachment:
- *
- * - ``encoding``  — posted to the Worker / read from disk; chip shows a spinner
- * - ``ready``     — ``dataUrl`` available; safe to submit
- * - ``error``     — validation / decode failure; chip shows inline error
- */
 type AttachmentStatus = "encoding" | "ready" | "error";
 export type AttachmentKind = "image" | "video" | "file";
 
@@ -18,17 +12,16 @@ interface AttachedAttachment {
   kind: AttachmentKind;
   file: Pick<File, "name" | "size" | "type">;
   local?: LocalAttachment;
-  /** Optimistic ``blob:`` preview URL; revoked on ``remove`` / ``clear`` /
-   * unmount. */
+  /** Preview URL; owned ``blob:`` URLs are revoked on removal, clearing or unmount. */
   previewUrl?: string;
   status: AttachmentStatus;
-  /** Populated when ``status === "ready"``. */
+  /** Encoded payload; ready local attachments use ``local`` instead. */
   dataUrl?: string;
   /** Size of the final encoded payload (base64 bytes decoded). */
   encodedBytes?: number;
-  /** Whether the Worker re-encoded the image to hit the size budget. */
+  /** Whether image bytes were re-encoded to meet the size budget. */
   normalized?: boolean;
-  /** Human-readable validation / encoding error when ``status === "error"``. */
+  /** Machine-readable error code for callers to localize when ``status === "error"``. */
   error?: AttachmentError;
 }
 
@@ -47,12 +40,12 @@ export type RestoredReadyImage = RestoredReadyAttachment;
  *
  * Callers localize these via the ``composer.imageRejected.*`` i18n table. */
 export type AttachmentError =
-  | "unsupported_type"   // server whitelist excludes this MIME
-  | "empty_file"         // attachments must contain bytes
+  | "unsupported_type"
+  | "empty_file"
   | "too_many_attachments" // non-video per-message cap reached before enqueue
   | "too_many_videos"      // video slot is already occupied
   | "total_too_large"    // decoded attachments exceed the business-policy total
-  | "magic_mismatch"     // extension lies about the real content
+  | "magic_mismatch"     // bytes lack a supported image signature
   | "decode_failed"      // Worker couldn't decode / re-encode
   | "too_large"          // even after normalization we exceed the budget
   | "io";                // file read failed at the browser layer
@@ -231,17 +224,15 @@ export interface UseAttachedImagesApi {
   };
   addLocal: (attachment: LocalAttachment, options?: { restoringDraft: boolean }) => AttachmentCountError | null;
   remove: (id: string) => { nextFocusId: string | null };
-  /** Revoke every staged blob URL and drop all attachments. Called after a
-   * successful submit — the optimistic bubble holds onto an independent
-   * ``data:`` URL so tearing down blob previews here is safe. */
+  /** Revoke owned blob previews and clear staged entries; submitted attachments
+   * retain independent data URLs or local references. */
   clear: () => void;
-  /** Restore already-encoded attachments, e.g. a queued composer draft moving
-   * back into the input. These entries are immediately sendable and use image
-   * ``data:`` URLs as stable previews. */
+  /** Restore ready encoded payloads or local references, preserving draft overflow
+   * for the user to resolve before sending. */
   restoreReadyImages: (images: RestoredReadyAttachment[]) => void;
   /** ``true`` when at least one attachment is still encoding — Send should wait. */
   encoding: boolean;
-  /** ``true`` when we've hit ``MAX_ATTACHMENTS_PER_MESSAGE``. */
+  /** ``true`` when both the non-video and video attachment quotas are full. */
   full: boolean;
 }
 
@@ -249,14 +240,6 @@ interface UseAttachedImagesOptions {
   ingressLimits?: WebUIIngressLimits | null;
 }
 
-/** Manage the lifecycle of attachments in the Composer.
- *
- * Responsibilities in one place:
- *   - validation (MIME whitelist, count cap)
- *   - blob URL creation + revocation
- *   - Worker orchestration
- *   - focus bookkeeping so keyboard delete doesn't strand the user
- */
 export function useAttachedImages({
   ingressLimits = null,
 }: UseAttachedImagesOptions = {}): UseAttachedImagesApi {
@@ -410,7 +393,6 @@ export function useAttachedImages({
       }
       const next = [...prev.slice(0, idx), ...prev.slice(idx + 1)];
       imagesRef.current = next;
-      // Prefer moving focus to the chip at the same index, else previous.
       const candidate = next[idx] ?? next[idx - 1];
       nextFocusId = candidate?.id ?? null;
       return next;

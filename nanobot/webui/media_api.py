@@ -1,5 +1,3 @@
-"""Signed media helpers for the WebUI HTTP surface."""
-
 from __future__ import annotations
 
 import base64
@@ -77,7 +75,6 @@ _BYTE_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
 
 def _parse_single_byte_range(range_header: str, size: int) -> tuple[int, int]:
-    """Parse a single HTTP byte range for signed media responses."""
     if size <= 0 or "," in range_header:
         raise ValueError("invalid byte range")
     m = _BYTE_RANGE_RE.fullmatch(range_header.strip())

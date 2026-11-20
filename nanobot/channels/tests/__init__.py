@@ -1,1 +1,0 @@
-"""Cross-channel Python tests."""

@@ -11,6 +11,8 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
+from nanobot.context_sources import record_source
+
 _TEMPLATES_ROOT = Path(__file__).resolve().parent.parent / "templates"
 
 
@@ -25,11 +27,14 @@ def _environment() -> Environment:
     )
 
 
-def render_template(name: str, *, strip: bool = False, **kwargs: Any) -> str:
+def render_template(name: str, *, strip: bool = False, track_source: bool = False, **kwargs: Any) -> str:
     """Render ``name`` (e.g. ``agent/identity.md``, ``agent/platform_policy.md``) under ``templates/``.
 
     Use ``strip=True`` for single-line user-facing strings when the file ends
     with a trailing newline you do not want preserved.
     """
     text = _environment().get_template(name).render(**kwargs)
-    return text.rstrip() if strip else text
+    text = text.rstrip() if strip else text
+    if track_source:
+        record_source(_TEMPLATES_ROOT / name, text)
+    return text

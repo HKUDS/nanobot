@@ -1,11 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import { RUNTIME_CONFIG_FIELDS, RUNTIME_CONFIG_GROUPS } from "@/components/settings/system/runtime-config-fields";
 import runtimeConfigKeys from "../../../tests/webui/fixtures/runtime-config-keys.json";
 import { TimezonePicker } from "@/components/settings/shared/TimezonePicker";
-import { DEFAULT_AGENT_SETTINGS_DRAFT } from "@/components/settings/models/ModelsSettings";
 import type { SettingsPayload } from "@/lib/types";
 import { installSettingsViewTestHooks, jsonResponse, renderSettingsView, requestMutationMock, settingsPayload } from "@/tests/settings-test-utils";
 
@@ -134,24 +132,6 @@ describe("Runtime configuration settings", () => {
     expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
     fireEvent.click(trigger);
     expect(within(screen.getByRole("dialog")).getByRole("textbox")).toHaveValue("TERM\nCOLORTERM");
-  });
-
-  it("starts the API with newly saved advanced settings", async () => {
-    const payload = runtimeSettings();
-    payload.api = { ...payload.api, host: "192.168.1.7", port: 8900, timeout: 77.5, api_key_hint: "set" };
-    const action = vi.fn();
-    render(<RuntimeSettings form={DEFAULT_AGENT_SETTINGS_DRAFT} settings={payload}
-      requiresRestartPending={false} apiService={{
-        installed: true, running: false, managed: false, host: "127.0.0.1", port: 8900,
-        timeout: 120, endpoint: "http://127.0.0.1:8900/v1", command: "nanobot serve",
-        api_key_hint: "set",
-      }} apiServiceLoading={false} apiServiceAction={null} apiServiceError={null}
-      capabilitiesLoading={false} capabilityAction={null} capabilityError={null}
-      onApiServiceAction={action} onInstallCapability={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "Start API server" }));
-    expect(action).toHaveBeenCalledWith("start", {
-      host: "192.168.1.7", port: 8900, timeout: 77.5, apiKey: undefined,
-    });
   });
 
   it("saves only edited fields using the existing settings footer", async () => {

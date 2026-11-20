@@ -1,5 +1,3 @@
-"""Filesystem primitives shared by configuration and runtime storage."""
-
 import os
 import stat
 import uuid

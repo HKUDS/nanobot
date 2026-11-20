@@ -1,5 +1,3 @@
-"""HTTP and handshake composition for the WebUI gateway listener."""
-
 from __future__ import annotations
 
 import hmac

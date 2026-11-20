@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { ToastProvider } from "@/components/ui/toast";
 import { ComposerDraftStore } from "@/lib/composer-draft";
 import type { EncodeResponse } from "@/lib/imageEncode";
 import type { WebUIIngressLimits } from "@/lib/types";
@@ -87,6 +88,56 @@ beforeEach(() => {
 });
 
 describe("ThreadComposer — attachments", () => {
+  it.each([false, true])("keeps a blocked image draft and opens the preset (active turn: %s)", async (isStreaming) => {
+    const file = pngFile("screenshot.png");
+    encodeImage.mockResolvedValueOnce(resolveReady(file));
+    const onSend = vi.fn();
+    const onInspectImagePreset = vi.fn();
+    const renderComposer = (imageInputBlocked: boolean, active = false) => (
+      <ThreadComposer isStreaming={active} {...{ onSend, imageInputBlocked, onInspectImagePreset }} />
+    );
+    const { rerender } = render(renderComposer(true, isStreaming), { wrapper: ToastProvider });
+    const textarea = screen.getByLabelText(/message input/i);
+    const input = textarea.closest("form")!.querySelector('input[type="file"]')!;
+    await act(async () => fireEvent.change(input, { target: { files: [file] } }));
+    fireEvent.change(textarea, { target: { value: "Please describe this" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Image input is off for this preset");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue("Please describe this");
+    expect(screen.getByTestId("composer-chip")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "View preset" }));
+    expect(onInspectImagePreset).toHaveBeenCalledOnce();
+
+    rerender(renderComposer(false));
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("Please describe this", [expect.objectContaining({
+      preview: expect.objectContaining({ name: file.name, kind: "image" }),
+    })], undefined);
+  });
+
+  it("pauses an already queued image when the next preset cannot process it", async () => {
+    const file = pngFile("queued.png");
+    encodeImage.mockResolvedValueOnce(resolveReady(file));
+    const onSend = vi.fn();
+    const { rerender } = render(<ThreadComposer isStreaming onSend={onSend} />, { wrapper: ToastProvider });
+    const textarea = screen.getByLabelText(/message input/i);
+    const input = textarea.closest("form")!.querySelector('input[type="file"]')!;
+    await act(async () => fireEvent.change(input, { target: { files: [file] } }));
+    fireEvent.change(textarea, { target: { value: "Queued with image" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    const queue = screen.getByRole("group", { name: "Waiting to send" });
+    expect(queue).toHaveTextContent("Queued with image");
+
+    rerender(<ThreadComposer imageInputBlocked onSend={onSend} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Image input is off for this preset");
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(within(queue).getByRole("button", { name: "Edit message" }));
+    expect(textarea).toHaveValue("Queued with image");
+    expect(screen.getByTestId("composer-chip")).toBeVisible();
+  });
+
   it("previews a picked image with size details on hover and includes its data url on send", async () => {
     const user = userEvent.setup();
     const file = pngFile("a.png", 100);
@@ -149,11 +200,11 @@ describe("ThreadComposer — attachments", () => {
     expect(onSend.mock.calls[0][1].map((attachment: { media: { name: string } }) => attachment.media.name)).toEqual([first.name]);
   });
 
-  it("attaches a picked PDF and includes its data url on send", async () => {
+  it("attaches and sends a PDF even when the preset does not accept images", async () => {
     const file = pdfFile();
     const onSend = vi.fn();
 
-    render(<ThreadComposer onSend={onSend} />);
+    render(<ThreadComposer onSend={onSend} imageInputBlocked />);
 
     const input = screen
       .getByLabelText(/message input/i)
@@ -216,7 +267,7 @@ describe("ThreadComposer — attachments", () => {
     const file = new File([], "empty.csv", { type: "application/vnd.ms-excel" });
     const onSend = vi.fn();
 
-    render(<ThreadComposer onSend={onSend} />);
+    render(<ThreadComposer onSend={onSend} />, { wrapper: ToastProvider });
 
     const input = screen
       .getByLabelText(/message input/i)
@@ -227,7 +278,9 @@ describe("ThreadComposer — attachments", () => {
       fireEvent.change(input, { target: { files: [file] } });
     });
 
-    expect(screen.getByText("Empty files cannot be attached")).toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert.closest("[data-toast-tone=error]")).not.toBeNull();
+    expect(alert).toHaveTextContent("Empty files cannot be attached");
     expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
     expect(encodeImage).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
@@ -586,17 +639,29 @@ describe("local attachment paths and video ingress", () => {
   });
 
   it.each([
+    [400, "Unsupported attachment MIME"],
     [404, "file not found"],
     [403, "file is outside the current workspace"],
-  ] as const)("retains pasted text on %s, showing only actionable errors", async (status, message) => {
-    const inspect = vi.fn().mockRejectedValue(Object.assign(new Error(message), { status }));
-    render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={inspect} />);
-    const input = screen.getByLabelText(/message input/i);
-    fireEvent.paste(input, { clipboardData: { items: [], getData: () => "./missing.mp4" } });
+    [null, "gateway request timed out"],
+  ] as const)("silently retains pasted text when inspection fails (%s)", async (status, message) => {
+    let reject!: (error: Error) => void;
+    const inspect = vi.fn(() => new Promise<typeof local>((_, fail) => { reject = fail; }));
+    const onSend = vi.fn();
+    const path = "C:\\project\\example.py";
+    render(<ThreadComposer onSend={onSend} onInspectAttachment={inspect} />);
+    const input = screen.getByLabelText(/message input/i) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Read OLD, please" } });
+    input.setSelectionRange(5, 8);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => path } });
+    expect(inspect).toHaveBeenCalledWith(path);
+    expect(input).toHaveValue(`Read ${path}, please`);
+    fireEvent.change(input, { target: { value: `Read ${path}, please quickly` } });
+    await act(async () => reject(Object.assign(new Error(message), { status })));
     await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
-    expect(input).toHaveValue("./missing.mp4");
-    if (status === 404) expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    else expect(screen.getByRole("alert")).toHaveTextContent(message);
+    expect(input).toHaveValue(`Read ${path}, please quickly`);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith(`Read ${path}, please quickly`, undefined, undefined);
     for (const text of ["some pasted text", "look at ./missing.mp4 please", "https://host/clip.mp4", "const path = './clip.mp4'", "line one\n./clip.mp4"]) {
       fireEvent.paste(input, {
         clipboardData: {
@@ -616,6 +681,24 @@ describe("local attachment paths and video ingress", () => {
     expect(inspect).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
     expect(encodeImage).not.toHaveBeenCalled();
+  });
+
+  it("keeps the path as text when the local attachment quota is full", async () => {
+    const second = { ...local, path: "C:\\project\\second.mp4", name: "second.mp4" };
+    const inspect = vi.fn().mockResolvedValueOnce(local).mockResolvedValueOnce(second);
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} onInspectAttachment={inspect} />);
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => local.path } });
+    await screen.findByRole("button", { name: local.name });
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => second.path } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
+    expect(input).toHaveValue(second.path);
+    expect(screen.getAllByTestId("composer-chip")).toHaveLength(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend.mock.calls[0][0]).toBe(second.path);
+    expect(onSend.mock.calls[0][1][0].media).toEqual({ path: local.path, name: local.name });
   });
 
   it("does not charge large local documents against a picked document's upload budget", async () => {

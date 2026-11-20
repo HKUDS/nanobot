@@ -12,7 +12,6 @@ from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 
 
 def test_loader_discovers_entry_point_tools(tmp_path, monkeypatch):
-    """Discover a real distribution descriptor in the tool entry-point group."""
 
     class _FakeTool(Tool):
         __name__ = "FakeTool"
@@ -64,7 +63,6 @@ def test_loader_discovers_entry_point_tools(tmp_path, monkeypatch):
 
 
 def test_loader_skips_abstract_entry_point_tools():
-    """Verify abstract tool classes registered via entry_points are skipped."""
     mock_ep = MagicMock()
     mock_ep.name = "abstract_plugin"
 
@@ -81,7 +79,6 @@ def test_loader_skips_abstract_entry_point_tools():
         def create(cls, ctx):
             return MagicMock()
 
-        # Intentionally missing abstract properties (name, description, parameters, execute)
 
     mock_ep.load.return_value = _AbstractTool
 
@@ -94,7 +91,6 @@ def test_loader_skips_abstract_entry_point_tools():
 
 @pytest.mark.asyncio
 async def test_loader_entry_point_error_wrapper_preserves_tool_api(tmp_path):
-    """Only adapt legacy plugin error strings; keep the wrapped tool API intact."""
     mock_ep = MagicMock()
     mock_ep.name = "api_plugin"
 
@@ -121,9 +117,6 @@ async def test_loader_entry_point_error_wrapper_preserves_tool_api(tmp_path):
         def concurrency_safe(self) -> bool:
             return False
 
-        def cast_params(self, params: dict) -> dict:
-            return {"value": str(params["value"])}
-
         def validate_params(self, params: dict) -> list[str]:
             return [] if params == {"value": "1"} else ["bad value"]
 
@@ -147,7 +140,6 @@ async def test_loader_entry_point_error_wrapper_preserves_tool_api(tmp_path):
     assert tool.config_key == "api_plugin"
     assert tool.read_only is True
     assert tool.concurrency_safe is False
-    assert tool.cast_params({"value": 1}) == {"value": "1"}
     assert tool.validate_params({"value": "1"}) == []
     assert tool.to_schema() == {"name": "api_plugin", "custom": True}
 

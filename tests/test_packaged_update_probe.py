@@ -1,5 +1,3 @@
-"""Keep acceptance evidence honest: real target bytes and fail-closed fixtures."""
-
 import asyncio
 import csv
 import hashlib
@@ -84,13 +82,15 @@ def test_display_migration_allows_an_empty_owner_without_masking_context_loss(tm
         assert_canonical_preserved(before, canonical_records(store.path))
 
 
-def wheel(tmp_path, version, *, worker=b"# worker\n", fallback=b"# fallback\n"):
+def wheel(tmp_path, version, *, worker=b"# worker\n", fallback=b"# fallback\n",
+          handoff=b"async def _prepare(directory):\n    try:\n        pass\n    except Exception:\n        raise\n"):
     path = tmp_path / f"nanobot_ai-{version}-py3-none-manylinux_2_17_x86_64.whl"
     with ZipFile(path, "w") as archive:
         archive.writestr(f"nanobot_ai-{version}.dist-info/METADATA", f"Name: nanobot-ai\nVersion: {version}\n")
         archive.writestr("nanobot/__init__.py", "# unchanged application\n")
         archive.writestr("nanobot/release_feed.py", "transport=transport or PinnedDNSAsyncTransport(),\n")
         archive.writestr("nanobot/update_worker.py", worker)
+        archive.writestr("nanobot/update_handoff.py", handoff)
         archive.writestr("nanobot/update_fallback.py", fallback)
         binary = ZipInfo("nanobot/tui/bin/nanobot-tui")
         binary.external_attr = 0o100755 << 16
@@ -120,7 +120,6 @@ def test_baseline_instrumentation_does_not_modify_the_target(tmp_path):
 def test_local_feed_uses_the_real_resolver_and_exact_target_hash(tmp_path, monkeypatch, version, channel):
     from unittest.mock import AsyncMock
 
-    # The packaged lifecycle fixture is deliberately not a public signed release.
     monkeypatch.setattr(ReleaseFeed, "_authorize", AsyncMock())
     from packaging.tags import Tag
 
@@ -201,7 +200,6 @@ def test_timings_checkpoint_real_fixture_and_keep_result_schema_separate(tmp_pat
     with timings.measure("scenario_total", scenario="upgrade"):
         with timings.measure("fixture", scenario="upgrade", journey=1):
             baseline = fixture_wheel(source, tmp_path / "baseline", "0.3.5", feed=tmp_path / "feed.json")
-        # Evidence is available before the outer context exits.
         checkpoint = json.loads(output.read_text())
         assert checkpoint["clock"] == "perf_counter"
         assert checkpoint["schema_version"] == 1
@@ -242,7 +240,6 @@ def test_timings_persist_failure_and_finally_cleanup_without_exporting_secrets(t
                                    capture_output=True, timeout=0.1 if failure == "timeout" else 10)
             finally:
                 with timings.measure("cleanup", scenario="restart-failure"):
-                    # Read the failed phase from disk before cleanup completes.
                     assert json.loads(output.read_text())["timings"][0]["status"] == "failed"
                     (tmp_path / "cleaned").touch()
     assert (tmp_path / "cleaned").exists()
@@ -266,6 +263,58 @@ def test_worker_count_must_be_positive_before_creating_output(tmp_path):
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 2 and "--workers" in result.stderr
     assert not output.exists()
+
+
+def test_fixture_preflight_observer_records_location_and_preserves_refusal(tmp_path):
+    secret = "sensitive-preflight-detail"
+    handoff = f'''from pathlib import Path
+async def _prepare(directory):
+    try:
+        raise ValueError({secret!r})
+    except Exception:
+        raise
+'''.encode()
+    source = wheel(tmp_path, "0.4.1", handoff=handoff)
+    baseline = fixture_wheel(source, tmp_path / "baseline", "0.4.0", feed=tmp_path / "feed.json")
+    namespace = {}
+    with ZipFile(baseline) as archive:
+        exec(compile(archive.read("nanobot/update_handoff.py"), "update_handoff.py", "exec"), namespace)
+    with pytest.raises(ValueError, match=secret):
+        asyncio.run(namespace["_prepare"](tmp_path))
+    document = (tmp_path / "acceptance-preflight.json").read_text()
+    assert json.loads(document) == {"error_type": "ValueError", "frames": [["update_handoff.py", 4]],
+                                    "stop_states": []}
+    assert secret not in document
+
+
+@pytest.mark.parametrize("update_phase", ["handoff_failed", "private-value-must-not-be-exported"])
+def test_phase_failure_identifies_failed_assertion_without_exporting_private_values(tmp_path, update_phase):
+    job = tmp_path / "private-job"
+    job.mkdir()
+    secret = "sensitive-token-must-stay-local"
+    probe.write(tmp_path / "launch.json", {"directory": str(job), "command": [secret]})
+    probe.write(job / "status.json", {"phase": update_phase, "mutation_started": False, "message": secret})
+    probe.write(job / "supervision.json", {"state": "needs_attention", "confirmation_id": secret})
+    probe.write(job / "acceptance-preflight.json", {"error_type": "ReleaseFeedError", "message": secret,
+                                                  "frames": [["release_feed.py", 300, secret], [secret, 2]],
+                                                  "stop_states": ["busy", secret, "busy"]})
+    probe.write(job / "acceptance-busy.json", {"active": True, "channel_delivery": False,
+                                              "pending_queues": secret, "message": secret})
+    try:
+        probe.replace_once(b"missing seam", b"needle", secret.encode())
+    except ValueError as error:
+        probe.phase_failure(tmp_path, "verify", error)
+    document = (tmp_path / "phase-failure.json").read_text()
+    record = json.loads(document)
+    assert record["phase"] == "verify" and record["error_type"] == "ValueError"
+    assert record["probe_lines"] and all(isinstance(line, int) for line in record["probe_lines"])
+    assert record["update_phase"] == ("handoff_failed" if update_phase == "handoff_failed" else "incomplete")
+    assert record["mutation_started"] is False and record["recovery_needs_attention"] is True
+    assert record["preflight_error"] == "ReleaseFeedError" and record["preflight_frames"] == [["release_feed.py", 300]]
+    assert record["stop_states"] == ["busy"]
+    assert record["busy_flags"] == {"active": True, "channel_delivery": False}
+    assert secret not in document and str(tmp_path) not in document
+    assert "private-value-must-not-be-exported" not in document
 
 
 def test_lanes_balance_all_nine_scenarios_without_splitting_fifteen_journeys():
@@ -448,7 +497,6 @@ def test_exited_controller_cannot_leave_a_descendant_listener_running(tmp_path, 
             probe.run_parallel(args, root, args.wheel, "0.3.6", digest(args.wheel), list(probe.SCENARIOS), timings)
         _wait_for_closed_listeners((json.loads(listener.read_text()),))
     finally:
-        # A red baseline must not leak the process it deliberately exposed.
         (root / "lane-1/stop-listener").touch()
         if listener.exists():
             _wait_for_closed_listeners((json.loads(listener.read_text()),))
@@ -485,7 +533,7 @@ def test_abnormal_lane_cleanup_does_not_depend_on_the_mutable_venv(tmp_path, mon
             probe.cleanup_lane(root, ["upgrade", "worker-exit", "metadata-loss"])
     else:
         probe.cleanup_lane(root, ["upgrade", "worker-exit", "metadata-loss"])
-    assert len(calls) == 2  # Still try the second account if the first stop failed.
+    assert len(calls) == 2
     for (command, options), config in zip(calls, configs, strict=True):
         assert command == [sys.executable, "-I", "-B", "-m", "nanobot", "gateway", "stop", "--config", str(config)]
         assert options["env"]["HOME"] == str(config.parent.parent) and options["cwd"] == config.parents[2]
@@ -587,8 +635,6 @@ def test_serial_lanes_resolve_baseline_dependencies_and_keep_recovery_chains_on_
     assert len(dependencies) == (0 if baseline_version else 2)
     assert len(baselines) == 9 and len(stages) == 9
     for command in baselines:
-        # Actual historical constraints must be resolved again after each
-        # successful upgrade, rather than paired with the target's dependencies.
         assert ("--no-deps" in command) == (baseline_version is None)
         assert ("--only-binary=:all:" in command) == (baseline_version is not None)
     assert sum(1 + ("subsequent_update" in result) for result in results) == 15

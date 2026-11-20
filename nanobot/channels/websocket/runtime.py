@@ -1,5 +1,3 @@
-"""WebSocket server channel: nanobot acts as a WebSocket server and serves connected clients."""
-
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +7,7 @@ import json
 import socket
 import ssl
 import uuid
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -275,7 +274,6 @@ class WebSocketConfig(Base):
 
 
 def _parse_inbound_payload(raw: str) -> str | None:
-    """Parse a client frame into text; return None for empty or unrecognized content."""
     text = raw.strip()
     if not text:
         return None
@@ -300,12 +298,6 @@ def _is_valid_chat_id(value: Any) -> TypeGuard[str]:  # pyright: ignore[reportUn
 
 
 def _parse_envelope(raw: str) -> dict[str, Any] | None:
-    """Return a typed envelope dict if the frame is a new-style JSON envelope, else None.
-
-    A frame qualifies when it parses as a JSON object with a string ``type`` field.
-    Legacy frames (plain text, or ``{"content": ...}`` without ``type``) return None;
-    callers should fall back to :func:`_parse_inbound_payload` for those.
-    """
     text = raw.strip()
     if not text.startswith("{"):
         return None
@@ -358,7 +350,6 @@ class WebSocketChannel(BaseChannel):
             config = WebSocketConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: WebSocketConfig = config
-        # chat_id -> connections subscribed to it (fan-out target).
         self._subs: dict[str, set[ServerConnection]] = {}
         # connection -> chat_ids it is subscribed to (O(1) cleanup on disconnect).
         self._conn_chats: dict[ServerConnection, set[str]] = {}
@@ -384,11 +375,7 @@ class WebSocketChannel(BaseChannel):
             session_projection=gateway.session_projection,
         )
         self._commands = WebUICommandRouter(self, gateway, outbound=self._outbound)
-        self._webui_request_tasks = self._commands.request_tasks
-        self._webui_request_operations = self._commands.request_operations
-        self._webui_request_locks = self._commands.request_locks
 
-    # -- Subscription bookkeeping -------------------------------------------
 
     def webui_subscribers(self, chat_id: str) -> tuple[ServerConnection, ...]:
         """Return a stable snapshot of one chat's transport subscribers."""
@@ -440,7 +427,6 @@ class WebSocketChannel(BaseChannel):
         media: list[str] | None,
         metadata: dict[str, Any],
         is_dm: bool,
-        session_key: str | None,
         require_existing_session: bool,
         session_generation: str | None,
     ) -> None:
@@ -451,13 +437,11 @@ class WebSocketChannel(BaseChannel):
             media=media,
             metadata=metadata,
             is_dm=is_dm,
-            session_key=session_key,
             require_existing_session=require_existing_session,
             session_generation=session_generation,
         )
 
     def _attach(self, connection: ServerConnection, chat_id: str) -> None:
-        """Idempotently subscribe *connection* to *chat_id*."""
         if not self._register_connection_outbound(connection):
             return
         self._subs.setdefault(chat_id, set()).add(connection)
@@ -485,7 +469,6 @@ class WebSocketChannel(BaseChannel):
                 self._subs.pop(chat_id, None)
 
     async def _cleanup_connection(self, connection: ServerConnection) -> None:
-        """Remove *connection* from every subscription set; safe to call multiple times."""
         self._retired_connections.add(connection)
         self._uploads.revoke(connection)
         state = self._connection_outbound.get(connection)
@@ -508,7 +491,6 @@ class WebSocketChannel(BaseChannel):
         event: str,
         **fields: Any,
     ) -> None:
-        """Send a control event (attached, error, ...) to a single connection."""
         payload: dict[str, Any] = {"event": event}
         payload.update(fields)
         raw = json.dumps(payload, ensure_ascii=False)
@@ -532,7 +514,6 @@ class WebSocketChannel(BaseChannel):
         ctx.load_cert_chain(certfile=cert, keyfile=key)
         return ctx
 
-    # -- HTTP dispatch ------------------------------------------------------
 
     async def _dispatch_http(self, connection: ServerConnection, request: WsRequest) -> Any:
         """Compatibility proxy for the externally composed gateway endpoint."""
@@ -555,7 +536,6 @@ class WebSocketChannel(BaseChannel):
             headers,
         )
 
-    # -- Server lifecycle and connection ingress ---------------------------
 
     @staticmethod
     def _socket_is_accepting(sock: socket.socket) -> bool:
@@ -603,7 +583,6 @@ class WebSocketChannel(BaseChannel):
         )
 
     async def _wait_for_listener_loss(self, server: Server) -> None:
-        """Wait for shutdown or raise when the serving socket disappears."""
         assert self._stop_event is not None
         while not self._stop_event.is_set():
             try:
@@ -871,19 +850,14 @@ class WebSocketChannel(BaseChannel):
                 # WebSocket already authenticates at handshake time (token),
                 # so pairing is not applicable. Treat as non-DM to avoid
                 # sending pairing codes to an already-authenticated client.
-                await self._handle_message(
-                    sender_id=client_id,
-                    chat_id=default_chat_id,
-                    content=content,
-                    metadata={"remote": getattr(connection, "remote_address", None)},
-                    is_dm=False,
+                await self._commands.dispatch_legacy_message(
+                    connection, client_id, default_chat_id, content,
                 )
         except Exception as e:
             self.logger.debug("connection ended: {}", e)
         finally:
             await self._cleanup_connection(connection)
 
-    # -- Inbound WebSocket envelopes ---------------------------------------
 
     async def _dispatch_envelope(
         self,
@@ -891,7 +865,6 @@ class WebSocketChannel(BaseChannel):
         client_id: str,
         envelope: dict[str, Any],
     ) -> None:
-        """Delegate one typed envelope to the WebUI application router."""
         await self._dispatch_active_envelope(connection, client_id, envelope)
 
     async def _dispatch_active_envelope(
@@ -904,7 +877,6 @@ class WebSocketChannel(BaseChannel):
             return
         await self._commands.dispatch(connection, client_id, envelope)
 
-    # -- Outbound WebSocket events -----------------------------------------
 
     async def stop(self) -> None:
         await self.gateway.http.remote_instances.close()
@@ -1090,7 +1062,6 @@ class WebSocketChannel(BaseChannel):
         *,
         label: str = "",
     ) -> None:
-        """Queue one frame without letting this connection block other clients."""
         state = self._connection_outbound.get(connection)
         if state is None or state.closing:
             return
@@ -1130,6 +1101,15 @@ class WebSocketChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         await self._outbound.send(msg)
+
+    def can_batch_send(self, previous: OutboundMessage, following: OutboundMessage) -> bool:
+        return self._outbound.can_batch_send(previous, following)
+
+    async def send_batch(self, messages: Sequence[OutboundMessage]) -> None:
+        await self._outbound.send_batch(messages)
+
+    def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
+        return msg
 
     async def send_reasoning_delta(
         self,

@@ -1,11 +1,19 @@
-"""Configuration schema using Pydantic."""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 
-from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 from pydantic.fields import FieldInfo
+from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig
@@ -22,7 +30,6 @@ from nanobot.agent.tools.web_config import (
 from nanobot.agent.tools.web_config import WebToolsConfig
 from nanobot.config.home import get_default_workspace
 from nanobot.config.network import NetworkConfig, migrate_legacy_proxy_config
-from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
@@ -40,8 +47,8 @@ class ChannelsConfig(Base):
 
     model_config = ConfigDict(extra="allow")
 
-    send_progress: bool = True  # stream agent's text progress to the channel
-    send_tool_hints: bool = True  # stream tool-call hints (e.g. read_file("…"))
+    send_progress: bool = True
+    send_tool_hints: bool = True
     show_reasoning: bool = True  # surface model reasoning when channel implements it
     show_compaction_notices: bool = False  # automatic compaction chat notices, not UI lifecycle events
     extract_document_text: bool = True  # Deprecated and ignored; documents are read on demand
@@ -54,7 +61,7 @@ class TranscriptionConfig(Base):
     """Cross-channel audio transcription configuration."""
 
     enabled: bool = True
-    provider: str | None = None  # Validated by nanobot.audio.transcription_registry.
+    provider: str | None = None
     model: str | None = None
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     max_duration_sec: int = Field(default=120, ge=1, le=600)
@@ -66,8 +73,8 @@ class DreamConfig(Base):
 
     _HOUR_MS = 3_600_000
 
-    enabled: bool = True  # Register the periodic Dream consolidation job on startup
-    interval_h: int = Field(default=2, ge=1)  # Every 2 hours by default
+    enabled: bool = True
+    interval_h: int = Field(default=2, ge=1)
     cron: str | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
@@ -75,7 +82,7 @@ class DreamConfig(Base):
     model_override: str | None = Field(
         default=None,
         validation_alias=AliasChoices("modelOverride", "model", "model_override"),
-    )  # Model preset name for Dream sessions
+    )
 
     def build_schedule(self, timezone: str) -> CronSchedule:
         """Build the runtime schedule, preferring the legacy cron override if present."""
@@ -135,6 +142,7 @@ class InlineFallbackConfig(RequestOverrides):
 
     model: str
     provider: str
+    supports_images: bool = True
     max_tokens: int | None = None
     context_window_tokens: int | None = None
     temperature: float | None = None
@@ -150,10 +158,12 @@ class ModelPresetConfig(RequestOverrides):
 
     model: str
     provider: str = "auto"
+    supports_images: bool = True
     max_tokens: int = 8192
     context_window_tokens: int = 200_000
     temperature: float = 0.1
     reasoning_effort: str | None = None
+    codex_fast_mode: StrictBool | Literal["ultrafast"] | None = None
     api: ModelAPIConfig | None = None
 
     def to_generation_settings(self) -> GenerationSettings:
@@ -173,6 +183,7 @@ class AgentDefaults(Base):
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
+    supports_images: bool = True
     max_tokens: int = 8192
     context_window_tokens: int = 200_000
     temperature: float = 0.1
@@ -187,14 +198,13 @@ class AgentDefaults(Base):
         le=500,
         validation_alias=AliasChoices("toolHintMaxLength"),
         serialization_alias="toolHintMaxLength",
-    )  # Max characters for tool hint display (e.g. "$ cd …/project && npm test")
+    )
     reasoning_effort: str | None = None  # low / medium / high / xhigh / max / adaptive / none — LLM thinking effort; None preserves the provider default
     api: ModelAPIConfig | None = None
     timezone: str = "UTC"  # Effective IANA timezone, e.g. "Asia/Shanghai"
     timezone_mode: Literal["auto", "manual"] = "auto"
-    bot_name: str = "nanobot"  # Display name shown in CLI prompts (e.g. "{name} is thinking...")
+    bot_name: str = "nanobot"
     bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
-    unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
     session_ttl_minutes: int = Field(
         default=15,
@@ -205,7 +215,7 @@ class AgentDefaults(Base):
     idle_compact_check_interval_seconds: int = Field(
         default=60,
         ge=0,
-    )  # Minimum interval in seconds between scans for idle sessions
+    )
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
     @model_validator(mode="before")
@@ -245,7 +255,6 @@ class AgentsConfig(Base):
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
-    # User-facing name for dynamic custom providers.
     display_name: str | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
@@ -257,7 +266,7 @@ class ProviderConfig(Base):
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
     use_proxy: bool = False
-    thinking_style: str | None = None  # Thinking/reasoning style for custom providers
+    thinking_style: str | None = None
 
     # Valid values mirror the keys of _THINKING_STYLE_MAP in
     # nanobot/providers/openai_compat_provider.py. Kept duplicated here to
@@ -267,6 +276,25 @@ class ProviderConfig(Base):
         "enable_thinking",
         "reasoning_split",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_retired_api_selector(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        provider = cast(dict[object, object], value)
+        # Older releases wrote the default Auto to every provider. Auto is
+        # already the default, and a current declaration always takes priority.
+        if "api" not in provider and any(
+            key in provider and provider[key] != "auto"
+            for key in ("apiType", "api_type", "apitype")
+        ):
+            raise PydanticCustomError(
+                "retired_provider_api_selector",
+                "The apiType setting was removed. Replace it with an api object that declares supportedApis, "
+                "or remove it for Auto.",
+            )
+        return provider
 
     @field_validator("thinking_style")
     @classmethod
@@ -300,24 +328,25 @@ class ProvidersConfig(Base):
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
-    bedrock: BedrockProviderConfig = Field(default_factory=BedrockProviderConfig)  # AWS Bedrock Converse
+    bedrock: BedrockProviderConfig = Field(default_factory=BedrockProviderConfig)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
-    orcarouter: ProviderConfig = Field(default_factory=ProviderConfig)  # OrcaRouter API gateway
-    assemblyai: ProviderConfig = Field(default_factory=ProviderConfig)  # AssemblyAI voice transcription
+    orcarouter: ProviderConfig = Field(default_factory=ProviderConfig)
+    shengsuanyun: ProviderConfig = Field(default_factory=ProviderConfig)
+    assemblyai: ProviderConfig = Field(default_factory=ProviderConfig)
     huggingface: ProviderConfig = Field(default_factory=ProviderConfig)
-    skywork: ProviderConfig = Field(default_factory=ProviderConfig)  # Skywork / APIFree API gateway
+    skywork: ProviderConfig = Field(default_factory=ProviderConfig)
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
     modelscope: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
-    ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
-    lm_studio: ProviderConfig = Field(default_factory=ProviderConfig)  # LM Studio local models
-    atomic_chat: ProviderConfig = Field(default_factory=ProviderConfig)  # Atomic Chat local models
-    ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
+    ollama: ProviderConfig = Field(default_factory=ProviderConfig)
+    lm_studio: ProviderConfig = Field(default_factory=ProviderConfig)
+    atomic_chat: ProviderConfig = Field(default_factory=ProviderConfig)
+    ovms: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     kimi_coding: ProviderConfig = Field(default_factory=ProviderConfig)  # Kimi Coding Plan (Anthropic Messages API)
@@ -325,25 +354,25 @@ class ProvidersConfig(Base):
     minimax_anthropic: ProviderConfig = Field(default_factory=ProviderConfig)  # MiniMax Anthropic endpoint (thinking)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
     stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰) — LLM + ASR (set apiBase to Plan URL for ASR)
-    xiaomi_mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MIMO (小米)
-    longcat: ProviderConfig = Field(default_factory=ProviderConfig)  # LongCat
-    ant_ling: ProviderConfig = Field(default_factory=ProviderConfig)  # Ant Ling
-    aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
-    siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
-    edenai: ProviderConfig = Field(default_factory=ProviderConfig)  # Eden AI API gateway
-    novita: ProviderConfig = Field(default_factory=ProviderConfig)  # Novita AI
-    volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
-    volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine Coding Plan
-    byteplus: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus (VolcEngine international)
-    byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
+    xiaomi_mimo: ProviderConfig = Field(default_factory=ProviderConfig)
+    longcat: ProviderConfig = Field(default_factory=ProviderConfig)
+    ant_ling: ProviderConfig = Field(default_factory=ProviderConfig)
+    aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)
+    siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)
+    edenai: ProviderConfig = Field(default_factory=ProviderConfig)
+    novita: ProviderConfig = Field(default_factory=ProviderConfig)
+    volcengine: ProviderConfig = Field(default_factory=ProviderConfig)
+    volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)
+    byteplus: ProviderConfig = Field(default_factory=ProviderConfig)
+    byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
     xai_grok: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # xAI Grok (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
-    qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
+    qianfan: ProviderConfig = Field(default_factory=ProviderConfig)
     nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
     opencode: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Zen (canonical provider id)
-    opencode_zen: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Zen (curated coding models)
-    opencode_go: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Go (low-cost coding models)
+    opencode_zen: ProviderConfig = Field(default_factory=ProviderConfig)
+    opencode_go: ProviderConfig = Field(default_factory=ProviderConfig)
 
     @model_validator(mode="after")
     def convert_extra_providers(self):
@@ -361,45 +390,12 @@ class ProvidersConfig(Base):
                     self.model_extra[key] = ProviderConfig.model_validate(value)
         return self
 
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_legacy_api_type(cls, value: Any) -> Any:
-        # Temporary for two releases; remove with provider_api_migration.py.
-        if not isinstance(value, dict):
-            return value
-        providers = cast(dict[str, Any], value)
-        return {
-            name: migrate_legacy_provider_api(cast(dict[str, Any], provider), provider_name=name)
-            if isinstance(provider, dict) else provider
-            for name, provider in providers.items()
-        }
-
 
 class HeartbeatConfig(Base):
     """Heartbeat service configuration (now backed by cron)."""
 
     enabled: bool = True
-    interval_s: int = 30 * 60  # 30 minutes
-
-
-class ApiConfig(Base):
-    """OpenAI-compatible API server configuration."""
-
-    host: str = "127.0.0.1"  # Safer default: local-only bind.
-    port: int = 8900
-    timeout: float = 120.0  # Per-request timeout in seconds.
-    api_key: str = Field(default="", repr=False)
-
-    @model_validator(mode="after")
-    def wildcard_host_requires_auth(self) -> "ApiConfig":
-        if self.host not in ("0.0.0.0", "::"):
-            return self
-        if self.api_key.strip():
-            return self
-        raise ValueError(
-            "host is 0.0.0.0 (all interfaces) but api_key is not set "
-            "- set api.api_key to prevent unauthenticated access"
-        )
+    interval_s: int = 30 * 60
 
 
 class GatewayConfig(Base):
@@ -508,7 +504,6 @@ class Config(BaseSettings):
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     network: NetworkConfig = Field(default_factory=NetworkConfig)
-    api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     model_presets: dict[str, ModelPresetConfig] = Field(
@@ -519,7 +514,11 @@ class Config(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def _migrate_proxy_config(cls, value: Any) -> Any:
+    def _migrate_legacy_config(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "api" in value:
+            # Old installations saved this block even if they never ran serve.
+            legacy = cast(dict[object, object], value)
+            value = {key: item for key, item in legacy.items() if key != "api"}
         return migrate_legacy_proxy_config(value)
 
     @classmethod
@@ -566,7 +565,8 @@ class Config(BaseSettings):
         """Return the implicit `default` preset from agents.defaults fields."""
         d = self.agents.defaults
         return ModelPresetConfig(
-            model=d.model, provider=d.provider, max_tokens=d.max_tokens,
+            model=d.model, provider=d.provider, supports_images=d.supports_images,
+            max_tokens=d.max_tokens,
             context_window_tokens=d.context_window_tokens,
             temperature=d.temperature, reasoning_effort=d.reasoning_effort, api=d.api,
         )
@@ -590,7 +590,6 @@ class Config(BaseSettings):
         *,
         preset: ModelPresetConfig | None = None,
     ) -> tuple["ProviderConfig | None", str | None]:
-        """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import (
             PROVIDERS,
             find_by_name,
@@ -623,6 +622,13 @@ class Config(BaseSettings):
         model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
         normalized_prefix = model_prefix.replace("-", "_")
         prefixed_provider = find_by_name(model_prefix) if model_prefix else None
+        legacy_connections = {
+            spec.name: provider
+            for spec in PROVIDERS
+            if spec.accepts_legacy_custom_config
+            and isinstance(provider := getattr(self.providers, spec.name, None), ProviderConfig)
+            and spec.uses_legacy_custom_config(provider)
+        }
 
         def _kw_matches(kw: str) -> bool:
             kw = kw.lower()
@@ -634,7 +640,7 @@ class Config(BaseSettings):
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
+                if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key or spec.name in legacy_connections:
                     return p, spec.name
 
         # Check for custom provider by prefix (e.g., "companyProxy/gpt-4").
@@ -646,9 +652,8 @@ class Config(BaseSettings):
             if custom is not None:
                 return custom
 
-        # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
-            if spec.is_transcription_only:
+            if spec.is_transcription_only or spec.name in legacy_connections:
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
@@ -690,18 +695,20 @@ class Config(BaseSettings):
         if local_fallback:
             return local_fallback
 
-        # Fallback: gateways first, then others (follows registry order)
         # OAuth providers are NOT valid fallbacks — they require explicit model selection
         for spec in PROVIDERS:
-            if spec.is_oauth or spec.is_transcription_only:
+            if spec.is_oauth or spec.is_transcription_only or spec.name in legacy_connections:
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
                 return p, spec.name
 
-        # Final fallback: check for any configured custom provider
         for attr_name, p in (self.providers.model_extra or {}).items():
             if isinstance(p, ProviderConfig) and p.api_base:
+                return p, attr_name
+
+        for attr_name, p in legacy_connections.items():
+            if p.api_base:
                 return p, attr_name
 
         return None, None
@@ -750,7 +757,7 @@ class Config(BaseSettings):
             return p.api_base
         if name:
             spec = find_by_name(name)
-            if spec and spec.default_api_base:
+            if spec and spec.default_api_base and (p is None or not spec.uses_legacy_custom_config(p)):
                 return spec.default_api_base
         return None
 

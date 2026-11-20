@@ -1,5 +1,3 @@
-"""Workspace access scope and sandbox capability helpers."""
-
 from __future__ import annotations
 
 import os

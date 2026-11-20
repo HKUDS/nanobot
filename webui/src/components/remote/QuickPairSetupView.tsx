@@ -167,7 +167,6 @@ export function QuickPairSetupView({
   </div>;
 }
 
-/** Decorative overview, not a live connection-status indicator. */
 function RemoteConnectionIllustration() {
   return <svg viewBox="0 0 208 88" width="184" height="78" aria-hidden="true" focusable="false" className="mx-auto mb-4 shrink-0 text-foreground/70" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M78 51 C111 65 114 28 146 36" className="text-muted-foreground/50" strokeWidth="2.5" />

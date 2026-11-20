@@ -21,6 +21,7 @@ from nanobot.agent.tools import (
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool, ExecToolConfig
+from nanobot.execution import processes
 from nanobot.security.network import configure_ssrf_whitelist
 
 
@@ -81,7 +82,6 @@ class DecoratedSampleTool(Tool):
 
 
 def test_schema_validate_value_matches_tool_validate_params() -> None:
-    """ObjectSchema.validate_value 与 validate_json_schema_value、Tool.validate_params 一致。"""
     root = tool_parameters_schema(
         query=StringSchema(min_length=2),
         count=IntegerSchema(minimum=1, maximum=10),
@@ -113,11 +113,10 @@ def test_schema_validate_value_matches_tool_validate_params() -> None:
     expected = _Mini().validate_params(params)
     assert Schema.validate_json_schema_value(params, root, "") == expected
     assert obj.validate_value(params, "") == expected
-    assert IntegerSchema(minimum=1).validate_value(0, "n") == ["n must be >= 1"]
+    assert IntegerSchema(minimum=1).validate_value(0, "n") == ["n: 0 is less than the minimum of 1"]
 
 
 def test_schema_classes_equivalent_to_sample_tool_parameters() -> None:
-    """Schema 类生成的 JSON Schema 应与手写 dict 一致，便于校验行为一致。"""
     built = tool_parameters_schema(
         query=StringSchema(min_length=2),
         count=IntegerSchema(minimum=1, maximum=10),
@@ -151,7 +150,7 @@ async def test_registry_executes_decorated_tool_end_to_end() -> None:
     reg = ToolRegistry()
     reg.register(DecoratedSampleTool())
 
-    ok = await reg.execute("decorated_sample", {"query": "hello", "count": "3"})
+    ok = await reg.execute("decorated_sample", {"query": "hello", "count": 3})
     assert ok == "ok:3"
 
     err = await reg.execute("decorated_sample", {"query": "h", "count": 3})
@@ -163,35 +162,35 @@ def test_integer_schema_accepts_integral_json_numbers(schema_type) -> None:
     assert Schema.validate_json_schema_value(3.0, {"type": schema_type}) == []
 
 
-async def test_registry_casts_integral_json_number_to_integer() -> None:
+async def test_registry_preserves_integral_json_number() -> None:
     reg = ToolRegistry()
     reg.register(DecoratedSampleTool())
 
     result = await reg.execute("decorated_sample", {"query": "hello", "count": 3.0})
 
-    assert result == "ok:3"
+    assert result == "ok:3.0"
 
 
 def test_validate_params_missing_required() -> None:
     tool = SampleTool()
     errors = tool.validate_params({"query": "hi"})
-    assert "missing required count" in "; ".join(errors)
+    assert "'count' is a required property" in "; ".join(errors)
 
 
 def test_validate_params_type_and_range() -> None:
     tool = SampleTool()
     errors = tool.validate_params({"query": "hi", "count": 0})
-    assert any("count must be >= 1" in e for e in errors)
+    assert any("count: 0 is less than the minimum of 1" in e for e in errors)
 
     errors = tool.validate_params({"query": "hi", "count": "2"})
-    assert any("count should be integer" in e for e in errors)
+    assert any("count: '2' is not of type 'integer'" in e for e in errors)
 
 
 def test_validate_params_enum_and_min_length() -> None:
     tool = SampleTool()
     errors = tool.validate_params({"query": "h", "count": 2, "mode": "slow"})
-    assert any("query must be at least 2 chars" in e for e in errors)
-    assert any("mode must be one of" in e for e in errors)
+    assert any("query: 'h' is too short" in e for e in errors)
+    assert any("mode: 'slow' is not one of" in e for e in errors)
 
 
 @pytest.mark.parametrize(
@@ -235,7 +234,7 @@ async def test_registry_enforces_json_enum_equality(value, allowed, valid) -> No
         assert result == "ok"
         assert calls == [value]
     else:
-        assert "value must be one of" in result
+        assert f"value: {value!r} is not one of" in result
         assert calls == []
 
 
@@ -248,8 +247,8 @@ def test_validate_params_nested_object_and_array() -> None:
             "meta": {"flags": [1, "ok"]},
         }
     )
-    assert any("missing required meta.tag" in e for e in errors)
-    assert any("meta.flags[0] should be string" in e for e in errors)
+    assert any("meta: 'tag' is a required property" in e for e in errors)
+    assert any("meta.flags[0]: 1 is not of type 'string'" in e for e in errors)
 
 
 def test_validate_params_ignores_unknown_fields() -> None:
@@ -261,7 +260,7 @@ def test_validate_params_ignores_unknown_fields() -> None:
 def test_tool_parameters_schema_rejects_unknown_fields_by_default() -> None:
     tool = DecoratedSampleTool()
     errors = tool.validate_params({"query": "hi", "count": 2, "extra": "x"})
-    assert errors == ["unexpected parameter extra"]
+    assert errors == ["parameters: Additional properties are not allowed ('extra' was unexpected)"]
 
 
 def test_validate_params_validates_typed_additional_properties() -> None:
@@ -270,11 +269,11 @@ def test_validate_params_validates_typed_additional_properties() -> None:
         "properties": {},
         "additionalProperties": {"type": "integer"},
     }
-    tool = CastTestTool(schema)
+    tool = SchemaTestTool(schema)
 
     errors = tool.validate_params({"extra": "2"})
 
-    assert errors == ["extra should be integer"]
+    assert errors == ["extra: '2' is not of type 'integer'"]
 
 
 async def test_registry_returns_validation_error() -> None:
@@ -291,7 +290,6 @@ def test_exec_extract_absolute_paths_keeps_full_windows_path() -> None:
 
 
 def test_exec_extract_absolute_paths_captures_windows_drive_root_path() -> None:
-    """Windows drive root paths like `E:\\` must be extracted for workspace guarding."""
     # Note: raw strings cannot end with a single backslash.
     cmd = "dir E:\\"
     paths = ExecTool._extract_absolute_paths(cmd)
@@ -417,7 +415,7 @@ async def test_exec_rejects_unknown_user_home(tmp_path, monkeypatch, command) ->
         Path(home_path).expanduser()
 
     spawn = AsyncMock(side_effect=AssertionError("Blocked commands must not start a process"))
-    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
     result = await ExecTool(
         working_dir=str(tmp_path), restrict_to_workspace=True,
     ).execute(command=command)
@@ -442,7 +440,7 @@ async def test_exec_rejects_home_path_without_home_directory(tmp_path, monkeypat
         Path("~/file.txt").expanduser()
 
     spawn = AsyncMock(side_effect=AssertionError("Blocked commands must not start a process"))
-    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
     result = await ExecTool(
         working_dir=str(tmp_path), restrict_to_workspace=True,
     ).execute(command="cat ~/file.txt")
@@ -599,22 +597,19 @@ def test_exec_extract_absolute_paths_ignores_pipe_tilde() -> None:
     assert not any(p.startswith("~") for p in paths)
 
 
-# --- cast_params tests ---
-
-
-class CastTestTool(Tool):
-    """Minimal tool for testing cast_params."""
+class SchemaTestTool(Tool):
+    """Minimal tool with a supplied parameter schema."""
 
     def __init__(self, schema: dict[str, Any]) -> None:
         self._schema = schema
 
     @property
     def name(self) -> str:
-        return "cast_test"
+        return "schema_test"
 
     @property
     def description(self) -> str:
-        return "test tool for casting"
+        return "test tool for schema validation"
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -624,81 +619,32 @@ class CastTestTool(Tool):
         return "ok"
 
 
-def test_cast_params_string_to_int() -> None:
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"count": {"type": "integer"}},
-        }
-    )
-    result = tool.cast_params({"count": "42"})
-    assert result["count"] == 42
-    assert isinstance(result["count"], int)
+@pytest.mark.parametrize("schema, value, valid", [
+    ({"type": "integer"}, "42", 42),
+    ({"type": "number"}, "3.14", 3.14),
+    ({"type": "boolean"}, "false", False),
+    ({"type": "string"}, 123, "123"),
+    ({"type": "array", "items": {"type": "integer"}}, ["1", "2"], [1, 2]),
+    ({"type": "object", "properties": {"port": {"type": "integer"}}}, {"port": "8080"}, {"port": 8080}),
+])
+def test_registry_rejects_wrong_types_and_accepts_corrected_arguments(schema, value, valid):
+    tool = SchemaTestTool({"type": "object", "properties": {"value": schema}})
+    registry = ToolRegistry()
+    registry.register(tool)
 
+    _, arguments, error = registry.prepare_call(tool.name, {"value": value})
 
-def test_cast_params_string_to_number() -> None:
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"rate": {"type": "number"}},
-        }
-    )
-    result = tool.cast_params({"rate": "3.14"})
-    assert result["rate"] == 3.14
-    assert isinstance(result["rate"], float)
-
-
-def test_cast_params_string_to_bool() -> None:
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"enabled": {"type": "boolean"}},
-        }
-    )
-    assert tool.cast_params({"enabled": "true"})["enabled"] is True
-    assert tool.cast_params({"enabled": "false"})["enabled"] is False
-    assert tool.cast_params({"enabled": "1"})["enabled"] is True
-
-
-def test_cast_params_array_items() -> None:
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {
-                "nums": {"type": "array", "items": {"type": "integer"}},
-            },
-        }
-    )
-    result = tool.cast_params({"nums": ["1", "2", "3"]})
-    assert result["nums"] == [1, 2, 3]
-
-
-def test_cast_params_nested_object() -> None:
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "properties": {
-                        "port": {"type": "integer"},
-                        "debug": {"type": "boolean"},
-                    },
-                },
-            },
-        }
-    )
-    result = tool.cast_params({"config": {"port": "8080", "debug": "true"}})
-    assert result["config"]["port"] == 8080
-    assert result["config"]["debug"] is True
+    assert arguments == {"value": value}
+    assert error is not None
+    assert "value" in error
+    assert "is not of type" in error
+    assert registry.prepare_call(tool.name, {"value": valid})[2] is None
 
 
 @pytest.mark.parametrize("types", [["array", "object"], ["object", "array"]])
-@pytest.mark.parametrize(
-    "value, expected", [(["2"], [2]), ({"count": "2"}, {"count": 2})],
-)
-def test_cast_type_union_recurses_into_matching_container(types, value, expected) -> None:
-    tool = CastTestTool({
+@pytest.mark.parametrize("value", [[2], {"count": 2}])
+def test_type_union_validates_matching_container(types, value) -> None:
+    tool = SchemaTestTool({
         "type": "object",
         "properties": {"value": {
             "type": types,
@@ -707,42 +653,33 @@ def test_cast_type_union_recurses_into_matching_container(types, value, expected
         }},
     })
 
-    result = tool.cast_params({"value": value})
-
-    assert result == {"value": expected}
-    assert tool.validate_params(result) == []
+    assert tool.validate_params({"value": value}) == []
     invalid = {"count": 0} if isinstance(value, dict) else [0]
-    assert "must be >= 1" in "; ".join(tool.validate_params({"value": invalid}))
+    assert "is less than the minimum of 1" in "; ".join(tool.validate_params({"value": invalid}))
 
 
 @pytest.mark.parametrize("types", [["integer", "string"], ["string", "integer"]])
 @pytest.mark.parametrize(
-    "value, error", [(0, "must be >= 1"), ("ab", "must be at least 3 chars")],
+    "value, error", [(0, "is less than the minimum of 1"), ("ab", "is too short")],
 )
 def test_type_union_enforces_matching_type_constraints(types, value, error) -> None:
-    tool = CastTestTool({
+    tool = SchemaTestTool({
         "type": "object",
         "properties": {"value": {"type": types, "minimum": 1, "minLength": 3}},
     })
 
-    result = tool.cast_params({"value": value})
-
-    assert result["value"] is value
-    assert error in "; ".join(tool.validate_params(result))
+    assert error in "; ".join(tool.validate_params({"value": value}))
 
 
 @pytest.mark.parametrize("types", [["integer", "string"], ["string", "integer"]])
 @pytest.mark.parametrize("value", [True, 1.5, None])
 def test_type_union_rejects_undeclared_types_without_coercion(types, value) -> None:
-    tool = CastTestTool({
+    tool = SchemaTestTool({
         "type": "object",
         "properties": {"value": {"type": types}},
     })
 
-    result = tool.cast_params({"value": value})
-
-    assert result["value"] is value
-    assert tool.validate_params(result)
+    assert tool.validate_params({"value": value})
 
 
 @pytest.mark.parametrize(
@@ -751,196 +688,76 @@ def test_type_union_rejects_undeclared_types_without_coercion(types, value) -> N
         (["number", "boolean", "null"], True, None),
         (["number", "boolean", "null"], 1.5, None),
         (["number", "boolean", "null"], None, None),
-        (["string", "number"], float("inf"), "value must be finite"),
-        (["string", "number"], float("nan"), "value must be finite"),
+        (["string", "number"], float("inf"), "value: inf is not of type 'string', 'number'"),
+        (["string", "number"], float("nan"), "value: nan is not of type 'string', 'number'"),
     ],
 )
 def test_type_union_preserves_numeric_boolean_and_null_values(types, value, error) -> None:
     for order in (types, types[::-1]):
-        tool = CastTestTool({
+        tool = SchemaTestTool({
             "type": "object",
             "properties": {"value": {"type": order}},
         })
 
-        result = tool.cast_params({"value": value})
+        errors = tool.validate_params({"value": value})
+        expected = f"value: {value!r} is not of type {', '.join(repr(t) for t in order)}"
+        assert errors == ([expected] if error else [])
 
-        assert result["value"] is value
-        assert tool.validate_params(result) == ([error] if error else [])
 
-
-@pytest.mark.parametrize("value, expected", [("42", 42), (None, None)])
-def test_nullable_integer_retains_safe_casts(value, expected) -> None:
-    tool = CastTestTool({
+@pytest.mark.parametrize("value", [42, None])
+def test_nullable_integer_accepts_integer_and_null(value) -> None:
+    tool = SchemaTestTool({
         "type": "object",
         "properties": {"value": {"type": ["integer", "null"]}},
     })
 
-    result = tool.cast_params({"value": value})
-
-    assert result == {"value": expected}
-    assert tool.validate_params(result) == []
+    assert tool.validate_params({"value": value}) == []
 
 
-def test_cast_params_bool_not_cast_to_int() -> None:
-    """Booleans should not be silently cast to integers."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"count": {"type": "integer"}},
-        }
-    )
-    result = tool.cast_params({"count": True})
-    assert result["count"] is True
-    errors = tool.validate_params(result)
-    assert any("count should be integer" in e for e in errors)
-
-
-def test_cast_params_preserves_empty_string() -> None:
-    """Empty strings should be preserved for string type."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-        }
-    )
-    result = tool.cast_params({"name": ""})
-    assert result["name"] == ""
-
-
-def test_cast_params_bool_string_false() -> None:
-    """Test that 'false', '0', 'no' strings convert to False."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"flag": {"type": "boolean"}},
-        }
-    )
-    assert tool.cast_params({"flag": "false"})["flag"] is False
-    assert tool.cast_params({"flag": "False"})["flag"] is False
-    assert tool.cast_params({"flag": "0"})["flag"] is False
-    assert tool.cast_params({"flag": "no"})["flag"] is False
-    assert tool.cast_params({"flag": "NO"})["flag"] is False
-
-
-def test_cast_params_bool_string_invalid() -> None:
-    """Invalid boolean strings should not be cast."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"flag": {"type": "boolean"}},
-        }
-    )
-    # Invalid strings should be preserved (validation will catch them)
-    result = tool.cast_params({"flag": "random"})
-    assert result["flag"] == "random"
-    result = tool.cast_params({"flag": "maybe"})
-    assert result["flag"] == "maybe"
-
-
-def test_cast_params_invalid_string_to_int() -> None:
-    """Invalid strings should not be cast to integer."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"count": {"type": "integer"}},
-        }
-    )
-    result = tool.cast_params({"count": "abc"})
-    assert result["count"] == "abc"  # Original value preserved
-    result = tool.cast_params({"count": "12.5.7"})
-    assert result["count"] == "12.5.7"
-
-
-def test_cast_params_invalid_string_to_number() -> None:
-    """Invalid strings should not be cast to number."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"rate": {"type": "number"}},
-        }
-    )
-    result = tool.cast_params({"rate": "not_a_number"})
-    assert result["rate"] == "not_a_number"
+def test_validate_params_rejects_boolean_as_integer() -> None:
+    tool = SchemaTestTool({"type": "object", "properties": {"count": {"type": "integer"}}})
+    assert tool.validate_params({"count": True}) == ["count: True is not of type 'integer'"]
 
 
 @pytest.mark.parametrize(
     "value",
     [float("nan"), float("inf"), float("-inf"), "NaN", "Infinity", "-Infinity"],
 )
-def test_cast_params_rejects_non_finite_numbers(value: float | str) -> None:
-    """JSON number parameters must remain finite after schema-driven casting."""
-    tool = CastTestTool(
+def test_validate_params_rejects_non_finite_numbers(value: float | str) -> None:
+    tool = SchemaTestTool(
         {
             "type": "object",
             "properties": {"rate": {"type": "number"}},
         }
     )
 
-    result = tool.cast_params({"rate": value})
-
-    assert tool.validate_params(result) == ["rate must be finite"]
+    assert tool.validate_params({"rate": value}) == [f"rate: {value!r} is not of type 'number'"]
 
 
 def test_validate_params_bool_not_accepted_as_number() -> None:
-    """Booleans should not pass number validation."""
-    tool = CastTestTool(
+    tool = SchemaTestTool(
         {
             "type": "object",
             "properties": {"rate": {"type": "number"}},
         }
     )
     errors = tool.validate_params({"rate": False})
-    assert any("rate should be number" in e for e in errors)
+    assert errors == ["rate: False is not of type 'number'"]
 
 
-def test_cast_params_none_values() -> None:
-    """Test None handling for different types."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "count": {"type": "integer"},
-                "items": {"type": "array"},
-                "config": {"type": "object"},
-            },
-        }
-    )
-    result = tool.cast_params(
-        {
-            "name": None,
-            "count": None,
-            "items": None,
-            "config": None,
-        }
-    )
-    # None should be preserved for all types
-    assert result["name"] is None
-    assert result["count"] is None
-    assert result["items"] is None
-    assert result["config"] is None
+@pytest.mark.parametrize("schema_type", ["string", "integer", "array", "object"])
+def test_validate_params_rejects_undeclared_null(schema_type) -> None:
+    tool = SchemaTestTool({"type": "object", "properties": {"value": {"type": schema_type}}})
+    assert tool.validate_params({"value": None}) == [f"value: None is not of type '{schema_type}'"]
 
 
-def test_cast_params_single_value_not_auto_wrapped_to_array() -> None:
-    """Single values should NOT be automatically wrapped into arrays."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"items": {"type": "array"}},
-        }
-    )
-    # Non-array values should be preserved (validation will catch them)
-    result = tool.cast_params({"items": 5})
-    assert result["items"] == 5  # Not wrapped to [5]
-    result = tool.cast_params({"items": "text"})
-    assert result["items"] == "text"  # Not wrapped to ["text"]
-
-
-# --- ExecTool enhancement tests ---
+@pytest.mark.parametrize("value", [5, "text"])
+def test_validate_params_rejects_scalar_for_array(value) -> None:
+    tool = SchemaTestTool({"type": "object", "properties": {"items": {"type": "array"}}})
+    assert tool.validate_params({"items": value}) == [f"items: {value!r} is not of type 'array'"]
 
 
 async def test_completed_exec_returns_exit_code() -> None:
-    """Completed output includes the exit code even on success (exit 0)."""
     tool = ExecTool()
     result = await tool.execute(command="echo hello", yield_time_ms=10000)
     assert "Exit code: 0" in result
@@ -948,7 +765,6 @@ async def test_completed_exec_returns_exit_code() -> None:
 
 
 async def test_exec_head_tail_truncation(tmp_path) -> None:
-    """Long output should preserve both head and tail."""
     tool = ExecTool()
     # Generate output that exceeds _MAX_OUTPUT (10_000 chars).
     # Use a temp script file so the output-generating logic lives in a file
@@ -966,15 +782,12 @@ async def test_exec_head_tail_truncation(tmp_path) -> None:
         command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script_file))}"
     result = await tool.execute(command=command, yield_time_ms=10000)
     assert "chars truncated" in result
-    # Head portion should start with As
     assert result.startswith("A")
-    # Tail portion should end with the exit code which comes after Bs
     assert "Exit code:" in result
 
 
 @pytest.mark.parametrize("runtime_parameter", ["timeout", "max_runtime"])
 async def test_exec_timeout_parameter(runtime_parameter) -> None:
-    """Both runtime spellings override the constructor's hard budget."""
     tool = ExecTool(timeout=60)
     started_at = time.monotonic()
     result = await tool.execute(
@@ -993,9 +806,8 @@ async def test_exec_timeout_parameter(runtime_parameter) -> None:
 async def test_exec_runtime_rejects_out_of_range(
     monkeypatch, runtime_parameter, runtime,
 ) -> None:
-    """Invalid budgets fail before spawning instead of being clamped."""
     spawn = AsyncMock(side_effect=AssertionError("Invalid runtime must not start a process"))
-    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
     tool = ExecTool(max_runtime=301, max_runtime_limit=300)
 
     result = await tool.execute(command="echo ok", **{runtime_parameter: runtime})
@@ -1007,7 +819,7 @@ async def test_exec_runtime_rejects_out_of_range(
 
 async def test_exec_runtime_aliases_are_mutually_exclusive(monkeypatch) -> None:
     spawn = AsyncMock(side_effect=AssertionError("Conflicting runtime arguments must not spawn"))
-    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
     tool = ExecTool()
     params = {"command": "echo ok", "max_runtime": 5, "timeout": 5}
 
@@ -1082,25 +894,12 @@ def test_exec_runtime_schema_matches_configured_limit(limit, runtime_parameter) 
     assert ExecTool().parameters["properties"][runtime_parameter]["maximum"] == 86400
 
 
-# --- _resolve_type and nullable param tests ---
-
-
-def test_resolve_type_simple_string() -> None:
-    """Simple string type passes through unchanged."""
-    assert Tool._resolve_type("string") == "string"
-
-
-def test_resolve_type_union_with_null() -> None:
-    """Union type ['string', 'null'] resolves to 'string'."""
-    assert Tool._resolve_type(["string", "null"]) == "string"
-
-
 @pytest.mark.parametrize("raw_type", ["null", ["null"]])
 @pytest.mark.parametrize("value", ["", 0, False, [], {}])
 def test_null_only_schema_rejects_non_null_values(raw_type, value) -> None:
     schema = {"type": raw_type}
     assert Schema.validate_json_schema_value(value, schema, "value") == [
-        "value should be null"
+        f"value: {value!r} is not of type 'null'"
     ]
     assert Schema.validate_json_schema_value(None, schema) == []
 
@@ -1109,14 +908,13 @@ def test_null_only_schema_rejects_non_null_values(raw_type, value) -> None:
     "schema",
     [
         {"type": ["string", "null"], "enum": ["fast"]},
-        {"type": "string", "nullable": True, "enum": ["fast"]},
         {"type": ["integer", "null"], "enum": [1]},
         {"type": ["string", "integer", "null"], "enum": ["fast", 1]},
     ],
 )
 def test_nullable_schema_still_enforces_enum(schema) -> None:
     assert Schema.validate_json_schema_value(None, schema, "mode") == [
-        f"mode must be one of {schema['enum']}"
+        f"mode: None is not one of {schema['enum']}"
     ]
     assert Schema.validate_json_schema_value(None, {**schema, "enum": [None]}) == []
     for value in schema["enum"]:
@@ -1128,19 +926,8 @@ def test_nullable_string_schema_enforces_enum() -> None:
     assert StringSchema(nullable=True, enum=["fast", None]).validate_value(None) == []
 
 
-def test_resolve_type_only_null() -> None:
-    """Union type ['null'] resolves to None (no non-null type)."""
-    assert Tool._resolve_type(["null"]) is None
-
-
-def test_resolve_type_none_input() -> None:
-    """None input passes through as None."""
-    assert Tool._resolve_type(None) is None
-
-
 def test_validate_nullable_param_accepts_string() -> None:
-    """Nullable string param should accept a string value."""
-    tool = CastTestTool(
+    tool = SchemaTestTool(
         {
             "type": "object",
             "properties": {"name": {"type": ["string", "null"]}},
@@ -1151,8 +938,7 @@ def test_validate_nullable_param_accepts_string() -> None:
 
 
 def test_validate_nullable_param_accepts_none() -> None:
-    """Nullable string param should accept None."""
-    tool = CastTestTool(
+    tool = SchemaTestTool(
         {
             "type": "object",
             "properties": {"name": {"type": ["string", "null"]}},
@@ -1160,32 +946,6 @@ def test_validate_nullable_param_accepts_none() -> None:
     )
     errors = tool.validate_params({"name": None})
     assert errors == []
-
-
-def test_validate_nullable_flag_accepts_none() -> None:
-    """OpenAI-normalized nullable params should still accept None locally."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"name": {"type": "string", "nullable": True}},
-        }
-    )
-    errors = tool.validate_params({"name": None})
-    assert errors == []
-
-
-def test_cast_nullable_param_no_crash() -> None:
-    """cast_params should not crash on nullable type (the original bug)."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"name": {"type": ["string", "null"]}},
-        }
-    )
-    result = tool.cast_params({"name": "hello"})
-    assert result["name"] == "hello"
-    result = tool.cast_params({"name": None})
-    assert result["name"] is None
 
 
 @pytest.mark.parametrize("command", [

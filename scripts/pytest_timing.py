@@ -1,5 +1,3 @@
-"""Opt-in pytest phase timings for CI artifacts (including xdist workers)."""
-
 from __future__ import annotations
 
 import json
@@ -48,6 +46,8 @@ class _TimingReport:
         case["phases"][report.when] = {
             "seconds": report.duration, "outcome": report.outcome,
         }
+        if report.failed:
+            case["phases"][report.when]["failure"] = report.longreprtext
 
     def pytest_sessionfinish(self, exitstatus: int) -> None:
         elapsed = time.perf_counter() - self.started

@@ -6,6 +6,7 @@ import {
   modalOverlayClassName,
   modalSurfaceClassName,
 } from "@/components/ui/floating-surface";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 
 const AlertDialog = AlertDialogPrimitive.Root;
@@ -29,22 +30,25 @@ AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
 const AlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
->(({ className, ...props }, ref) => (
-  <AlertDialogPortal>
-    <AlertDialogOverlay />
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <AlertDialogPrimitive.Content
-        ref={ref}
-        className={cn(
-          modalSurfaceClassName,
-          "grid w-full max-w-lg origin-center gap-4 rounded-modal p-6 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-          className,
-        )}
-        {...props}
-      />
-    </div>
-  </AlertDialogPortal>
-));
+>(({ className, ...props }, ref) => {
+  const surfaceRef = useOverlaySurfaceRef("dialog", ref);
+  return (
+    <AlertDialogPortal>
+      <AlertDialogOverlay />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <AlertDialogPrimitive.Content
+          ref={surfaceRef}
+          className={cn(
+            modalSurfaceClassName,
+            "grid w-full max-w-lg origin-center gap-4 rounded-modal p-6 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+            className,
+          )}
+          {...props}
+        />
+      </div>
+    </AlertDialogPortal>
+  );
+});
 AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName;
 
 const AlertDialogHeader = ({

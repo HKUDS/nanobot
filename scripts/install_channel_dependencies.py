@@ -1,5 +1,3 @@
-"""Install channel manifest dependencies for repository build and CI jobs."""
-
 from __future__ import annotations
 
 import sys

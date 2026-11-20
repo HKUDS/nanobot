@@ -1,10 +1,7 @@
-"""Tools for finding and reading persisted conversations."""
-
 # pyright: reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import Mapping
 from typing import Any
@@ -54,6 +51,7 @@ def _session_ref(session_key: str) -> str:
 class _SessionTool(Tool):
     def __init__(self, sessions: SessionManager) -> None:
         self._access = SessionHistoryReader(sessions)
+        self._handles = SessionHandleResolver(sessions)
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
@@ -81,7 +79,7 @@ class _SessionTool(Tool):
     )
 )
 class SearchSessionsTool(_SessionTool):
-    """Find persisted sessions without changing them."""
+    """Find persisted conversations and their public handles."""
 
     @property
     def name(self) -> str:
@@ -90,10 +88,10 @@ class SearchSessionsTool(_SessionTool):
     @property
     def description(self) -> str:
         return (
-            "Search other persisted conversation sessions by title or recent visible message "
-            "text. Use this only when the user asks about a past conversation or when prior "
-            "discussion is needed to answer. Results contain bounded excerpts; use "
-            "read_session for more context. When citing a result, link its title to the exact "
+            "Search other persisted conversations by title or visible message text. Use when "
+            "past discussion is relevant or to find the target of a user-requested session "
+            "message. Results include @handles for read_session and send_session_message "
+            "when available, plus bounded excerpts. When citing a result, link its title to the exact "
             "session_ref using Markdown. The current session is excluded."
         )
 
@@ -105,10 +103,8 @@ class SearchSessionsTool(_SessionTool):
         query = query.strip()
         if not query:
             return ToolResult.error("Error: search query must not be empty")
-        matches = await asyncio.to_thread(
-            self._access.search,
-            query,
-            _SEARCH_LIMIT,
+        validated = await self._access.asearch(
+            query, _SEARCH_LIMIT, handles=self._handles,
             exclude_session_key=current_request_session_key(),
         )
         needle = query.casefold()
@@ -119,6 +115,7 @@ class SearchSessionsTool(_SessionTool):
                 {
                     "session_key": match["session_key"],
                     "session_ref": _session_ref(match["session_key"]),
+                    "handle": f"@{handle}" if handle is not None else None,
                     "title": match["title"],
                     "updated_at": match["updated_at"],
                     "excerpts": [
@@ -132,7 +129,7 @@ class SearchSessionsTool(_SessionTool):
                         for message in match["messages"]
                     ],
                 }
-                for match in matches
+                for match, handle in validated
             ],
         }
         return json.dumps(result, ensure_ascii=False)
@@ -156,10 +153,6 @@ class SearchSessionsTool(_SessionTool):
 class ReadSessionTool(_SessionTool):
     """Read bounded visible history from one persisted session."""
 
-    def __init__(self, sessions: SessionManager) -> None:
-        super().__init__(sessions)
-        self._handles = SessionHandleResolver(sessions)
-
     @property
     def name(self) -> str:
         return "read_session"
@@ -180,7 +173,7 @@ class ReadSessionTool(_SessionTool):
         session_key = session_key.strip()
         if not session_key:
             return ToolResult.error("Error: session_key must not be empty")
-        session_handle: str | None = None
+        handle_name: str | None = None
         if session_key.startswith("@"):
             try:
                 handle_name = normalize_session_handle(session_key)
@@ -189,7 +182,6 @@ class ReadSessionTool(_SessionTool):
             handle = await self._handles.aresolve(handle_name)
             if handle is None:
                 return ToolResult.error(f"Error: session @{handle_name} was not found")
-            session_handle = f"@{handle_name}"
             session_key = handle.session_key
         query_text = query.strip() if query else ""
         if query_text in _UNSUPPORTED_MATCH_ALL_QUERIES:
@@ -197,17 +189,19 @@ class ReadSessionTool(_SessionTool):
                 "Error: query matches literal substrings; '*' and '.*' do not mean match all. "
                 "Omit query to read the latest messages."
             )
-        match = await asyncio.to_thread(
-            self._access.read,
+        match = await self._access.aread(
             session_key,
             query=query_text,
             limit=_READ_LIMIT,
             exclude_session_key=current_request_session_key(),
         )
-        if match is None:
-            return ToolResult.error(
-                f"Error: session not found: {session_handle or session_key}"
-            )
+        validated = await self._access.avalidate(
+            [match], {session_key: handle_name} if handle_name is not None else {},
+        ) if match is not None else []
+        if not validated or (handle_name is not None and validated[0][1] is None):
+            reference = f"@{handle_name}" if handle_name is not None else session_key
+            return ToolResult.error(f"Error: session not found: {reference}")
+        match = validated[0][0]
         needle = query_text.casefold()
         result: dict[str, Any] = {
             "notice": _UNTRUSTED_NOTICE,
@@ -218,8 +212,8 @@ class ReadSessionTool(_SessionTool):
                 for message in match["messages"]
             ],
         }
-        if session_handle is not None:
-            result["handle"] = session_handle
+        if handle_name is not None:
+            result["handle"] = f"@{handle_name}"
         else:
             result.update({
                 "session_key": match["session_key"],

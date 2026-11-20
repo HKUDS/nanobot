@@ -43,7 +43,7 @@ def _load_webui_build_module() -> ModuleType:
 class WebUIBuildHook(BuildHookInterface):
     PLUGIN_NAME = "webui-build"
 
-    def initialize(self, version: str, build_data: dict) -> None:  # noqa: D401
+    def initialize(self, version: str, build_data: dict) -> None:
         root = Path(self.root)
         docs_dir = root / "docs"
         references_dir = root / "nanobot" / "skills" / "nanobot-document" / "references"

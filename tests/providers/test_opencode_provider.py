@@ -1,5 +1,3 @@
-"""Tests for the OpenCode Zen and OpenCode Go provider registrations."""
-
 import asyncio
 import hashlib
 import json
@@ -194,7 +192,6 @@ def test_opencode_affinity_matches_hostname(base, enabled):
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("configured_header", [None, "x-opencode-session", "X-OpenCode-Session"])
 async def test_opencode_wire_affinity(monkeypatch, api_type, stream, configured_header):
-    """Exercise SDK header encoding/merging through the public provider entrypoints."""
     from openai import AsyncOpenAI
 
     from nanobot.providers import openai_compat_provider

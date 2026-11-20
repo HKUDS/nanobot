@@ -406,11 +406,12 @@ describe("Settings channels", () => {
     expect(await screen.findByRole("button", { name: "View Enabled channel settings" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View Enabled dependency channel settings" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "View Disabled channel settings" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Enabled" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("switch", { name: "Enabled only" })).toBeChecked();
     expect(screen.queryByText("No installation needed")).not.toBeInTheDocument();
     expect(screen.queryByText("Requires dependencies")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Enabled only" }));
+    expect(screen.getByRole("switch", { name: "Enabled only" })).not.toBeChecked();
     expect(screen.getByRole("button", { name: "View Disabled channel settings" })).toBeInTheDocument();
   });
 
@@ -430,7 +431,7 @@ describe("Settings channels", () => {
 
     expect(await screen.findByRole("button", { name: "View First channel settings" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View Second channel settings" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("switch", { name: "Enabled only" })).not.toBeChecked();
   });
 
   it("shows all channels by default when only the always-enabled WebUI is enabled", async () => {
@@ -453,7 +454,7 @@ describe("Settings channels", () => {
 
     expect(await screen.findByText("nanobot WebUI")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View Disabled channel settings" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("switch", { name: "Enabled only" })).not.toBeChecked();
   });
 
   it("replaces the installed channel switch with an in-row restart action", async () => {
@@ -1842,6 +1843,11 @@ describe("Settings channels", () => {
       }),
       150_000,
     ));
+    const savedValues = requestMutationMock.mock.calls.find(
+      ([action]) => action === "settings.channel.configure",
+    )?.[1].values;
+    expect(savedValues).not.toHaveProperty(["channels.email.imapPassword"]);
+    expect(savedValues).not.toHaveProperty(["channels.email.smtpPassword"]);
     expect(within(dialog).getByText("Saving")).toBeVisible();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
@@ -1989,7 +1995,7 @@ describe("Settings channels", () => {
     expect(screen.getByLabelText("Discord channel")).toBeEnabled();
     const savedSecret = screen.getByPlaceholderText("Saved secret");
     expect(savedSecret).toHaveValue("");
-    expect(savedSecret).toHaveAttribute("autocomplete", "off");
+    expect(savedSecret).toHaveAttribute("autocomplete", "new-password");
     expect(savedSecret.closest("form")).not.toBeNull();
     expect(screen.queryByDisplayValue("discord-secret-token")).not.toBeInTheDocument();
 

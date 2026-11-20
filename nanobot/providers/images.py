@@ -1,5 +1,3 @@
-"""Prepare inline image copies within a shared provider request byte budget."""
-
 from __future__ import annotations
 
 import asyncio

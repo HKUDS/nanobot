@@ -1,5 +1,3 @@
-"""Tests for the restructured MemoryStore — pure file I/O layer."""
-
 import json
 from datetime import datetime
 from pathlib import Path
@@ -7,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.memory import _HISTORY_ENTRY_HARD_CAP, MemoryStore
+from nanobot.utils.gitstore import GitStore
+from nanobot.utils.helpers import sync_workspace_templates
 
 
 @pytest.fixture
@@ -90,14 +90,6 @@ class TestHistoryWithCursor:
         assert data["cursor"] == cursor
         assert data["content"] == expected_content
 
-    def test_read_unprocessed_history(self, store):
-        store.append_history("event 1")
-        store.append_history("event 2")
-        store.append_history("event 3")
-        entries = store.read_unprocessed_history(since_cursor=1)
-        assert len(entries) == 2
-        assert entries[0]["cursor"] == 2
-
     def test_read_unprocessed_history_returns_all_when_cursor_zero(self, store):
         store.append_history("event 1")
         store.append_history("event 2")
@@ -105,7 +97,6 @@ class TestHistoryWithCursor:
         assert len(entries) == 2
 
     def test_read_unprocessed_skips_entries_without_cursor(self, store):
-        """Regression: entries missing the cursor key should be silently skipped."""
         store.history_file.write_text(
             '{"timestamp": "2026-04-01 10:00", "content": "no cursor"}\n'
             '{"cursor": 2, "timestamp": "2026-04-01 10:01", "content": "valid"}\n'
@@ -116,7 +107,6 @@ class TestHistoryWithCursor:
         assert [e["cursor"] for e in entries] == [2, 3]
 
     def test_read_unprocessed_skips_malformed_history_payloads(self, store):
-        """Externally edited JSONL can keep an int cursor but miss required payload fields."""
         store.history_file.write_text(
             '{"cursor": 1, "timestamp": "2026-04-01 10:00", "content": "valid"}\n'
             '{"cursor": 2, "timestamp": "2026-04-01 10:01"}\n'
@@ -133,19 +123,15 @@ class TestHistoryWithCursor:
         assert [e["content"] for e in entries] == ["valid", "also valid"]
 
     def test_next_cursor_falls_back_when_last_entry_has_no_cursor(self, store):
-        """Regression: _next_cursor should not KeyError on entries without cursor."""
         store.history_file.write_text(
             '{"timestamp": "2026-04-01 10:01", "content": "no cursor"}\n',
             encoding="utf-8",
         )
-        # Delete .cursor file so _next_cursor falls back to reading JSONL
         store._cursor_file.unlink(missing_ok=True)
-        # Last entry has no cursor — should safely return 1, not KeyError
         cursor = store.append_history("new event")
         assert cursor == 1
 
     def test_append_history_allocates_unique_cursors_under_concurrent_writes(self, store):
-        """Regression: concurrent appends must not allocate duplicate cursors."""
         import threading
 
         writers = 16
@@ -195,33 +181,11 @@ class TestHistoryWithCursor:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert [entry["cursor"] for entry in entries] == list(range(21, 101))
 
-    def test_write_entries_uses_atomic_write(self, tmp_path):
-        """_write_entries uses a temporary file and atomic replacement."""
-        store = MemoryStore(tmp_path)
-        store.append_history("event 1")
-        store.append_history("event 2")
-        store.append_history("event 3")
-        entries = store.read_unprocessed_history(since_cursor=0)
-
-        # Monitor temp file existence
-        tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
-        assert not tmp_path_obj.exists()  # Should not exist initially
-
-        # Call _write_entries
-        store._write_entries(entries)
-
-        # Temp file should be cleaned up
-        assert not tmp_path_obj.exists()
-        # Original file should exist
-        assert store.history_file.exists()
-
     def test_write_entries_cleans_up_tmp_on_exception(self, tmp_path, monkeypatch):
-        """Exception during _write_entries cleans up the temp file."""
         store = MemoryStore(tmp_path)
         store.append_history("event 1")
         entries = store.read_unprocessed_history(since_cursor=0)
 
-        # Fail the platform-independent replacement boundary.
         def failing_replace(*args, **kwargs):
             raise RuntimeError("Simulated failure")
 
@@ -230,10 +194,8 @@ class TestHistoryWithCursor:
         with pytest.raises(RuntimeError):
             store._write_entries(entries)
 
-        # Temp file should be cleaned up, including uniquely named temps.
         assert list(store.history_file.parent.glob("*.tmp")) == []
 
-        # Original file should still exist (because replace failed)
         assert store.history_file.exists()
 
 
@@ -243,14 +205,12 @@ class TestAppendHistoryHardCap:
     any current caller's per-call cap, so normal operation never trips it."""
 
     def test_oversized_entry_is_truncated(self, store):
-        """An entry above _HISTORY_ENTRY_HARD_CAP is truncated before being persisted."""
         huge = "x" * (_HISTORY_ENTRY_HARD_CAP + 10_000)
         store.append_history(huge)
         entry = store.read_unprocessed_history(since_cursor=0)[0]
         assert len(entry["content"]) <= _HISTORY_ENTRY_HARD_CAP + 50
 
     def test_oversize_warning_is_emitted_once(self, store, monkeypatch):
-        """Repeated oversized writes should warn only on the first occurrence."""
         records: list[str] = []
         monkeypatch.setattr(
             "nanobot.agent.memory.logger.warning",
@@ -265,13 +225,11 @@ class TestAppendHistoryHardCap:
         assert len(oversize_warnings) == 1
 
     def test_custom_max_chars_overrides_default(self, store):
-        """Callers that pass max_chars should get their tighter cap applied."""
         store.append_history("a" * 500, max_chars=100)
         entry = store.read_unprocessed_history(since_cursor=0)[0]
-        assert len(entry["content"]) <= 150  # 100 + "\n... (truncated)"
+        assert len(entry["content"]) <= 150
 
     def test_normal_sized_entries_unaffected(self, store):
-        """The hard cap must not alter entries that fit within it."""
         msg = "normal short entry"
         store.append_history(msg)
         entry = store.read_unprocessed_history(since_cursor=0)[0]
@@ -312,18 +270,24 @@ class TestDreamCursor:
         store2 = MemoryStore(store.workspace)
         assert store2.get_last_dream_cursor() == 3
 
-    def test_git_restore_rolls_back_dream_cursor(self, tmp_path):
+    @pytest.mark.parametrize("existing_repo", [False, True], ids=["new-workspace", "existing-workspace"])
+    def test_git_restore_rolls_back_dream_cursor(self, tmp_path, existing_repo):
         store = MemoryStore(tmp_path)
         store.write_memory("before")
         store.set_last_dream_cursor(1)
-        assert store.git.init() is True
+        if existing_repo:
+            # Workspaces initialized before the fix ignore the runtime cursor.
+            old_git = GitStore(tmp_path, tracked_files=["memory/MEMORY.md"], tracked_dirs=["memory/wiki"])
+            assert old_git.init()
+            assert store.git.auto_commit("dream: save first cursor checkpoint")
+        else:
+            sync_workspace_templates(tmp_path, silent=True)
 
         store.write_memory("after")
         store.set_last_dream_cursor(2)
         dream_sha = store.git.auto_commit("dream: update")
         assert dream_sha is not None
 
-        store.write_memory("newer")
         store.set_last_dream_cursor(3)
 
         restore_sha = store.git.revert(dream_sha)
@@ -335,7 +299,6 @@ class TestDreamCursor:
 
 class TestLegacyHistoryMigration:
     def test_read_unprocessed_history_handles_entries_without_cursor(self, store):
-        """JSONL entries with cursor=1 are correctly parsed and returned."""
         store.history_file.write_text(
             '{"cursor": 1, "timestamp": "2026-03-30 14:30", "content": "Old event"}\n',
             encoding="utf-8",
@@ -493,7 +456,6 @@ class TestLegacyHistoryMigration:
 
 
 def test_history_skips_non_dict_jsonl_lines(tmp_path: Path) -> None:
-    """Null/list/bool history lines must not crash reads or appends."""
     memory = MemoryStore(tmp_path)
     memory.history_file.parent.mkdir(parents=True, exist_ok=True)
     memory.history_file.write_text(

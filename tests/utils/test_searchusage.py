@@ -1,5 +1,3 @@
-"""Tests for web search provider usage fetching and /status integration."""
-
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,9 +12,6 @@ from nanobot.utils.searchusage import (
     fetch_search_usage,
 )
 
-# ---------------------------------------------------------------------------
-# SearchUsageInfo.format() tests
-# ---------------------------------------------------------------------------
 
 class TestSearchUsageInfoFormat:
     def test_unsupported_provider_shows_no_tracking(self):
@@ -72,10 +67,6 @@ class TestSearchUsageInfoFormat:
         assert "brave" in text
         assert "not available" in text
 
-
-# ---------------------------------------------------------------------------
-# _parse_tavily_usage tests
-# ---------------------------------------------------------------------------
 
 class TestParseTavilyUsage:
     def test_full_response(self):
@@ -146,10 +137,6 @@ class TestParseTavilyUsage:
         assert info.crawl_used == 1
 
 
-# ---------------------------------------------------------------------------
-# fetch_search_usage routing tests
-# ---------------------------------------------------------------------------
-
 class TestFetchSearchUsageRouting:
     @pytest.mark.asyncio
     async def test_duckduckgo_returns_unsupported(self):
@@ -181,7 +168,6 @@ class TestFetchSearchUsageRouting:
     @pytest.mark.asyncio
     async def test_tavily_no_api_key_returns_error(self):
         with patch.dict("os.environ", {}, clear=True):
-            # Ensure TAVILY_API_KEY is not set
             import os
             os.environ.pop("TAVILY_API_KEY", None)
             info = await fetch_search_usage("tavily", api_key=None)
@@ -265,10 +251,6 @@ class TestFetchSearchUsageRouting:
         assert info.supported is True
 
 
-# ---------------------------------------------------------------------------
-# build_status_content integration tests
-# ---------------------------------------------------------------------------
-
 class TestBuildStatusContentWithSearchUsage:
     _BASE_KWARGS = dict(
         version="0.1.0",
@@ -281,7 +263,6 @@ class TestBuildStatusContentWithSearchUsage:
     )
 
     def test_no_search_usage_unchanged(self):
-        """Omitting search_usage_text keeps existing behaviour."""
         content = build_status_content(**self._BASE_KWARGS)
         assert "🔍" not in content
         assert "Web Search" not in content
@@ -299,11 +280,9 @@ class TestBuildStatusContentWithSearchUsage:
     def test_existing_fields_still_present(self):
         usage_text = "🔍 Web Search: duckduckgo\n   Usage tracking: not available"
         content = build_status_content(**self._BASE_KWARGS, search_usage_text=usage_text)
-        # Original fields must still be present
         assert "nanobot v0.1.0" in content
         assert "claude-opus-4-5" in content
         assert "1000 in / 200 out" in content
-        # New field appended
         assert "duckduckgo" in content
 
     def test_full_tavily_in_status(self):

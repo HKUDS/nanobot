@@ -1,5 +1,3 @@
-"""Logging helpers for the WebUI WebSocket server surface."""
-
 from __future__ import annotations
 
 import logging

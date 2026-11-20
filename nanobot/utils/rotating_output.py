@@ -1,5 +1,3 @@
-"""Bounded text output for detached nanobot processes."""
-
 from __future__ import annotations
 
 import io

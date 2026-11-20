@@ -1,5 +1,3 @@
-"""Keep shipped corresponding source and runtime materials complete and aligned."""
-
 import importlib.util
 import io
 import json

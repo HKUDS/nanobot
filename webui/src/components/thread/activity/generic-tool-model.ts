@@ -71,6 +71,7 @@ const EXCLUDED_TOOLS = new Set([
   "cli_anything_run",
   "edit_file",
   "exec",
+  "exec_session",
   "exec_command",
   "execute_command",
   "run_cli_app",
@@ -280,8 +281,6 @@ function activityLabel(
       return activityStatus(t, status, "startingLongTask", "startedLongTask", "startLongTaskFailed");
     case "update_goal":
       return activityStatus(t, status, "updatingLongTask", "updatedLongTask", "updateLongTaskFailed");
-    case "exec_session":
-      return activityStatus(t, status, "continuingCommand", "continuedCommand", "continueCommandFailed");
     case "list_exec_sessions":
       return activityStatus(t, status, "checkingRunningCommands", "checkedRunningCommands", "checkRunningCommandsFailed");
     case "screenshot":
@@ -333,8 +332,6 @@ function activityDetail(items: GenericToolRunItem[], family: ToolFamily, name: s
       return safeText(fieldValue(trace, "ui_summary"));
     case "update_goal":
       return safeText(fieldValue(trace, "action"));
-    case "exec_session":
-      return compactIdentifier(fieldValue(trace, "session_id"));
     case "screenshot":
     case "capture_screenshot":
       return "";
@@ -394,12 +391,6 @@ function safeText(value: string): string {
 function quote(value: string): string {
   const safe = safeText(value);
   return safe ? `“${safe}”` : "";
-}
-
-function compactIdentifier(value: string): string {
-  const safe = safeText(value);
-  if (safe.length <= 16) return safe;
-  return `${safe.slice(0, 7)}…${safe.slice(-5)}`;
 }
 
 function humanizeToolName(name: string): string {

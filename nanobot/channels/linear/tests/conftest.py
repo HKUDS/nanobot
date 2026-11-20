@@ -1,5 +1,3 @@
-"""Keep Linear installation and permission state out of the user's real profile."""
-
 from pathlib import Path
 
 import pytest

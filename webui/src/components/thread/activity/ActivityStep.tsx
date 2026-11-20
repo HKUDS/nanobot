@@ -52,6 +52,7 @@ export function ActivityStep({
   const textLabel = typeof label === "string" ? [label, detail].filter(Boolean).join("\n") : undefined;
   const activityMarker = (
     <span
+      data-activity-marker=""
       className={cn(
         "flex h-5 w-[1.125rem] shrink-0 items-start justify-center pt-[3px]",
         markerLabel && ["rounded-sm", formControlFocusClassName],

@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import i18n from "@/i18n";
@@ -6,6 +6,8 @@ import {
   installSettingsViewTestHooks,
   jsonResponse,
   renderSettingsView,
+  selectToolType,
+  showOnlyReadyTools,
   requestMutationMock,
   settingsPayload,
 } from "@/tests/settings-test-utils";
@@ -43,7 +45,7 @@ async function connectXmind() {
 describe("SettingsView Apps catalog", () => {
   installSettingsViewTestHooks();
 
-  it("searches within the selected readiness or kind filter", async () => {
+  it("combines independent type and readiness filters with search", async () => {
     const figmaLocal = { ...xmindMcpPreset, name: "figma-local", display_name: "Figma local" };
     const figmaConnected = {
       ...xmindMcpPreset, name: "figma-connected", display_name: "Figma connected",
@@ -72,18 +74,22 @@ describe("SettingsView Apps catalog", () => {
     }));
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "Ready" }));
+    await showOnlyReadyTools(true);
     fireEvent.change(screen.getByPlaceholderText("Search tools"), { target: { value: "figma" } });
     expect(await screen.findByRole("heading", { name: "Figma connected" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Figma CLI" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Figma local" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Figma pending" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    expect(screen.getByRole("switch", { name: "Ready only" })).toBeChecked();
+    expect(screen.queryByRole("heading", { name: "Figma local" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Figma CLI" })).not.toBeInTheDocument();
+    await showOnlyReadyTools(false);
     expect(screen.getByRole("heading", { name: "Figma local" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Figma connected" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Figma CLI" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Apps" }));
+    await selectToolType("CLI Apps");
     expect(screen.getByRole("heading", { name: "Figma pending" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Figma local" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Photoshop CLI" })).not.toBeInTheDocument();
@@ -102,7 +108,8 @@ describe("SettingsView Apps catalog", () => {
       return { ok: false, status: 404, text: async () => "Not found" } as Response;
     }));
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
     fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
     const dialog = await screen.findByRole("dialog", { name: "Xmind" });
     const configure = within(dialog).queryByRole("button", { name: "Configure proxy" });
@@ -158,7 +165,8 @@ describe("SettingsView Apps catalog", () => {
     });
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
     fireEvent.click(await screen.findByRole("button", { name: "Connect Metabase" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Metabase" });
@@ -247,7 +255,8 @@ describe("SettingsView Apps catalog", () => {
     vi.stubGlobal("open", open);
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
     expect(screen.getByText("MCP tools")).toBeInTheDocument();
     const connectButton = await screen.findByRole("button", { name: "Connect Xmind" });
     expect(connectButton).toHaveTextContent("Connect");
@@ -320,10 +329,11 @@ describe("SettingsView Apps catalog", () => {
     requestMutationMock.mockRejectedValueOnce(new Error("Stopped after request assertion"));
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "Ready" }));
-    expect(await screen.findByText("No tools are ready yet.")).toBeInTheDocument();
+    await showOnlyReadyTools(true);
+    expect(await screen.findByText("No tools are ready yet")).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
 
     const heading = await screen.findByRole("heading", { name: "Xmind" });
     const row = heading.closest("article");
@@ -382,7 +392,8 @@ describe("SettingsView Apps catalog", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
 
     const heading = await screen.findByRole("heading", { name: "Xmind" });
     const row = heading.closest("article");
@@ -423,11 +434,18 @@ describe("SettingsView Apps catalog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    const client = { requestMutation: requestMutationMock, status: "open", onStatus: () => () => {} } as never;
+    renderSettingsView({ client, initialSection: "apps" });
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
 
     expect(await screen.findByRole("button", { name: "Xmind" }))
       .toHaveAccessibleDescription("Connecting…");
+    cleanup();
+    renderSettingsView({ client, initialSection: "apps", initialSettings: settingsPayload() });
+    await selectToolType("MCP");
+    expect(screen.getByRole("button", { name: "Xmind" })).toHaveAccessibleDescription("Connecting…");
+    expect(mcpPresetRequests).toBe(1);
     expect(await screen.findByRole(
       "button",
       { name: "Manage Xmind" },
@@ -435,7 +453,7 @@ describe("SettingsView Apps catalog", () => {
     )).toHaveTextContent("Manage");
     expect(mcpPresetRequests).toBe(2);
 
-    fireEvent.click(screen.getByRole("button", { name: "Ready" }));
+    await showOnlyReadyTools(true);
     expect(await screen.findByRole("heading", { name: "Xmind" })).toBeInTheDocument();
   });
 
@@ -480,7 +498,8 @@ describe("SettingsView Apps catalog", () => {
     });
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
     expect(await screen.findByText("Connection failed.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Manage team-docs" }));
@@ -494,7 +513,8 @@ describe("SettingsView Apps catalog", () => {
     ));
     const connected = await screen.findByRole("button", { name: "Manage team-docs" });
     expect(connected).toHaveTextContent("Manage");
-    fireEvent.click(screen.getByRole("button", { name: "Ready" }));
+    await selectToolType("All");
+    await showOnlyReadyTools(true);
     const readyHeading = await screen.findByRole("heading", { name: "team-docs" });
     expect(within(readyHeading.closest("article") as HTMLElement).getByText("MCP"))
       .toBeInTheDocument();
@@ -540,7 +560,8 @@ describe("SettingsView Apps catalog", () => {
     });
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
     fireEvent.click(await screen.findByRole("button", { name: "Custom" }));
 
     fireEvent.change(screen.getByLabelText("Server name"), {
@@ -667,7 +688,8 @@ describe("SettingsView Apps catalog", () => {
     vi.stubGlobal("open", vi.fn(() => popup));
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
     await connectXmind();
 
     const callbackInput = await screen.findByRole("textbox", { name: "Callback URL" });
@@ -734,7 +756,8 @@ describe("SettingsView Apps catalog", () => {
     vi.stubGlobal("open", vi.fn(() => popup));
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
     await connectXmind();
 
     const cancelButton = await screen.findByRole("button", { name: "Cancel" });
@@ -790,7 +813,8 @@ describe("SettingsView Apps catalog", () => {
     });
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
     fireEvent.click(await screen.findByRole("button", { name: "Manage Xmind" }));
     const dialog = screen.getByRole("dialog", { name: "Xmind" });
     fireEvent.click(within(dialog).getByRole("tab", { name: "Connection" }));
@@ -840,7 +864,8 @@ describe("SettingsView Apps catalog", () => {
     vi.stubGlobal("open", open);
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
     await connectXmind();
 
     const continueButton = await screen.findByRole("button", { name: "Continue sign-in" });
@@ -910,7 +935,8 @@ describe("SettingsView Apps catalog", () => {
     vi.stubGlobal("open", vi.fn(() => popup));
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
     await connectXmind();
 
     await waitFor(() => expect(statusCalls).toBe(1), { timeout: 2000 });

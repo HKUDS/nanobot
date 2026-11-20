@@ -29,7 +29,6 @@ RATE_LIMITS = {
 
 # error.code values that carry a specific recovery contract.
 CODE_INVALID_TOKEN = 100
-CODE_MISSING_AUTH = 190
 CODE_RATE_LIMITED = 130429
 CODE_NOT_CREATOR = 131005
 CODE_BAD_REQUEST = 131009
@@ -47,20 +46,16 @@ MEDIA_LIMITS = {
 }
 
 ACCEPTED_UPLOAD_MIME = {
-    # image
     "image/jpeg",
     "image/png",
-    # video
     "video/mp4",
     "video/3gpp",
-    # audio
     "audio/aac",
     "audio/mp4",
     "audio/mpeg",
     "audio/amr",
     "audio/ogg",
     "audio/opus",
-    # document
     "application/pdf",
     "text/plain",
     "application/msword",
@@ -69,9 +64,7 @@ ACCEPTED_UPLOAD_MIME = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-powerpoint",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    # sticker
     "image/webp",
-    # generic
     "application/octet-stream",
 }
 
@@ -447,7 +440,6 @@ def _normalize_kind(value: Any) -> MessageKind:
 
 
 def _as_dict(value: Any) -> dict[str, Any] | None:
-    """Narrow an untrusted JSON value to an object at the boundary."""
     if not isinstance(value, dict):
         return None
     return cast(dict[str, Any], value)

@@ -44,7 +44,7 @@ Collaborators can open PRs for:
 
 For riskier or larger changes, collaborators are encouraged to open a draft PR early after discussing the scope and approach in an issue.
 
-WebUI and remote-host interface changes must follow the [client/host compatibility review checklist](.agent/review-guide.md), including independent client/server upgrades, host isolation, and actionable update guidance.
+WebUI and remote-host interface changes must follow the [client/host compatibility review checklist](.agent/review-guide.md), including the same-version support policy, host isolation, and actionable update guidance.
 
 ### Starting Work
 
@@ -141,6 +141,8 @@ If your change genuinely needs to step outside this, please call it out explicit
 ## Release Packaging Contract
 
 Use the [release checklist](./docs/releasing.md) for candidate preparation, package checks, documentation coordination, and the final publication handoff.
+
+Stable feature releases and Stable patches are manual and share the same package workflow. Patches use generated change notes and update only affected documentation; they do not require a full wiki or promotional refresh. The Preview/dev line is intended for daily workflow delivery. The current first step supports opt-in daily candidate preparation only; publication remains separate and daily preparation is disabled by default. See the checklist for its activation boundary and remaining publication work.
 
 A stable install must never combine Python from one version with a TUI from another. Publish in this order:
 

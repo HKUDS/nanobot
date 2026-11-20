@@ -28,7 +28,6 @@ _TRANSPORT_SETTINGS = {"UV_HTTP_TIMEOUT", "UV_HTTP_RETRIES", "UV_SYSTEM_CERTS", 
 
 
 def _receipt_only_policy() -> None:
-    """Refuse external resolver policy that this receipt-bound plan has not frozen."""
     locations = {"UV_TOOL_DIR", "UV_TOOL_BIN_DIR", "UV_CACHE_DIR", "UV_NO_CONFIG"}
     for key in os.environ:
         if (key.startswith("UV_") and key not in locations | _TRANSPORT_SETTINGS
@@ -63,7 +62,6 @@ def _hash_file(path: Path) -> str:
 
 
 def _toml(value: object) -> str:
-    """Re-encode parsed receipt settings, leaving their semantics to uv itself."""
     if isinstance(value, (str, bool)) or type(value) is int:
         return json.dumps(value, ensure_ascii=False)
     if isinstance(value, list):

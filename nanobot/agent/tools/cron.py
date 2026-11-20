@@ -1,5 +1,3 @@
-"""Cron tool for scheduling reminders and tasks."""
-
 # pyright: reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
@@ -19,7 +17,6 @@ from nanobot.agent.tools.schema import (
 from nanobot.cron.service import CronService
 from nanobot.cron.session_turns import is_bound_cron_job, is_cron_turn
 from nanobot.cron.types import CronJob, CronJobState, CronSchedule
-from nanobot.session.keys import UNIFIED_SESSION_KEY
 
 _CRON_PARAMETERS = tool_parameters_schema(
     action=StringSchema(
@@ -83,11 +80,7 @@ class CronTool(Tool):
         ctx = current_request_context()
         if ctx is None:
             return "", "", "", {}
-        raw_key = f"{ctx.channel}:{ctx.chat_id}" if ctx.channel and ctx.chat_id else ""
-        session_key = (
-            raw_key if ctx.session_key == UNIFIED_SESSION_KEY else (ctx.session_key or "")
-        )
-        return session_key, ctx.channel or "", ctx.chat_id or "", dict(ctx.metadata or {})
+        return ctx.session_key or "", ctx.channel or "", ctx.chat_id or "", dict(ctx.metadata or {})
 
     @staticmethod
     def _validate_timezone(tz: str) -> str | None:
@@ -100,7 +93,6 @@ class CronTool(Tool):
         return None
 
     def _display_timezone(self, schedule: CronSchedule) -> str:
-        """Pick the most human-meaningful timezone for display."""
         return schedule.tz or self._default_timezone
 
     @staticmethod
@@ -124,6 +116,8 @@ class CronTool(Tool):
 
     def validate_params(self, params: dict[str, Any]) -> list[str]:
         errors = super().validate_params(params)
+        if errors:
+            return errors
         action = params.get("action")
         if action == "add" and not str(params.get("message") or "").strip():
             errors.append("message is required when action='add'")
@@ -278,7 +272,6 @@ class CronTool(Tool):
         return f"Updated job '{result.name}' (id: {result.id})"
 
     def _format_timing(self, schedule: CronSchedule) -> str:
-        """Format schedule as a human-readable timing string."""
         if schedule.kind == "cron":
             tz = f" ({schedule.tz})" if schedule.tz else ""
             return f"cron: {schedule.expr}{tz}"
@@ -296,7 +289,6 @@ class CronTool(Tool):
         return schedule.kind
 
     def _format_state(self, state: CronJobState, schedule: CronSchedule) -> list[str]:
-        """Format job run state as display lines."""
         lines: list[str] = []
         display_tz = self._display_timezone(schedule)
         if state.last_run_at_ms:
@@ -357,7 +349,7 @@ class CronTool(Tool):
             return f"No recorded runs for job {job_id}."
         lines = [f"Recent runs for '{job.name}' (id: {job.id}), newest first:"]
         display_tz = self._display_timezone(job.schedule)
-        for run in reversed(job.state.run_history[-limit:]):
+        for run in reversed(job.state.run_history[-int(limit):]):
             timestamp = self._format_timestamp(run.run_at_ms, display_tz)
             lines.append(f"- {timestamp} — {run.status} ({run.duration_ms}ms)")
             if run.error:

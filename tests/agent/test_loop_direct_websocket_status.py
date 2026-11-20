@@ -43,6 +43,7 @@ def _make_loop(tmp_path):
 async def test_process_direct_websocket_clears_run_status(tmp_path) -> None:
     loop = _make_loop(tmp_path)
     gateway = MagicMock()
+    gateway.transcripts.prepare_and_append = AsyncMock(return_value=True)
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         loop.bus,

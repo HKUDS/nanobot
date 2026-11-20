@@ -41,7 +41,7 @@ def _read(fd: int, timeout: float) -> bytes:
         try:
             chunk = os.read(fd, 65_536)
         except OSError as exc:
-            if exc.errno == errno.EIO:  # PTY slave closed.
+            if exc.errno == errno.EIO:
                 break
             raise
         if not chunk:

@@ -17,7 +17,7 @@ describe("trace activity semantics", () => {
     ['web_search({"query":"nanobot latest release"})', "done", "Searched the web", "nanobot latest release"],
     ['web_fetch({"url":"https://example.com/docs?token=private"})', "done", "Read", "example.com/docs"],
     ['read_file({"path":"/Users/alice/project/README.md"})', "done", "Read", "~/project/README.md"],
-    ['exec({"command":"date +%Y-%m-%d"})', "done", "Checked current time", ""],
+    ['exec({"command":"date +%Y-%m-%d"})', "done", "Checked time", ""],
     ['exec_command({"cmd":"API_KEY=secret npm test"})', "running", "Running command", "API_KEY=•••• npm test"],
     ['write_file({"path":"/home/alice/project/output.txt"})', "done", "Wrote file", "~/project/output.txt"],
     ['apply_patch({"file_path":"src/app.tsx","patch":"private"})', "error", "Could not edit file", "src/app.tsx"],
@@ -72,7 +72,7 @@ describe("trace activity semantics", () => {
     expect(result).toMatchObject({
       label: "Ran command",
       detail: "npm test",
-      aside: "script, 3 lines",
+      aside: "script (3 lines)",
     });
     expect(result.detail).not.toContain("second-secret-line");
   });

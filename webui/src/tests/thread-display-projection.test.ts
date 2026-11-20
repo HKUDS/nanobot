@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { deriveTitle, isModelCommandText, visibleSessionPreview } from "@/lib/format";
-import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
+import { historyContentSnapshot, projectWebuiThreadMessages, sameHistoryContent } from "@/lib/thread-display-projection";
 import type { UIMessage } from "@/lib/types";
 
 const STARTED_AT = Date.UTC(2026, 6, 25, 12, 34, 0);
@@ -145,5 +145,68 @@ describe("projectWebuiThreadMessages", () => {
     ]);
 
     expect(visible[1]?.completedAt).toBeUndefined();
+  });
+});
+
+
+describe("history content admission", () => {
+  it("compares displayed answers independently of replay identities and completion telemetry", () => {
+    const before = historyContentSnapshot([message("assistant", { content: "First\n\nSecond" })], null);
+    const after = historyContentSnapshot([
+      message("assistant", { id: "slice-1", content: "First", turnId: "turn-1", turnSeq: 1 }),
+      message("assistant", { id: "slice-2", content: "Second", turnId: "turn-1", turnSeq: 2,
+        completedAt: STARTED_AT + 1000, latencyMs: 1000, usage: { total_tokens: 42 } }),
+    ], null);
+    expect(sameHistoryContent(before, after)).toBe(true);
+    expect(sameHistoryContent(after, historyContentSnapshot([
+      message("assistant", { content: "First\n\nSecond\n\nThird" }),
+    ], null))).toBe(false);
+  });
+
+  it("ignores hidden task creation and transport placeholders", () => {
+    const prompt = message("user");
+    const before = historyContentSnapshot([prompt], null);
+    const after = historyContentSnapshot([prompt,
+      message("assistant", { content: 'subagent({"action":"create"})', kind: "trace",
+        toolEvents: [{ name: "subagent", phase: "end", arguments: { action: "create" } }] }),
+      message("assistant", { content: "", completedAt: STARTED_AT + 1000 }),
+    ], null);
+    expect(sameHistoryContent(before, after)).toBe(true);
+  });
+
+  it("recognizes a visible fork boundary without treating a leading marker as content", () => {
+    const rows = [message("user"), message("assistant")];
+    const before = historyContentSnapshot(rows, null);
+    expect(sameHistoryContent(before, historyContentSnapshot(rows, 0))).toBe(true);
+    expect(sameHistoryContent(before, historyContentSnapshot(rows, 1))).toBe(false);
+  });
+
+  it("compares nested tool payloads by content, including results and attachments", () => {
+    const tool = { name: "read_file", phase: "end", arguments: { path: "test.txt" },
+      result: { lines: ["first", "second"], truncated: false } };
+    const trace = message("assistant", { content: "read_file(test.txt)", kind: "trace", toolEvents: [tool] });
+    const before = historyContentSnapshot([trace], null);
+    const replay = { ...trace, id: "replayed", toolEvents: [{ ...tool,
+      arguments: { path: "test.txt" }, result: { truncated: false, lines: ["first", "second"] } }] };
+    expect(sameHistoryContent(before, historyContentSnapshot([replay], null))).toBe(true);
+    for (const changed of [
+      { ...tool, result: { lines: ["first", "changed"], truncated: false } },
+      { ...tool, result: { lines: ["first"], truncated: false } },
+      { ...tool, result: null, error: "Not found" },
+      { ...tool, files: [{ name: "test.txt", url: "/files/test.txt" }] },
+    ]) {
+      expect(sameHistoryContent(before, historyContentSnapshot([{ ...trace, toolEvents: [changed] }], null))).toBe(false);
+    }
+  });
+
+  it("detects newly available media without relying on new message identities", () => {
+    const original = message("user", { images: [{ name: "picture.png" }] });
+    const before = historyContentSnapshot([original], null);
+    expect(sameHistoryContent(before, historyContentSnapshot([
+      { ...original, images: [{ name: "picture.png", url: undefined }] },
+    ], null))).toBe(true);
+    expect(sameHistoryContent(before, historyContentSnapshot([
+      { ...original, images: [{ name: "picture.png", url: "/files/picture.png" }] },
+    ], null))).toBe(false);
   });
 });

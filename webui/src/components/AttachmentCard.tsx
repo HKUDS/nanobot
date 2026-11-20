@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { FileText, ImageIcon, Video } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { PendingEdgeOverlay, type PendingEdgeState } from "@/components/PendingEdgeOverlay";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { UIMediaKind } from "@/lib/types";
@@ -10,12 +11,14 @@ import { cn } from "@/lib/utils";
 export const attachmentCardActionClassName = "absolute right-0 top-0 grid h-11 w-11 place-items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 
 /** The card owns only its information surface; callers own removal, download, and status. */
-export function AttachmentCard({ name, description, children, action, invalid = false }: {
+export function AttachmentCard({ name, description, children, action, invalid = false, edgeState = "solid", onSealEnd }: {
   name: string;
   description?: string;
   children: ReactNode;
   action?: ReactNode;
   invalid?: boolean;
+  edgeState?: PendingEdgeState;
+  onSealEnd?: () => void;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [hintOpen, setHintOpen] = useState(false);
@@ -28,7 +31,9 @@ export function AttachmentCard({ name, description, children, action, invalid = 
   return <span className={cn(
     "relative block h-24 w-24 max-w-full shrink-0 rounded-control border transition-colors motion-reduce:transition-none",
     invalid ? "border-destructive/40 bg-destructive/5 text-destructive" : "border-border/70 bg-muted/35",
+    edgeState !== "solid" && "border-transparent",
   )}>
+    <PendingEdgeOverlay state={edgeState} solidTone="card" inset="-inset-px" onSealEnd={onSealEnd} />
     <TooltipProvider>
       <Tooltip open={hintOpen && !detailsOpen} onOpenChange={setHintOpen}>
         <Popover open={detailsOpen} onOpenChange={changeDetailsOpen}>
@@ -50,6 +55,8 @@ export function AttachmentCard({ name, description, children, action, invalid = 
           </PopoverTrigger>
           <PopoverContent side="top" aria-label={name}
             onOpenAutoFocus={(event) => event.preventDefault()}
+            // Focus stays on the trigger; delayed restoration must not steal the next Tab.
+            onCloseAutoFocus={(event) => event.preventDefault()}
             className="w-max max-w-[min(20rem,calc(100vw-2rem))] break-words px-3 py-1.5 text-caption">
             {details}
           </PopoverContent>

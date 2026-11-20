@@ -1,5 +1,3 @@
-"""Instance-local usage and dismissal state for the optional GitHub invitation."""
-
 from __future__ import annotations
 
 import time

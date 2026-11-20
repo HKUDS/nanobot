@@ -1,14 +1,14 @@
-"""Session management for conversation history."""
-
 from __future__ import annotations
 
 import asyncio
 import re
+import threading
+from collections.abc import Iterator, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, TypedDict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict, TypeVar, cast
 from uuid import uuid4
 
 from nanobot.providers.base import ProviderConversationState
@@ -18,12 +18,12 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.display_history import HistoryFact, HistoryReader
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
+from nanobot.session.image_attachments import replay_user_image_blocks
 from nanobot.session.location import SessionLocation
-from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.message_content import message_text, text_history_blocks
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionTypes
 from nanobot.utils.helpers import (
-    content_with_media_breadcrumbs,
     estimate_message_tokens,
     find_legal_message_start,
     recent_message_start_index,
@@ -36,62 +36,24 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T")
 SESSION_CACHE_MAX_SIZE = 128
-_MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
-_LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
-_TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
 _SESSION_PREVIEW_MAX_CHARS = 120
 _FORK_VOLATILE_METADATA_KEYS = {
     "_stopped_at_iteration_limit",
     PARENT_SESSION_KEY,
     SESSION_TYPE_KEY,
-    "goal_state",
     "pending_user_turn",
     "pending_user_followups",
     "runtime_checkpoint",
     "history_edit_receipt",
     "session_handle",
     "webui_recovery",
-    "thread_goal",
     "title",
     "title_user_edited",
 }
 
 
-def _sanitize_assistant_replay_text(content: str) -> str:
-    """Remove internal replay artifacts that the model may have copied before.
-
-    These strings are useful as runtime/session metadata, but when they appear
-    in assistant examples they become demonstrations for the model to repeat.
-    """
-    content = _MESSAGE_TIME_PREFIX_RE.sub("", content, count=1)
-    lines = [
-        line
-        for line in content.splitlines()
-        if not _LOCAL_IMAGE_BREADCRUMB_RE.match(line)
-        and not _TOOL_CALL_ECHO_RE.match(line)
-    ]
-    return "\n".join(lines).strip()
-
-
 def _text_preview(content: object) -> str:
-    """Return compact display text for session lists."""
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        parts: list[str] = []
-        for block in cast(list[object], content):
-            if isinstance(block, dict):
-                block_data = cast(dict[object, object], block)
-                if block_data.get("type") != "text":
-                    continue
-                value = block_data.get("text")
-                if isinstance(value, str):
-                    parts.append(value)
-        text = " ".join(parts)
-    else:
-        return ""
-    text = _sanitize_assistant_replay_text(text)
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", message_text(content)).strip()
     if len(text) > _SESSION_PREVIEW_MAX_CHARS:
         text = text[: _SESSION_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
     return text
@@ -180,7 +142,7 @@ class Session:
     def last_archived(self, value: int) -> None:
         self.last_consolidated = value
 
-    def add_message(self, role: str, content: str, **kwargs: Any) -> None:
+    def add_message(self, role: str, content: str | list[_T], **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
             "role": role,
@@ -227,6 +189,22 @@ class Session:
         is not a user request and must not resume an old task on the next turn.
         A positive ``max_messages`` applies an additional caller-owned count limit.
         """
+        return self._history(
+            max_messages, max_tokens=max_tokens, extend_to_user=extend_to_user,
+            view="model" if include_runtime_context else "public",
+        )
+
+    def get_text_history(
+        self, *, max_tokens: int = 0, include_runtime_context: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Return the replayable context for archives and estimates without loading images."""
+        return self._history(max_tokens=max_tokens, view="text" if include_runtime_context else "public")
+
+    def _history(
+        self, max_messages: int = 0, *, max_tokens: int = 0, extend_to_user: bool = False,
+        view: Literal["model", "text", "public"],
+    ) -> list[dict[str, Any]]:
+        include_runtime_context = view != "public"
         replayable = self.messages[self.last_archived:]
         if max_messages <= 0:
             start_idx = 0
@@ -248,7 +226,6 @@ class Session:
                 sliced = sliced[start:]
                 break
 
-        # Drop orphan tool results at the front.
         start = find_legal_message_start(sliced)
         if start:
             sliced = sliced[start:]
@@ -265,18 +242,8 @@ class Session:
                 message = public_history_message(message)
             content = message.get("content", "")
             role = message.get("role")
-            if role == "assistant" and isinstance(content, str):
-                content = _sanitize_assistant_replay_text(content)
-            # Synthesize an ``[image: path]`` breadcrumb from the persisted
-            # ``media`` kwarg so LLM replay still sees *something* where the
-            # image used to be. Without this, an image-only user turn
-            # replays as an empty user message — the assistant's reply then
-            # looks like it's responding to nothing.
-            content = content_with_media_breadcrumbs(
-                role,
-                content,
-                message.get("media"),
-            )
+            if role == "user" and view != "model" and isinstance(content, list):
+                content = text_history_blocks(cast(list[object], content))
             cli_apps = cast(object, message.get("cli_apps"))
             if (
                 include_runtime_context
@@ -308,6 +275,12 @@ class Session:
                 if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
                     continue
             entry: dict[str, Any] = {"role": message["role"], "content": content}
+            if include_runtime_context and "input_id" in message and not is_hidden_history_message(message):
+                entry["_meta"] = {"input_id": message["input_id"]}
+            marker = message.get(HIDDEN_HISTORY_META)
+            if include_runtime_context and isinstance(marker, dict) and cast(dict[str, Any], marker).get("kind") == "internal_continuation":
+                # Attribution must distinguish persisted continuations from no-ID automation inputs.
+                entry[HIDDEN_HISTORY_META] = {"kind": "internal_continuation"}
             for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
                 if key in message:
                     entry[key] = message[key]
@@ -344,6 +317,11 @@ class Session:
             if start:
                 kept = kept[start:]
             out = kept
+        if view == "model":
+            for entry in out:
+                content = entry["content"]
+                if entry["role"] == "user" and isinstance(content, list):
+                    entry["content"] = replay_user_image_blocks(cast(list[object], content))
         return out
 
     def retain_history_prefix(self, boundary: int) -> None:
@@ -378,6 +356,10 @@ class SessionMetadataPayload(TypedDict):
     metadata: dict[str, Any]
 
 
+class SessionHistoryPayload(SessionMetadataPayload):
+    generation: str
+
+
 class SessionInfo(TypedDict):
     key: str
     created_at: str
@@ -400,7 +382,10 @@ def history_prefix_boundary(source: Session, before_user_index: int) -> int | No
     return len(source.messages) if user_index == before_user_index else None
 
 
-def fork_session(source: Session, target_key: str, before_user_index: int) -> Session | None:
+def fork_session(
+    source: Session, target_key: str, before_user_index: int,
+    *, exclude_metadata: frozenset[str] = frozenset(),
+) -> Session | None:
     """Build a portable fork ending before the requested visible user message."""
     boundary = history_prefix_boundary(source, before_user_index)
     if boundary is None:
@@ -416,7 +401,7 @@ def fork_session(source: Session, target_key: str, before_user_index: int) -> Se
     )
     target.retain_history_prefix(boundary)
     target.messages = [public_history_message(message) for message in target.messages]
-    for key in _FORK_VOLATILE_METADATA_KEYS:
+    for key in _FORK_VOLATILE_METADATA_KEYS | exclude_metadata:
         target.metadata.pop(key, None)
     return target
 
@@ -439,7 +424,12 @@ class SessionManager:
         self._store.initialize(workspace)
         self._delete_observer: Callable[[str], None] | None = None
         self.types = SessionTypes()
+        self._generation_exclusions: set[str] = set()
         self._state: SessionState | None = None
+
+    def exclude_generation_metadata(self, keys: frozenset[str]) -> None:
+        """Register feature metadata that cannot cross a fork or reset."""
+        self._generation_exclusions.update(keys)
 
     @property
     def state(self) -> SessionState:
@@ -447,7 +437,10 @@ class SessionManager:
         if self._state is None:
             from nanobot.session.state import SessionState
 
-            self._state = SessionState(self._store, on_delete=self._notify_delete, types=self.types)
+            self._state = SessionState(
+                self._store, on_delete=self._notify_delete, types=self.types,
+                generation_exclusions=self._generation_exclusions,
+            )
         return self._state
 
     def _notify_delete(self, key: str) -> None:
@@ -471,13 +464,8 @@ class SessionManager:
         return SessionLocation.safe_key(key)
 
     @staticmethod
-    def _storage_key(key: str) -> str:
-        """Collision-resistant encoding for internal session storage filenames."""
-        return SessionLocation.storage_key(key)
-
-    @staticmethod
     def _decode_storage_key(stem: str) -> str | None:
-        """Reverse _storage_key(): decode a base64url (no-padding) stem back to the original key."""
+        """Decode a base64url (no-padding) stem back to the original key."""
         return SessionLocation.decode_storage_key(stem)
 
     @staticmethod
@@ -507,6 +495,18 @@ class SessionManager:
         """Read persisted child headers without transcripts, checkpoints, or pending inputs."""
         return self._store.list_child_session_metadata(parent_key)
 
+    def list_subagent_session_metadata(
+        self, parent_key: str, *, turn_ids: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read persisted subagent headers attributed to the requested parent turns."""
+        return self._store.list_subagent_session_metadata(parent_key, turn_ids=turn_ids)
+
+    def read_child_session_metadata(
+        self, parent_key: str, child_keys: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read named persisted child headers without transcripts or pending inputs."""
+        return self._store.read_child_session_metadata(parent_key, child_keys)
+
     def save(self, session: Session) -> None:
         """Commit an offline administrative snapshot, rejecting obsolete history."""
         self._require_offline_mutation()
@@ -535,18 +535,7 @@ class SessionManager:
             return 0
         self._require_offline_mutation()
 
-        def rename() -> int:
-            changed = 0
-            for row in self._store.list_metadata():
-                if row["metadata"].get(SESSION_MODEL_PRESET_METADATA_KEY) == old_name:
-                    self._store.update_metadata(
-                        row["key"],
-                        {SESSION_MODEL_PRESET_METADATA_KEY: new_name},
-                    )
-                    changed += 1
-            return changed
-
-        return self._store.run_write(rename)
+        return len(self._store.rename_model_preset(old_name, new_name))
 
     def invalidate(self, key: str) -> None:
         if self._state is not None:
@@ -582,7 +571,9 @@ class SessionManager:
             source = self._store.load(source_key)
             if source is None:
                 return None
-            target = fork_session(source, target_key, before_user_index)
+            target = fork_session(
+                source, target_key, before_user_index, exclude_metadata=frozenset(self._generation_exclusions),
+            )
             if target is not None:
                 self._store.save(target)
                 self._store.copy_history_prefix(source_key, target, before_user_index)
@@ -605,6 +596,37 @@ class SessionManager:
                 self._store.save(session)
             self._store.append_history(key, facts, expected_generation=session.generation)
         self._store.run_write(append)
+
+    def read_consistently(
+        self, operation: Callable[[], _T], *, cancelled: threading.Event | None = None,
+    ) -> _T:
+        """Run nested repository reads against one committed snapshot."""
+        return self._store.run_read(operation, cancelled=cancelled)
+
+    def read_batch(self, operation: Callable[[], _T]) -> _T:
+        """Reuse a connection without extending nested read snapshots."""
+        return self._store.run_read_batch(operation)
+
+    def read_history_header(self, key: str) -> SessionHistoryPayload | None:
+        """Read the metadata and generation needed by persisted history tools."""
+        return self._store.read_history_header(key)
+
+    def project_session_messages(
+        self,
+        key: str,
+        project: Callable[[SessionHistoryPayload, Iterator[tuple[int, dict[str, Any]]]], _T],
+    ) -> _T | None:
+        """Project a session header and reverse message stream within one snapshot.
+
+        The stream is valid only during the callback.
+        """
+        return self._store.project_session_messages(key, project)
+
+    def project_session_handle_names(
+        self, project: Callable[[Iterator[tuple[str, object]]], _T],
+    ) -> _T:
+        """Project stored handle names within the caller's read snapshot."""
+        return self._store.project_session_handle_names(project)
 
     def read_session_file(self, key: str) -> dict[str, Any] | None:
         """Read a session without populating the cache."""

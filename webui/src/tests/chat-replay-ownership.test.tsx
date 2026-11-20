@@ -67,7 +67,7 @@ describe("transcript replay with real task and stream subscriptions", () => {
     const tree = (showThread: boolean) => (
       <ClientProvider client={client} token="test">
         <SubagentTasksProvider client={client} sessionKey={`websocket:${CHAT_ID}`}
-          token="test" enabled liveEvents>{showThread && <Thread />}</SubagentTasksProvider>
+          token="test" enabled liveEvents turnIds={[TURN_ID]}>{showThread && <Thread />}</SubagentTasksProvider>
       </ClientProvider>
     );
     const view = render(tree(false));
@@ -103,7 +103,7 @@ describe("transcript replay with real task and stream subscriptions", () => {
       socket.receive(toolMessage("while-away-c"));
       const tasks = (children?: ReactNode) => (
         <SubagentTasksProvider client={client} sessionKey={`websocket:${CHAT_ID}`}
-          token="test" enabled liveEvents>{children}</SubagentTasksProvider>
+          token="test" enabled liveEvents turnIds={[TURN_ID]}>{children}</SubagentTasksProvider>
       );
       const view = render(
         <ClientProvider client={client} token="test">

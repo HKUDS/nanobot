@@ -1,5 +1,3 @@
-"""Small constructors shared by declarative channel manifests."""
-
 from __future__ import annotations
 
 from collections.abc import Iterable

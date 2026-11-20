@@ -1,5 +1,3 @@
-"""Tests for ``goal_state`` session metadata helpers."""
-
 from __future__ import annotations
 
 from nanobot.session.goal_state import (
@@ -8,7 +6,6 @@ from nanobot.session.goal_state import (
     discard_legacy_goal_state_key,
     explicit_goal_requested,
     goal_state_runtime_lines,
-    goal_state_ws_blob,
     parse_goal_state,
     sustained_goal_active,
 )
@@ -77,48 +74,6 @@ def test_parse_goal_state_accepts_json_string():
     assert parse_goal_state('{"status":"active","objective":"x"}') == {
         "status": "active",
         "objective": "x",
-    }
-
-
-def test_goal_state_ws_blob_inactive_when_missing_or_completed():
-    assert goal_state_ws_blob(None) == {"active": False}
-    assert goal_state_ws_blob({}) == {"active": False}
-    assert goal_state_ws_blob({GOAL_STATE_KEY: {"status": "completed", "objective": "x"}}) == {
-        "active": False,
-    }
-
-
-def test_goal_state_ws_blob_active_shape():
-    meta = {
-        GOAL_STATE_KEY: {
-            "status": "active",
-            "objective": "Build feature.",
-            "ui_summary": "feat",
-        },
-    }
-    assert goal_state_ws_blob(meta) == {
-        "active": True,
-        "status": "active",
-        "ui_summary": "feat",
-        "objective": "Build feature.",
-    }
-
-
-def test_goal_state_ws_blob_preserves_blocked_state_for_host_attention():
-    meta = {
-        GOAL_STATE_KEY: {
-            "status": "blocked",
-            "objective": "Deploy safely.",
-            "ui_summary": "Approval required",
-            "recap": "Production access is required.",
-        },
-    }
-    assert goal_state_ws_blob(meta) == {
-        "active": False,
-        "status": "blocked",
-        "ui_summary": "Approval required",
-        "objective": "Deploy safely.",
-        "recap": "Production access is required.",
     }
 
 

@@ -1,4 +1,5 @@
-import { pastedFilePath, PastedPathRange, isLocalAttachment, type LocalAttachment } from "../../../../packages/client-events/attachments";
+import type { ModelOptionsControlProps } from "@/components/thread/ModelOptionsControl";
+import { pastedFilePath, PastedPathRange, type LocalAttachment } from "../../../../packages/client-events/attachments";
 import {
   NewChatIcon,
   CompactIcon,
@@ -27,17 +28,16 @@ import {
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type Ref,
 } from "react";
 
-import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import {
   CapabilityMentionToken,
   cliAppInitials,
@@ -57,10 +57,10 @@ import {
 import { INLINE_REFERENCE_HIGHLIGHT_COLOR, INLINE_TOKEN_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/components/InlineTokenHighlight";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import {
-  ChevronDown,
-  ChevronUp,
   CornerDownRight,
   Loader2,
+  Maximize2,
+  Minimize2,
   Quote,
   Trash2,
   X,
@@ -69,12 +69,12 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 import { AttachmentCard, AttachmentTypeFace, attachmentCardActionClassName } from "@/components/AttachmentCard";
 import { ComposerActionIcon, type ComposerActionState } from "@/components/thread/ComposerActionIcon";
 import {
   floatingItemClassName,
   floatingItemFocusClassName,
-  floatingSurfaceElevationClassName,
   floatingSurfaceVisualClassName,
 } from "@/components/ui/floating-surface";
 import {
@@ -91,11 +91,7 @@ import {
   ModelPresetBadge,
   type ModelPresetOption,
 } from "@/components/thread/ModelPresetBadge";
-import {
-  ComposerUsagePopover,
-  type ComposerContextUsage,
-  type ComposerRoundUsage,
-} from "@/components/thread/ComposerUsagePopover";
+import type { ComposerUsageControl } from "@/components/thread/ComposerUsagePopover";
 import {
   ACCEPT_ATTR,
   acceptedAttachmentKind,
@@ -114,7 +110,7 @@ import { useComposerMentionInput } from "@/hooks/useComposerMentionInput";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
-import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
+import { useComposerVoiceInput } from "@/hooks/useComposerVoiceInput";
 import type {
   CliAppInfo,
   ChatSummary,
@@ -148,15 +144,17 @@ import {
   readDraggedSession,
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
-
-const VOICE_SHORTCUT_CODE = "KeyD";
-const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
-const VOICE_ERROR_VISIBLE_MS = 3_500;
-const VOICE_ERROR_FADE_MS = 500;
-type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
+import {
+  queuedImagesToSendImages,
+  queuedUploadBytes,
+  readyImagesToQueuedImages,
+  useQueuedPrompt,
+  type QueuedPromptContent,
+} from "@/components/thread/useQueuedPrompt";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -168,54 +166,6 @@ function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
-function isVoiceShortcutDown(event: KeyboardEvent): boolean {
-  return (
-    event.code === VOICE_SHORTCUT_CODE
-    && event.ctrlKey
-    && event.shiftKey
-    && !event.altKey
-    && !event.metaKey
-  );
-}
-
-function isVoiceShortcutRelease(event: KeyboardEvent): boolean {
-  return (
-    event.code === VOICE_SHORTCUT_CODE
-    || event.key === "Control"
-    || event.key === "Shift"
-  );
-}
-
-function getVoiceShortcutPlatform(): VoiceShortcutPlatform {
-  if (typeof navigator === "undefined") return "other";
-  const userAgentData = (navigator as Navigator & { userAgentData?: { platform?: string } })
-    .userAgentData;
-  const platform = [
-    userAgentData?.platform,
-    navigator.platform,
-    navigator.userAgent,
-  ].filter(Boolean).join(" ").toLowerCase();
-  const isIpadPretendingToBeMac =
-    navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
-  if (isIpadPretendingToBeMac || /mac|iphone|ipad|ipod/.test(platform)) return "apple";
-  if (/win/.test(platform)) return "windows";
-  if (/cros/.test(platform)) return "chromeos";
-  if (/linux|x11|android/.test(platform)) return "linux";
-  return "other";
-}
-
-function getVoiceShortcutLabel(): string {
-  switch (getVoiceShortcutPlatform()) {
-    case "apple":
-      return "⌃⇧D";
-    case "chromeos":
-    case "linux":
-    case "windows":
-    case "other":
-      return "Ctrl ⇧ D";
-  }
-}
-
 interface ThreadComposerProps {
   onSend: (
     content: string,
@@ -225,6 +175,7 @@ interface ThreadComposerProps {
   disabled?: boolean;
   placeholder?: string;
   inputAriaLabel?: string;
+  expandable?: boolean;
   compactWhenIdle?: boolean;
   isStreaming?: boolean;
   activeTurnId?: string | null;
@@ -233,14 +184,17 @@ interface ThreadComposerProps {
   modelDetail?: string | null;
   modelPreset?: string | null;
   modelPresets?: ModelPresetOption[];
+  modelOptionsControl?: ModelOptionsControlProps;
+  onModelMenuOpenChange?: (open: boolean) => void;
   onModelPresetChange?: (name: string) => void;
+  imageInputBlocked?: boolean;
+  onInspectImagePreset?: () => void;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
   onModelBadgeClick?: () => void;
   onManageModels?: () => void;
-  contextUsage?: ComposerContextUsage | null;
-  recentRoundUsage?: readonly ComposerRoundUsage[];
+  renderContextUsage?: ComposerUsageControl;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
   onMentionSearch?: () => void;
@@ -299,7 +253,7 @@ const COMMAND_ICONS: Record<string, LucideIcon> = {
 const BUILTIN_COMMAND_ICONS: Record<string, LucideIcon> = {
   "/new": NewChatIcon, "/compact": CompactIcon, "/stop": StopIcon,
   "/restart": RestartIcon, "/status": StatusIcon, "/model": ModelsIcon,
-  "/history": HistoryIcon, "/goal": GoalIcon, "/trigger": TriggerIcon,
+  "/goal": GoalIcon, "/trigger": TriggerIcon,
   "/dream": DreamIcon, "/dream-log": DreamLogIcon, "/dream-restore": RestoreMemoryIcon,
   "/dream-prompt": PromptTemplateIcon, "/evaluator-prompt": PromptTemplateIcon,
   "/skill": SkillsIcon, "/help": HelpIcon, "/pairing": PairingIcon,
@@ -311,9 +265,6 @@ const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
 const SLASH_PALETTE_CHROME_PX = 12;
 const SLASH_RECENTS_STORAGE_KEY = "nanobot.webui.slashCommandRecents";
 const SLASH_RECENTS_LIMIT = 5;
-const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:";
-const EMPTY_COMPLETED_TURN_IDS: readonly string[] = [];
-const QUEUED_PROMPTS_LIMIT = 20;
 const SESSION_MENTIONS_LIMIT = 8;
 
 function VoiceRecordingMeter({
@@ -361,61 +312,6 @@ interface SlashPaletteLayout {
   placement: SlashPalettePlacement;
   maxHeight: number;
 }
-
-interface QueuedPrompt {
-  id: string;
-  text: string;
-  images?: QueuedPromptImage[];
-  quotedContext?: string;
-  sessionMentions?: SessionMention[];
-  autoAfterTurnId?: string;
-  autoPaused?: boolean;
-  autoSendPageId?: string;
-}
-
-let queuedPromptPageId: string | undefined;
-
-function getQueuedPromptPageId(): string {
-  return queuedPromptPageId ??= crypto.randomUUID();
-}
-
-function canAutoSendQueuedPrompt(prompt: QueuedPrompt): boolean {
-  return !prompt.autoPaused && prompt.autoSendPageId === getQueuedPromptPageId();
-}
-
-function pauseQueuedPrompt(prompt: QueuedPrompt): QueuedPrompt {
-  return { ...prompt, autoAfterTurnId: undefined, autoSendPageId: undefined, autoPaused: true };
-}
-
-function mergeQueuedPrompt(first: QueuedPrompt, next: QueuedPrompt): QueuedPrompt {
-  const prompts = [first, next];
-  const mentions = new Map<string, SessionMention>();
-  for (const prompt of prompts) {
-    for (const mention of prompt.sessionMentions ?? []) {
-      if (!mentions.has(mention.session_key)) mentions.set(mention.session_key, mention);
-    }
-  }
-  return {
-    id: first.id,
-    text: prompts.map((prompt) => prompt.text).filter(Boolean).join("\n"),
-    images: prompts.flatMap((prompt) => prompt.images ?? []),
-    quotedContext: [...new Set(prompts.map((prompt) => prompt.quotedContext).filter(Boolean))].join("\n\n"),
-    sessionMentions: [...mentions.values()],
-    autoAfterTurnId: first.autoAfterTurnId,
-    autoPaused: prompts.some((prompt) => prompt.autoPaused),
-    autoSendPageId: first.autoSendPageId,
-  };
-}
-
-function queuedUploadBytes(image: QueuedPromptImage): number {
-  if (image.local) return 0;
-  const dataUrl = image.dataUrl ?? "";
-  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
-  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
-  return Math.floor(base64.length * 3 / 4) - padding;
-}
-
-type QueuedPromptImage = RestoredReadyImage;
 
 interface CliAppMentionQuery {
   query: string;
@@ -528,238 +424,7 @@ function storeSlashRecents(commands: string[]): void {
   }
 }
 
-function queuedPromptsStorageKey(key?: string | null): string | null {
-  const clean = key?.trim();
-  return clean ? `${QUEUED_PROMPTS_STORAGE_PREFIX}${clean}` : null;
-}
-
-function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const candidate = item as Partial<SessionMention>;
-    const name = candidate.name?.trim().slice(0, 80);
-    const sessionKey = candidate.session_key?.trim().slice(0, 512);
-    if (
-      !name
-      || !sessionKey?.startsWith("websocket:")
-      || !/^[\p{L}\p{N}_-]+$/u.test(name)
-    ) return [];
-    return [{
-      ...(typeof candidate.id === "string" && /^handle_[a-f0-9]{32}$/i.test(candidate.id)
-        ? { id: candidate.id }
-        : {}),
-      name,
-      session_key: sessionKey,
-      title: candidate.title?.trim().slice(0, 160) ?? "",
-    }];
-  });
-}
-
-function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | null {
-  if (!item || typeof item !== "object") return null;
-  const record = item as Partial<QueuedPrompt>;
-  if (typeof record.text !== "string") return null;
-  const text = record.text.trim();
-  const images = Array.isArray(record.images)
-    ? record.images.flatMap((image): QueuedPromptImage[] => {
-        if (!image || typeof image !== "object") return [];
-        const candidate = image as Partial<QueuedPromptImage>;
-        if (isLocalAttachment(candidate.local)) {
-          return [{ local: candidate.local, kind: candidate.local.kind, name: candidate.local.name }];
-        }
-        if (typeof candidate.dataUrl !== "string" || !candidate.dataUrl.startsWith("data:")) {
-          return [];
-        }
-        const kind = candidate.kind === "file" || candidate.kind === "image" || candidate.kind === "video"
-          ? candidate.kind
-          : candidate.dataUrl.startsWith("data:image/")
-            ? "image"
-            : "file";
-        return [{
-          dataUrl: candidate.dataUrl,
-          kind,
-          ...(typeof candidate.name === "string" && candidate.name.trim()
-            ? { name: candidate.name.trim() }
-            : {}),
-        }];
-      })
-    : [];
-  const quotedContext = typeof record.quotedContext === "string"
-    ? record.quotedContext.trim()
-    : "";
-  const sessionMentions = normalizeQueuedSessionMentions(record.sessionMentions);
-  if (!text && images.length === 0) return null;
-  const id = typeof record.id === "string" && record.id.trim()
-    ? record.id
-    : `queued-prompt-restored-${index}`;
-  const prompt: QueuedPrompt = {
-    id,
-    text,
-    ...(images.length > 0 ? { images } : {}),
-    ...(quotedContext ? { quotedContext } : {}),
-    ...(sessionMentions.length > 0 ? { sessionMentions } : {}),
-    ...(typeof record.autoAfterTurnId === "string" && record.autoAfterTurnId.trim()
-      ? { autoAfterTurnId: record.autoAfterTurnId.trim() }
-      : {}),
-    ...(record.autoPaused === true ? { autoPaused: true } : {}),
-    ...(typeof record.autoSendPageId === "string" ? { autoSendPageId: record.autoSendPageId } : {}),
-  };
-  return canAutoSendQueuedPrompt(prompt) ? prompt : pauseQueuedPrompt(prompt);
-}
-
-function readQueuedPrompt(storageKey: string): QueuedPrompt | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return null;
-    return parsed.slice(0, QUEUED_PROMPTS_LIMIT)
-      .map((item, index) => normalizeQueuedPrompt(item, index))
-      .filter((item): item is QueuedPrompt => item != null)
-      .reduce<QueuedPrompt | null>((pending, prompt) => (
-        pending ? mergeQueuedPrompt(pending, prompt) : prompt
-      ), null);
-  } catch {
-    return null;
-  }
-}
-
-function storeQueuedPrompt(storageKey: string, prompt: QueuedPrompt | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (!prompt) {
-      window.localStorage.removeItem(storageKey);
-      return;
-    }
-    // Retain the v1 array shape so existing queued drafts remain readable.
-    window.localStorage.setItem(storageKey, JSON.stringify([prompt]));
-  } catch {
-    // localStorage persistence is a convenience; the in-memory draft still works.
-  }
-}
-
-interface QueuedPromptSnapshot {
-  prompt: QueuedPrompt | null;
-  sending: boolean;
-  error: string | null;
-}
-
-// Delivery can outlive the composer during attachment upload or topic navigation.
-// Keep one owner per mounted/sending topic; idle, unmounted owners are reloaded from storage.
-const queuedPromptStores = new Map<string, QueuedPromptStore>();
-
-class QueuedPromptStore {
-  private snapshot: QueuedPromptSnapshot;
-  private listeners = new Set<() => void>();
-
-  constructor(private storageKey: string | null) {
-    this.snapshot = { prompt: storageKey ? readQueuedPrompt(storageKey) : null, sending: false, error: null };
-  }
-
-  getSnapshot = () => this.snapshot;
-
-  subscribe = (listener: () => void) => {
-    if (this.storageKey) queuedPromptStores.set(this.storageKey, this);
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-      this.release();
-    };
-  };
-
-  private release() {
-    if (this.storageKey && !this.snapshot.sending && this.listeners.size === 0
-      && queuedPromptStores.get(this.storageKey) === this) queuedPromptStores.delete(this.storageKey);
-  }
-
-  private publish(next: QueuedPromptSnapshot) {
-    if (this.storageKey && next.prompt !== this.snapshot.prompt) storeQueuedPrompt(this.storageKey, next.prompt);
-    this.snapshot = next;
-    for (const listener of this.listeners) listener();
-    this.release();
-  }
-
-  set = (next: QueuedPrompt | null | ((current: QueuedPrompt | null) => QueuedPrompt | null)) => {
-    const prompt = typeof next === "function" ? next(this.snapshot.prompt) : next;
-    if (prompt !== this.snapshot.prompt) this.publish({ ...this.snapshot, prompt, error: null });
-  };
-
-  send(prompt: QueuedPrompt, send: () => void | boolean | Promise<void | boolean>) {
-    if (this.snapshot.sending) return;
-    const retained = pauseQueuedPrompt(prompt);
-    this.publish({ prompt: retained, sending: true, error: null });
-    const finish = (accepted: void | boolean, error?: unknown) => {
-      const failed = accepted === false || error !== undefined;
-      this.publish({
-        prompt: failed ? retained : null,
-        sending: false,
-        error: failed ? error instanceof Error ? error.message : "Message not sent; queued draft retained" : null,
-      });
-    };
-    try {
-      const result = send();
-      if (result instanceof Promise) void result.then((accepted) => finish(accepted), (error: unknown) => finish(false, error));
-      else finish(result);
-    } catch (error) {
-      finish(false, error);
-    }
-  }
-}
-
-function queuedPromptStoreFor(storageKey: string | null): QueuedPromptStore {
-  if (!storageKey) return new QueuedPromptStore(null);
-  let store = queuedPromptStores.get(storageKey);
-  if (!store) {
-    store = new QueuedPromptStore(storageKey);
-    queuedPromptStores.set(storageKey, store);
-  }
-  return store;
-}
-
-function expireQueuedPromptAuthorization(): void {
-  queuedPromptPageId = undefined;
-  for (const store of queuedPromptStores.values()) {
-    store.set((prompt) => prompt && !prompt.autoPaused ? pauseQueuedPrompt(prompt) : prompt);
-  }
-}
-
-// Saved content survives a page's lifetime; permission to execute it does not.
-if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", expireQueuedPromptAuthorization);
-  document.addEventListener("freeze", expireQueuedPromptAuthorization);
-}
-
-function readyImagesToQueuedImages(
-  images: AttachedImage[],
-): QueuedPromptImage[] {
-  return images.map((img) => ({
-    dataUrl: img.dataUrl,
-    local: img.local,
-    kind: img.kind,
-    name: img.file.name,
-  }));
-}
-
-function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendAttachment[] | undefined {
-  if (!images?.length) return undefined;
-  return images.flatMap((img): SendAttachment[] => {
-    if (img.local) return [{
-      media: { path: img.local.path, name: img.local.name },
-      preview: { kind: img.local.kind, url: img.local.url, name: img.local.name },
-    }];
-    if (!img.dataUrl) return [];
-    return [{
-      media: { data_url: img.dataUrl, ...(img.name ? { name: img.name } : {}) },
-      preview: {
-        kind: img.kind ?? (img.dataUrl.startsWith("data:image/") ? "image" : img.dataUrl.startsWith("data:video/") ? "video" : "file"),
-        url: img.dataUrl, ...(img.name ? { name: img.name } : {}),
-      },
-    }];
-  });
-}
-
-function queuedPromptLabel(prompt: QueuedPrompt): string {
+function queuedPromptLabel(prompt: QueuedPromptContent): string {
   const text = prompt.text.trim();
   if (text) return text;
   return prompt.images?.map((img) => img.name).filter(Boolean).join(", ") || "File attachment";
@@ -800,40 +465,6 @@ function getVisibleBounds(el: HTMLElement): { top: number; bottom: number } {
   return { top, bottom };
 }
 
-function goalStateStripPreview(
-  goal: GoalStateWsPayload | undefined,
-  t: (key: string) => string,
-): string | null {
-  if (!goal?.active) return null;
-  const summary = goal.ui_summary?.trim();
-  if (summary) return summary;
-  const obj = goal.objective?.trim();
-  if (obj) return obj.length > 72 ? `${obj.slice(0, 72)}…` : obj;
-  return t("thread.composer.goalStateFallback");
-}
-
-const GOAL_PANEL_VIEWPORT_TOP_PAD = 20;
-const GOAL_PANEL_GAP_ABOVE_STRIP_PX = 10;
-const GOAL_PANEL_MIN_HEIGHT_PX = 112;
-const GOAL_PANEL_MAX_VIEWPORT_RATIO = 0.62;
-
-function measureGoalPanelMaxCssHeight(stripTopY: number): number {
-  const viewport = visualViewportBounds();
-  const spaceAboveStrip =
-    stripTopY - viewport.top - GOAL_PANEL_VIEWPORT_TOP_PAD - GOAL_PANEL_GAP_ABOVE_STRIP_PX;
-  return Math.min(
-    Math.max(spaceAboveStrip, GOAL_PANEL_MIN_HEIGHT_PX),
-    Math.floor(viewport.height * GOAL_PANEL_MAX_VIEWPORT_RATIO),
-  );
-}
-
-function buildGoalMarkdownBody(summary: string, objective: string): string {
-  const s = summary.trim();
-  const o = objective.trim();
-  if (s && o) return `${s}\n\n---\n\n${o}`;
-  return o || s;
-}
-
 function cliAppMentionPayload(app: CliAppInfo): OutboundCliAppMention {
   return {
     name: app.name,
@@ -858,202 +489,17 @@ function mcpPresetMentionPayload(preset: McpPresetInfo): OutboundMcpPresetMentio
   };
 }
 
-function GoalStateStrip({
-  goalState,
-}: {
-  goalState?: GoalStateWsPayload;
-}) {
-  const { t } = useTranslation();
-  const [goalPanelOpen, setGoalPanelOpen] = useState(false);
-  const stripLabel = goalStateStripPreview(goalState, t);
-  const active = !!stripLabel?.trim();
-  const [, setTick] = useState(0);
-  const stripWrapperRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const expandToggleRef = useRef<HTMLButtonElement>(null);
-  const stripSnapshotRef = useRef<{
-    goalState?: GoalStateWsPayload;
-    stripLabel: string | null;
-  } | null>(null);
-  const [panelMaxPx, setPanelMaxPx] = useState(280);
-
-  if (active) {
-    stripSnapshotRef.current = { goalState, stripLabel };
-  }
-
-  useEffect(() => {
-    if (!active) setGoalPanelOpen(false);
-  }, [active]);
-
-  const display = active
-    ? { goalState, stripLabel }
-    : stripSnapshotRef.current;
-  const displayGoalState = display?.goalState;
-  const displayStripLabel = display?.stripLabel ?? null;
-
-  const objectiveFull = displayGoalState?.objective?.trim() ?? "";
-  const summaryFull = displayGoalState?.ui_summary?.trim() ?? "";
-  const canExpandGoal = !!(active && displayGoalState?.active && (objectiveFull || summaryFull));
-
-  const markdownBody =
-    objectiveFull || summaryFull
-      ? buildGoalMarkdownBody(summaryFull, objectiveFull)
-      : "";
-
-  useLayoutEffect(() => {
-    if (!goalPanelOpen) return;
-
-    function relayout(): void {
-      const el = stripWrapperRef.current;
-      if (!el) return;
-      const top = el.getBoundingClientRect().top;
-      setPanelMaxPx(measureGoalPanelMaxCssHeight(top));
-    }
-
-    relayout();
-
-    void preloadMarkdownText();
-    const ro =
-      typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(() => relayout())
-        : null;
-    if (stripWrapperRef.current && ro) {
-      ro.observe(stripWrapperRef.current);
-    }
-    const viewport = window.visualViewport;
-    viewport?.addEventListener("resize", relayout);
-    viewport?.addEventListener("scroll", relayout);
-    window.addEventListener("resize", relayout);
-    window.addEventListener("scroll", relayout, true);
-    return () => {
-      ro?.disconnect();
-      viewport?.removeEventListener("resize", relayout);
-      viewport?.removeEventListener("scroll", relayout);
-      window.removeEventListener("resize", relayout);
-      window.removeEventListener("scroll", relayout, true);
-    };
-  }, [goalPanelOpen]);
-
-  useEffect(() => {
-    if (!goalPanelOpen) return;
-
-    function onPointerDown(ev: MouseEvent): void {
-      const target = ev.target as Node | null;
-      if (!target) return;
-      if (panelRef.current?.contains(target)) return;
-      if (expandToggleRef.current?.contains(target)) return;
-      setGoalPanelOpen(false);
-    }
-
-    function onKey(ev: KeyboardEvent): void {
-      if (ev.key === "Escape") setGoalPanelOpen(false);
-    }
-
-    window.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [goalPanelOpen]);
-
-  if (!display) return null;
-
-  const ariaLabel = displayStripLabel
-    ? t("thread.composer.goalStateStrip", { label: displayStripLabel })
-    : t("thread.composer.goalStateFallback");
-
-  return (
-    <div
-      ref={stripWrapperRef}
-      className="composer-status-drawer relative z-30"
-      data-composer-status-drawer=""
-      data-state={active ? "open" : "closed"}
-      aria-hidden={active ? undefined : true}
-      onTransitionEnd={(event) => {
-        if (active || event.target !== event.currentTarget) return;
-        stripSnapshotRef.current = null;
-        setTick((n) => n + 1);
-      }}
-    >
-      {goalPanelOpen && canExpandGoal && markdownBody ? (
-        <div
-          ref={panelRef}
-          id="nanobot-goal-panel-root"
-          role="dialog"
-          aria-modal="false"
-          aria-label={t("thread.composer.goalStateSheetTitle")}
-          tabIndex={-1}
-          className={cn(
-            "absolute bottom-[calc(100%+8px)] left-3 right-3 z-[50] flex max-w-none flex-col overflow-hidden",
-            "rounded-2xl",
-            floatingSurfaceElevationClassName,
-          )}
-          style={{ maxHeight: `${Math.round(panelMaxPx)}px` }}
-        >
-          <div
-            id="nanobot-goal-panel-scroll"
-            className="min-h-0 flex-1 overflow-y-auto scrollbar-thin p-3"
-          >
-            <MarkdownText className="max-w-none text-foreground/90">
-              {markdownBody}
-            </MarkdownText>
-          </div>
-        </div>
-      ) : null}
-      <div className="composer-status-drawer-clip">
-        {display ? (
-          <div
-            className="composer-status-drawer-content flex min-h-[36px] items-center gap-2 px-3 py-2"
-            role="status"
-            aria-label={ariaLabel}
-          >
-            <GoalIcon className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
-            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
-              {displayStripLabel ? (
-                <span className="truncate">
-                  {t("thread.composer.goalStateStrip", { label: displayStripLabel })}
-                </span>
-              ) : null}
-            </span>
-            {canExpandGoal ? (
-              <button
-                ref={expandToggleRef}
-                type="button"
-                className={cn(
-                  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                  "text-muted-foreground transition-colors hover:text-foreground",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                )}
-                aria-expanded={goalPanelOpen}
-                aria-controls={goalPanelOpen ? "nanobot-goal-panel-root" : undefined}
-                aria-label={t("thread.composer.goalStateExpandAria")}
-                title={t("thread.composer.goalStateExpandAria")}
-                onClick={() => setGoalPanelOpen((o) => !o)}
-              >
-                {goalPanelOpen ? (
-                  <ChevronDown className="h-4 w-4" aria-hidden />
-                ) : (
-                  <ChevronUp className="h-4 w-4" aria-hidden />
-                )}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
 function autosizeTextarea(input: HTMLTextAreaElement) {
   const container = input.parentElement!;
   const previousMinHeight = container.style.minHeight;
+  const scrollTop = input.scrollTop;
   // Measuring the one-row textarea must not expand the sibling transcript and
   // clamp its native scroll offset, even temporarily before paint.
   container.style.minHeight = `${container.getBoundingClientRect().height}px`;
   try {
     input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 260)}px`;
+    input.style.height = `${input.scrollHeight}px`;
+    input.scrollTop = scrollTop;
   } finally {
     container.style.minHeight = previousMinHeight;
   }
@@ -1064,22 +510,26 @@ export function ThreadComposer({
   disabled,
   placeholder,
   inputAriaLabel,
+  expandable = true,
   compactWhenIdle = false,
   isStreaming = false,
   activeTurnId = null,
-  completedTurnIds = EMPTY_COMPLETED_TURN_IDS,
+  completedTurnIds,
   modelLabel = null,
   modelDetail = null,
   modelPreset = null,
   modelPresets = [],
+  modelOptionsControl,
+  onModelMenuOpenChange,
   onModelPresetChange,
+  imageInputBlocked = false,
+  onInspectImagePreset,
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
   onModelBadgeClick,
   onManageModels,
-  contextUsage = null,
-  recentRoundUsage = [],
+  renderContextUsage,
   variant = "thread",
   slashCommands = [],
   onMentionSearch,
@@ -1119,6 +569,7 @@ export function ThreadComposer({
   const [initialDraft] = useState(() => draftKey ? draftStore?.get(draftKey, persistDraft) : undefined);
   const [value, setValue] = useState(initialDraft?.text ?? "");
   const [composerFocused, setComposerFocused] = useState(false);
+  const [compactPlaceholder, setCompactPlaceholder] = useState(false);
   const blurFrame = useRef<number | null>(null);
   const [boundSessionMentions, setBoundSessionMentions] = useState<SessionMention[]>(
     initialDraft?.sessionMentions ?? [],
@@ -1129,6 +580,7 @@ export function ThreadComposer({
     end: number;
   } | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const showToast = useToast();
   const [sendPending, setSendPending] = useState(false);
   const [pathInspection, setPathInspection] = useState<{
     generation: number; scope: string; range: PastedPathRange; attachment?: LocalAttachment;
@@ -1139,103 +591,17 @@ export function ThreadComposer({
   pathCheckScope.current = scopeIdentity;
   useEffect(() => () => { pathCheckGeneration.current += 1; }, []);
   const [modelSetupAttentionRequest, setModelSetupAttentionRequest] = useState(0);
-  const queuedPromptStorageKey = queuedPromptsStorageKey(pendingQueueKey);
-  const queuedPromptStore = useMemo(() => queuedPromptStoreFor(queuedPromptStorageKey), [queuedPromptStorageKey]);
-  const queueSnapshot = useSyncExternalStore(queuedPromptStore.subscribe, queuedPromptStore.getSnapshot);
-  const queuedPrompt = queueSnapshot.prompt;
-  const setQueuedPrompt = queuedPromptStore.set;
-  const interactionDisabled = !!disabled || sendPending || queueSnapshot.sending;
-  useEffect(() => {
-    if (queueSnapshot.error) setInlineError(queueSnapshot.error);
-  }, [queueSnapshot.error]);
-  const [voiceErrorFading, setVoiceErrorFading] = useState(false);
-  const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
-  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
-  const [cliAppMenuDismissed, setCliAppMenuDismissed] = useState(false);
-  const [selectedCliAppIndex, setSelectedCliAppIndex] = useState(0);
-  const [cursorPosition, setCursorPosition] = useState(0);
-  const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
-  const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
-  // Coarser than hasTouchPrimaryPointer on purpose: tablets with a physical
-  // keyboard still get the newline-on-Enter behavior.
-  const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
-  const mobileWorkspaceControls = useMediaQuery("(max-width: 639px)");
-  const { readingTextSize, customReadingTextSize } = useLocalPreferences();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const mentionOverlayRef = useRef<HTMLDivElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
-  const [compactControls, setCompactControls] = useState(false);
-
-  useLayoutEffect(() => {
-    const form = formRef.current;
-    if (!form) return;
-    let previousWidth = 0;
-    const update = () => {
-      const width = form.getBoundingClientRect().width;
-      if (width <= 0 || width === previousWidth) return;
-      previousWidth = width;
-      setCompactControls(width <= 512);
-      const input = textareaRef.current;
-      if (input) autosizeTextarea(input);
-    };
-    update();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
-    observer?.observe(form);
-    window.addEventListener("resize", update);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", update);
-    };
+  const textareaId = useId();
+  const [draftExpanded, setDraftExpanded] = useState(false);
+  const [draftOverflows, setDraftOverflows] = useState(false);
+  const focusTextarea = useCallback(() => {
+    requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const chipRefs = useRef(new Map<string, HTMLButtonElement>());
-  const queuedPromptCounterRef = useRef(0);
-  const previousPendingQueueKeyRef = useRef(pendingQueueKey);
-  const previousQueueRunRef = useRef({ key: pendingQueueKey, isStreaming });
-  const voiceShortcutDownRef = useRef(false);
-  const voiceErrorFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isHero = variant === "hero";
-  const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
-  const projectPickerAvailable =
-    !workspaceProjectLocked
-    && !!workspaceDefaultScope
-    && !!onWorkspaceScopeChange
-    && !!onLoadWorkspaceProjects
-    && !!onBrowseWorkspaceDirectories
-    && !!onResolveWorkspaceProject
-    && !!onFavoriteWorkspaceProject
-    && workspaceControls?.can_change_project !== false;
-  const showProjectPicker = projectPickerAvailable && !workspaceControlsHidden;
-
-  useEffect(() => {
-    if (!isStreaming || !activeTurnId) return;
-    setQueuedPrompt((prompt) => (
-      !prompt || prompt.autoPaused || prompt.autoAfterTurnId === activeTurnId
-        ? prompt
-        : { ...prompt, autoAfterTurnId: activeTurnId }
-    ));
-  }, [activeTurnId, isStreaming, pendingQueueKey, setQueuedPrompt]);
-
-  const resolvedPlaceholder = placeholder ?? t("thread.composer.placeholderThread");
-
   const maxAttachments = ingressLimits?.attachments.max_count
     ?? MAX_ATTACHMENTS_PER_MESSAGE;
   const maxFileBytes = ingressLimits?.attachments.max_file_bytes ?? MAX_ATTACHMENT_BYTES;
   const maxTextBytes = ingressLimits?.message.max_text_bytes ?? 64 * 1024;
-  const { images, enqueue, addLocal, remove, clear, restoreReadyImages, encoding: encodingFiles, full } =
-    useAttachedImages({ ingressLimits });
-  const encoding = encodingFiles || pathInspection !== null;
-  const restoredDraftAttachments = useRef(false);
-  const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.attachments.length);
-  useLayoutEffect(() => {
-    if (restoredDraftAttachments.current) return;
-    restoredDraftAttachments.current = true;
-    for (const attachment of initialDraft?.attachments ?? []) {
-      if (attachment instanceof File) enqueue([attachment], { restoringDraft: true });
-      else addLocal(attachment, { restoringDraft: true });
-    }
-    setDraftAttachmentsReady(true);
-  }, [enqueue, addLocal, initialDraft]);
 
   const formatRejection = useCallback(
     (reason: Exclude<AttachmentError, "too_large">): string => {
@@ -1269,12 +635,180 @@ export function ThreadComposer({
     [maxTextBytes, t],
   );
 
+  const queuedPromptError = useCallback((prompt: QueuedPromptContent): string | null => {
+    if (utf8Bytes(formatQuotedUserMessage(prompt.text, prompt.quotedContext)) > maxTextBytes) {
+      return textTooLargeMessage();
+    }
+    const attachments = prompt.images ?? [];
+    const videos = attachments.filter((item) => item.kind === "video").length;
+    if (videos > MAX_VIDEOS_PER_MESSAGE) return formatRejection("too_many_videos");
+    if (attachments.length - videos > maxAttachments) return formatRejection("too_many_attachments");
+    const oversized = attachments.find((item) => queuedUploadBytes(item) > (item.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes));
+    if (oversized) {
+      return formatUploadTooLarge(queuedUploadBytes(oversized), oversized.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes);
+    }
+    const total = attachments.reduce((sum, item) => sum + (item.kind === "video" ? 0 : queuedUploadBytes(item)), 0);
+    if (total > (ingressLimits?.attachments.max_total_bytes ?? MAX_TOTAL_ATTACHMENT_BYTES)) {
+      return formatRejection("total_too_large");
+    }
+    if ((prompt.sessionMentions?.length ?? 0) > SESSION_MENTIONS_LIMIT) {
+      return t("thread.composer.queued.tooManyMentions", { max: SESSION_MENTIONS_LIMIT });
+    }
+    return null;
+  }, [formatRejection, formatUploadTooLarge, ingressLimits, maxAttachments, maxFileBytes, maxTextBytes, t, textTooLargeMessage]);
+
+  const validatePrompt = useCallback((prompt: QueuedPromptContent): boolean => {
+    if (imageInputBlocked && prompt.images?.some(({ kind }) => kind === "image")) {
+      showToast?.({
+        message: t("errors.modelRequestFailed.imageInputTitle"),
+        tone: "error",
+        action: onInspectImagePreset
+          ? { label: t("settings.models.viewPreset"), run: onInspectImagePreset }
+          : undefined,
+      });
+      return false;
+    }
+    const error = queuedPromptError(prompt);
+    if (error) setInlineError(error);
+    return error === null;
+  }, [imageInputBlocked, onInspectImagePreset, queuedPromptError, showToast, t]);
+
+  const {
+    snapshot: queueSnapshot,
+    collect: collectQueuedPrompt,
+    enqueue: enqueueQueuedPrompt,
+    clear: clearQueuedPrompt,
+    pause: pauseQueue,
+    send: sendQueuedPrompt,
+  } = useQueuedPrompt(pendingQueueKey, { isStreaming, activeTurnId, completedTurnIds }, {
+    disabled: !!disabled || sendPending,
+    onSend,
+    validate: validatePrompt,
+    onSendAttempt: focusTextarea,
+  });
+  const queuedPrompt = queueSnapshot.prompt;
+  const interactionDisabled = !!disabled || sendPending || queueSnapshot.sending;
+  useEffect(() => {
+    if (queueSnapshot.error) setInlineError(queueSnapshot.error);
+  }, [queueSnapshot.error]);
+  const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [cliAppMenuDismissed, setCliAppMenuDismissed] = useState(false);
+  const [selectedCliAppIndex, setSelectedCliAppIndex] = useState(0);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
+  const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
+  // Coarser than hasTouchPrimaryPointer on purpose: tablets with a physical
+  // keyboard still get the newline-on-Enter behavior.
+  const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
+  const mobileWorkspaceControls = useMediaQuery("(max-width: 639px)");
+  const { readingTextSize, customReadingTextSize } = useLocalPreferences();
+  const placeholderMeasureRef = useRef<HTMLSpanElement>(null);
+  const mentionOverlayRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [compactControls, setCompactControls] = useState(false);
+
+  const measureDraft = useCallback(() => {
+    const input = textareaRef.current;
+    if (!input) return;
+    autosizeTextarea(input);
+    if (expandable) setDraftOverflows(input.scrollHeight > input.clientHeight);
+    if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = input.scrollTop;
+  }, [expandable]);
+
+  useLayoutEffect(() => {
+    const form = formRef.current;
+    const input = textareaRef.current;
+    if (!form || !input) return;
+    let previousWidth = 0;
+    const update = () => {
+      const width = form.getBoundingClientRect().width;
+      if (width <= 0) return;
+      if (width !== previousWidth) {
+        previousWidth = width;
+        setCompactControls(width <= 512);
+        measureDraft();
+      } else if (expandable) {
+        setDraftOverflows(input.scrollHeight > input.clientHeight);
+      }
+    };
+    update();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(form);
+    if (expandable) observer?.observe(input);
+    window.addEventListener("resize", update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [expandable, measureDraft]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const chipRefs = useRef(new Map<string, HTMLButtonElement>());
+  const previousPendingQueueKeyRef = useRef(pendingQueueKey);
+  const isHero = variant === "hero";
+  const projectPickerAvailable =
+    !workspaceProjectLocked
+    && !!workspaceDefaultScope
+    && !!onWorkspaceScopeChange
+    && !!onLoadWorkspaceProjects
+    && !!onBrowseWorkspaceDirectories
+    && !!onResolveWorkspaceProject
+    && !!onFavoriteWorkspaceProject
+    && workspaceControls?.can_change_project !== false;
+  const showProjectPicker = projectPickerAvailable && !workspaceControlsHidden;
+
+  const resolvedPlaceholder = placeholder ?? t("thread.composer.placeholder");
+  const showCompactPlaceholder = placeholder === undefined && compactPlaceholder;
+  const displayedPlaceholder = showCompactPlaceholder ? t("thread.composer.placeholderCompact") : resolvedPlaceholder;
+
+  useLayoutEffect(() => {
+    const input = textareaRef.current;
+    const text = placeholderMeasureRef.current;
+    if (!input || !text || placeholder !== undefined) return;
+    const measure = () => {
+      const style = getComputedStyle(input);
+      const available = input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      if (available > 0) setCompactPlaceholder(text.getBoundingClientRect().width > available);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(input);
+    observer?.observe(text);
+    window.addEventListener("resize", measure);
+    let active = true;
+    void document.fonts?.ready.then(() => { if (active) measure(); });
+    return () => {
+      active = false;
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [placeholder, resolvedPlaceholder, compactControls, readingTextSize, customReadingTextSize]);
+
+  const { images, enqueue, addLocal, remove, clear, restoreReadyImages, encoding: encodingFiles, full } =
+    useAttachedImages({ ingressLimits });
+  const encoding = encodingFiles || pathInspection !== null;
+  const restoredDraftAttachments = useRef(false);
+  const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.attachments.length);
+  useLayoutEffect(() => {
+    if (restoredDraftAttachments.current) return;
+    restoredDraftAttachments.current = true;
+    for (const attachment of initialDraft?.attachments ?? []) {
+      if (attachment instanceof File) enqueue([attachment], { restoringDraft: true });
+      else addLocal(attachment, { restoringDraft: true });
+    }
+    setDraftAttachmentsReady(true);
+  }, [enqueue, addLocal, initialDraft]);
+
   const addFiles = useCallback(
     (files: File[]) => {
       if (interactionDisabled || files.length === 0) return;
       const { rejected } = enqueue(files);
       if (rejected.length > 0) {
         const { reason, file } = rejected[0];
+        if (reason === "empty_file" || reason === "unsupported_type") {
+          showToast?.({ message: formatRejection(reason), tone: "error", dedupeKey: `attachment:${reason}` });
+          return;
+        }
         setInlineError(reason === "too_large"
           ? formatUploadTooLarge(file.size, acceptedAttachmentKind(file) === "video" ? MAX_VIDEO_BYTES : maxFileBytes)
           : formatRejection(reason));
@@ -1282,7 +816,7 @@ export function ThreadComposer({
         setInlineError(null);
       }
     },
-    [enqueue, formatRejection, formatUploadTooLarge, interactionDisabled, maxFileBytes],
+    [enqueue, formatRejection, formatUploadTooLarge, interactionDisabled, maxFileBytes, showToast],
   );
 
   const {
@@ -1469,8 +1003,6 @@ export function ThreadComposer({
             : t("thread.composer.slash.details.goalReady");
         } else if (command.command === "/stop" && isStreaming) {
           detail = t("thread.composer.slash.details.stopRunning");
-        } else if (command.command === "/history") {
-          detail = t("thread.composer.slash.details.history");
         }
         return {
           ...command,
@@ -1560,13 +1092,12 @@ export function ThreadComposer({
     void onInspectAttachment(path).then((attachment) => {
       if (generation !== pathCheckGeneration.current) return;
       setPathInspection((current) => current?.generation === generation ? { ...current, attachment } : current);
-    }).catch((error: unknown) => {
+    }).catch(() => {
       if (generation !== pathCheckGeneration.current || pathCheckScope.current !== scopeIdentity) return;
+      // Attachment recognition is optional; the pasted text is already in the draft.
       setPathInspection(null);
-      if (error instanceof Error && "status" in error && error.status === 404) return;
-      setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
     });
-  }, [interactionDisabled, isUserShell, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
+  }, [interactionDisabled, isUserShell, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, value]);
 
   useLayoutEffect(() => {
     if (!pathInspection) return;
@@ -1578,16 +1109,12 @@ export function ThreadComposer({
     // Let the native IME commit before removing the confirmed path from its text.
     if (!pathInspection.attachment || mentionInput.isComposing) return;
     const edited = pathInspection.range.replace("", rawSelection().start);
-    if (edited) {
-      const rejection = addLocal(pathInspection.attachment);
-      if (rejection) setInlineError(formatRejection(rejection));
-      else {
-        replaceMentionInput(edited.value, edited.cursor, { preserveFocus: true });
-        setInlineError(null);
-      }
+    if (edited && !addLocal(pathInspection.attachment)) {
+      replaceMentionInput(edited.value, edited.cursor, { preserveFocus: true });
+      setInlineError(null);
     }
     setPathInspection(null);
-  }, [addLocal, formatRejection, isUserShell, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
+  }, [addLocal, isUserShell, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
 
   const draftText = composerMentionText(mentionInput.segments).raw;
   const sessionDragInsertion = sessionDragPreview
@@ -1836,34 +1363,16 @@ export function ThreadComposer({
     };
   }, [filteredMentionCandidates.length, filteredSlashCommands.length, showAnyPalette]);
 
-  const focusTextarea = useCallback(() => {
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }, []);
-
   useLayoutEffect(() => {
-    const el = textareaRef.current;
-    if (!el || mentionInput.isComposing) return;
-    autosizeTextarea(el);
-    if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = el.scrollTop;
-  }, [compactControls, mentionInput.isComposing, mentionInput.value]);
+    if (mentionInput.isComposing) return;
+    if (!mentionInput.value) setDraftExpanded(false);
+    measureDraft();
+  }, [compactControls, measureDraft, mentionInput.isComposing, mentionInput.value]);
 
   useEffect(() => {
     // The parent projects typography tokens in its layout effect; measure after it.
-    const input = textareaRef.current;
-    if (input) autosizeTextarea(input);
-  }, [readingTextSize, customReadingTextSize]);
-
-  // Runs before paint so switching sessions never flashes stale draft text.
-  useLayoutEffect(() => {
-    if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
-    previousPendingQueueKeyRef.current = pendingQueueKey;
-    setValue("");
-    setInlineError(null);
-    setSlashMenuDismissed(false);
-    setCliAppMenuDismissed(false);
-    setCursorPosition(0);
-    clear();
-  }, [clear, pendingQueueKey]);
+    measureDraft();
+  }, [readingTextSize, customReadingTextSize, measureDraft]);
 
   const appendTranscription = useCallback((text: string) => {
     const transcript = text.trim();
@@ -1875,80 +1384,34 @@ export function ThreadComposer({
     });
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
-    setInlineError(null);
     focusTextarea();
   }, [focusTextarea]);
 
-  const clearVoiceErrorTimers = useCallback(() => {
-    if (voiceErrorFadeTimerRef.current !== null) clearTimeout(voiceErrorFadeTimerRef.current);
-    voiceErrorFadeTimerRef.current = null;
-  }, []);
-  const clearInlineError = useCallback(() => {
-    clearVoiceErrorTimers();
-    setVoiceErrorFading(false);
-    setInlineError(null);
-  }, [clearVoiceErrorTimers]);
-  const setVoiceError = useCallback((key: VoiceRecorderErrorKey) => {
-    clearVoiceErrorTimers();
-    setVoiceErrorFading(false);
-    setInlineError(t(`thread.composer.voiceErrors.${key}`));
-    voiceErrorFadeTimerRef.current = setTimeout(() => {
-      setVoiceErrorFading(true);
-      voiceErrorFadeTimerRef.current = setTimeout(() => {
-        setInlineError(null);
-        setVoiceErrorFading(false);
-        voiceErrorFadeTimerRef.current = null;
-      }, VOICE_ERROR_FADE_MS);
-    }, VOICE_ERROR_VISIBLE_MS);
-  }, [clearVoiceErrorTimers, t]);
-  const voiceRecorder = useVoiceRecorder({
-    disabled: interactionDisabled,
-    onClearError: clearInlineError,
-    onError: setVoiceError,
-    onTranscript: appendTranscription,
-    onTranscribeAudio,
+  const {
+    recorder: voiceRecorder, setupError: voiceSetupError, clearSetupError,
+    shortcutLabel: voiceShortcutLabel, shortcutAria, canSendQueuedPrompt,
+  } = useComposerVoiceInput({
+    disabled: interactionDisabled, onTranscribeAudio, onTranscript: appendTranscription,
     wantsWav: transcriptionProvider === "xiaomi_mimo",
   });
 
-  useEffect(() => () => clearVoiceErrorTimers(), [clearVoiceErrorTimers]);
-
-  useEffect(() => {
-    if (!onTranscribeAudio) return;
-
-    function onKeyDown(event: KeyboardEvent): void {
-      if (!isVoiceShortcutDown(event) || event.repeat || voiceShortcutDownRef.current) return;
-      event.preventDefault();
-      voiceShortcutDownRef.current = true;
-      voiceRecorder.beginShortcutHold();
-    }
-
-    function onKeyUp(event: KeyboardEvent): void {
-      if (!voiceShortcutDownRef.current || !isVoiceShortcutRelease(event)) return;
-      event.preventDefault();
-      voiceShortcutDownRef.current = false;
-      voiceRecorder.endShortcutHold();
-    }
-
-    function onWindowBlur(): void {
-      if (!voiceShortcutDownRef.current) return;
-      voiceShortcutDownRef.current = false;
-      voiceRecorder.endShortcutHold();
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("blur", onWindowBlur);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("blur", onWindowBlur);
-    };
-  }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
+  // Runs before paint so switching sessions never flashes stale draft text.
+  useLayoutEffect(() => {
+    if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
+    previousPendingQueueKeyRef.current = pendingQueueKey;
+    setValue("");
+    setInlineError(null);
+    clearSetupError();
+    setSlashMenuDismissed(false);
+    setCliAppMenuDismissed(false);
+    setCursorPosition(0);
+    clear();
+  }, [clear, clearSetupError, pendingQueueKey]);
 
   const handleStop = useCallback(() => {
-    setQueuedPrompt((prompt) => prompt ? pauseQueuedPrompt(prompt) : null);
+    pauseQueue();
     onStop?.();
-  }, [onStop, setQueuedPrompt]);
+  }, [onStop, pauseQueue]);
 
   const chooseSlashCommand = useCallback(
     (command: SlashPaletteCommand) => {
@@ -2071,64 +1534,29 @@ export function ThreadComposer({
     if (restoreFocus) focusTextarea();
   }, [focusTextarea]);
 
-  const queuedPromptError = useCallback((prompt: QueuedPrompt): string | null => {
-    if (utf8Bytes(formatQuotedUserMessage(prompt.text, prompt.quotedContext)) > maxTextBytes) {
-      return textTooLargeMessage();
-    }
-    const attachments = prompt.images ?? [];
-    const videos = attachments.filter((item) => item.kind === "video").length;
-    if (videos > MAX_VIDEOS_PER_MESSAGE) return formatRejection("too_many_videos");
-    if (attachments.length - videos > maxAttachments) return formatRejection("too_many_attachments");
-    const oversized = attachments.find((item) => queuedUploadBytes(item) > (item.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes));
-    if (oversized) {
-      return formatUploadTooLarge(queuedUploadBytes(oversized), oversized.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes);
-    }
-    const total = attachments.reduce((sum, item) => sum + (item.kind === "video" ? 0 : queuedUploadBytes(item)), 0);
-    if (total > (ingressLimits?.attachments.max_total_bytes ?? MAX_TOTAL_ATTACHMENT_BYTES)) {
-      return formatRejection("total_too_large");
-    }
-    if ((prompt.sessionMentions?.length ?? 0) > SESSION_MENTIONS_LIMIT) {
-      return t("thread.composer.queued.tooManyMentions", { max: SESSION_MENTIONS_LIMIT });
-    }
-    return null;
-  }, [formatRejection, formatUploadTooLarge, ingressLimits, maxAttachments, maxFileBytes, maxTextBytes, t, textTooLargeMessage]);
-
-  const collectGuidancePrompt = useCallback((): QueuedPrompt => {
-    queuedPromptCounterRef.current += 1;
-    const prompt: QueuedPrompt = {
-      id: `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`,
-      text: value.trim(),
-      autoSendPageId: getQueuedPromptPageId(),
-      images: readyImagesToQueuedImages(readyImages),
-      ...(activeTurnId ? { autoAfterTurnId: activeTurnId } : {}),
-      ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
-      sessionMentions: activeSessionMentions,
-    };
-    return queuedPrompt ? mergeQueuedPrompt(queuedPrompt, prompt) : prompt;
-  }, [activeSessionMentions, activeTurnId, normalizedQuotedContext, queuedPrompt, readyImages, value]);
+  const collectGuidancePrompt = useCallback(() => collectQueuedPrompt({
+    text: value,
+    images: readyImagesToQueuedImages(readyImages),
+    ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
+    sessionMentions: activeSessionMentions,
+  }), [activeSessionMentions, collectQueuedPrompt, normalizedQuotedContext, readyImages, value]);
 
   const queueGuidancePrompt = useCallback(() => {
     if (!canQueueGuidance) return;
-    const prompt = collectGuidancePrompt();
-    const error = queuedPromptError(prompt);
-    if (error) {
-      setInlineError(error);
-      return;
-    }
-    setQueuedPrompt(prompt);
+    if (!enqueueQueuedPrompt(collectGuidancePrompt())) return;
     clear();
     clearComposerText();
     onQuotedContextChange?.(null);
-  }, [canQueueGuidance, clear, clearComposerText, collectGuidancePrompt, onQuotedContextChange, queuedPromptError, setQueuedPrompt]);
+  }, [canQueueGuidance, clear, clearComposerText, collectGuidancePrompt, onQuotedContextChange, enqueueQueuedPrompt]);
 
   const removeQueuedPrompt = useCallback(() => {
-    setQueuedPrompt(null);
+    clearQueuedPrompt();
     requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [setQueuedPrompt]);
+  }, [clearQueuedPrompt]);
 
-  const editQueuedPrompt = useCallback((pending: QueuedPrompt) => {
+  const editQueuedPrompt = useCallback((pending: QueuedPromptContent) => {
     const prompt = hasComposerContent || normalizedQuotedContext ? collectGuidancePrompt() : pending;
-    setQueuedPrompt(null);
+    clearQueuedPrompt();
     replaceMentionInput(prompt.text, prompt.text.length);
     setBoundSessionMentions(prompt.sessionMentions ?? []);
     setInlineError(null);
@@ -2141,51 +1569,7 @@ export function ThreadComposer({
       clear();
     }
     focusTextarea();
-  }, [clear, collectGuidancePrompt, hasComposerContent, normalizedQuotedContext, onQuotedContextChange, replaceMentionInput, focusTextarea, restoreReadyImages, setQueuedPrompt]);
-
-  const sendQueuedPrompt = useCallback(
-    (prompt: QueuedPrompt, extraOptions?: SendOptions) => {
-      if (interactionDisabled) return;
-      const error = queuedPromptError(prompt);
-      if (error) {
-        setQueuedPrompt(pauseQueuedPrompt(prompt));
-        setInlineError(error);
-        return;
-      }
-      const text = prompt.text.trim();
-      const queuedImages = queuedImagesToSendImages(prompt.images);
-      const options: SendOptions | undefined = (
-        extraOptions || prompt.quotedContext || prompt.sessionMentions?.length || isStreaming
-      )
-        ? {
-            ...extraOptions,
-            ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
-            ...(prompt.sessionMentions?.length ? { sessionMentions: prompt.sessionMentions } : {}),
-            ...(isStreaming ? { continueActiveTurn: true } : {}),
-          }
-        : undefined;
-      queuedPromptStore.send(prompt, () => (
-        options ? onSend(text, queuedImages, options)
-          : queuedImages?.length ? onSend(text, queuedImages)
-          : onSend(text)
-      ));
-      requestAnimationFrame(() => textareaRef.current?.focus());
-    },
-    [interactionDisabled, isStreaming, onSend, queuedPromptStore, queuedPromptError, setQueuedPrompt],
-  );
-
-  useEffect(() => {
-    const previous = previousQueueRunRef.current;
-    previousQueueRunRef.current = { key: pendingQueueKey, isStreaming };
-    // Switching to an idle session is not completion of the previous session's run.
-    if (previous.key !== pendingQueueKey) return;
-    if (isStreaming || interactionDisabled || !queuedPrompt || !canAutoSendQueuedPrompt(queuedPrompt)) return;
-    const waitingTurnCompleted = queuedPromptStorageKey !== null && queuedPrompt.autoAfterTurnId !== undefined
-      ? completedTurnIds.includes(queuedPrompt.autoAfterTurnId)
-      : previous.isStreaming;
-    if (!waitingTurnCompleted) return;
-    sendQueuedPrompt(queuedPrompt);
-  }, [completedTurnIds, interactionDisabled, sendQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompt, queuedPromptStorageKey]);
+  }, [clear, collectGuidancePrompt, hasComposerContent, normalizedQuotedContext, onQuotedContextChange, replaceMentionInput, focusTextarea, restoreReadyImages, clearQueuedPrompt]);
 
   const submit = useCallback(() => {
     if (requiresModelSetup) {
@@ -2249,11 +1633,7 @@ export function ThreadComposer({
       slashLifecycle === "finalize_active_turn";
     if (!isUserShell && !slashLifecycle) {
       const prompt = collectGuidancePrompt();
-      const error = queuedPromptError(prompt);
-      if (error) {
-        setInlineError(error);
-        return;
-      }
+      if (!validatePrompt(prompt)) return;
       if (queuedPrompt) {
         sendQueuedPrompt(prompt, options);
         if (draftKey) draftStore?.delete(draftKey);
@@ -2269,7 +1649,7 @@ export function ThreadComposer({
       if (draftKey && draftStore && draftStore.get(draftKey) !== submittedDraft) return;
       if (draftKey) draftStore?.delete(draftKey);
       if (hasTouchPrimaryPointer) textareaRef.current?.blur();
-      if ((!isStreaming && !isUserShell) || finalizeActiveTurn) setQueuedPrompt(null);
+      if ((!isStreaming && !isUserShell) || finalizeActiveTurn) clearQueuedPrompt();
       // Bubble owns the data URL copy; safe to revoke every staged blob
       // preview here without affecting the rendered message.
       clear();
@@ -2312,9 +1692,9 @@ export function ThreadComposer({
     clearComposerText,
     collectGuidancePrompt,
     queuedPrompt,
-    queuedPromptError,
+    validatePrompt,
     sendQueuedPrompt,
-    setQueuedPrompt,
+    clearQueuedPrompt,
     hasTouchPrimaryPointer,
     hasComposerContent,
     handleStop,
@@ -2413,7 +1793,7 @@ export function ThreadComposer({
         && !e.ctrlKey
         && !e.metaKey
       ) {
-        if (!e.repeat && voiceRecorder.state === "idle" && !voiceShortcutDownRef.current) {
+        if (!e.repeat && canSendQueuedPrompt()) {
           sendQueuedPrompt(queuedPrompt);
         }
         return;
@@ -2487,8 +1867,8 @@ export function ThreadComposer({
     : showStopButton ? "stop" : requiresModelSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
-    && value.length === 0 && images.length === 0 && !inlineError
-    && !normalizedQuotedContext && !queuedPrompt && !goalState?.active
+    && value.length === 0 && images.length === 0 && !inlineError && !(onTranscribeAudio && voiceSetupError)
+    && !normalizedQuotedContext && !queuedPrompt
     && !isDragging && !sessionDragPreview && !voiceRecorder.isRecording && !showProjectPicker;
   useLayoutEffect(() => {
     if (!compactWhenIdle || compactControls) return;
@@ -2540,6 +1920,8 @@ export function ThreadComposer({
       modelDetail={modelDetail}
       modelPreset={modelPreset}
       modelPresets={modelPresets}
+      modelOptionsControl={modelOptionsControl}
+      onMenuOpenChange={onModelMenuOpenChange}
       onPresetChange={onModelPresetChange}
       onManageModels={onManageModels}
       onRequestComposerFocus={() => textareaRef.current?.focus()}
@@ -2552,12 +1934,11 @@ export function ThreadComposer({
     />
   ) : null;
   const usageInMeta = mobileWorkspaceControls || compactControls;
-  const usageControl = !voiceRecorder.isRecording && (contextUsage || recentRoundUsage.length) ? (
-    <ComposerUsagePopover context={contextUsage} rounds={recentRoundUsage} showLabel={usageInMeta} compactLabel={mobileWorkspaceControls} bottomSheet={usageInMeta} />
-  ) : null;
+  const usageControl = !voiceRecorder.isRecording
+    ? renderContextUsage?.({ showLabel: usageInMeta, compactLabel: mobileWorkspaceControls }) : null;
   const inputTextClasses = cn(
-    // Keep the overlay's CJK/Latin spacing aligned with the native textarea caret.
-    "w-full resize-none bg-transparent text-composer [text-autospace:no-autospace]",
+    // The native input and its reference overlay must wrap and space text alike.
+    "inset-scrollbar w-full resize-none bg-transparent text-composer [scrollbar-gutter:stable] [text-autospace:no-autospace]",
     compactControls
       ? "min-h-[52px] px-4 pb-2 pt-3"
       : isHero
@@ -2568,6 +1949,16 @@ export function ThreadComposer({
         : "min-h-[50px] px-3.5 pb-1.5 pt-3 sm:px-4",
   );
   const paletteBeside = showAnyPalette && slashPaletteLayout.placement === "beside";
+  const draftResizeLabel = t(draftExpanded ? "thread.composer.collapseDraft" : "thread.composer.expandDraft");
+  const toggleDraftSize = () => {
+    const input = textareaRef.current;
+    if (!input) return;
+    const followCaret = draftExpanded && input.selectionStart === input.value.length
+      && input.scrollHeight - input.clientHeight - input.scrollTop <= 1;
+    setDraftExpanded(!draftExpanded);
+    input.focus({ preventScroll: true });
+    if (followCaret) requestAnimationFrame(() => { input.scrollTop = input.scrollHeight; });
+  };
 
   return (
     <form
@@ -2654,8 +2045,6 @@ export function ThreadComposer({
           interactionDisabled && "opacity-60",
           sessionDragPreview && "ring-1 ring-primary/25",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
-          goalState?.active &&
-            "ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
         )}
       >
         {queuedPrompt ? (
@@ -2724,8 +2113,17 @@ export function ThreadComposer({
             </button>
           </div>
         ) : null}
-        <GoalStateStrip goalState={goalState} />
-        <div className="thread-composer-input relative min-w-0">
+        <div
+          className="thread-composer-input relative min-w-0"
+          data-expandable={expandable || undefined}
+          data-expanded={draftExpanded || undefined}
+          data-overflowing={draftOverflows || undefined}
+        >
+          {placeholder === undefined ? (
+            <span className="pointer-events-none invisible absolute h-0 w-0 overflow-hidden">
+              <span ref={placeholderMeasureRef} aria-hidden className="inline-block whitespace-pre text-composer [text-autospace:no-autospace]">{resolvedPlaceholder}</span>
+            </span>
+          ) : null}
           {hasInlineDecorations ? (
             <ComposerInlineReferenceOverlay
               overlayRef={mentionOverlayRef}
@@ -2740,6 +2138,7 @@ export function ThreadComposer({
             />
           ) : null}
           <textarea
+            id={textareaId}
             ref={textareaRef}
             value={mentionInput.value}
             onFocus={() => {
@@ -2760,9 +2159,10 @@ export function ThreadComposer({
             onPaste={onPaste}
             rows={1}
             enterKeyHint={hasCoarsePointer ? "enter" : undefined}
-            placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
+            placeholder={sessionDragPreview ? "" : displayedPlaceholder}
             disabled={interactionDisabled}
             aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
+            aria-description={sessionDragPreview ? undefined : resolvedPlaceholder}
             className={cn(
               inputTextClasses,
               "relative z-10 block caret-foreground placeholder:text-muted-foreground",
@@ -2772,16 +2172,9 @@ export function ThreadComposer({
             )}
           />
         </div>
-        {inlineError ? (
-          <div
-            role="alert"
-            className={cn(
-              "mx-3 mb-1 max-h-24 overflow-hidden rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1",
-              "text-[11.5px] font-medium text-destructive transition-[max-height,margin,padding,opacity] [transition-duration:220ms] ease-out motion-reduce:transition-none",
-              voiceErrorFading && "mb-0 max-h-0 border-transparent py-0 opacity-0",
-            )}
-          >
-            {inlineError}
+        {inlineError || (onTranscribeAudio && voiceSetupError) ? (
+          <div role="alert" className="mx-3 mb-1 break-words rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1 text-[11.5px] font-medium text-destructive">
+            {inlineError ?? t(`thread.composer.voiceErrors.${voiceSetupError}`)}
           </div>
         ) : null}
         <div
@@ -2840,6 +2233,29 @@ export function ThreadComposer({
               isHero ? "gap-1.5" : "gap-2",
             )}
           >
+            {expandable && (draftExpanded || draftOverflows) ? (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="icon"
+                      disabled={interactionDisabled}
+                      aria-label={draftResizeLabel}
+                      aria-expanded={draftExpanded}
+                      aria-controls={textareaId}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={toggleDraftSize}
+                      className="thread-composer-action thread-composer-round-action touch-target h-[var(--composer-action-size)] w-[var(--composer-action-size)] shrink-0 rounded-xl text-muted-foreground hover:text-foreground"
+                    >
+                      {draftExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{draftResizeLabel}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : null}
             {modelControl}
             {!usageInMeta ? usageControl : null}
             <TooltipProvider>
@@ -2858,7 +2274,7 @@ export function ThreadComposer({
                             ? t("thread.composer.configureModel", { defaultValue: "Configure model" })
                             : isUserShell ? t("thread.composer.shell.run") : t("thread.composer.send")
                     }
-                    aria-keyshortcuts={showVoiceButton ? VOICE_SHORTCUT_ARIA : undefined}
+                    aria-keyshortcuts={showVoiceButton ? shortcutAria : undefined}
                     onPointerDown={showVoiceButton ? voiceRecorder.beginPress : undefined}
                     onPointerUp={showVoiceButton ? voiceRecorder.endPress : undefined}
                     onPointerCancel={showVoiceButton ? voiceRecorder.endPress : undefined}
@@ -2940,7 +2356,7 @@ function QueuedPromptPreview({
   onDelete,
   onEdit,
 }: {
-  prompt: QueuedPrompt;
+  prompt: QueuedPromptContent;
   disabled: boolean;
   editDisabled: boolean;
   label: string;
@@ -3140,6 +2556,7 @@ function CliAppMentionPalette({
     layout.maxHeight - SLASH_PALETTE_CHROME_PX,
   );
   const listRef = useSelectedOptionScroll(selectedIndex);
+  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("overlay");
   const groupedCandidates = (["session", "cli", "mcp"] as const)
     .map((kind) => ({
       kind,
@@ -3155,6 +2572,7 @@ function CliAppMentionPalette({
     .filter((group) => group.items.length > 0);
   return (
     <div
+      ref={surfaceRef}
       role="listbox"
       aria-label={t("thread.composer.mentions.ariaLabel")}
       style={{ maxHeight: layout.maxHeight }}
@@ -3304,8 +2722,10 @@ function SlashCommandPalette({
     layout.maxHeight - SLASH_PALETTE_CHROME_PX,
   );
   const listRef = useSelectedOptionScroll(selectedIndex);
+  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("overlay");
   return (
     <div
+      ref={surfaceRef}
       role="listbox"
       aria-label={t("thread.composer.slash.ariaLabel")}
       style={{ maxHeight: layout.maxHeight }}

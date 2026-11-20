@@ -17,6 +17,7 @@ import {
 } from "@/components/settings/models/providerForm";
 import type { ModelSettingsState } from "@/components/settings/models/useModelSettingsState";
 import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
+import { useToast } from "@/components/ui/toast";
 import {
   ApiError,
   cancelProviderOAuth,
@@ -64,6 +65,7 @@ interface ModelSettingsActionsOptions {
   setError: Dispatch<SetStateAction<string | null>>;
   onModelNameChange: (modelName: string | null) => void;
   remoteBrowserAccess: boolean;
+  optimizedPresetSave: boolean;
   closeProviderOAuthFlow: (cancelPending?: boolean) => void;
   installCapabilities: (names: string[]) => Promise<boolean>;
   configuredModelProviderOptions: Array<{ name: string; label: string }>;
@@ -80,10 +82,12 @@ export function useModelSettingsActions({
   setError,
   onModelNameChange,
   remoteBrowserAccess,
+  optimizedPresetSave,
   closeProviderOAuthFlow,
   installCapabilities,
   configuredModelProviderOptions,
 }: ModelSettingsActionsOptions) {
+  const showToast = useToast();
   const oauthMounted = useRef(true);
   useEffect(() => {
     oauthMounted.current = true;
@@ -115,6 +119,7 @@ export function useModelSettingsActions({
     setModelPresetEditingName,
     setModelPresetNameError,
     setModelPresetPendingDelete,
+    setModelPresetDeleteError,
     setProviderForms,
     setProviderOAuthCompleting,
     setProviderOAuthDialogError,
@@ -199,7 +204,7 @@ export function useModelSettingsActions({
       setModelPresetNameError(null);
       setModelConfigurationSaving(true);
       try {
-        const payload = await createModelConfiguration(client, {
+        const result = await createModelConfiguration(client, {
           name,
           provider,
           model,
@@ -207,33 +212,30 @@ export function useModelSettingsActions({
           contextWindowTokens: form.contextWindowTokens,
           temperature: form.temperature,
           reasoningEffort: form.reasoningEffort || null,
+          codexFastMode: form.codexFastMode ?? undefined,
+          supportsImages: form.supportsImages,
           api: form.api ?? undefined,
           ...(settings.model_request_overrides_supported ? {
             extraHeaders: form.extraHeaders,
             extraQuery: form.extraQuery,
             extraBody: form.extraBody,
           } : {}),
-        });
+        }, optimizedPresetSave);
+        let payload: SettingsPayload = { ...result, usage: result.usage ?? latestSettings.current?.usage ?? settings.usage };
         const createdPreset = payload.created_model_preset;
-        const nextOrder = createdPreset ? [...modelCallOrder, createdPreset] : null;
+        if (!optimizedPresetSave && createdPreset) {
+          applyPayload(payload, { preserveCapabilityForms: true });
+          setForm(agentDraftFromPayload(payload, createdPreset));
+          setModelPresetEditingName(createdPreset);
+          payload = await updateModelCallOrder(client, [...modelCallOrder, createdPreset]);
+        }
         applyPayload(payload, { preserveCapabilityForms: true });
         if (createdPreset) {
           setForm(agentDraftFromPayload(payload, createdPreset));
           setModelPresetEditingName(createdPreset);
         }
-
-        let finalPayload = payload;
-        if (nextOrder) {
-          const orderedPayload = await updateModelCallOrder(client, nextOrder);
-          applyPayload(orderedPayload, { preserveCapabilityForms: true });
-          finalPayload = orderedPayload;
-        }
-        if (createdPreset) {
-          setForm(agentDraftFromPayload(finalPayload, createdPreset));
-          setModelPresetEditingName(createdPreset);
-        }
         modelPresetBeforeCreateRef.current = null;
-        onModelNameChange(finalPayload.agent.model || null);
+        onModelNameChange(payload.agent.model || null);
         setModelPresetNameError(null);
         setError(null);
       } catch (err) {
@@ -259,7 +261,7 @@ export function useModelSettingsActions({
     const reasoningEffort = form.reasoningEffort || null;
     setSaving(true);
     try {
-      const payload = await updateModelConfiguration(client, {
+      const result = await updateModelConfiguration(client, {
         name: selectedPreset.name,
         newName: nameChanged ? nextName : undefined,
         model: form.model !== selectedPreset.model ? form.model : undefined,
@@ -275,6 +277,10 @@ export function useModelSettingsActions({
           form.temperature !== selectedPreset.temperature ? form.temperature : undefined,
         reasoningEffort:
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
+        codexFastMode: form.codexFastMode !== (selectedPreset.codex_fast_mode ?? null)
+          ? form.codexFastMode : undefined,
+        supportsImages: form.supportsImages !== (selectedPreset.supports_images ?? true)
+          ? form.supportsImages : undefined,
         api: modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
           ? form.api : undefined,
         ...(settings.model_request_overrides_supported ? {
@@ -282,7 +288,8 @@ export function useModelSettingsActions({
           extraQuery: form.extraQuery !== providerJsonValue(selectedPreset.extra_query) ? form.extraQuery : undefined,
           extraBody: form.extraBody !== providerJsonValue(selectedPreset.extra_body) ? form.extraBody : undefined,
         } : {}),
-      });
+      }, optimizedPresetSave);
+      const payload = { ...result, usage: result.usage ?? latestSettings.current?.usage ?? settings.usage };
       latestSettings.current = payload;
       editTarget.name = nextName;
       applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
@@ -303,12 +310,14 @@ export function useModelSettingsActions({
   };
 
   const saveModelRequestSettings = async (values: Partial<RequestParameterDraft>) => {
+    if (!settings) return;
     setSaving(true);
     try {
-      const payload = await updateModelConfiguration(client, {
+      const result = await updateModelConfiguration(client, {
         name: modelPresetEditingName,
         ...values,
-      });
+      }, optimizedPresetSave);
+      const payload = { ...result, usage: result.usage ?? latestSettings.current?.usage ?? settings.usage };
       applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       setForm((current) => current === form ? agentDraftFromPayload(payload, modelPresetEditingName) : current);
       setError(null);
@@ -336,6 +345,7 @@ export function useModelSettingsActions({
       modelPreset: "",
       provider,
       model: "",
+      supportsImages: true,
       api: null,
       extraHeaders: "",
       extraQuery: "",
@@ -346,6 +356,7 @@ export function useModelSettingsActions({
       ),
       temperature: primaryPreset?.temperature ?? settings.agent.temperature,
       reasoningEffort: primaryPreset?.reasoning_effort ?? settings.agent.reasoning_effort ?? "",
+      codexFastMode: null,
     }));
     setModelPresetCreating(true);
   };
@@ -384,7 +395,15 @@ export function useModelSettingsActions({
       setError(null);
     } catch (err) {
       setModelCallOrder(previousOrder);
-      setError((err as Error).message);
+      if (showToast && err instanceof ApiError && (err.status === 503 || err.status === 504)) {
+        showToast({
+          tone: "error",
+          message: t("message.agentActivity.updateAgentSettingsFailed"),
+          dedupeKey: "settings:models:call-order",
+        });
+      } else {
+        setError((err as Error).message);
+      }
     } finally {
       setModelCallOrderSaving(false);
     }
@@ -415,14 +434,14 @@ export function useModelSettingsActions({
       return false;
     }
     setSaving(true);
+    setModelPresetDeleteError(null);
     try {
       const payload = await deleteModelConfiguration(client, modelPresetPendingDelete.name);
       applyPayload(payload, { preserveCapabilityForms: true });
       setModelPresetPendingDelete(null);
-      setError(null);
       return true;
     } catch (err) {
-      setError((err as Error).message);
+      setModelPresetDeleteError(err instanceof Error ? err.message : String(err));
       return false;
     } finally {
       setSaving(false);

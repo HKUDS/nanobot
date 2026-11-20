@@ -1,9 +1,12 @@
 import asyncio
 import base64
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
+from openai import AsyncOpenAI
 
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop, TurnContext, TurnKind
@@ -13,6 +16,8 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ChannelsConfig
 from nanobot.providers.base import LLMResponse
+from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+from nanobot.providers.registry import ModelAPICapabilities
 from nanobot.runtime_context import public_history_message
 from nanobot.utils.document import reference_non_image_attachments
 
@@ -57,7 +62,7 @@ async def test_document_attachment_is_referenced_and_read_on_demand(
     media_dir.mkdir()
     csv_path = media_dir / "report.csv"
     csv_path.write_text("name,value\nnanobot,1", encoding="utf-8")
-    monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media_dir)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
 
     loop = _make_loop(
         workspace,
@@ -237,28 +242,66 @@ async def test_borrowed_image_origin_survives_canonical_reload(tmp_path: Path) -
     augment = MagicMock(return_value=[{"kind": "image", "url": "/borrowed"}])
     response = build_session_thread_response(persisted, augment_user_media=augment)
     augment.assert_called_once_with([str(source)], [str(source)])
+    assert response["events"][0]["text"] == "look"
     assert response["events"][0]["media_urls"][0]["url"] == "/borrowed"
 
 
 @pytest.mark.asyncio
-async def test_image_path_remains_visible_once_after_session_reload(tmp_path: Path) -> None:
-    image = tmp_path / "original.png"
-    image.write_bytes(base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII="
-    ))
-    loop = _make_loop(tmp_path)
-    loop.provider.aclose = AsyncMock()
+@pytest.mark.parametrize("prompt", ["Compare these images", ""])
+async def test_user_images_replay_in_order_after_cold_reload(tmp_path: Path, prompt: str) -> None:
+    png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII="
+    gif = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+    first, second = tmp_path / "first.png", tmp_path / "second.gif"
+    first.write_bytes(base64.b64decode(png))
+    second.write_bytes(base64.b64decode(gif))
+    expected = [
+        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{png}"}},
+        {"type": "image_url", "image_url": {"url": f"data:image/gif;base64,{gif}"}},
+    ]
+    if prompt:
+        expected.append({"type": "text", "text": prompt})
+    key = "websocket:image-reference"
+    requests = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        requests.append(body["messages"])
+        event = {
+            "id": "chat_1", "created": 1, "object": "chat.completion.chunk", "model": body["model"],
+            "choices": [{"index": 0, "delta": {"content": "answer"}, "finish_reason": "stop"}],
+        }
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"},
+            text=f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n",
+        )
+
+    def new_loop() -> AgentLoop:
+        provider = OpenAICompatProvider(
+            api_key="fixture", default_model="gpt-4o",
+            model_api=ModelAPICapabilities(("chat_completions",), "chat_completions"),
+        )
+        provider._client = AsyncOpenAI(
+            api_key="fixture", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
+        )
+        return AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="gpt-4o")
+
+    loop = new_loop()
     try:
-        await loop.process_direct("edit this image", session_key="websocket:image-reference", channel="websocket", chat_id="image-reference", media=[str(image)])
-        initial = loop.provider.chat_stream_with_retry.call_args.kwargs["messages"]
-        current = initial[-1]["content"]
-        assert any(block.get("type") == "image_url" for block in current)
-        assert sum(block.get("text", "").count(str(image)) for block in current) == 1
-        loop.sessions.invalidate("websocket:image-reference")
-        await loop.process_direct("which file was that?", session_key="websocket:image-reference", channel="websocket", chat_id="image-reference")
-        following = loop.provider.chat_stream_with_retry.call_args.kwargs["messages"]
-        previous = next(message["content"] for message in following if message["role"] == "user")
-        previous_text = previous if isinstance(previous, str) else "\n".join(block.get("text", "") for block in previous)
-        assert previous_text.count(str(image)) == 1
+        await loop.process_direct(prompt, session_key=key, media=[str(first), str(second)])
     finally:
         await loop.aclose()
+
+    first.unlink()
+    cold = new_loop()
+    try:
+        await cold.process_direct("What was in the first image?", session_key=key)
+        initial, following = requests
+        first_request = initial[-1]["content"]
+        assert first_request[:len(expected)] == expected
+        previous = next(message for message in following if message["role"] == "user")
+        assert previous["content"] == first_request
+        stored = cold.sessions.get_or_create(key).messages[0]
+        assert stored["media"] == [str(first), str(second)]
+        assert "base64," not in repr(stored)
+    finally:
+        await cold.aclose()

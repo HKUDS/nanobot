@@ -1,10 +1,3 @@
-"""Tests for context builder media handling.
-
-The ContextBuilder.build_user_content method should ONLY handle images.
-The processing layer turns non-image media into attachment path references;
-document contents are read on demand through ``read_file``.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,7 +17,6 @@ def test_build_user_content_with_no_media_returns_string(tmp_path: Path) -> None
 
 
 def test_build_user_content_with_image_returns_list(tmp_path: Path) -> None:
-    """Image files should produce base64 content blocks."""
     builder = _make_builder(tmp_path)
     png = tmp_path / "test.png"
     png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
@@ -36,7 +28,6 @@ def test_build_user_content_with_image_returns_list(tmp_path: Path) -> None:
 
 
 def test_build_user_content_ignores_non_image_files(tmp_path: Path) -> None:
-    """Non-image files should be silently skipped — extraction is not context builder's job."""
     builder = _make_builder(tmp_path)
     txt = tmp_path / "notes.txt"
     txt.write_text("some text", encoding="utf-8")
@@ -45,7 +36,6 @@ def test_build_user_content_ignores_non_image_files(tmp_path: Path) -> None:
 
 
 def test_build_user_content_mixed_image_and_non_image(tmp_path: Path) -> None:
-    """Only images should be included; non-image files are skipped."""
     builder = _make_builder(tmp_path)
     png = tmp_path / "chart.png"
     png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)

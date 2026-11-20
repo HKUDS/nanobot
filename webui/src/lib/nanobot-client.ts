@@ -9,6 +9,7 @@ import type {
   OutboundMcpPresetMention,
   OutboundMedia,
   SessionMention,
+  SessionModelOptions,
   SidebarStatePayload,
   GoalStateWsPayload,
   WorkspaceScopePayload,
@@ -33,32 +34,42 @@ function createDefaultSocket(url: string): WebSocket {
   return new WebSocket(url);
 }
 
+const WS_DEBUG_CACHE_TTL_MS = 1_000;
+let wsDebugCache: { checkedAt: number; enabled: boolean } | null = null;
+
 /** Inbound WebSocket ``console.log`` / parse-failure ``console.warn``.
  *
  * - **Dev** (non-production bundle): **on by default** — messages appear at default log level.
  * - **Production**: off unless ``localStorage.setItem('nanobot_debug_ws','1')`` (or ``true``).
  * - **Silence anywhere**: ``localStorage.setItem('nanobot_debug_ws','0')`` (or ``false`` / ``off``).
- * Values are read on every frame; no reload needed.
+ * Values are cached briefly so toggling takes effect without reload while avoiding
+ * synchronous ``localStorage`` reads on every streamed delta frame.
  */
 function wsInboundDebugEnabled(): boolean {
   if (typeof globalThis === "undefined") return false;
+  if (import.meta.env.MODE === "test") return false;
+  const now = Date.now();
+  if (wsDebugCache && now - wsDebugCache.checkedAt < WS_DEBUG_CACHE_TTL_MS) {
+    return wsDebugCache.enabled;
+  }
+  let enabled: boolean;
   try {
-    if (import.meta.env.MODE === "test") return false;
     const ls = (globalThis as unknown as { localStorage?: Storage }).localStorage;
     const raw = ls?.getItem("nanobot_debug_ws")?.trim().toLowerCase() ?? "";
     if (raw === "0" || raw === "false" || raw === "off" || raw === "no") {
-      return false;
+      enabled = false;
+    } else if (raw === "1" || raw === "true" || raw === "on" || raw === "yes") {
+      enabled = true;
+    } else {
+      enabled = !import.meta.env.PROD;
     }
-    if (raw === "1" || raw === "true" || raw === "on" || raw === "yes") {
-      return true;
-    }
-    return !import.meta.env.PROD;
   } catch {
-    return !import.meta.env.PROD;
+    enabled = !import.meta.env.PROD;
   }
+  wsDebugCache = { checkedAt: now, enabled };
+  return enabled;
 }
 
-/** Shorten streaming text fields so logging stays usable for huge deltas. */
 function summarizeInboundWsPayload(ev: InboundEvent): unknown {
   const kind = (ev as { event?: string }).event;
   if (kind === "ready") return { ...ev, upload: "[redacted]" };
@@ -145,8 +156,11 @@ class WebUIMutationError extends Error {
   }
 }
 
+type ChatRequestFrame = Extract<Outbound, { type: "new_chat" | "new_temporary_chat" | "fork_chat" }>;
+
 interface PendingChatRequest extends PendingRequest<string> {
-  temporary: boolean;
+  frame: ChatRequestFrame & { request_id: string };
+  phase: "queued" | "sent";
 }
 
 const SYSTEM_COMMAND_TURN_PREFIX = "webui-system:";
@@ -167,11 +181,9 @@ export interface NanobotClientOptions {
   reconnect?: boolean;
   /** Maximum UTF-8 bytes accepted for one websocket message. */
   maxFrameBytes?: number;
-  /** Called when a connection drops so the app can refresh its token. */
-  onReauth?: () => Promise<string | null>;
-  /** Inject a custom WebSocket factory (used by unit tests). */
+  /** Refresh authentication; discard side effects when the connection's signal aborts. */
+  onReauth?: (signal: AbortSignal) => Promise<string | null>;
   socketFactory?: (url: string) => WebSocket;
-  /** Delay-cap for reconnect backoff (ms). */
   maxBackoffMs?: number;
 }
 
@@ -204,7 +216,7 @@ function runObservation(event: InboundEvent): RunObservation | null {
     case "stream_end":
       return { ...base, kind: "activity" };
     case "retry_status":
-      return { ...base, kind: event.state === "recovered" || event.state === "cleared" ? "progress" : "activity" };
+      return { ...base, lifecycleSignal: true, kind: event.state === "recovered" || event.state === "cleared" ? "progress" : "activity" };
     case "recovery_state":
       // Supersession resolves the old recovery, not the new user turn that caused it.
       return event.status === "recovered" && event.reason === "superseded"
@@ -249,22 +261,21 @@ export class NanobotClient {
   private historyGenerations = new Map<string, string>();
   private retiredHistoryGenerations = new Map<string, Set<string>>();
   private static readonly PENDING_INBOUND_MAX = 2000;
-  // chat_ids we've attached to since connect; re-attached after reconnects
+  private static readonly PENDING_TEMP_INBOUND_MAX = 20_000;
   private knownChats = new Set<string>();
   /** Temporary chats are connection-owned and intentionally not reattached. */
   private temporaryChatIds = new Set<string>();
   private readonly runs = new ClientRunLedger();
   /** Last tracked application frame written, for conservative transport-error attribution. */
   private lastSocketMessageSend: { chatId: string; turnId: string } | null = null;
-  /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
-  private pendingNewChat: PendingChatRequest | null = null;
+  private pendingChatRequest: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
   private pendingWebUIRequests = new Map<string, PendingWebUIRequest>();
-  // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
+  private reconnectController: AbortController | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly shouldReconnect: boolean;
   private readonly maxBackoffMs: number;
@@ -291,6 +302,12 @@ export class NanobotClient {
 
   get defaultChatId(): string | null {
     return this.readyChatId;
+  }
+
+  /** Stable browser preference namespace without authentication or query parameters. */
+  get preferenceScope(): string {
+    const url = new URL(this.currentUrl, window.location.href);
+    return `${url.protocol}//${url.host}${url.pathname}`;
   }
 
   /** Swap the URL (e.g. after fetching a fresh token) then reconnect. */
@@ -356,7 +373,6 @@ export class NanobotClient {
     return () => { this.taskNoticeHandlers.delete(handler); };
   }
 
-  /** Subscribe to transport-level faults (see :type:`StreamError`). */
   onError(handler: ErrorHandler): Unsubscribe {
     this.errorHandlers.add(handler);
     return () => {
@@ -371,11 +387,6 @@ export class NanobotClient {
   /** Restore pending history only within its original lifecycle generation. */
   restorePendingRun(chatId: string, generation: number, turnId: string | null): void {
     this.applyRunEffects(this.runs.transition({ kind: "restore-pending", chatId, generation, turnId }));
-  }
-
-  /** Last ``goal_status`` ``started_at`` (unix sec) for *chatId*, if the turn is running. */
-  getRunStartedAt(chatId: string): number | null {
-    return this.runs.view(chatId).startedAt;
   }
 
   /** Canonical lifecycle turn currently owning the run, retained after completion. */
@@ -474,6 +485,16 @@ export class NanobotClient {
     this.applyRunEffects(this.runs.transition({ kind: "fence", chatId, completedTurnIds }));
   }
 
+  /** Settle explicit completions without claiming coverage of live content. */
+  settleCompletedRunLifecycle(chatId: string, completedTurnIds: readonly string[]): void {
+    this.applyRunEffects(this.runs.transition({ kind: "settle-completed-lifecycle", chatId, completedTurnIds }));
+  }
+
+  /** Whether a mounted transcript owns delivery for this chat. */
+  hasTranscript(chatId: string): boolean {
+    return this.transcriptHandlers.has(chatId);
+  }
+
   /** Last ``goal_state`` payload for *chatId*, if any frame has arrived this connection. */
   getGoalState(chatId: string): GoalStateWsPayload | undefined {
     return this.goalStateByChatId.get(chatId);
@@ -487,7 +508,7 @@ export class NanobotClient {
     if (
       ev.detail === "workspace_scope_rejected"
       && ev.chat_id === undefined
-      && this.pendingNewChat
+      && this.pendingChatRequest
     ) return null;
     return this.runs.soleSentTurn(this.lastSocketMessageSend, ev.chat_id);
   }
@@ -508,7 +529,8 @@ export class NanobotClient {
             && frame.turn_id === effect.turnId
           ));
           break;
-        case "prune-inbound": {
+        case "prune-inbound":
+        case "prune-lifecycle-inbound": {
           const pending = this.pendingInboundByChat.get(effect.chatId);
           if (!pending) break;
           const turnIds = new Set(effect.turnIds);
@@ -516,6 +538,8 @@ export class NanobotClient {
             !("turn_id" in event)
             || typeof event.turn_id !== "string"
             || !turnIds.has(event.turn_id)
+            || (effect.kind === "prune-lifecycle-inbound"
+              && event.event !== "goal_status" && event.event !== "recovery_state" && event.event !== "retry_status")
           ));
           if (remaining.length > 0) this.pendingInboundByChat.set(effect.chatId, remaining);
           else this.pendingInboundByChat.delete(effect.chatId);
@@ -576,33 +600,27 @@ export class NanobotClient {
 
   connect(): void {
     if (this.socket && this.socket.readyState < WS_CLOSING) return;
+    this.cancelReconnect();
     this.intentionallyClosed = false;
     this.setStatus("connecting");
     const sock = this.socketFactory(this.currentUrl);
     this.socket = sock;
-    sock.onopen = () => this.handleOpen();
-    sock.onmessage = (ev) => this.handleMessage(ev);
-    sock.onerror = () => this.setStatus("error");
-    sock.onclose = (ev) => this.handleClose(ev);
+    sock.onopen = () => { if (this.socket === sock) this.handleOpen(); };
+    sock.onmessage = (ev) => { if (this.socket === sock) this.handleMessage(ev); };
+    sock.onerror = () => { if (this.socket === sock) this.setStatus("error"); };
+    sock.onclose = (ev) => { if (this.socket === sock) this.handleClose(ev); };
   }
 
   close(): void {
-    this.upload = null;
-    this.receipts.close();
     this.intentionallyClosed = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
     const sock = this.socket;
-    this.socket = null;
+    // Settle connection-owned work now, not in a possibly delayed close callback.
+    this.handleClose();
     try {
       sock?.close();
     } catch {
-      // ignore
+      // Local cleanup has already completed.
     }
-    this.clearTemporaryChats();
-    this.setStatus("closed");
   }
 
   discardTemporaryChat(chatId: string): void {
@@ -615,35 +633,53 @@ export class NanobotClient {
 
   /** Ask the server to provision a new chat_id; resolves with the assigned id. */
   newChat(timeoutMs: number = 5_000, workspaceScope?: WorkspaceScopePayload | null): Promise<string> {
-    if (this.pendingNewChat) {
-      return Promise.reject(new Error("newChat already in flight"));
-    }
-    return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingNewChat = null;
-        reject(new Error("newChat timed out"));
-      }, timeoutMs);
-      this.pendingNewChat = { resolve, reject, timer, temporary: false };
-      this.queueSend({
-        type: "new_chat",
-        ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
-      });
-    });
+    return this.requestChat({
+      type: "new_chat",
+      ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
+    }, timeoutMs, "newChat");
   }
 
   /** Ask the WebUI gateway to create a connection-owned non-persistent chat. */
   newTemporaryChat(timeoutMs: number = 5_000): Promise<string> {
-    if (this.pendingNewChat) {
-      return Promise.reject(new Error("newChat already in flight"));
-    }
+    return this.requestChat({ type: "new_temporary_chat" }, timeoutMs, "newTemporaryChat");
+  }
+
+  private requestChat(frame: ChatRequestFrame, timeoutMs: number, name: string): Promise<string> {
+    if (this.intentionallyClosed) return Promise.reject(new Error("socket closed"));
+    if (this.pendingChatRequest) return Promise.reject(new Error("newChat already in flight"));
     return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingNewChat = null;
-        reject(new Error("newTemporaryChat timed out"));
-      }, timeoutMs);
-      this.pendingNewChat = { resolve, reject, timer, temporary: true };
-      this.queueSend({ type: "new_temporary_chat" });
+      const pending: PendingChatRequest = {
+        frame: { ...frame, request_id: crypto.randomUUID() },
+        phase: "queued", resolve, reject,
+        timer: setTimeout(() => {
+          const sent = pending.phase === "sent";
+          this.pendingChatRequest = null;
+          reject(new Error(`${name} timed out${sent ? "; creation outcome is unknown" : " before sending"}`));
+        }, timeoutMs),
+      };
+      this.pendingChatRequest = pending;
+      this.sendPendingChat();
     });
+  }
+
+  private sendPendingChat(): void {
+    const pending = this.pendingChatRequest;
+    if (!pending || pending.phase !== "queued" || this.socket?.readyState !== WS_OPEN) return;
+    try {
+      this.socket.send(JSON.stringify(pending.frame));
+      pending.phase = "sent";
+      this.lastSocketMessageSend = null;
+    } catch {
+      this.rejectPendingChat("Could not send chat request");
+    }
+  }
+
+  private rejectPendingChat(detail: string): void {
+    const pending = this.pendingChatRequest;
+    if (!pending) return;
+    this.pendingChatRequest = null;
+    clearTimeout(pending.timer);
+    pending.reject(new Error(detail));
   }
 
   transcribeAudio(
@@ -736,22 +772,12 @@ export class NanobotClient {
     title?: string,
     timeoutMs: number = 5_000,
   ): Promise<string> {
-    if (this.pendingNewChat) {
-      return Promise.reject(new Error("newChat already in flight"));
-    }
-    return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingNewChat = null;
-        reject(new Error("forkChat timed out"));
-      }, timeoutMs);
-      this.pendingNewChat = { resolve, reject, timer, temporary: false };
-      this.queueSend({
-        type: "fork_chat",
-        source_chat_id: sourceChatId,
-        before_user_index: beforeUserIndex,
-        ...(title?.trim() ? { title: title.trim() } : {}),
-      });
-    });
+    return this.requestChat({
+      type: "fork_chat",
+      source_chat_id: sourceChatId,
+      before_user_index: beforeUserIndex,
+      ...(title?.trim() ? { title: title.trim() } : {}),
+    }, timeoutMs, "forkChat");
   }
 
   attach(chatId: string): void {
@@ -760,6 +786,23 @@ export class NanobotClient {
     if (this.socket?.readyState === WS_OPEN) {
       this.queueSend({ type: "attach", chat_id: chatId });
     }
+  }
+
+  async uploadBackground(file: File): Promise<void> {
+    const socket = this.socket;
+    const capability = this.upload;
+    const stillConnected = () => this.socket === socket
+      && socket?.readyState === WS_OPEN && this.upload === capability;
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read image"));
+      reader.onerror = () => reject(new Error("Could not read image"));
+      reader.readAsDataURL(file);
+    });
+    const [attachment] = await uploadAttachments([{ data_url: dataUrl, name: file.name }], capability,
+      typeof window !== "undefined" ? window.location.href : this.currentUrl, stillConnected);
+    if (!attachment || !("reference" in attachment)) throw new Error("Could not upload image");
+    await this.requestMutation("background.update", { reference: attachment.reference });
   }
 
   async sendAttachments(
@@ -822,6 +865,7 @@ export class NanobotClient {
       quotedContext?: string;
       intent?: "create_automation";
       userShell?: boolean;
+      modelOptions?: SessionModelOptions;
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
       /** False for side-channel or injected messages that do not own a lifecycle. */
@@ -844,6 +888,8 @@ export class NanobotClient {
       ...(options?.quotedContext?.trim() ? { quoted_context: options.quotedContext.trim() } : {}),
       ...(options?.intent === "create_automation" ? { intent: options.intent } : {}),
       ...(options?.userShell ? { user_shell: true } : {}),
+      ...(!temporary && !options?.userShell && options?.modelOptions
+        ? { model_options: options.modelOptions } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,
@@ -899,7 +945,6 @@ export class NanobotClient {
     return this.requestMutation<SidebarStatePayload>("sidebar.update", { state });
   }
 
-  // -- internals ---------------------------------------------------------
 
   private setStatus(status: ConnectionStatus): void {
     if (this.status_ === status) return;
@@ -910,16 +955,15 @@ export class NanobotClient {
   private handleOpen(): void {
     this.setStatus("open");
     this.reconnectAttempts = 0;
-    // Re-attach every known chat_id so deliveries continue routing after a drop.
     for (const chatId of this.knownChats) {
       this.rawSend({ type: "attach", chat_id: chatId });
     }
     for (const pending of this.pendingWebUIRequests.values()) {
       this.rawSendSerialized(pending.serializedFrame);
     }
-    // Flush anything queued during reconnect.
     const queued = this.sendQueue.splice(0);
     for (const frame of queued) this.rawSend(frame);
+    this.sendPendingChat();
   }
 
   private handleMessage(ev: MessageEvent): void {
@@ -966,6 +1010,16 @@ export class NanobotClient {
     if ("history_generation" in parsed && typeof parsed.history_generation === "string"
       && "chat_id" in parsed && parsed.chat_id
       && this.retiredHistoryGenerations.get(parsed.chat_id)?.has(parsed.history_generation)) return;
+    if (parsed.event === "error" && parsed.request_id !== undefined) {
+      const pending = this.pendingChatRequest;
+      if (pending && pending.phase !== "queued" && pending.frame.request_id === parsed.request_id) {
+        this.rejectPendingChat([parsed.detail, parsed.reason].filter(Boolean).join(":") || "server error");
+        if (parsed.detail === "workspace_scope_rejected") {
+          this.emitError({ kind: "workspace_scope_rejected", reason: parsed.reason });
+        }
+      }
+      return;
+    }
 
     if (parsed.event === "error" && !parsed.turn_id) {
       const fallback = this.legacyRejectionTarget(parsed);
@@ -1043,18 +1097,27 @@ export class NanobotClient {
     }
 
     if (parsed.event === "attached") {
+      const pending = this.pendingChatRequest;
+      const known = this.knownChats.has(parsed.chat_id) || this.temporaryChatIds.has(parsed.chat_id);
+      const matches = pending?.phase === "sent" && parsed.request_id === pending.frame.request_id;
+      if (matches) {
+        clearTimeout(pending.timer);
+        this.pendingChatRequest = null;
+        pending.resolve(parsed.chat_id);
+      }
+      if (!matches && parsed.request_id !== undefined && !known) {
+        // A late success is not a new user selection; temporary resources need disposal.
+        if (parsed.temporary) this.rawSend({ type: "discard_temporary_chat", chat_id: parsed.chat_id });
+        return;
+      }
       if (parsed.temporary === true) {
         this.temporaryChatIds.add(parsed.chat_id);
       } else {
         this.knownChats.add(parsed.chat_id);
       }
-      if (
-        this.pendingNewChat
-        && this.pendingNewChat.temporary === (parsed.temporary === true)
-      ) {
-        clearTimeout(this.pendingNewChat.timer);
-        this.pendingNewChat.resolve(parsed.chat_id);
-        this.pendingNewChat = null;
+      const live = parsed.live_turn_ids;
+      if (Array.isArray(live) && live.every((id) => typeof id === "string" && id.length > 0)) {
+        this.applyRunEffects(this.runs.transition({ kind: "reattach", chatId: parsed.chat_id, liveTurnIds: live }));
       }
       this.dispatch(parsed.chat_id, parsed);
       return;
@@ -1099,19 +1162,6 @@ export class NanobotClient {
         chatId: parsed.chat_id,
         turnId: parsed.turn_id,
       });
-      if (this.pendingNewChat) {
-        clearTimeout(this.pendingNewChat.timer);
-        this.pendingNewChat.reject(new Error(`workspace_scope_rejected:${parsed.reason || ""}`));
-        this.pendingNewChat = null;
-      }
-    }
-
-    if (parsed.event === "error" && this.pendingNewChat) {
-      clearTimeout(this.pendingNewChat.timer);
-      const detail = typeof parsed.detail === "string" ? parsed.detail : "server error";
-      const reason = typeof parsed.reason === "string" && parsed.reason ? `:${parsed.reason}` : "";
-      this.pendingNewChat.reject(new Error(`${detail}${reason}`));
-      this.pendingNewChat = null;
     }
 
     if (correlatedChatId) {
@@ -1167,26 +1217,25 @@ export class NanobotClient {
         this.pendingInboundByChat.set(chatId, pending);
       }
       pending.push(ev);
-      // Temporary chats have no canonical history to recover evicted events from.
-      if (!this.temporaryChatIds.has(chatId)) {
-        const over = pending.length - NanobotClient.PENDING_INBOUND_MAX;
-        if (over > 0) pending.splice(0, over);
-      }
+      // Temporary chats have no canonical history to recover evicted events from,
+      // but still keep a generous upper bound so an unmounted chat cannot OOM the tab.
+      const maxPending = this.temporaryChatIds.has(chatId)
+        ? NanobotClient.PENDING_TEMP_INBOUND_MAX
+        : NanobotClient.PENDING_INBOUND_MAX;
+      const over = pending.length - maxPending;
+      if (over > 0) pending.splice(0, over);
     }
     for (const handler of this.chatHandlers.get(chatId) ?? []) handler(ev);
   }
 
   private handleClose(event?: { code?: number }): void {
+    this.cancelReconnect();
     this.upload = null;
     this.receipts.close();
     this.socket = null;
     this.clearTemporaryChats();
     const willReconnect = !this.intentionallyClosed && this.shouldReconnect;
-    if (this.pendingNewChat) {
-      clearTimeout(this.pendingNewChat.timer);
-      this.pendingNewChat.reject(new Error("socket closed"));
-      this.pendingNewChat = null;
-    }
+    this.rejectPendingChat("socket closed");
     this.rejectAllTranscriptions("socket closed");
     if (!willReconnect) {
       for (const pending of this.pendingWebUIRequests.values()) {
@@ -1289,21 +1338,32 @@ export class NanobotClient {
     pending.reject(new Error(detail));
   }
 
+  private cancelReconnect(): void {
+    this.reconnectController?.abort();
+    this.reconnectController = null;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+  }
+
   private scheduleReconnect(): void {
+    const controller = new AbortController();
+    this.reconnectController = controller;
     this.setStatus("reconnecting");
     const attempt = this.reconnectAttempts++;
-    // Exponential backoff: 0.5s, 1s, 2s, 4s, capped.
     const delay = Math.min(500 * 2 ** attempt, this.maxBackoffMs);
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
+      if (controller.signal.aborted) return;
+      let refreshed: string | null = null;
       if (this.options.onReauth) {
         try {
-          const refreshed = await this.options.onReauth();
-          if (refreshed) this.currentUrl = refreshed;
+          refreshed = await this.options.onReauth(controller.signal);
         } catch {
           // fall through to retry with current URL
         }
       }
+      if (controller.signal.aborted) return;
+      if (refreshed) this.currentUrl = refreshed;
       this.connect();
     }, delay);
   }

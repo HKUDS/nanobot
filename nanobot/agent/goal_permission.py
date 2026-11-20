@@ -1,10 +1,9 @@
-"""Turn-local permission for explicit sustained-goal mutations."""
-
 from __future__ import annotations
 
 from collections.abc import Iterable
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
+from typing import Self
 
 from nanobot.bus.events import InboundMessage
 from nanobot.session.automation_turns import automation_history_overrides
@@ -37,15 +36,9 @@ def goal_mutation_permission(allowed: bool):
 class GoalInputScope(ExitStack):
     """Own goal authorization for fresh inputs consumed during one agent run."""
 
-    def __init__(self, initial_message: InboundMessage | None = None) -> None:
-        super().__init__()
-        self._initial_message = initial_message
-
-    def __enter__(self) -> GoalInputScope:
+    def __enter__(self) -> Self:
         super().__enter__()
         self.enter_context(goal_mutation_permission(False))
-        if self._initial_message is not None:
-            self.consume_inputs((self._initial_message,))
         return self
 
     def consume_inputs(self, messages: Iterable[InboundMessage]) -> None:

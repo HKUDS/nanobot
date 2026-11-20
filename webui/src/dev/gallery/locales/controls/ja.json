@@ -54,6 +54,11 @@
     "model": "サンプルのモデル",
     "disabledModel": "無効化されたモデル選択"
   },
+  "codexSpeed": {
+    "title": "Codex の速度",
+    "description": "Fast または超高速を選びます。選択中のモードをもう一度選ぶと解除できます。",
+    "options": "対応モデルでは超高速を表示します。"
+  },
   "segmented": {
     "title": "セグメント選択",
     "description": "少数の選択肢を常に表示します。",
@@ -100,6 +105,15 @@
     "confirm": "削除を確定",
     "removed": "サンプルを削除しました。",
     "available": "サンプルは利用可能です。"
+  },
+  "toast": {
+    "title": "トースト通知",
+    "description": "エラー、成功、取り消せる操作を短く知らせます。",
+    "options": "ToastProvider を配置し、useToast を使って通知を表示します。操作ボタン付きの通知は長めに表示されます。",
+    "showError": "エラーを表示",
+    "error": "サンプルを保存できませんでした。",
+    "pending": "サンプルを削除します。",
+    "restored": "サンプルを復元しました。"
   },
   "sheet": {
     "title": "サイドパネル",
@@ -504,5 +518,12 @@
     "view": "招待を表示",
     "dismissed": "プレビューで今後表示しないを選択しました",
     "starred": "プレビューで GitHub リンクを選択しました"
+  },
+  "sidebarPanel": {
+    "title": "サイドパネル",
+    "toggle": "パネルの表示を切り替え",
+    "content": "詳細は現在のペイン内に表示されます。",
+    "description": "共通の開くアニメーションを持つ非モーダルのサイドパネル。",
+    "options": "width, header, isClosing, floating, contentClassName"
   }
 }

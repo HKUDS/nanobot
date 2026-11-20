@@ -1,5 +1,3 @@
-"""Delayed network responses must not restore or overwrite workspace authorizations."""
-
 from __future__ import annotations
 
 import asyncio
@@ -149,14 +147,13 @@ async def test_member_read_cannot_restore_or_overwrite_a_changed_installation(
             release.set()
             with pytest.raises(linear_connect.ChannelConnectError, match="authorization changed"):
                 await pending
-            assert "/graphql" not in requests  # Never use a discarded refresh result.
+            assert "/graphql" not in requests
             assert LinearStateStore(state.path).installation("org-1") == expected
             assert state.installation("org-2") is not None
             if expected is None:
                 assert state.member_access("client-id", "org-1", "user-1") is None
             else:
                 assert state.member_access(expected.oauth_client_id, "org-1", "user-1") is False
-            # The genuine removal notice can arrive after the network response.
             channel, _ = _runtime(tmp_path / "runtime")
             channel._state = state  # pyright: ignore[reportPrivateUsage]
             channel._process_lifecycle_event({  # pyright: ignore[reportPrivateUsage]
@@ -206,7 +203,6 @@ async def test_late_refresh_cannot_overwrite_another_clients_rotation(tmp_path: 
             assert error.value.retryable
             assert state.installation("org-1") == winner
             assert state.member_access("client-id", "org-1", "user-1") is False
-            # Retrying reads the winner's credentials, without another rotation.
             await first.graphql("org-1", "query Test { viewer { id } }", {})
             assert count == 2
             assert tokens_used == ["Bearer access-2", "Bearer access-2"]
@@ -241,7 +237,6 @@ async def test_normal_refresh_preserves_authorization_and_member_choices(
     assert rotated is not None and rotated.access_token == "rotated"
     assert rotated.authorized_at == 1000.0
     assert reopened.member_access("client-id", "org-1", "user-1") is False
-    # Refresh is not a new grant: a real revocation from before the refresh still wins.
     assert reopened.delete_installation("org-1", revoked_at=1500.0)
 
 
@@ -253,14 +248,13 @@ async def test_forced_refresh_does_not_use_a_different_apps_credentials(tmp_path
     def handler(_request: httpx.Request) -> httpx.Response:
         nonlocal requests
         requests += 1
-        # The app changed while an earlier API request was in flight.
         state.save_installation(replace(_installation(), oauth_client_id="other-app"))
         return httpx.Response(401)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         with pytest.raises(LinearApiError, match="authorization changed"):
             await LinearClient(_config(), state, http).graphql("org-1", "query Test { viewer { id } }", {})
-    assert requests == 1  # No refresh request with another app's token.
+    assert requests == 1
 
 
 @pytest.mark.parametrize("replacement", ["reauthorized", "same_tokens", "other_app"])

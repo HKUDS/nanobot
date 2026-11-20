@@ -159,7 +159,6 @@ def test_missing_profile_name_is_not_treated_as_empty_string():
     body = _poll_body()
     body["entry"][0]["changes"][0]["value"]["contacts"] = [{"wa_id": "user:55"}]
 
-    # The absent ``profile`` key must not raise; names are optional per poll.
     assert parse_poll_batch(body).messages == []
 
 
@@ -206,12 +205,10 @@ def test_media_limits_match_the_documented_caps():
     assert media_limit_for("image/jpeg", "image") == 5 * 1024 * 1024
     assert media_limit_for("image/webp", "sticker") == 500 * 1024
     assert media_limit_for("video/mp4", "video") == 16 * 1024 * 1024
-    # An undeclared type still receives the generic 16 MB cap.
     assert media_limit_for("audio/ogg", "unknown") == 16 * 1024 * 1024
 
 
 def test_media_url_must_pass_the_ssrf_guard():
-    # A malformed or internal target must be refused before any request is made.
     assert quote_safe_url("http://127.0.0.1/media")[0] is False
     assert quote_safe_url("file:///etc/passwd")[0] is False
     assert quote_safe_url("")[0] is False

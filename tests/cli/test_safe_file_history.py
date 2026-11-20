@@ -22,7 +22,6 @@ class TestSanitizeSurrogates:
         assert _sanitize_surrogates("normal ascii text") == "normal ascii text"
 
     def test_emoji_already_correct(self):
-        """Properly encoded emoji should pass through unchanged."""
         assert _sanitize_surrogates("hello 🐈 nanobot") == "hello 🐈 nanobot"
 
     def test_mixed_unicode_preserved(self):
@@ -52,17 +51,15 @@ class TestSafeFileHistory:
         assert entries[0] == "normal ascii text"
 
     def test_windows_surrogate_pair_round_trips_as_emoji(self, tmp_path):
-        """Raw UTF-16 console input must survive a UTF-8 history write and reload."""
         history_path = tmp_path / "history"
         hist = SafeFileHistory(str(history_path))
         hist.store_string("hello \ud83d\udc08 nanobot")
 
-        history_path.read_bytes().decode("utf-8")  # Strict decoding must not raise.
+        history_path.read_bytes().decode("utf-8")
         reloaded = SafeFileHistory(str(history_path))
         assert list(reloaded.load_history_strings()) == ["hello 🐈 nanobot"]
 
     def test_mixed_unicode_preserved(self, tmp_path):
-        """CJK + emoji + latin should all pass through cleanly."""
         hist = SafeFileHistory(str(tmp_path / "history"))
         hist.store_string("你好 hello こんにちは 🎉")
         entries = list(hist.load_history_strings())

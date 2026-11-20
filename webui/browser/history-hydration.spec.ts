@@ -2,8 +2,6 @@ import { expect, test, type Locator, type Page, type Route, type WebSocketRoute 
 
 import type { InboundEvent, ThreadProjectionEvent, UITurnPhase, WebuiThreadPersistedPayload } from "../src/lib/types";
 
-// Controlled synthetic backend traffic, not a replay of an original user recording.
-// Every body assertion goes through the real socket/client/provider/ThreadShell path.
 const A = "nan311-a";
 const B = "nan311-b";
 const TURN = "nan311-active-turn";
@@ -24,7 +22,7 @@ function delta(sequence: number, text: string, streamId = "live-wire"): ThreadPr
   return { ...at(TURN, sequence, "answer"), event: "delta", stream_id: streamId, text };
 }
 
-function end(sequence: number, text: string, streamId: string, merge = false): ThreadProjectionEvent {
+function end(sequence: number, text: string, streamId: string, merge = false): Extract<ThreadProjectionEvent, { event: "stream_end" }> {
   return { ...at(TURN, sequence, "answer"), event: "stream_end", stream_id: streamId, text,
     ...(merge ? { resuming: true, merge_next: true } : { resuming: true }) };
 }
@@ -81,7 +79,6 @@ async function installBackend(page: Page) {
     const url = new URL(route.request().url());
     reads.push({ chatId: decodeURIComponent(url.pathname.split("/")[3]!).slice("websocket:".length),
       before: url.searchParams.get("before"), after: url.searchParams.get("after"), route });
-    // Deliberately leave this request pending until the test releases this exact page.
   });
   await page.routeWebSocket((url) => url.pathname === "/nan311-fixture-ws", (wire) => {
     socket = wire;
@@ -160,6 +157,99 @@ async function expectBefore(body: Locator, first: string, second: string) {
   expect(text.indexOf(second), `${second} must follow ${first}`).toBeGreaterThan(text.indexOf(first));
 }
 
+test("loading an earlier fragment restores a long turn without duplicating its answer", async ({ page }) => {
+  const { backend, body } = await openFixture(page);
+  const events: ThreadProjectionEvent[] = [
+    input(TURN, "Long-turn question"),
+    end(1, "First answer segment.", "long-wire", true),
+    { ...at(TURN, 2, "activity"), event: "message", kind: "tool_hint", text: "Inspecting long history" },
+    end(3, "First answer segment. Final answer segment.", "long-wire"),
+    { ...at(TURN, 4, "complete"), event: "turn_end" },
+  ];
+  const tail = history(events.slice(3), { before: "inside-turn", more: true });
+  tail.page = { ...tail.page, record_range: { turn: 0, start: 3, end: 5 }, truncated_oversized_turn: true };
+  await backend.release(await backend.read(), tail);
+  await expect(body.getByText("First answer segment. Final answer segment.", { exact: true })).toBeVisible();
+
+  const older = await requestOlder(page, backend, body, "inside-turn");
+  const prefix = history(events.slice(0, 3));
+  prefix.page = { ...prefix.page, record_range: { turn: 0, start: 0, end: 3 }, truncated_oversized_turn: true };
+  await backend.release(older, prefix);
+  await expect(body.getByText("Long-turn question", { exact: true })).toHaveCount(1);
+  await expect(body.getByText("First answer segment.", { exact: true })).toHaveCount(1);
+  await expect(body.getByText("Final answer segment.", { exact: true })).toHaveCount(1);
+  await expectBefore(body, "Long-turn question", "Final answer segment.");
+  const answer = body.locator("[data-thread-display-unit]").filter({ has: page.getByText("Final answer segment.", { exact: true }) });
+  await answer.hover();
+  await answer.getByRole("button", { name: "Message actions", exact: true }).click();
+  await page.locator("[data-message-block-activity-action]").click();
+  await expect(answer.getByText("Completed step Inspecting long history", { exact: true })).toBeVisible();
+  backend.healthy();
+});
+
+test("canonical recovery replaces the partial answer in an open oversized turn", async ({ page }) => {
+  const { backend, body } = await openFixture(page);
+  const active = history([end(3, "Partial answer", "partial-wire")], { before: "before-1", more: true, active: TURN });
+  active.page = { ...active.page, history_generation: "generation", record_range: { turn: 0, start: 1, end: 4001 }, truncated_oversized_turn: true };
+  await backend.release(await backend.read(), active);
+  await expect(body.getByText("Partial answer", { exact: true })).toBeVisible();
+  const recovered = history([
+    { chat_id: A, turn_id: TURN, event: "message", text: "Correct final answer" },
+    { ...at(TURN, 4002, "complete"), event: "turn_end" },
+  ], { before: "before-2", more: true });
+  recovered.page = { ...recovered.page, history_generation: "generation", record_range: { turn: 0, start: 2, end: 4002 },
+    truncated_oversized_turn: true, recovered_answers: true };
+  backend.refreshThread();
+  await backend.release(await backend.read(A, null, 1), recovered);
+  await expect(body.getByText("Correct final answer", { exact: true })).toBeVisible();
+  await expect(body.getByText("Partial answer", { exact: true })).toHaveCount(0);
+  await page.reload();
+  await backend.ready();
+  await backend.release(await backend.read(A, null, 2), recovered);
+  await expect(body.getByText("Correct final answer", { exact: true })).toHaveCount(1);
+  await expect(body.getByText("Partial answer", { exact: true })).toHaveCount(0);
+  backend.healthy();
+});
+
+test("prepending a fragment keeps the same answer at the reading position", async ({ page }) => {
+  const { backend, body } = await openFixture(page);
+  const prefix: ThreadProjectionEvent[] = [
+    input(TURN, "Earlier question"),
+    end(1, "Earlier answer", "earlier-wire"),
+    { ...at(TURN, 2, "activity"), event: "message", kind: "tool_hint", text: "Earlier tool" },
+  ];
+  const tail: ThreadProjectionEvent[] = [];
+  for (let index = 0; index < 24; index++) {
+    tail.push(end(3 + index * 2, `Tail answer ${index}`, `tail-${index}`));
+    tail.push({ ...at(TURN, 4 + index * 2, "activity"), event: "message", kind: "tool_hint", text: `Tail tool ${index}` });
+  }
+  tail.push({ ...at(TURN, 51, "complete"), event: "turn_end" });
+  const latest = history(tail, { before: "inside-turn", more: true });
+  latest.page = { ...latest.page, record_range: { turn: 0, start: 3, end: 3 + tail.length }, truncated_oversized_turn: true };
+  await backend.release(await backend.read(), latest);
+  await expect(body.getByText("Tail answer 23", { exact: true })).toBeAttached();
+  const older = await requestOlder(page, backend, body, "inside-turn");
+  const anchor = body.getByText("Tail answer 5", { exact: true });
+  await expect(anchor).toBeAttached();
+  await body.evaluate(async (node) => {
+    const unit = Array.from(node.querySelectorAll<HTMLElement>("[data-thread-display-unit]"))
+      .find((item) => item.textContent?.includes("Tail answer 5"))!;
+    // Establish the reading anchor through the native scroll event before HTTP commits.
+    const scrolled = new Promise<void>((resolve) => node.addEventListener("scroll", () => resolve(), { once: true }));
+    node.scrollTop += unit.getBoundingClientRect().top - node.getBoundingClientRect().top - 280;
+    await scrolled;
+  });
+  const position = () => anchor.evaluate((node) => node.getBoundingClientRect().top);
+  const before = await position();
+  const first = history(prefix);
+  first.page = { ...first.page, record_range: { turn: 0, start: 0, end: 3 }, truncated_oversized_turn: true };
+  await backend.release(older, first);
+  await expect(body.getByText("Earlier question", { exact: true })).toBeAttached();
+  await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
+  await expect.poll(async () => Math.abs((await position()) - before)).toBeLessThan(2);
+  backend.healthy();
+});
+
 test("idle compaction stays singular across live updates, thread refresh and cold replay", async ({ page }) => {
   const { backend, body } = await openFixture(page);
   const base = closedTurn("idle-completed", "Before idle compression", "Completed answer before idle compression.");
@@ -184,7 +274,7 @@ test("idle compaction stays singular across live updates, thread refresh and col
   backend.healthy();
 });
 
-test("pre-request compaction precedes the answer in live output and history replay", async ({ page }) => {
+test("pre-request compaction stays in place through retries and precedes the answer in history", async ({ page }) => {
   const { backend, body } = await openFixture(page);
   const base = closedTurn("before-native", "Previous question", "Previous answer.");
   await backend.release(await backend.read(), history(base));
@@ -193,18 +283,89 @@ test("pre-request compaction precedes the answer in live output and history repl
   const compact: ThreadProjectionEvent = { ...at(TURN, 2, "activity"), event: "context_compaction", compaction_id: "native-before-answer", phase: "succeeded" };
   await backend.send(question);
   await backend.send({ event: "context_compaction", chat_id: A, compaction_id: "native-before-answer", phase: "started" });
+  const notice = body.locator("[data-context-compaction]");
+  await expect(notice).toHaveCount(1);
+  await notice.evaluate((element) => { element.setAttribute("data-retry-notice", "original"); });
+  for (const attempt of [1, 2]) {
+    await backend.send({ event: "retry_status", chat_id: A, state: "waiting", attempt,
+      max_attempts: 4, error_kind: "timeout", retry_after_s: 1 });
+    await expect(notice).toHaveCount(1);
+    await expect(notice).toHaveAttribute("data-context-compaction", "started");
+    await expect(notice).toHaveAttribute("data-retry-notice", "original");
+  }
   await backend.send(compact);
+  await expect(notice).toHaveCount(1);
+  await expect(notice).toHaveAttribute("data-context-compaction", "succeeded");
   await backend.send(delta(3, LIVE));
   await backend.send(end(4, LIVE, "live-wire"));
   const complete: ThreadProjectionEvent = { ...at(TURN, 5, "complete"), event: "turn_end" };
   await backend.send(complete);
   await expectBefore(body, "Context compacted", LIVE);
+  const completed = history([...base, question, compact, end(4, LIVE, "live-wire"), complete]);
   backend.refreshThread();
-  await backend.release(await backend.read(A, null, 1), history([...base, question, compact, end(4, LIVE, "live-wire"), complete]));
+  await backend.release(await backend.read(A, null, 1), completed);
+  await expect(body.locator('[data-context-compaction="succeeded"]')).toHaveCount(1);
+  await expectBefore(body, "Context compacted", LIVE);
+  await page.reload();
+  await backend.ready();
+  await backend.release(await backend.read(A, null, 2), completed);
+  await expect(body.locator("[data-context-compaction]")).toHaveCount(1);
   await expect(body.locator('[data-context-compaction="succeeded"]')).toHaveCount(1);
   await expectBefore(body, "Context compacted", LIVE);
   backend.healthy();
 });
+
+for (const inputMethod of ["wheel", "touch"] as const) {
+  test(`keeps unresolved history retryable after live-first delivery (${inputMethod})`, async ({ page }) => {
+    const { backend, body } = await openFixture(page, inputMethod === "touch" ? 390 : 1440);
+    const initial = await backend.read();
+    await backend.send(delta(5, LIVE));
+    await expect(body.getByText(LIVE, { exact: true })).toBeVisible();
+
+    if (inputMethod === "touch") {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+      const bounds = (await body.boundingBox())!;
+      const x = bounds.x + bounds.width / 2;
+      const y = bounds.y + 80;
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      for (const travel of [40, 80, 120, 200]) {
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + travel }] });
+      }
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await cdp.detach();
+    } else {
+      await body.hover();
+      await page.mouse.wheel(0, -120);
+    }
+    await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
+    await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeVisible();
+    expect(backend.reads).toHaveLength(1);
+
+    await initial.route.fulfill({ status: 503, body: "Synthetic history unavailable" });
+    const retry = page.getByRole("button", { name: "Loading failed. Retry" });
+    await expect(retry).toBeVisible();
+    await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
+    await expect(body.getByText(LIVE, { exact: true })).toBeVisible();
+    await retry.click();
+    const retried = await backend.read(A, null, 1);
+    await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeVisible();
+    await backend.release(retried, liveFirstHistory());
+    await expect(body.getByText("Historical prefix question", { exact: true })).toBeAttached();
+    await expect(body.getByText(LIVE, { exact: true })).toHaveCount(1);
+    await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
+
+    const older = await requestOlder(page, backend, body, "nan311-before-2");
+    await backend.release(older, history(closedTurn("first-turn", "First question", "First answer.")));
+    await expect(body.getByText("First question", { exact: true })).toBeAttached();
+    await body.hover();
+    await page.mouse.wheel(0, -10_000);
+    await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeLessThanOrEqual(1);
+    await page.mouse.wheel(0, -120);
+    await expect(page.getByText("No earlier messages", { exact: true })).toBeVisible();
+    backend.healthy();
+  });
+}
 
 for (const width of [1440, 390]) {
   test(`synthetic live-first latest admits its prefix without refresh, then prepends two cursor pages (${width}px)`, async ({ page }) => {
@@ -254,7 +415,8 @@ test("synthetic HTTP-first cumulative text suppresses delayed covered chunks but
   const { backend, body } = await openFixture(page);
   const latest = await backend.read();
   const canonical = "Canonical answer";
-  await backend.release(latest, history([input(TURN, "HTTP-first question"), end(3, canonical, "resume-wire", true)], { active: TURN }));
+  await backend.release(latest, history([input(TURN, "HTTP-first question"),
+    { ...end(3, canonical, "resume-wire", true), text_from_seq: 1 }], { active: TURN }));
   await expect(body.getByText(canonical, { exact: true })).toBeVisible();
 
   await backend.send(delta(1, "Canonical ", "resume-wire"));
@@ -270,6 +432,194 @@ test("synthetic HTTP-first cumulative text suppresses delayed covered chunks but
   await expect(body.getByText(`${continued} after delayed end`, { exact: true })).toHaveCount(1);
   await expect(body.getByText(canonical, { exact: true })).toHaveCount(0);
   expect(backend.reads).toHaveLength(1);
+  backend.healthy();
+});
+
+test("compaction keeps active system files in the context graph through live delivery and replay", async ({ page }) => {
+  const { backend } = await openFixture(page);
+  const base = closedTurn("before-graph", "Previous question", "Previous answer.");
+  await backend.release(await backend.read(), history(base));
+  const question = input(TURN, "Question requiring compaction");
+  const system = { path: "/SOUL.md", name: "SOUL.md", state: "loaded" as const, tokens: 40 };
+  const guide = { path: "/guide.md", name: "guide.md", state: "discovered" as const, tokens: 0 };
+  const previous = { path: "/before.py", name: "before.py", state: "loaded" as const, tokens: 100 };
+  const systemGraph = { nodes: [system, guide], edges: [{ source: system.path, target: guide.path }] };
+  const started: ThreadProjectionEvent = { ...at(TURN, 1, "activity"), event: "model_request",
+    run_id: "run", request_id: "active", sequence: 1, phase: "started",
+    context_graph: { nodes: [system, guide, previous], edges: systemGraph.edges } };
+  const compact: ThreadProjectionEvent = { ...at(TURN, 2, "activity"), event: "context_compaction",
+    compaction_id: "active", phase: "succeeded", context_graph: systemGraph };
+  await backend.send(question);
+  await backend.send(started);
+  await page.getByTestId("composer-context-usage").click();
+  const sidebar = page.getByTestId("context-sidebar");
+  await expect(sidebar.getByRole("button", { name: "before.py", exact: true })).toBeVisible();
+  await backend.send(compact);
+  await expect(sidebar.getByRole("button", { name: "SOUL.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "guide.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "before.py", exact: true })).toHaveCount(0);
+
+  const replay = history([...base, question, started, compact], { active: TURN });
+  backend.refreshThread();
+  await backend.release(await backend.read(A, null, 1), replay);
+  await expect(sidebar.getByRole("button", { name: "SOUL.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "before.py", exact: true })).toHaveCount(0);
+  await page.reload();
+  await backend.ready();
+  await backend.release(await backend.read(A, null, 2), replay);
+  if (!await sidebar.isVisible()) await page.getByTestId("composer-context-usage").click();
+  await expect(sidebar.getByRole("button", { name: "SOUL.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "guide.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "before.py", exact: true })).toHaveCount(0);
+  backend.healthy();
+});
+
+test("the open context sidebar keeps its slot through hydration and empty conversation transitions", async ({ page }) => {
+  const { backend } = await openFixture(page);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const contextHistory = (chatId: string, name: string, tokens: number) => {
+    const turn = `${chatId}-context`;
+    return history([
+      input(turn, `Inspect ${name}`, chatId),
+      { ...at(turn, 1, "activity", chatId), event: "model_request", request_id: `${turn}-request`,
+        run_id: turn, sequence: 1, phase: "completed", context_window_tokens: 10000,
+        usage: { prompt_tokens: tokens, context_tokens: tokens },
+        request_usage: { prompt_tokens: tokens, context_tokens: tokens },
+        context_graph: { nodes: [{ path: `/${name}`, name, state: "loaded", tokens: 100 }], edges: [] } },
+      { ...at(turn, 2, "answer", chatId), event: "message", text: `Inspected ${name}.` },
+      { ...at(turn, 3, "complete", chatId), event: "turn_end" },
+    ], { chatId });
+  };
+  await backend.release(await backend.read(), contextHistory(A, "first.md", 1000));
+  await page.getByTestId("composer-context-usage").click();
+  const sidebar = page.getByTestId("context-sidebar");
+  await expect(sidebar.getByRole("button", { name: "first.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
+  await sidebar.evaluate((node) => node.setAttribute("data-session-slot", "retained"));
+  const expectSlot = async () => {
+    await page.locator(".thread-layout").evaluate(async (node) => {
+      await Promise.all(node.getAnimations().map((animation) => animation.finished));
+    });
+    await expect(sidebar).toHaveAttribute("data-session-slot", "retained");
+    await expect.poll(() => sidebar.evaluate((node) => node.getBoundingClientRect().width)).toBe(420);
+    await expect.poll(() => sidebar.locator(".file-preview-content").evaluate((node) => {
+      const surface = document.querySelector(".thread-composer-surface")!;
+      return Math.abs(node.getBoundingClientRect().bottom - surface.getBoundingClientRect().bottom);
+    })).toBeLessThan(1);
+    expect((await sidebar.locator(".file-preview-content").boundingBox())!.height).toBeGreaterThan(300);
+  };
+  await expectSlot();
+
+  await page.getByRole("button", { name: "Conversation B", exact: true }).click();
+  const target = await backend.read(B);
+  // The pane stays open with unknown usage, never the outgoing session's graph.
+  await expect(sidebar.getByRole("button", { name: "first.md", exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
+  await expectSlot();
+
+  await backend.release(target, history([], { chatId: B }));
+  await expect(page.locator('.thread-layout[data-layout="hero"]')).toBeVisible();
+  await expectSlot();
+  for (const event of contextHistory(B, "second.md", 2000).events) await backend.send(event);
+  await expect(sidebar.getByRole("button", { name: "second.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
+  await expectSlot();
+  backend.healthy();
+});
+
+test("switching away from file edits does not rebuild the outgoing diff before history hands over", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("nanobot-webui.settings-preferences", JSON.stringify({
+      activityMode: "expanded", fileEditDisplayMode: "diff",
+    }));
+  });
+  const { backend, body } = await openFixture(page);
+  const edited = history([
+    input("edited-turn", "Review these synthetic edits"),
+    { ...at("edited-turn", 1, "activity"), event: "file_edit", edits: [
+      { call_id: "edit-1", tool: "edit_file", path: "src/example.ts", phase: "end",
+        status: "done", added: 1, deleted: 1, approximate: false,
+        diff: { format: "unified", text: "--- a/src/example.ts\n+++ b/src/example.ts\n@@ -1 +1 @@\n-const previous = 1;\n+const updated = 2;\n" } },
+    ] },
+    { ...at("edited-turn", 2, "answer"), event: "message", text: "Synthetic edits complete." },
+    { ...at("edited-turn", 3, "complete"), event: "turn_end" },
+  ]);
+  await backend.release(await backend.read(), edited);
+  await expect(body.getByTestId("syntax-highlighted-diff-hunk")).toBeVisible();
+  const additions = await page.evaluateHandle(() => {
+    const state = { diffs: 0 };
+    const observer = new MutationObserver((records) => {
+      for (const record of records) for (const node of record.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        state.diffs += Number(node.matches('[data-testid="file-edit-diff"]'))
+          + node.querySelectorAll('[data-testid="file-edit-diff"]').length;
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return { state, observer };
+  });
+  await page.getByRole("button", { name: "Conversation B", exact: true }).click();
+  const next = await backend.read(B);
+  expect(await additions.evaluate(({ state, observer }) => {
+    observer.disconnect();
+    return state.diffs;
+  })).toBe(0);
+  await additions.dispose();
+  await backend.release(next, history(closedTurn("other-turn", "Other question", "Other answer.", B), { chatId: B }));
+  await expect(body.getByText("Other answer.", { exact: true })).toBeVisible();
+  await expect(body.getByTestId("file-edit-diff")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Conversation A", exact: true }).click();
+  await backend.release(await backend.read(A, null, 1), edited);
+  await expect(body.getByTestId("syntax-highlighted-diff-hunk")).toBeVisible();
+  await expect(body.getByText("Synthetic edits complete.", { exact: true })).toBeVisible();
+  backend.healthy();
+});
+
+test("cached conversations with a shared fork prefix reset activity disclosures on message handoff", async ({ page }) => {
+  const { backend, body } = await openFixture(page);
+  const prefix: ThreadProjectionEvent[] = [
+    input("shared-turn", "Shared question"),
+    { ...at("shared-turn", 1, "activity"), event: "message", kind: "tool_hint", text: "Shared activity detail" },
+    { ...at("shared-turn", 2, "answer"), event: "message", text: "Shared answer." },
+    { ...at("shared-turn", 3, "complete"), event: "turn_end" },
+  ];
+  const source = history([...prefix, ...closedTurn("source-turn", "Source question", "Source answer.")]);
+  const fork = history([
+    ...prefix.map((event) => ({ ...event, chat_id: B })),
+    ...closedTurn("fork-turn", "Fork question", "Fork answer.", B),
+  ], { chatId: B });
+  await backend.release(await backend.read(), source);
+  await expect(body.getByText("Source answer.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Conversation B", exact: true }).click();
+  await backend.release(await backend.read(B), fork);
+  await expect(body.getByText("Fork answer.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Conversation A", exact: true }).click();
+  await backend.read(A, null, 1);
+  await expect(body.getByText("Source answer.", { exact: true })).toBeVisible();
+  const sharedBlock = body.locator("[data-thread-display-unit]").filter({ has: page.getByText("Shared answer.", { exact: true }) });
+  await sharedBlock.hover();
+  await sharedBlock.getByRole("button", { name: "Message actions", exact: true }).click();
+  const activity = page.locator("[data-message-block-activity-action]");
+  await expect(activity).toHaveAttribute("aria-expanded", "false");
+  await activity.click();
+  await expect(sharedBlock.getByTestId("agent-activity-content")).toBeVisible();
+
+  await page.getByRole("button", { name: "Conversation B", exact: true }).click();
+  const forkRead = await backend.read(B, null, 1);
+  await expect(body.getByText("Fork answer.", { exact: true })).toBeVisible();
+  await sharedBlock.hover();
+  await sharedBlock.getByRole("button", { name: "Message actions", exact: true }).click();
+  await expect(activity).toHaveAttribute("aria-expanded", "false");
+  await page.keyboard.press("Escape");
+  await backend.release(forkRead, fork);
+
+  await page.getByRole("button", { name: "Conversation A", exact: true }).click();
+  await backend.release(await backend.read(A, null, 2), source);
+  await expect(body.getByText("Source answer.", { exact: true })).toBeVisible();
+  await sharedBlock.hover();
+  await sharedBlock.getByRole("button", { name: "Message actions", exact: true }).click();
+  await expect(activity).toHaveAttribute("aria-expanded", "false");
   backend.healthy();
 });
 

@@ -1,5 +1,3 @@
-"""The WebUI exposes only user-facing device data and owns cancellation."""
-
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -84,8 +82,6 @@ def test_cancels_copilot_login_while_device_prompt_is_loading(monkeypatch, tmp_p
             else:
                 replacement = login_oauth_provider(Config(), query, **kwargs)
                 assert registry.get("github_copilot", replacement["flow_id"]) is not None
-            # Cancellation must end the start request without waiting for the
-            # outstanding GitHub device-code response to return.
             with pytest.raises(WebUISettingsError, match="GitHub sign-in failed"):
                 started.result(timeout=1)
             assert saved == []

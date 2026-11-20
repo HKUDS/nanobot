@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any, cast
 
 from nanobot.bus.events import InboundMessage
@@ -56,6 +57,11 @@ class HistoryEditSource:
     revision: str
     message_id: str
     turn_id: str | None
+    text_digest: str
+
+    @classmethod
+    def from_text(cls, revision: str, message_id: str, turn_id: str | None, text: str) -> HistoryEditSource:
+        return cls(revision, message_id, turn_id, sha256(text.encode()).hexdigest())
 
 
 @dataclass(frozen=True)
@@ -70,5 +76,5 @@ class HistoryEditTarget:
 HistoryEditProjection = Callable[[Session, HistoryReader], HistoryEditTarget]
 HistoryEditAccepted = Callable[[Session], Awaitable[None]]
 HistoryEditSubmit = Callable[
-    [InboundMessage, HistoryEditSource, HistoryEditProjection, HistoryEditAccepted], Awaitable[Session]
+    [InboundMessage, HistoryEditSource, HistoryEditProjection, HistoryEditAccepted], Awaitable[None]
 ]

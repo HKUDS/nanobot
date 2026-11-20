@@ -1,5 +1,3 @@
-"""Provider wrapper that transparently fails over to fallback models on error."""
-
 # pyright: reportIncompatibleMethodOverride=false, reportIncompatibleVariableOverride=false
 
 from __future__ import annotations
@@ -12,7 +10,7 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.events import RetryStatusEvent
+from nanobot.events import NO_EVENTS, RetryStatusEvent
 from nanobot.providers.base import (
     GenerationSettings,
     LLMCallObserver,
@@ -23,10 +21,12 @@ from nanobot.providers.base import (
     RetryEventCallback,
     RetryStatusCallback,
 )
+from nanobot.providers.compaction import ProviderStateCommitError, provider_compaction_scope
+from nanobot.providers.image_input import replace_replayed_images
+from nanobot.providers.model_options import ModelOptions
 from nanobot.providers.oauth_catalog_cache import oauth_catalog_auth_rejected
 from nanobot.providers.registry import find_by_name
 
-# Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
 _PRIMARY_FAILURE_THRESHOLD = 3
 _PRIMARY_COOLDOWN_S = 60
 _FALLBACK_ERROR_KINDS = frozenset({
@@ -209,11 +209,9 @@ class FallbackProvider(LLMProvider):
         return replace(provider_context, context_window_tokens=context_window_tokens)
 
     def _primary_available(self) -> bool:
-        """Return True if the primary provider is not currently tripped."""
         if self._primary_tripped_at is None:
             return True
         if time.monotonic() - self._primary_tripped_at >= _PRIMARY_COOLDOWN_S:
-            # Half-open: allow one probe attempt.
             return True
         return False
 
@@ -227,7 +225,6 @@ class FallbackProvider(LLMProvider):
     async def _run_chat_with_retry(
         self,
         kw: dict[str, Any],
-        original_messages: list[dict[str, Any]],
         *,
         stream: bool,
         retry_mode: str,
@@ -237,7 +234,6 @@ class FallbackProvider(LLMProvider):
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        """Retry each provider before advancing through the fallback chain."""
         call_kwargs = dict(kw)
         provider_context = call_kwargs.get("provider_context")
         if isinstance(provider_context, ProviderCallContext):
@@ -288,18 +284,24 @@ class FallbackProvider(LLMProvider):
                 return await provider.chat_stream_with_retry(**provider_kwargs)
             return await provider.chat_with_retry(**provider_kwargs)
 
-        return await self._retry_with_fallback(
-            _call_provider,
-            call_kwargs,
-            original_messages,
-            retry_mode=retry_mode,
-            on_retry_wait=on_retry_wait,
-            on_retry_exhausted=on_retry_exhausted,
-            on_retry_status=on_retry_status,
-            has_streamed=has_streamed,
-            on_stream_recover=recover_stream,
-            persistent_retry_guard=should_retry_guard,
-        )
+        context = call_kwargs.get("provider_context")
+        events = context.events if isinstance(context, ProviderCallContext) else NO_EVENTS
+        async with provider_compaction_scope(
+            events, context.compaction if isinstance(context, ProviderCallContext) else None,
+        ) as compaction:
+            if isinstance(context, ProviderCallContext):
+                call_kwargs["provider_context"] = replace(context, compaction=compaction)
+            return await self._retry_with_fallback(
+                _call_provider,
+                call_kwargs,
+                retry_mode=retry_mode,
+                on_retry_wait=on_retry_wait,
+                on_retry_exhausted=on_retry_exhausted,
+                on_retry_status=on_retry_status,
+                has_streamed=has_streamed,
+                on_stream_recover=recover_stream,
+                persistent_retry_guard=should_retry_guard,
+            )
 
     async def chat_with_context(
         self,
@@ -346,7 +348,6 @@ class FallbackProvider(LLMProvider):
         self,
         call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
         kwargs: dict[str, Any],
-        original_messages: list[dict[str, Any]],
         *,
         retry_mode: str,
         on_retry_wait: RetryEventCallback | None,
@@ -356,7 +357,6 @@ class FallbackProvider(LLMProvider):
         on_stream_recover: Callable[[], Awaitable[None]] | None,
         persistent_retry_guard: Callable[[], bool] | None,
     ) -> LLMResponse:
-        """Retry each candidate, deferring terminal events until the chain fails."""
 
         async def _call_chain(**chain_kwargs: Any) -> LLMResponse:
             last_exhausted_message: str | None = None
@@ -429,7 +429,6 @@ class FallbackProvider(LLMProvider):
         return await self._run_with_retry(
             _call_chain,
             dict(kwargs),
-            original_messages,
             retry_mode="persistent",
             on_retry_wait=on_retry_wait,
             on_retry_exhausted=on_retry_exhausted,
@@ -478,6 +477,25 @@ class FallbackProvider(LLMProvider):
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
         on_fallback_attempt: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
+        context = kwargs.get("provider_context")
+        events = context.events if isinstance(context, ProviderCallContext) else NO_EVENTS
+        async with provider_compaction_scope(
+            events, context.compaction if isinstance(context, ProviderCallContext) else None,
+        ) as compaction:
+            if isinstance(context, ProviderCallContext):
+                kwargs = {**kwargs, "provider_context": replace(context, compaction=compaction)}
+            return await self._try_candidates(
+                call, kwargs, has_streamed, on_stream_recover, on_fallback_attempt,
+            )
+
+    async def _try_candidates(
+        self,
+        call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
+        kwargs: dict[str, Any],
+        has_streamed: list[bool] | None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None,
+        on_fallback_attempt: Callable[[], Awaitable[None]] | None,
+    ) -> LLMResponse:
         primary_model = kwargs.get("model") or self._primary.get_default_model()
         primary_was_attempted = False
         primary_response: LLMResponse | None = None
@@ -486,10 +504,19 @@ class FallbackProvider(LLMProvider):
         # continuation, so the incoming primary state remains reusable.
         preserve_primary_state = True
 
-        if self._primary_available():
+        messages = kwargs["messages"]
+        text_messages = replace_replayed_images(messages)
+        primary_messages = messages if self._primary.supports_images else text_messages
+        provider_context = kwargs.get("provider_context")
+        has_fresh_images = self._request_contains_images(text_messages, provider_context)
+        image_error = self._primary._image_input_error(primary_messages, provider_context)
+        if image_error is not None:
+            primary_response = image_error
+            primary_error = image_error.content or primary_error
+        elif self._primary_available():
             primary_was_attempted = True
             response, primary_exception = await self._call_provider(
-                call, self._primary, kwargs
+                call, self._primary, {**kwargs, "messages": primary_messages}
             )
             if primary_exception is not None:
                 logger.warning(
@@ -543,6 +570,8 @@ class FallbackProvider(LLMProvider):
         last_response = primary_response
         primary_skipped = not primary_was_attempted
         for idx, fallback in enumerate(self._fallback_presets):
+            if has_fresh_images and not fallback.supports_images:
+                continue
             fallback_model = fallback.model
             if has_streamed is not None and has_streamed[0]:
                 is_timeout = (
@@ -559,7 +588,9 @@ class FallbackProvider(LLMProvider):
                     await on_stream_recover()
                 else:
                     break
-            if idx == 0 and primary_skipped:
+            if image_error is not None:
+                logger.info("Primary model '{}' does not accept images; trying '{}'", primary_model, fallback_model)
+            elif idx == 0 and primary_skipped:
                 logger.info(
                     "Primary model '{}' circuit open, trying fallback '{}'",
                     primary_model, fallback_model,
@@ -587,13 +618,14 @@ class FallbackProvider(LLMProvider):
 
             fallback_kwargs = {
                 **kwargs,
+                "messages": messages if fallback.supports_images else text_messages,
                 "model": fallback_model,
                 "max_tokens": fallback.max_tokens,
                 "temperature": fallback.temperature,
             }
             provider_context = fallback_kwargs.get("provider_context")
             if isinstance(provider_context, ProviderCallContext):
-                state = provider_context.conversation_state
+                state = provider_context.current_conversation_state
                 if state is not None and not fallback_provider.can_resume_conversation_state(
                     state,
                     fallback_model,
@@ -622,6 +654,7 @@ class FallbackProvider(LLMProvider):
                         if provider_context.response_preset is not None else None
                     ),
                     response_is_fallback=provider_context.response_preset is not None,
+                    model_options=ModelOptions(),
                 )
             if fallback.reasoning_effort is None:
                 fallback_kwargs.pop("reasoning_effort", None)
@@ -663,13 +696,13 @@ class FallbackProvider(LLMProvider):
             "All {} fallback model(s) failed",
             len(self._fallback_presets),
         )
-        # Return the last error response we saw (primary or last fallback).
         if last_response is not None:
             return replace(
                 last_response,
                 preserve_provider_state_on_error=preserve_primary_state,
                 primary_error_kind=(
-                    self.public_error_kind(primary_response) if primary_response is not None else None
+                    self.public_error_kind(primary_response)
+                    if primary_response is not None and image_error is None else None
                 ),
             )
         # Primary was skipped and no fallback returned a response. Keep the result
@@ -699,7 +732,7 @@ class FallbackProvider(LLMProvider):
         """Turn provider exceptions into error responses without swallowing cancellation."""
         try:
             return await call(provider, kwargs), None
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ProviderStateCommitError):
             raise
         except Exception as exc:
             response = LLMProvider._error_response_from_exception(exc)

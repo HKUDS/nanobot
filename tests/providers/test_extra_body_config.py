@@ -1,5 +1,3 @@
-"""Tests for provider extra_body config injection into request payloads."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -12,13 +10,8 @@ from nanobot.providers.openai_compat_provider import (
 )
 from nanobot.providers.registry import find_by_name
 
-# ---------------------------------------------------------------------------
-# _deep_merge unit tests
-# ---------------------------------------------------------------------------
-
 
 class TestDeepMerge:
-    """Verify recursive dict merge semantics."""
 
     def test_flat_merge(self) -> None:
         assert _deep_merge({"a": 1}, {"b": 2}) == {"a": 1, "b": 2}
@@ -56,13 +49,7 @@ class TestDeepMerge:
         assert override == {"a": {"y": 2}}
 
 
-# ---------------------------------------------------------------------------
-# Provider construction
-# ---------------------------------------------------------------------------
-
-
 class TestExtraBodyInit:
-    """Verify the provider stores extra_body from config."""
 
     def test_default_is_empty(self) -> None:
         provider = OpenAICompatProvider(api_key="test")
@@ -78,11 +65,6 @@ class TestExtraBodyInit:
         assert provider._extra_body == body
 
 
-# ---------------------------------------------------------------------------
-# _build_kwargs integration
-# ---------------------------------------------------------------------------
-
-
 def _make_provider(extra_body: dict[str, Any] | None = None) -> OpenAICompatProvider:
     return OpenAICompatProvider(
         api_key="test-key",
@@ -96,7 +78,6 @@ def _simple_messages() -> list[dict[str, Any]]:
 
 
 class TestBuildKwargsExtraBody:
-    """Verify extra_body flows into _build_kwargs output."""
 
     def test_no_extra_body_no_key(self) -> None:
         provider = _make_provider()
@@ -143,7 +124,6 @@ class TestBuildKwargsExtraBody:
         assert kwargs["extra_body"] == {"custom_param": "value"}
 
     def test_extra_body_merges_with_thinking(self) -> None:
-        """Config extra_body should merge with (and override) thinking params."""
         from nanobot.providers.registry import ProviderSpec
 
         spec = ProviderSpec(
@@ -164,12 +144,10 @@ class TestBuildKwargsExtraBody:
             temperature=0.1, reasoning_effort="high", tool_choice=None,
         )
         body = kwargs.get("extra_body", {})
-        # Config param should be present
         assert body.get("custom_param") == "value"
         assert body["thinking"] == {"type": "enabled"}
 
     def test_guided_json_injection(self) -> None:
-        """Real-world use case: vLLM guided decoding."""
         schema = {"type": "object", "properties": {"name": {"type": "string"}}}
         provider = _make_provider({"guided_json": schema})
         kwargs = provider._build_kwargs(
@@ -180,7 +158,6 @@ class TestBuildKwargsExtraBody:
         assert kwargs["extra_body"]["guided_json"] == schema
 
     def test_repetition_penalty_injection(self) -> None:
-        """Real-world use case: local model sampling param."""
         provider = _make_provider({"repetition_penalty": 1.15})
         kwargs = provider._build_kwargs(
             messages=_simple_messages(),
@@ -191,7 +168,6 @@ class TestBuildKwargsExtraBody:
 
 
 class TestBuildResponsesBodyExtraBody:
-    """Verify extra_body flows into Responses API request bodies."""
 
     def test_responses_extra_body_merges_top_level_fields(self) -> None:
         provider = OpenAICompatProvider(
@@ -353,13 +329,7 @@ class TestBuildResponsesBodyExtraBody:
         ]
 
 
-# ---------------------------------------------------------------------------
-# Schema validation
-# ---------------------------------------------------------------------------
-
-
 class TestSchemaConfig:
-    """Verify ProviderConfig accepts extra_body."""
 
     def test_default_is_none(self) -> None:
         from nanobot.config.schema import ProviderConfig

@@ -59,8 +59,16 @@ const samples: { label: string; message: UIMessage }[] = [
 ];
 
 export function AttachmentLayoutFixture() {
+  const processingSamples: typeof samples = (["pending", "consumed"] as const).map((status) => ({
+    label: `Attachments: ${status}`,
+    message: {
+      id: `attachments-${status}`, role: "user", content: "", createdAt: 8, processingStatus: status,
+      media: [archive, image("Study.svg", "#83a9d8"), { kind: "video", name: "sample.webm", url: sampleVideo }],
+    },
+  }));
+  const messages = new URLSearchParams(window.location.search).has("processing") ? processingSamples : samples;
   return <main className="space-y-8 px-4 py-6">
-    {samples.map(({ label, message }) => <section key={message.id} aria-label={label}>
+    {messages.map(({ label, message }) => <section key={message.id} aria-label={label}>
       <h2 className="mb-3 text-xs font-medium text-muted-foreground">{label}</h2>
       <MessageBubble message={message} />
     </section>)}

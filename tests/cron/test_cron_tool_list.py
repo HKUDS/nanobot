@@ -1,5 +1,3 @@
-"""Tests for CronTool._list_jobs() output formatting."""
-
 import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -29,9 +27,6 @@ def _bound_chat(chat_id: str = "chat-1") -> dict[str, str]:
         "origin_channel": "websocket",
         "origin_chat_id": chat_id,
     }
-
-
-# -- _format_timing tests --
 
 
 def test_format_timing_cron_with_tz(tmp_path) -> None:
@@ -72,11 +67,8 @@ def test_format_timing_at(tmp_path) -> None:
 
 def test_format_timing_fallback(tmp_path) -> None:
     tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every")  # no every_ms
+    s = CronSchedule(kind="every")
     assert tool._format_timing(s) == "every"
-
-
-# -- _format_state tests --
 
 
 def test_format_state_empty(tmp_path) -> None:
@@ -127,9 +119,6 @@ def test_format_state_unknown_status(tmp_path) -> None:
     state = CronJobState(last_run_at_ms=1773673200000, last_status=None)
     lines = tool._format_state(state, CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"))
     assert "unknown" in lines[0]
-
-
-# -- _list_jobs integration tests --
 
 
 def test_list_empty(tmp_path) -> None:
@@ -194,7 +183,6 @@ async def test_list_shows_last_run_state(tmp_path) -> None:
         message="test",
         **_bound_chat(),
     )
-    # Simulate a completed run by updating state in the store
     job.state.last_run_at_ms = 1773673200000
     job.state.last_status = "ok"
     tool._cron._save_store()
@@ -372,7 +360,6 @@ async def test_legacy_zero_interval_job_can_be_listed_repaired_and_removed(tmp_p
     tool = _make_tool(tmp_path)
     store_path = tool._cron.store_path
     store_path.parent.mkdir(parents=True)
-    # Older versions accepted and persisted zero-interval jobs that never ran.
     store_path.write_text(json.dumps({
         "version": 1,
         "jobs": [{
@@ -468,7 +455,6 @@ def test_add_job_empty_message_returns_actionable_error(tmp_path) -> None:
 
 
 def test_add_job_captures_owner_and_origin_without_legacy_delivery_fields(tmp_path) -> None:
-    """CronTool stores owner/session identity separately from origin delivery context."""
     tool = _make_tool(tmp_path)
     meta = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
     with request_context(

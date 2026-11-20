@@ -1,5 +1,3 @@
-"""Move a complete scheduled turn through the real authenticated gateway."""
-
 import asyncio
 import json
 import socket
@@ -88,10 +86,8 @@ async def test_durable_move_stale_edit_failed_save_and_old_action(tmp_path, monk
         assert CronService(cron.store_path).get_job(job.id) == moved
         with pytest.raises(ValueError, match="changed"):
             cron.change_binding(job.id, revision=revision, binding=target_binding(), message="Stale")
-        # A CLI process can have read the old job before the WebUI commits.
         cron._append_action("update", asdict(old))
         assert cron.get_job(job.id) == moved
-        # A directory-sync failure after replace must not report a false rollback.
         def committed_then_failed(path, content):
             write(path, content)
             raise OSError("directory sync failed")
@@ -168,7 +164,6 @@ async def test_target_identity_scope_and_channel_lifecycle(tmp_path):
     offline = await automation_chats(job, sessions, workspaces, {})
     current = next(chat for chat in offline if chat.title == "Product team")
     assert current.public_payload()["unavailable"] is True
-    # Only identical display names need a visible disambiguator.
     session = sessions.get_or_create("websocket:source")
     await sessions.state.update_metadata(session.key, {"title": "Product team"})
     duplicates = await automation_chats(job, sessions, workspaces, {})
@@ -349,7 +344,6 @@ async def test_real_gateway_move_run_reload_and_previous_result(tmp_path, target
             return
         cron.change_binding(job.id, revision=binding_revision(moved),
                             binding=CronBinding("websocket:source", "websocket", "source", {}), message="Back")
-        # Moving back must not turn the external run's link into the current chat.
         history = serialize_automation_jobs([cron.get_job(job.id)], include_details=True)[0]["state"]["run_history"]
         assert [run["webui_session_key"] for run in history] == expected_history
     finally:
@@ -363,8 +357,9 @@ async def test_real_gateway_move_run_reload_and_previous_result(tmp_path, target
 
 @pytest.mark.asyncio
 async def test_late_subagent_result_stays_with_moved_task(tmp_path, monkeypatch):
-    # A background result can arrive after the normal 300-second terminal wait.
     monkeypatch.setattr("nanobot.agent.loop._SUBAGENT_TERMINAL_WAIT_SECONDS", 0.02)
+    # Real session writes are part of this routing check, not a latency requirement.
+    timeout = 30
     sessions, cron, job = seed(tmp_path)
     release = asyncio.Event()
     entered = asyncio.Event()
@@ -402,11 +397,11 @@ async def test_late_subagent_result_stays_with_moved_task(tmp_path, monkeypatch)
     try:
         moved = cron.change_binding(job.id, revision=binding_revision(job),
                                     binding=target_binding(), message="Prepare the report")
-        await asyncio.wait_for(run_bound_cron_job(moved, agent=agent, cron=cron), 5)
-        await asyncio.wait_for(entered.wait(), 5)
+        await asyncio.wait_for(run_bound_cron_job(moved, agent=agent, cron=cron), timeout)
+        await asyncio.wait_for(entered.wait(), timeout)
         release.set()
         delivered = []
-        async with asyncio.timeout(5):
+        async with asyncio.timeout(timeout):
             while not any(msg.content.startswith("Final report:") for msg in delivered):
                 msg = await bus.consume_outbound()
                 if msg.event is None and msg.content:

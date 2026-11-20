@@ -1,5 +1,3 @@
-"""Dependency-free Feishu configuration model shared by management and runtime."""
-
 from typing import Literal
 
 from pydantic import Field

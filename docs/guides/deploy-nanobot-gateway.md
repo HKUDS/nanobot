@@ -49,8 +49,8 @@ nanobot gateway --verbose
 
 ## Security notes
 
-- Plan ports before exposing services. Gateway health defaults to `18790`, WebUI/WebSocket defaults to `8765`, and `nanobot serve` defaults to `8900`.
-- Protect WebUI and API network listeners with their respective token or key settings. The health endpoint has no authentication; keep its published port on loopback or behind a restricted monitoring interface.
+- Plan ports before exposing services. Gateway health defaults to `18790`, and WebUI/WebSocket defaults to `8765`.
+- Protect shared WebUI access with a WebSocket token. The health endpoint has no authentication; keep its published port on loopback or behind a restricted monitoring interface.
 - Keep chat access control intentional before deploying.
 - Use Docker or Linux sandboxing when shell tools are enabled for unattended work.
 

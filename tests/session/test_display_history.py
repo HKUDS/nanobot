@@ -1,5 +1,3 @@
-"""One SQLite owner for model messages and durable, generation-bound display facts."""
-
 from __future__ import annotations
 
 import json
@@ -10,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.session.display_history import HistoryFact, HistoryKind
+from nanobot.session.location import SessionLocation
 from nanobot.session.manager import SessionManager
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.webui.forking import create_webui_chat_fork
@@ -247,6 +246,54 @@ asyncio.run(run())
     else:
         assert fork is None and facts == []
     assert reopened.read_session_file(source.key)["messages"] == source.messages
+
+
+async def test_legacy_import_waits_for_unmigrated_workspace_owner(tmp_path, monkeypatch):
+    root = tmp_path / "sessions"
+    directory = tmp_path / "webui"
+    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: directory)
+    locations = {}
+    sources = {}
+    for name in ("first", "second"):
+        location = SessionLocation(tmp_path / name, sessions_root=root)
+        locations[name] = location
+        key = f"websocket:{name}"
+        source = location.sessions_dir / f"{SessionLocation.storage_key(key)}.jsonl"
+        source.write_text("\n".join(json.dumps(record) for record in [
+            {"_type": "metadata", "key": key, "metadata": {}},
+            {"role": "user", "content": f"question {name}"},
+        ]) + "\n", encoding="utf-8")
+        display = _legacy(directory, key, [
+            {"event": "user", "chat_id": name, "text": f"question {name}"},
+            {"event": "message", "chat_id": name, "text": f"answer {name}"},
+            {"event": "turn_end", "chat_id": name},
+        ])
+        sources.update({path: path.read_bytes() for path in (source, display)})
+
+    async def initialize(name: str):
+        sessions = SessionManager(tmp_path / name, sessions_root=root)
+        key = f"websocket:{name}"
+        try:
+            await WebUITranscriptRecorder(sessions).initialize()
+            assert [row["key"] for row in await sessions.state.list_sessions()] == [key]
+            session = await sessions.state.read(key)
+            assert session is not None
+            assert session.messages == [{"role": "user", "content": f"question {name}"}]
+            facts = await sessions.state.project_history(key, lambda history: history.all_facts())
+            assert [(fact.kind, fact.content.get("text")) for fact in facts] == [
+                (HistoryKind.INPUT, f"question {name}"),
+                (HistoryKind.ANSWER, f"answer {name}"),
+                (HistoryKind.COMPLETION, None),
+            ]
+        finally:
+            await sessions.state.aclose()
+
+    await initialize("second")
+    assert not (locations["first"].sessions_dir / "sessions.sqlite3").exists()
+    await initialize("first")
+    await initialize("second")
+    await initialize("first")
+    assert {path: path.read_bytes() for path in sources} == sources
 
 
 @pytest.mark.asyncio

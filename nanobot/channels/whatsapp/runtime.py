@@ -1,5 +1,4 @@
 # pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportUnusedFunction=false
-"""WhatsApp channel implementation using neonize."""
 
 from __future__ import annotations
 
@@ -7,6 +6,7 @@ import asyncio
 import mimetypes
 import re
 import secrets
+import sys
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
@@ -16,6 +16,7 @@ from typing import Any, Literal, NamedTuple, cast
 from urllib.parse import urlparse
 
 import httpx
+from loguru import logger
 from pydantic import Field
 
 from nanobot.bus.delivery import ChannelNotReadyError
@@ -38,6 +39,10 @@ class WhatsAppConfig(Base):
     database_path: str = ""
     use_proxy: bool = False
     lid_mappings: dict[str, str] = Field(default_factory=dict)
+
+
+class WhatsAppDependencyError(RuntimeError):
+    """A dependency failure with a safe, actionable message."""
 
 
 class _NeonizeAPI(NamedTuple):
@@ -81,6 +86,16 @@ def _legacy_bridge_config_fields(config: dict[str, Any]) -> list[str]:
     return [field for field in _LEGACY_BRIDGE_CONFIG_FIELDS if field in config]
 
 
+def _libmagic_error_message() -> str:
+    if sys.platform == "darwin":
+        hint = "Install it with: brew install libmagic"
+    elif sys.platform == "win32":
+        hint = "Check the python-magic-bin installation and Python architecture."
+    else:
+        hint = "Install your system's libmagic package (Debian/Ubuntu: sudo apt install libmagic1)."
+    return f"WhatsApp could not load libmagic. {hint}"
+
+
 def _load_neonize() -> _NeonizeAPI:
     global _NEONIZE_API
     if _NEONIZE_API is not None:
@@ -88,17 +103,42 @@ def _load_neonize() -> _NeonizeAPI:
 
     try:
         import magic
+    except ModuleNotFoundError as exc:
+        if exc.name != "magic":
+            raise
+        logger.exception("Could not load WhatsApp python-magic")
+        raise WhatsAppDependencyError(
+            "WhatsApp requires python-magic (python-magic-bin on Windows). "
+            "Run: nanobot plugins enable whatsapp"
+        ) from exc
+    except (ImportError, OSError) as exc:
+        detail = str(exc).lower()
+        if not (
+            isinstance(exc, ImportError) and "failed to find libmagic" in detail
+            or isinstance(exc, OSError) and "libmagic" in detail
+        ):
+            raise
+        logger.exception("Could not load WhatsApp libmagic")
+        raise WhatsAppDependencyError(_libmagic_error_message()) from exc
+
+    detect_mime = getattr(magic, "from_file", None)
+    detect_buffer = getattr(magic, "from_buffer", None)
+    if not callable(detect_mime) or not callable(detect_buffer):
+        raise WhatsAppDependencyError(
+            "The magic module is incompatible. Check python-magic "
+            "(python-magic-bin on Windows) in nanobot's Python environment."
+        )
+
+    try:
         from neonize.aioze.client import NewAClient
         from neonize.aioze.events import ConnectedEv, DisconnectedEv, MessageEv, PairStatusEv
         from neonize.utils.jid import build_jid
-
-        detect_mime = getattr(magic, "from_file", None)
-        detect_buffer = getattr(magic, "from_buffer", None)
-        if not callable(detect_mime) or not callable(detect_buffer):
-            raise ImportError("python-magic does not expose from_file/from_buffer")
-    except ImportError as exc:
-        raise RuntimeError(
-            "WhatsApp dependencies not installed. Run: nanobot plugins enable whatsapp"
+    except ModuleNotFoundError as exc:
+        if exc.name != "neonize":
+            raise
+        logger.exception("Could not load WhatsApp Neonize")
+        raise WhatsAppDependencyError(
+            "Neonize is not installed. Run: nanobot plugins enable whatsapp"
         ) from exc
 
     _NEONIZE_API = _NeonizeAPI(
@@ -305,6 +345,9 @@ class WhatsAppChannel(BaseChannel):
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return WhatsAppConfig().model_dump(by_alias=True)
+
+    def start_error_message(self, error: Exception) -> str | None:
+        return str(error) if isinstance(error, WhatsAppDependencyError) else None
 
     def __init__(
         self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
@@ -649,11 +692,6 @@ class WhatsAppChannel(BaseChannel):
                 self._self_jids.add(_bare_jid(jid))
 
     async def _send_read_receipt(self, client: Any, source: Any, message_id: str) -> None:
-        """Send a read receipt (blue double-check) for an incoming message.
-
-        Best-effort: any failure is logged at debug level and swallowed so it
-        never blocks message processing.
-        """
         if not message_id:
             return
         try:
@@ -669,7 +707,7 @@ class WhatsAppChannel(BaseChannel):
                 sender=sender,
                 receipt=ReceiptType.READ,
             )
-        except Exception as exc:  # noqa: BLE001 - read receipt is best-effort
+        except Exception as exc:
             self.logger.debug("Failed to send WhatsApp read receipt: {}", exc)
 
     async def _handle_neonize_message(self, client: Any, event: Any) -> None:
@@ -706,7 +744,6 @@ class WhatsAppChannel(BaseChannel):
             while len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.popitem(last=False)
 
-        # Mark the incoming message as read (blue double-check). Best-effort.
         await self._send_read_receipt(client, source, message_id)
 
         participant_jid = _normalize_jid(_safe_attr(source, "Sender"))

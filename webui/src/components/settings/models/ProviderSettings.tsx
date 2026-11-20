@@ -81,7 +81,7 @@ const PROVIDER_REQUEST_OPTIONS: Partial<Record<string, ProviderRequestOption[]>>
   openai_codex: [{
     kind: "priority",
     titleKey: "settings.providers.capabilityFastMode",
-    title: "Fast mode",
+    title: "Fast",
     helpKey: "settings.providers.capabilityFastModeHelp",
     help: "Faster responses, increased usage.",
   }],

@@ -53,7 +53,6 @@ export function footerTelemetry(
   return new StyledText([chunk(`${percentage}% context`, theme.accent, true)])
 }
 
-/** Give shortcuts visual hierarchy without turning the footer into a toolbar. */
 export function footerHints(hints: readonly FooterHint[], theme: FooterHintTheme): StyledText {
   const chunks: TextChunk[] = []
   hints.forEach((hint, index) => {

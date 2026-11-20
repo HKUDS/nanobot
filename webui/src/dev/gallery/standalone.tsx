@@ -70,12 +70,8 @@ function ChatsPreview() {
       activeKey={active} onSelect={setActive} pinnedKeys={pinned} archivedKeys={archived} showArchived={mode === "archived"}
       loading={mode === "loading"}
       onTogglePin={(key) => setPinned(toggle(pinned, key))} onToggleArchive={(key) => setArchived(toggle(archived, key))}
-      onRequestDelete={(key, _label, onDecision) => {
-        onDecision?.(true);
-        setSessions((items) => items.filter((item) => item.key !== key));
-      }}
-      onRequestDeleteMany={(items, onDecision) => {
-        onDecision?.(true);
+      onRequestDelete={(key) => setSessions((items) => items.filter((item) => item.key !== key))}
+      onRequestDeleteMany={(items) => {
         const keys = new Set(items.map((item) => item.key));
         setSessions((current) => current.filter((item) => !keys.has(item.key)));
       }}

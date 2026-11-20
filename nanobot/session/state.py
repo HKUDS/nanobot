@@ -1,5 +1,3 @@
-"""Ordered session operations with detached reads and durable acknowledgements."""
-
 from __future__ import annotations
 
 import asyncio
@@ -29,7 +27,6 @@ from nanobot.session.manager import (
     SessionPolicy,
     fork_session,
 )
-from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.sqlite_store import SessionConflictError, SqliteSessionStore
 from nanobot.session.types import PARENT_SESSION_KEY, SessionTypes
 from nanobot.utils.cancellation import shield_and_drain
@@ -62,12 +59,16 @@ class SessionState:
         workers: int = _DEFAULT_WORKERS,
         on_delete: Callable[[str], None] | None = None,
         types: SessionTypes | None = None,
+        generation_exclusions: set[str] | None = None,
     ) -> None:
         if capacity < 1:
             raise ValueError("session operation capacity must be positive")
         if workers < 1:
             raise ValueError("session operation worker count must be positive")
         self._types = types if types is not None else SessionTypes()
+        self._generation_exclusions: set[str] = (
+            generation_exclusions if generation_exclusions is not None else set()
+        )
         self._store = store
         self._on_delete = on_delete
         self._snapshots: dict[str, Session] = {}
@@ -92,6 +93,8 @@ class SessionState:
             thread_name_prefix="session-write",
         )
         self._closed = False
+        # Import completion is permanent; archive contents are never cached.
+        self._archives_imported = False
         self._close_task: asyncio.Task[None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -130,12 +133,14 @@ class SessionState:
         *,
         operation_name: str | None = None,
         write: bool = True,
+        barrier: bool = True,
     ) -> _T:
         async def run() -> _T:
             return await self._run_operation(operation, write=write)
 
         return await self._submit(
             key, run, operation_name=operation_name or getattr(operation, "__name__", "session operation"),
+            barrier=barrier,
         )
 
     async def _submit(
@@ -146,7 +151,6 @@ class SessionState:
         operation_name: str,
         barrier: bool = True,
     ) -> _T:
-        """Admit bounded work with FIFO key affinity or a global barrier."""
         self._bind_loop()
         name = operation_name
         if key is None:
@@ -432,6 +436,15 @@ class SessionState:
             return self._draft(session)
         return await self._execute(key, read, write=False)
 
+    async def read_header(self, key: str) -> Session | None:
+        """Read committed identity and metadata without creating a session."""
+        def read() -> Session | None:
+            session = self._load(key, history=False)
+            if session is None:
+                return None
+            return replace(session, messages=[], provider_state=None, _baseline=None)
+        return await self._execute(key, read, write=False)
+
     async def get(self, key: str) -> Session:
         """Read an existing conversation; create missing state on the writer."""
         return await self._get(key, history=True)
@@ -667,7 +680,7 @@ class SessionState:
         await self._submit_draft(session)
 
     async def finish_turn(self, session: Session) -> None:
-        """Commit the assembled transcript and clear its recovery markers."""
+        """Commit the assembled transcript and clear its recovery checkpoint."""
         session.metadata.pop(_PENDING_KEY, None)
         session.metadata.pop(_CHECKPOINT_KEY, None)
         await self._submit_draft(session)
@@ -725,12 +738,14 @@ class SessionState:
 
     async def append_history(
         self, key: str, facts: Sequence[HistoryFact], *, expected_generation: str | None,
-    ) -> None:
-        """Append to an existing session; None selects its current generation."""
+        skip_invalid: bool = False,
+    ) -> list[str]:
+        """Serialize owned facts in the worker; None selects the current generation."""
         records = list(facts)
-        await self._execute(
+        return await self._execute(
             key,
-            lambda: self._store.append_history(key, deepcopy(records), expected_generation=expected_generation),
+            lambda: self._store.append_history(key, records, expected_generation=expected_generation,
+                                               skip_invalid=skip_invalid),
             operation_name="append_history",
         )
 
@@ -759,10 +774,11 @@ class SessionState:
         )
 
     async def queue_followup(self, key: str, message: InboundMessage) -> str | None:
-        if message.channel != "websocket":
-            return None
-
         from nanobot.session.recovery import record_pending_followup
+        from nanobot.session.session_messages import session_message_input
+
+        if message.channel != "websocket" and session_message_input(message) is None:
+            return None
 
         payload = deepcopy(message)
 
@@ -834,6 +850,47 @@ class SessionState:
             write=False,
         )
 
+    async def archives_imported(self) -> bool:
+        if not self._archives_imported and await self._execute(
+            None, self._store.archives_imported, operation_name="archives_imported",
+            write=False, barrier=False,
+        ):
+            self._archives_imported = True
+        return self._archives_imported
+
+    async def archived_keys(self) -> list[str]:
+        return await self._execute(
+            None, self._store.archived_keys, operation_name="archived_keys",
+            write=False, barrier=False,
+        )
+
+    async def import_archives(self, keys: Sequence[str]) -> list[str]:
+        values = list(keys)
+        imported = await self._execute(
+            None, lambda: self._store.import_archives(values), operation_name="import_archives",
+        )
+        self._archives_imported = True
+        return imported
+
+    async def set_archived_keys(self, keys: Sequence[str]) -> list[str]:
+        values = list(dict.fromkeys(keys))
+        return await self._execute(
+            None, lambda: self._store.set_archived_keys(values), operation_name="set_archived_keys",
+        )
+
+    async def typed_session_headers(self, session_type: str) -> list[tuple[str, dict[str, Any]]]:
+        return await self._execute(
+            None, lambda: self._store.typed_session_headers(session_type),
+            operation_name="typed_session_headers", write=False,
+        )
+
+    async def recovery_candidates(self, key_prefix: str) -> list[tuple[str, bool]]:
+        """Take one ordered read snapshot before startup admits new work."""
+        return await self._execute(
+            None, lambda: self._store.recovery_candidates(key_prefix),
+            operation_name="recovery_candidates", write=False,
+        )
+
     async def list_sessions(self) -> list[dict[str, Any]]:
         return await self._execute(
             None,
@@ -872,18 +929,7 @@ class SessionState:
             return 0
 
         def rename() -> int:
-            def write() -> list[str]:
-                changed: list[str] = []
-                for row in self._store.list_metadata():
-                    if row["metadata"].get(SESSION_MODEL_PRESET_METADATA_KEY) == old_name:
-                        if self._store.update_metadata(
-                            row["key"],
-                            {SESSION_MODEL_PRESET_METADATA_KEY: new_name},
-                        ):
-                            changed.append(row["key"])
-                return changed
-
-            changed = self._store.run_write(write)
+            changed = self._store.rename_model_preset(old_name, new_name)
             with self._cache_lock:
                 for key in changed:
                     self._snapshots.pop(key, None)
@@ -985,7 +1031,9 @@ class SessionState:
                 source = self._load(source_key)
                 if source is None:
                     return None
-                target = fork_session(source, target_key, before_user_index)
+                target = fork_session(
+                    source, target_key, before_user_index, exclude_metadata=frozenset(self._generation_exclusions),
+                )
                 if target is None:
                     return None
                 if title:
@@ -1011,25 +1059,34 @@ class SessionState:
 
     async def replace_user_input(
         self, key: str, source: HistoryEditSource, message: InboundMessage,
-        projection: HistoryEditProjection,
-    ) -> Session:
-        """Accept a replacement and its input together; revoke every old draft."""
+        projection: HistoryEditProjection | None,
+    ) -> Session | None:
+        """Commit both histories, or return None for an exact retry. A busy lane may only retry."""
         from uuid import uuid4
 
         if reason := ordinary_text_error({"role": "user", "content": message.content}):
             raise HistoryEditError(reason)
 
-        def commit() -> Session:
-            def write() -> Session:
-                current = self._load(key)
-                if current is None or not current.policy.persist:
+        receipt = {"turn_id": message.metadata["webui_turn_id"], "source": asdict(source), "text": message.content}
+
+        def commit() -> Session | None:
+            def write() -> Session | None:
+                header = self._load(key, history=False)
+                if header is None or not header.policy.persist:
                     raise HistoryEditError("edit_source_changed")
-                if any(current.metadata.get(name) for name in _RESERVED_KEYS):
+                previous = header.metadata.get("history_edit_receipt")
+                if isinstance(previous, dict) and previous.get("turn_id") == receipt["turn_id"]:
+                    if previous != receipt:
+                        raise HistoryEditError("edit_request_conflict")
+                    return None
+                if projection is None or any(header.metadata.get(name) for name in _RESERVED_KEYS):
                     raise HistoryEditError("edit_session_busy")
+                current = self._load(key)
+                assert current is not None
                 target = self._store.project_history(key, lambda history: projection(current, history))
                 previous_generation = current.generation
                 current.retain_history_prefix(target.model_position)
-                for name in ("webui_recovery", "_last_usage", "request_origin", "goal_state", "thread_goal"):
+                for name in (*self._generation_exclusions, "webui_recovery", "_last_usage", "request_origin", "_stopped_at_iteration_limit"):
                     current.metadata.pop(name, None)
                 current.generation = uuid4().hex
                 current.add_message(
@@ -1037,12 +1094,8 @@ class SessionState:
                     webui_turn_id=message.metadata["webui_turn_id"],
                 )
                 current.metadata[_PENDING_KEY] = True
-                current.metadata["history_edit_receipt"] = {
-                    "turn_id": message.metadata["webui_turn_id"],
-                    "source": asdict(source),
-                    "text": message.content,
-                }
-                self._store.replace_generation(current, previous_generation=previous_generation)
+                current.metadata["history_edit_receipt"] = receipt
+                self._store.replace_generation(current, previous_generation=previous_generation, message_start=target.model_position)
                 self._store.replace_history_input(
                     key, target.turn_ordinal, target.position, target.input,
                     expected_generation=current.generation,
@@ -1050,6 +1103,8 @@ class SessionState:
                 return current
 
             current = self._store.run_write(write)
+            if current is None:
+                return None
             self._publish(current)
             return self._draft(current)
 
@@ -1179,8 +1234,10 @@ class SessionState:
                     session.metadata = deepcopy(old.metadata)
                 for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary", "_stopped_at_iteration_limit"):
                     session.metadata.pop(name, None)
+                for name in self._generation_exclusions:
+                    session.metadata.pop(name, None)
                 if session.policy.persist:
-                    self._store.delete(key)
+                    self._store.delete(key, preserve_archive=True)
                 self._commit(session)
                 return session
 

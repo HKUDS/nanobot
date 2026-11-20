@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AppearanceSettingsView } from "@/components/settings/overview/AppearanceSettingsView";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import { DiffSyntaxHighlight } from "@/components/thread/activity/DiffSyntaxHighlight";
+import { FileEditGroup } from "@/components/thread/activity/FileEditRow";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { useReadingTypography } from "@/hooks/useReadingTypography";
 import { readLocalPreferences, writeLocalPreferences } from "@/lib/local-preferences";
@@ -40,6 +40,10 @@ const content = `# 阅读，让思路自然延续
 | 正文 Body | 中文 English 混排 | 舒适、连续的阅读节奏 |
 | 标题 Heading | 清楚的内容层级 | 保留结构，而非所有文字同大 |
 | Code | configuration.readingTextSize | 完整显示，必要时在局部滚动 |
+
+| $T$ | $q-p$ | 实测梯度 $\\frac{1}{T}(q-p)$ | 式（4）预测 $\\frac{\\delta}{NT^2}$ |
+| --- | --- | --- | --- |
+| 1 | $[0.0208,\\ -0.0179,\\ -0.0031]$ | $[1.45,-0.52,-0.93]\\times10^{-3}$ | $[1.33,-0.33,-1.00]\\times10^{-3}$ |
 
 \`\`\`typescript
 // 中文注释与 English code
@@ -92,10 +96,10 @@ export function TypographyFixture() {
       </div>
       <section className="mx-auto max-w-[var(--content-column-width)] space-y-6 px-4 pb-8" aria-label="Reading preview">
         {[...previewMessages, ...sent].map((message) => <MessageBubble key={message.id} message={message} />)}
-        <div className="overflow-x-auto"><DiffSyntaxHighlight language="typescript" lines={[
-          { kind: "delete", content: "const size = 16;", old_lineno: 1, new_lineno: null },
-          { kind: "add", content: "const size = preferences.readingTextSize;", old_lineno: null, new_lineno: 1 },
-        ]} /></div>
+        <FileEditGroup displayMode="diff" edits={[{
+          key: "typography", path: "size.ts", added: 1, deleted: 1, approximate: false, binary: false, status: "done", pending: false,
+          diff: { format: "unified", text: "--- a/size.ts\n+++ b/size.ts\n@@ -1 +1 @@\n-const size = 16;\n+const size = preferences.readingTextSize;\n" },
+        }]} />
         <ThreadComposer compactWhenIdle sessions={[session]} modelLabel="Fixture" persistDraft={false} onSend={(text) => {
           setSent((current) => [...current, { id: `sent-${current.length}`, role: "user", content: text, createdAt: 3 + current.length }]);
         }} />

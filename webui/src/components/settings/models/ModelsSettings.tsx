@@ -4,6 +4,7 @@ import { useAutomaticModelAPI } from "@/components/settings/models/useAutomaticM
 import { useModelPresetDrag } from "@/components/settings/models/useModelPresetDrag";
 import { ReasoningEffortPicker } from "@/components/settings/models/ReasoningEffortPicker";
 import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
+import { CodexSpeedControl } from "@/components/ui/codex-speed-control";
 import { ToggleButton } from "@/components/ui/toggle-button";
 import type { EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
@@ -47,9 +48,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { ModelAPIConfig, SettingsPayload } from "@/lib/types";
+import type { CodexFastMode, ModelAPIConfig, SettingsPayload } from "@/lib/types";
 import { ProviderParameterFields, type RequestParameterDraft } from "@/components/settings/models/ProviderParameterFields";
-import { providerJsonValue } from "@/components/settings/models/providerForm";
+import { parseProviderObject, providerJsonValue } from "@/components/settings/models/providerForm";
 
 export interface AgentSettingsDraft {
   model: string;
@@ -59,6 +60,8 @@ export interface AgentSettingsDraft {
   contextWindowTokens: number;
   temperature: number;
   reasoningEffort: string;
+  codexFastMode: CodexFastMode | null;
+  supportsImages: boolean;
   api: ModelAPIConfig | null;
   extraHeaders: string;
   extraQuery: string;
@@ -103,6 +106,8 @@ export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   contextWindowTokens: 200_000,
   temperature: 0.1,
   reasoningEffort: "",
+  codexFastMode: null,
+  supportsImages: true,
   api: null,
   extraHeaders: "",
   extraQuery: "",
@@ -130,6 +135,8 @@ export function agentDraftFromPayload(
     ),
     temperature: activePreset?.temperature ?? payload.agent.temperature,
     reasoningEffort: activePreset?.reasoning_effort ?? "",
+    codexFastMode: activePreset?.codex_fast_mode ?? null,
+    supportsImages: (activePreset ? activePreset.supports_images : payload.agent.supports_images) ?? true,
     api: activePreset ? activePreset.api ?? null : payload.agent.api ?? null,
     extraHeaders: providerJsonValue(activePreset?.extra_headers),
     extraQuery: providerJsonValue(activePreset?.extra_query),
@@ -142,11 +149,13 @@ export function agentDraftFromPayload(
 export function ModelPresetDeleteDialog({
   preset,
   deleting,
+  error,
   onOpenChange,
   onConfirm,
 }: {
   preset: SettingsPayload["model_presets"][number] | null;
   deleting: boolean;
+  error?: string | null;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
@@ -154,8 +163,8 @@ export function ModelPresetDeleteDialog({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   return (
-    <Dialog open={preset !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[440px]">
+    <Dialog open={preset !== null} onOpenChange={(open) => { if (open || !deleting) onOpenChange(open); }}>
+      <DialogContent showCloseButton={!deleting} className="max-w-[440px]">
         <DialogHeader className="text-left">
           <DialogTitle>
             {tx("settings.models.deletePresetTitle", "Delete model preset?")}
@@ -168,6 +177,7 @@ export function ModelPresetDeleteDialog({
             )}
           </DialogDescription>
         </DialogHeader>
+        {error ? <p role="alert" className="break-words text-sm text-destructive">{error}</p> : null}
         <DialogFooter>
           <Button
             type="button"
@@ -202,6 +212,7 @@ export function ModelsSettings({
   form,
   setForm,
   editingPresetName,
+  imageInputPreset,
   presetNameError,
   error,
   settings,
@@ -233,6 +244,7 @@ export function ModelsSettings({
   form: AgentSettingsDraft;
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
   editingPresetName: string;
+  imageInputPreset?: string;
   presetNameError: string | null;
   error?: string | null;
   settings: SettingsPayload;
@@ -263,7 +275,6 @@ export function ModelsSettings({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
-  const [hideEditorReturnFocus, setHideEditorReturnFocus] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const resolvedAutomaticAPI = useAutomaticModelAPI({
     token,
@@ -276,6 +287,9 @@ export function ModelsSettings({
   });
   const editorTriggerRef = useRef<HTMLElement | null>(null);
   const presetNameInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLButtonElement>(null);
+  const openedImagePreset = useRef<string>();
+  const focusImageInput = useRef(false);
   const suggestedPresetNameRef = useRef<string | null>(null);
   const presetContextInitializedRef = useRef(false);
   const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
@@ -322,6 +336,19 @@ export function ModelsSettings({
 
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
   const selectedProvider = settings.providers.find((provider) => provider.name === form.provider);
+  const savedSpeed = form.provider === selectedPreset?.provider && form.model === selectedPreset.model
+    ? selectedPreset.model_options?.codex_fast_mode : undefined;
+  const speedProvider = selectedProvider ?? (savedSpeed
+    ? settings.providers.find((provider) => provider.name === selectedPreset?.resolved_provider)
+    : undefined);
+  const supportsCodexSpeed = selectedProvider?.codex_fast_mode_supported || !!savedSpeed;
+  const speedTier = supportsCodexSpeed
+    ? { ...speedProvider?.extra_body, ...parseProviderObject(form.extraBody) }.service_tier
+    : undefined;
+  const shownSpeed = form.codexFastMode ?? (speedTier === "ultrafast" ? speedTier : speedTier === "priority");
+  const supportsUltrafast = (model: string) => selectedProvider?.codex_ultrafast_models?.includes(
+    model.trim().toLowerCase().replace(/^openai[-_]codex\//, ""),
+  );
   const selectableProviders = uniqueProviders([
     ...configuredProviders,
     ...(selectedProvider ? [selectedProvider] : []),
@@ -349,6 +376,7 @@ export function ModelsSettings({
       extraHeaders: provider === prev.provider ? prev.extraHeaders : "",
       extraQuery: provider === prev.provider ? prev.extraQuery : "",
       extraBody: provider === prev.provider ? prev.extraBody : "",
+      codexFastMode: provider === prev.provider ? prev.codexFastMode : null,
       modelPreset: clearSuggestedName ? "" : prev.modelPreset,
     }));
   };
@@ -380,20 +408,11 @@ export function ModelsSettings({
     disabled: callOrderBusy,
     onReorder: (keys) => onChangeCallOrder(keys.map((key) => presetRows.find((row) => row.key === key)!.name)),
   });
-  const selectPreset = async (
+  const openPreset = (
     preset: SettingsPayload["model_presets"][number],
     rowKey: string,
   ) => {
-    setHideEditorReturnFocus(false);
-    editorTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const toggleCurrentPreset =
-      !creating && selectedPreset?.name === preset.name && activeEditorRowKey === rowKey;
-    if (edits.needsCompletion() && !(await edits.commit())) return;
     onSelectConfiguration(preset.name);
-    if (toggleCurrentPreset) {
-      setEditorOpen((open) => !open);
-      return;
-    }
     setForm((prev) => ({
       ...prev,
       modelPreset: preset.name,
@@ -403,6 +422,8 @@ export function ModelsSettings({
       contextWindowTokens: normalizeContextWindowTokens(preset.context_window_tokens),
       temperature: preset.temperature,
       reasoningEffort: preset.reasoning_effort ?? "",
+      codexFastMode: preset.codex_fast_mode ?? null,
+      supportsImages: preset.supports_images ?? true,
       api: preset.api ?? null,
       extraHeaders: providerJsonValue(preset.extra_headers),
       extraQuery: providerJsonValue(preset.extra_query),
@@ -411,6 +432,27 @@ export function ModelsSettings({
     setEditorRowKey(rowKey);
     setEditorOpen(true);
   };
+  const selectPreset = async (
+    preset: SettingsPayload["model_presets"][number],
+    rowKey: string,
+  ) => {
+    editorTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (edits.needsCompletion() && !(await edits.commit())) return;
+    if (!creating && selectedPreset?.name === preset.name && activeEditorRowKey === rowKey) {
+      setEditorOpen((open) => !open);
+    } else {
+      openPreset(preset, rowKey);
+    }
+  };
+
+  useEffect(() => {
+    if (openedImagePreset.current === imageInputPreset) return;
+    const row = presetRows.find(({ name }) => name === imageInputPreset);
+    openedImagePreset.current = imageInputPreset;
+    if (!row?.preset) return;
+    focusImageInput.current = true;
+    openPreset(row.preset, row.key);
+  });
 
   const moveCallOrderItem = (index: number, offset: -1 | 1) => {
     if (callOrderBusy) return;
@@ -537,8 +579,25 @@ export function ModelsSettings({
               model,
               contextWindowTokens: initializeContext ? contextWindow : prev.contextWindowTokens,
               api: model === prev.model ? prev.api : null,
+              codexFastMode: prev.codexFastMode === "ultrafast" && model !== prev.model && !supportsUltrafast(model)
+                ? null : prev.codexFastMode,
               modelPreset: canSuggestName ? suggestion : prev.modelPreset,
             }));
+          }}
+        />
+      </SettingsRow>
+      <SettingsRow
+        title={t("settings.models.imageInput")}
+        description={t("settings.models.imageInputHelp")}
+      >
+        <ToggleButton
+          ref={imageInputRef}
+          checked={form.supportsImages}
+          label={t("settings.models.imageInput")}
+          disabled={saving || creatingSaving}
+          onChange={(supportsImages) => {
+            edits.complete();
+            setForm((prev) => ({ ...prev, supportsImages }));
           }}
         />
       </SettingsRow>
@@ -554,6 +613,21 @@ export function ModelsSettings({
           onChange={(reasoningEffort) => setForm((prev) => ({ ...prev, reasoningEffort }))}
         />
       </SettingsRow>
+      {supportsCodexSpeed && (
+        <SettingsRow
+          title={t("thread.composer.modelOptions.codexFast")}
+          description={t("settings.providers.capabilityFastModeHelp")}
+        >
+          <CodexSpeedControl
+            value={shownSpeed}
+            ultrafastSupported={supportsUltrafast(form.model) || savedSpeed?.ultrafast_supported}
+            onChange={(codexFastMode) => {
+              edits.complete();
+              setForm((prev) => ({ ...prev, codexFastMode }));
+            }}
+          />
+        </SettingsRow>
+      )}
       <Dialog open={advancedOpen} onOpenChange={(open) => {
         if (!open && !creating && edits.needsCompletion()) {
           void edits.commit().then((saved) => { if (saved) setAdvancedOpen(false); });
@@ -772,11 +846,9 @@ export function ModelsSettings({
                         aria-label={ordered ? `${name}. ${t("settings.models.dragToReorder")}` : name}
                         data-testid={`model-call-order-row-${name}`}
                         onPointerDown={(event) => {
-                          setHideEditorReturnFocus(false);
                           presetDrag.start(event, key);
                         }}
                         onKeyDown={(event) => {
-                          if (event.key !== "Escape") setHideEditorReturnFocus(false);
                           if (event.currentTarget !== event.target) return;
                           if (ordered && event.key === "ArrowUp") {
                             event.preventDefault();
@@ -795,7 +867,7 @@ export function ModelsSettings({
                           ordered && (callOrderBusy ? "cursor-wait" : "cursor-grab active:cursor-grabbing"),
                           !isDragging && "settings-hover",
                           isSelected && "bg-muted/45",
-                          !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                          "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                         )}
                       >
                         <div className="contents">
@@ -805,8 +877,7 @@ export function ModelsSettings({
                             aria-haspopup="dialog"
                             disabled={!preset}
                             onClick={() => preset && selectPreset(preset, key)}
-                            className={cn("col-span-2 grid min-w-0 grid-cols-subgrid items-center rounded-control text-left outline-none",
-                              !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-ring")}
+                            className="col-span-2 grid min-w-0 grid-cols-subgrid items-center rounded-control text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             {presetConfigured ? (
                               <span className={cn("relative aspect-square min-w-8", primary ? "w-[calc(var(--preset-title-size)*1.375+1.5rem)]" : "h-8")}>
@@ -902,13 +973,10 @@ export function ModelsSettings({
               type="button"
               variant="link"
               size="sm"
-              className={cn("mr-auto h-11 gap-2 text-[13px] font-normal text-muted-foreground hover:font-semibold hover:text-orange-700 hover:no-underline dark:hover:text-orange-400 sm:h-9",
-                hideEditorReturnFocus && "focus-visible:ring-0 focus-visible:ring-offset-0")}
-              onKeyDown={(event) => { if (event.key !== "Escape") setHideEditorReturnFocus(false); }}
+              className="mr-auto h-11 gap-2 text-[13px] font-normal text-muted-foreground hover:font-semibold hover:text-orange-700 hover:no-underline dark:hover:text-orange-400 sm:h-9"
               disabled={callOrderBusy}
               onClick={(event) => {
                 editorTriggerRef.current = event.currentTarget;
-                setHideEditorReturnFocus(false);
                 setEditorRowKey(null);
                 setEditorOpen(true);
                 onBeginCreate();
@@ -935,8 +1003,13 @@ export function ModelsSettings({
         <DialogContent aria-describedby={undefined}
           onChangeCapture={edits.onChangeCapture} onFocusCapture={edits.onFocusCapture}
           onBlurCapture={edits.onBlurCapture}
-          onEscapeKeyDown={() => setHideEditorReturnFocus(true)}
           className="relative max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none gap-0 overflow-y-auto p-0"
+          onOpenAutoFocus={(event) => {
+            if (!focusImageInput.current || !imageInputRef.current) return;
+            focusImageInput.current = false;
+            event.preventDefault();
+            imageInputRef.current.focus();
+          }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             editorTriggerRef.current?.focus();

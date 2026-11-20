@@ -1,5 +1,3 @@
-"""Nonblocking GitHub device authorization for gateway settings clients."""
-
 # pyright: reportMissingTypeStubs=false
 
 from __future__ import annotations

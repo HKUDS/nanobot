@@ -24,6 +24,7 @@ export interface RemoteProfile {
   gateway_id?: string;
   view_id?: string;
   connection_error?: string;
+  health_check?: number;
   paired?: boolean;
   /** Opaque grouping ID supplied only after the local backend verifies receipts. */
   instance_id?: string;
@@ -97,8 +98,9 @@ export interface RemoteInspection {
   incomplete: boolean;
 }
 
-export async function readRemoteInstances(token: string): Promise<RemoteDirectory> {
-  const response = await fetchWithTimeout("/api/remote-instances", {
+export async function readRemoteInstances(token: string, check: string[] = []): Promise<RemoteDirectory> {
+  const query = new URLSearchParams(check.map((id) => ["check", id]));
+  const response = await fetchWithTimeout(`/api/remote-instances${query.size ? `?${query}` : ""}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (response.status === 403 || response.status === 404) return { available: false, profiles: [] };

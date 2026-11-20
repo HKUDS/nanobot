@@ -41,7 +41,6 @@ class QQConnectSession:
 
 
 def _decrypt_secret(encrypted: str, key: str) -> str:
-    """Decrypt ``bot_encrypt_secret``: base64(iv[12] | ciphertext | tag[16])."""
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     raw = base64.b64decode(encrypted)

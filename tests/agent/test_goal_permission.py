@@ -28,10 +28,10 @@ def goal_message(**overrides):
     {"metadata": {"goal_requested": True, "_cron_trigger": {"job_id": "job"}}},
     {"metadata": {"goal_requested": True, "_local_trigger": {"trigger_id": "trigger"}}},
 ])
-def test_background_input_cannot_authorize_initial_or_injected_work(overrides):
+def test_consumed_background_input_cannot_authorize_work(overrides):
     message = goal_message(**overrides)
     with goal_mutation_permission(True):
-        with GoalInputScope(message) as scope:
+        with GoalInputScope() as scope:
             assert goal_mutation_allowed() is False
             scope.consume_inputs([message])
             assert goal_mutation_allowed() is False
@@ -39,7 +39,9 @@ def test_background_input_cannot_authorize_initial_or_injected_work(overrides):
 
 
 def test_revoked_permission_requires_a_new_explicit_request_to_reauthorize():
-    with GoalInputScope(goal_message()) as scope:
+    with GoalInputScope() as scope:
+        assert goal_mutation_allowed() is False
+        scope.consume_inputs([goal_message()])
         assert goal_mutation_allowed() is True
         revoke_goal_mutation_permission()
         scope.consume_inputs([goal_message(content="ok", metadata={})])

@@ -185,3 +185,42 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
   });
 });
+
+describe("ModelPresetBadge dismissal focus", () => {
+  it("does not request composer focus for an outside click", async () => {
+    const user = userEvent.setup();
+    const onRequestComposerFocus = vi.fn();
+    render(<><ModelPresetBadge label="zhipu" modelPreset="zhipu" modelPresets={presets}
+      onPresetChange={vi.fn()} onRequestComposerFocus={onRequestComposerFocus} isHero /><input aria-label="Other field" /></>);
+    await user.click(screen.getByRole("button", { name: "zhipu" }));
+    const outside = screen.getByRole("textbox", { name: "Other field" });
+    await user.click(outside);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(outside).toHaveFocus();
+    expect(onRequestComposerFocus).not.toHaveBeenCalled();
+  });
+
+  it("returns keyboard Escape to the picker rather than requesting composer focus", async () => {
+    const user = userEvent.setup();
+    const onRequestComposerFocus = vi.fn();
+    render(<ModelPresetBadge label="zhipu" modelPreset="zhipu" modelPresets={presets}
+      onPresetChange={vi.fn()} onRequestComposerFocus={onRequestComposerFocus} isHero />);
+    const trigger = screen.getByRole("button", { name: "zhipu" });
+    await user.tab();
+    await user.keyboard("{Enter}{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(onRequestComposerFocus).not.toHaveBeenCalled();
+  });
+
+  it("requests composer focus once after a picker selection closes", async () => {
+    const user = userEvent.setup();
+    const onRequestComposerFocus = vi.fn();
+    render(<ModelPresetBadge label="zhipu" modelPreset="zhipu" modelPresets={presets}
+      onPresetChange={vi.fn()} onRequestComposerFocus={onRequestComposerFocus} isHero />);
+    await user.click(screen.getByRole("button", { name: "zhipu" }));
+    await user.click(screen.getByRole("option", { name: "codex" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(onRequestComposerFocus).toHaveBeenCalledTimes(1);
+  });
+});

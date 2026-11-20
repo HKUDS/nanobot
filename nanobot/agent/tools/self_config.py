@@ -1,5 +1,3 @@
-"""Self-inspection configuration shared by the tool and root schema."""
-
 from nanobot.config_base import Base
 
 

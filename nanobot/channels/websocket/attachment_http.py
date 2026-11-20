@@ -1,4 +1,3 @@
-"""Connection-scoped upload capabilities, issued only after the WS handshake."""
 from __future__ import annotations
 
 import secrets

@@ -7,7 +7,6 @@ import {
   KeyRound,
   PowerOff,
   RefreshCw,
-  Search,
   Terminal,
   Trash2,
 } from "lucide-react";
@@ -26,33 +25,55 @@ import {
 import { Button } from "@/components/ui/button";
 import { Disclosure } from "@/components/ui/disclosure";
 import { ExpandableText } from "@/components/ui/expandable-text";
-import { SearchInput } from "@/components/ui/input";
-import { SegmentedControl } from "@/components/ui/segmented-control";
+import { CatalogControls, CatalogFilter, CatalogToolbar } from "@/components/settings/shared/CatalogToolbar";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
+import { MarketplaceProviderFilter, SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
 import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
 import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { ToggleButton } from "@/components/ui/toggle-button";
 import { deleteSkill, fetchSkillDetail, updateSkillEnabled } from "@/lib/api";
 import { notifySkillsChanged, requestSkillsRefresh } from "@/lib/skill-events";
-import type { SkillDetail, SkillSummary } from "@/lib/types";
+import type { MarketplaceProvider, SkillDetail, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-export function SkillsCatalogSettings({ skills, loading = false, error = false }: {
+export function useSkillsCatalogSearch() {
+  const { t } = useTranslation();
+  const [view, setView] = useState<"installed" | "discover">("installed");
+  const [installedQuery, setInstalledQuery] = useState("");
+  const [marketplaceQuery, setMarketplaceQuery] = useState("");
+  return { view, setView, search: {
+    value: view === "installed" ? installedQuery : marketplaceQuery,
+    onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
+      (view === "installed" ? setInstalledQuery : setMarketplaceQuery)(event.target.value),
+    placeholder: t(view === "installed" ? "settings.skills.searchInstalled" : "settings.skills.marketplaceSearchPlaceholder"),
+  } };
+}
+
+type SkillsCatalogProps = {
   skills: SkillSummary[];
   loading?: boolean;
   error?: boolean;
+};
+
+export function SkillsCatalogSettings(props: SkillsCatalogProps) {
+  const searchState = useSkillsCatalogSearch();
+  return <SkillsCatalogPage {...props} searchState={searchState} showSearch />;
+}
+
+export function SkillsCatalogPage({ skills, loading = false, error = false, searchState, showSearch }: SkillsCatalogProps & {
+  searchState: ReturnType<typeof useSkillsCatalogSearch>;
+  showSearch?: boolean;
 }) {
   const { t } = useTranslation();
+  const { view, setView, search } = searchState;
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
-  const [view, setView] = useState<"installed" | "discover">("installed");
   const [installingSkill, setInstallingSkill] = useState("");
-  const [installedQuery, setInstalledQuery] = useState("");
+  const [marketplaceProvider, setMarketplaceProvider] = useState<MarketplaceProvider>("all");
   const [installedFilter, setInstalledFilter] = useState<"all" | "enabled" | "disabled">(
     "all",
   );
-  const normalizedQuery = installedQuery.trim().toLowerCase();
+  const normalizedQuery = view === "installed" ? search.value.trim().toLowerCase() : "";
   const filteredSkills = skills.filter((skill) => {
     const enabled = skill.enabled !== false;
     if (installedFilter === "enabled" && !enabled) return false;
@@ -85,73 +106,29 @@ export function SkillsCatalogSettings({ skills, loading = false, error = false }
   const disabledCount = skills.filter((skill) => skill.enabled === false).length;
 
   return (
-    <div className="settings-stack">
-      <SegmentedControl
-        value={view}
-        mode="tabs"
-        ariaLabel={t("settings.skills.views", { defaultValue: "Skills views" })}
-        className="w-fit text-[13px]"
-        itemClassName="px-3.5"
-        options={[
-          {
-            value: "installed",
-            label: t("settings.skills.installedTab", { defaultValue: "Installed" }),
-          },
-          {
-            value: "discover",
-            label: t("settings.skills.discoverTab", { defaultValue: "Discover" }),
-          },
-        ]}
-        onChange={setView}
-      />
-
-      {view === "installed" ? (
-        <section className="overflow-hidden rounded-panel bg-settings-surface">
-          <div className="flex flex-col gap-3 px-4 pb-2 pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative w-full sm:max-w-[320px]">
-              <Search
-                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-                aria-hidden
-              />
-              <SearchInput
-                value={installedQuery}
-                onChange={(event) => setInstalledQuery(event.target.value)}
-                placeholder={t("settings.skills.searchInstalled", {
-                  defaultValue: "Search installed skills",
-                })}
-                aria-label={t("settings.skills.searchInstalled", {
-                  defaultValue: "Search installed skills",
-                })}
-                className="h-9 bg-background pl-9 text-[13px]"
-              />
-            </div>
-            <SegmentedControl
-              value={installedFilter}
-              className="sm:w-auto"
-              itemClassName="px-2.5 text-[11px]"
+    <div className="catalog-section">
+      <CatalogToolbar search={showSearch ? search : undefined}>
+        <CatalogControls>
+          <CatalogFilter label={t("settings.skills.views")} value={view} onChange={setView}
+            options={[
+              { value: "installed", label: t("settings.skills.installedTab") },
+              { value: "discover", label: t("settings.skills.discoverTab") },
+            ]} />
+          {view === "installed" ? (
+            <CatalogFilter label={t("settings.apps.statusFilter")} value={installedFilter} onChange={setInstalledFilter}
               options={([
-                ["all", t("settings.skills.filterAll", { defaultValue: "All" }), skills.length],
-                [
-                  "enabled",
-                  t("settings.skills.filterEnabled", { defaultValue: "Enabled" }),
-                  skills.length - disabledCount,
-                ],
-                [
-                  "disabled",
-                  t("settings.skills.filterDisabled", { defaultValue: "Disabled" }),
-                  disabledCount,
-                ],
+                ["all", t("settings.skills.filterAll"), skills.length],
+                ["enabled", t("settings.skills.filterEnabled"), skills.length - disabledCount],
+                ["disabled", t("settings.skills.filterDisabled"), disabledCount],
               ] as const).map(([value, label, count]) => ({
                 value,
-                label: (
-                  <>
-                    {label} <span className="ml-0.5 tabular-nums opacity-65">{loading || error ? "—" : count}</span>
-                  </>
-                ),
-              }))}
-              onChange={setInstalledFilter}
-            />
-          </div>
+                label: <><span>{label}</span><span className="tabular-nums opacity-65">{loading || error ? "—" : count}</span></>,
+              }))} />
+          ) : <MarketplaceProviderFilter value={marketplaceProvider} onChange={setMarketplaceProvider} />}
+        </CatalogControls>
+      </CatalogToolbar>
+      {view === "installed" ? (
+        <section className="overflow-hidden rounded-panel bg-settings-surface pt-3">
           {loading ? (
             <CatalogSkeleton label={t("settings.skills.loading")} layout="skills" />
           ) : error ? (
@@ -193,6 +170,8 @@ export function SkillsCatalogSettings({ skills, loading = false, error = false }
         </section>
       ) : (
         <SkillsMarketplace
+          query={search.value}
+          provider={marketplaceProvider}
           installedSkills={skills}
           installing={installingSkill}
           onInstallingChange={setInstallingSkill}
@@ -388,8 +367,8 @@ function SkillDetailSheet({
             "sm:right-3 sm:top-3",
           )}
           className={cn(
-            "w-full max-w-none gap-0 overflow-hidden border-l-0 p-0",
-            "sm:w-[min(34rem,calc(100vw-1rem))] sm:max-w-none sm:border-l",
+            "w-[calc(100vw-1rem)] max-w-none gap-0 p-0",
+            "sm:w-[min(34rem,calc(100vw-1rem))] sm:max-w-none",
           )}
         >
           <div

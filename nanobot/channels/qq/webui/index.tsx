@@ -11,8 +11,7 @@ export default {
   ConnectFlow: QQConnectFlow,
   canConnectBeforeConfigured: true,
   presentation: {
-    logoUrl: "https://static-res.qq.com/static-res/imqq/qq-logo.png",
-    logoFallbackUrl: "https://im.qq.com/favicon.ico",
+    logoUrl: "/brand/channels/qq.svg",
     displayName: "QQ",
     initials: "QQ",
     color: "#12B7F5",

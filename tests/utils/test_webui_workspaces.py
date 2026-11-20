@@ -112,6 +112,36 @@ async def test_webui_default_access_applies_to_unscoped_old_sessions(tmp_path, m
     assert new_scope.access_mode == "full"
 
 
+@pytest.mark.parametrize("scope_present", [False, True])
+async def test_old_session_scope_defaults_respect_connection_authority(
+    tmp_path, monkeypatch, scope_present: bool,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default = tmp_path / "default"
+    default.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    session = sessions.get_or_create("websocket:legacy")
+    if scope_present:
+        session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = None
+    sessions.save(session)
+    write_webui_default_access_mode("full")
+    controller = WebUIWorkspaceController(
+        session_manager=sessions, default_workspace=default, default_restrict_to_workspace=True,
+    )
+
+    client_scope = await controller.scope_for_message(
+        {}, chat_id="legacy", chat_running=False, can_change_project=False,
+    )
+    owner_scope = await controller.scope_for_message(
+        {}, chat_id="legacy", chat_running=False, can_change_project=True,
+    )
+
+    assert client_scope.project_path == default.resolve()
+    assert client_scope.access_mode == "restricted"
+    assert owner_scope.access_mode == ("restricted" if scope_present else "full")
+    assert sessions.read_session_metadata("websocket:legacy")["metadata"] == session.metadata
+
+
 def test_indexed_scope_preserves_missing_and_explicit_null_semantics(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
     default = tmp_path / "default"

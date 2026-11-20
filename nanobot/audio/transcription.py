@@ -24,7 +24,7 @@ from nanobot.config.loader import resolve_env_refs
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Config, ProviderConfig
 from nanobot.providers.registry import find_by_name
-from nanobot.utils.media_decode import FileSizeExceeded, save_base64_data_url
+from nanobot.utils.media_decode import FileSizeExceededError, save_base64_data_url
 
 TranscriptionProviderName = str
 
@@ -179,7 +179,7 @@ async def transcribe_audio_data_url(
             get_media_dir("webui-transcription"),
             max_bytes=max_bytes,
         )
-    except FileSizeExceeded as exc:
+    except FileSizeExceededError as exc:
         raise TranscriptionIngressError("size") from exc
     except Exception as exc:
         logger.warning("transcription audio decode failed: {}", exc)

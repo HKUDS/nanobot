@@ -1,5 +1,3 @@
-"""Helpers for keeping the bundled WebUI build in sync with source checkouts."""
-
 from __future__ import annotations
 
 import os

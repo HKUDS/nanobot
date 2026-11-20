@@ -1,18 +1,18 @@
 {
+  "goal": {
+    "title": "GoalIsland · Objetivo",
+    "description": "Previsualiza el objetivo y sus detalles.",
+    "options": "Proporciona el estado, resumen, objetivo y un avance opcional.",
+    "state": "Estado",
+    "summary": "Preparar la versión",
+    "objective": "Revisa los cambios y verifica la versión.\n\n- Comprobar las pruebas\n- Revisar la documentación\n- Confirmar que está lista",
+    "recap": "Esperando aprobación."
+  },
   "rename": {
     "title": "RenameDialog · Renombrar grupos y proyectos",
     "description": "Prueba el cambio de nombre de grupos y proyectos. Los temas se renombran en la lista de chats.",
     "options": "El componente padre aporta dialogTitle, description y placeholder. title fija el valor inicial; onConfirm recibe el título sin espacios en los extremos. No se pueden guardar títulos vacíos.",
     "hint": "Al guardar se actualiza el título de arriba."
-  },
-  "delete": {
-    "title": "DeleteConfirm · Confirmación de eliminación",
-    "description": "Compara la eliminación de un chat, varios chats o un chat con automatizaciones.",
-    "options": "count controla el texto de eliminación múltiple. automations muestra tareas vinculadas, horarios y próximas ejecuciones. Confirmar llama a onConfirm.",
-    "scenario": "Escenario de eliminación",
-    "open": "Abrir confirmación de eliminación",
-    "confirmed": "Eliminación de ejemplo confirmada.",
-    "hint": "Elige un chat, varios chats o un chat con automatizaciones."
   },
   "inlineTokens": {
     "title": "Inline tokens · Comandos e identificadores de sesión",
@@ -178,6 +178,18 @@
     "dismissed": "Aviso de recuperación cerrado.",
     "reset": "Restablecer vista previa",
     "hint": "Elige un estado de recuperación y prueba a continuar o cerrar."
+  },
+  "sandbox": {
+    "gateway": "Pasarela de ejemplo",
+    "unknownGateway": "Sin especificar",
+    "title": "Aviso de comandos",
+    "description": "Compara componentes ausentes, instalaciones sin protección y errores de inicio con el componente real.",
+    "options": "El aviso no toma el foco ni reintenta comandos. Cambia el estado, ciérralo y sigue escribiendo.",
+    "missing": "Componente no encontrado",
+    "permissions": "Revisar instalación",
+    "startup": "Inicio no disponible",
+    "hint": "Solo demostración. No se ejecutan comandos ni se cambian ajustes.",
+    "settingsAction": "Se solicitaron los ajustes del sandbox (demostración)."
   },
   "fallback": {
     "title": "ModelFallbackNotice · Modelo alternativo",

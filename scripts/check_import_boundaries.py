@@ -34,7 +34,6 @@ class Violation:
 
 
 _ADAPTERS = (
-    "nanobot.api",
     "nanobot.channels",
     "nanobot.cli",
     "nanobot.gateway",
@@ -63,7 +62,7 @@ IMPORT_RULES = (
         ("nanobot.update_service", "nanobot.update_plan", "nanobot.update_jobs",
          "nanobot.update_worker", "nanobot.update_stop",
          "nanobot.update_profiles", "nanobot.update_handoff", "nanobot.update_guidance"),
-        ("nanobot.agent", "nanobot.session", "nanobot.api", "nanobot.cli",
+        ("nanobot.agent", "nanobot.session", "nanobot.cli",
          "nanobot.channels", "nanobot.webui"),
     ),
     ImportRule(
@@ -84,6 +83,22 @@ IMPORT_RULES = (
         allowed_targets=("nanobot.channels.notification_routes",),
     ),
     ImportRule(
+        "process-execution",
+        ("nanobot.execution.processes", "nanobot.execution._windows_job"),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.config", "nanobot.security", "nanobot.session"),
+    ),
+    ImportRule(
+        "http-execution",
+        ("nanobot.execution.http",),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.config", "nanobot.providers", "nanobot.session"),
+    ),
+    ImportRule(
+        "sandbox-execution",
+        ("nanobot.execution.sandbox",),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.config", "nanobot.session"),
+        allowed_targets=("nanobot.config.paths.get_media_dir",),
+    ),
+    ImportRule(
         "channel-routing-contracts",
         ("nanobot.channels.notification_routes",),
         ("nanobot",),
@@ -97,7 +112,18 @@ IMPORT_RULES = (
     ImportRule(
         "security-primitives",
         ("nanobot.security",),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.execution", "nanobot.session"),
+    ),
+    ImportRule(
+        "resource-execution",
+        ("nanobot.execution",),
         (*_ADAPTERS, "nanobot.agent", "nanobot.session"),
+    ),
+    ImportRule(
+        "file-tool-execution",
+        ("nanobot.agent.tools.filesystem", "nanobot.agent.tools.apply_patch",
+         "nanobot.agent.tools.search", "nanobot.utils.file_edit_events"),
+        ("nanobot.security", "nanobot.agent.tools.path_utils", "os", "shutil", "glob"),
     ),
     ImportRule(
         "websocket-transport",

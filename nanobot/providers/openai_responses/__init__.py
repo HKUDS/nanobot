@@ -1,5 +1,3 @@
-"""Shared backend for providers that implement the OpenAI Responses protocol."""
-
 from nanobot.providers.openai_responses.backend import ResponsesBackend, ResponsesWebSocketOptions
 from nanobot.providers.openai_responses.converters import (
     convert_messages,

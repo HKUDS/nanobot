@@ -3,7 +3,7 @@ import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 export default {
   presentation: {
-    logoUrl: "https://mattermost.com/favicon.ico",
+    logoUrl: "/brand/channels/mattermost.svg",
     displayName: "Mattermost",
     initials: "MM",
     color: "#1C58D9",

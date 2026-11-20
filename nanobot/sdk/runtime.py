@@ -1,5 +1,3 @@
-"""Runtime helpers for SDK calls."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping

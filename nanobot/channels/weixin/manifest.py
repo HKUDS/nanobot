@@ -1,5 +1,3 @@
-"""WeChat management contract."""
-
 from nanobot.channels._manifest import field, required
 from nanobot.channels.contracts import ChannelManagementSpec, ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin

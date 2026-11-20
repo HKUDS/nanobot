@@ -1,7 +1,14 @@
 name: Verify Release Candidate
+run-name: >-
+  ${{ github.event_name == 'schedule' && vars.NANOBOT_DAILY_CANDIDATES_ENABLED != 'true' &&
+      'Disabled daily candidate' || format('Candidate {0} {1} from {2}',
+      inputs.channel || 'preview', inputs.next_stable || vars.NANOBOT_PREVIEW_BASE, github.sha) }}
 
-# Preparation only: no cron, tags, GitHub Releases, PyPI or channel-feed writes.
+# Preparation only: no tags, GitHub Releases, PyPI or channel-feed writes.
+# Daily preparation is opt-in and remains disabled until maintainers enable the variable.
 on:
+  schedule:
+    - cron: '17 0 * * *'
   workflow_dispatch:
     inputs:
       next_stable:
@@ -26,11 +33,67 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-candidate
+  # A daily tick must not replace a maintainer's pending manual run.
+  group: release-candidate-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
+  plan:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.repository == 'HKUDS/nanobot' && github.ref == 'refs/heads/main' &&
+       vars.NANOBOT_DAILY_CANDIDATES_ENABLED == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      prepare: ${{ steps.plan.outputs.prepare }}
+      base: ${{ steps.plan.outputs.base }}
+      channel: ${{ steps.plan.outputs.channel }}
+      notes_artifact_id: ${{ steps.notes.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install planning tools
+        run: python -m pip install 'pydantic>=2,<3' packaging
+      - name: Select an exact candidate and generate draft notes
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          NEXT_STABLE: ${{ inputs.next_stable || vars.NANOBOT_PREVIEW_BASE }}
+          CANDIDATE_CHANNEL: ${{ inputs.channel || 'preview' }}
+          PREVIEW_SEQUENCE: ${{ github.run_number }}
+        run: |
+          args=()
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then args+=(--scheduled); fi
+          python -m scripts.release_plan --source-commit "$SOURCE_COMMIT" \
+            --base "$NEXT_STABLE" --channel "$CANDIDATE_CHANNEL" \
+            --sequence "$PREVIEW_SEQUENCE" --output "$RUNNER_TEMP/release-plan" \
+            --github-output "$GITHUB_OUTPUT" "${args[@]}"
+      - name: Retain draft notes for the same candidate
+        id: notes
+        if: steps.plan.outputs.prepare == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-notes-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-plan
+          if-no-files-found: error
+          retention-days: 3
+      - name: Report unchanged source
+        if: steps.plan.outputs.prepare == 'false'
+        run: echo 'This source and Preview base already passed candidate acceptance. No new build or publication.' >> "$GITHUB_STEP_SUMMARY"
+
   candidate:
+    needs: plan
+    if: needs.plan.outputs.prepare == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -40,9 +103,9 @@ jobs:
       prepared_artifact_id: ${{ steps.prepared.outputs.artifact-id }}
     env:
       SOURCE_COMMIT: ${{ github.sha }}
-      NEXT_STABLE: ${{ inputs.next_stable }}
+      NEXT_STABLE: ${{ needs.plan.outputs.base }}
       PREVIEW_SEQUENCE: ${{ github.run_number }}
-      CANDIDATE_CHANNEL: ${{ inputs.channel }}
+      CANDIDATE_CHANNEL: ${{ needs.plan.outputs.channel }}
 
     steps:
       - name: Set candidate directory
@@ -62,6 +125,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.13
+
+      - name: Restore the planned notes by producer ID
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.plan.outputs.notes_artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/release-plan
 
       - name: Install isolated build and verification tools
         run: |
@@ -191,11 +261,12 @@ jobs:
             ${{ runner.temp }}/candidate.json
             ${{ runner.temp }}/release-artifacts/release-manifest.json
             ${{ runner.temp }}/install-candidate.md
+            ${{ runner.temp }}/release-plan/release-notes.md
           if-no-files-found: error
           retention-days: 3
 
       # Explicit, short-lived release handoff only. This is the documented
-      # exception to report-only preflight; never enable it on a daily schedule.
+      # exception to report-only preflight. Schedules do not retain installable files.
       - name: Preserve the verified bytes and independent candidate source
         if: ${{ inputs.retain_installable }}
         working-directory: ${{ env.CANDIDATE_DIR }}
@@ -203,6 +274,7 @@ jobs:
           python -m scripts.release_candidate retain --source-commit "$SOURCE_COMMIT" \
             --artifacts "$RUNNER_TEMP/release-artifacts" \
             --output "$RUNNER_TEMP/retained-candidate"
+          cp "$RUNNER_TEMP/release-plan/release-notes.md" "$RUNNER_TEMP/retained-candidate/release-notes.md"
 
       - name: Transfer prepared candidate pending native acceptance
         id: prepared
@@ -233,8 +305,8 @@ jobs:
 
   verified:
     name: Candidate required
-    needs: [candidate, native]
-    if: always()
+    needs: [plan, candidate, native]
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.prepare == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

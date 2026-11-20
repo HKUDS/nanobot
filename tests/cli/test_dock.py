@@ -1,5 +1,3 @@
-"""The Dock shortcut never owns gateway execution, data, or credentials on disk."""
-
 import asyncio
 import os
 import socket
@@ -161,7 +159,6 @@ def _server():
         listener.listen()
         clients = _Clients()
         stopped = threading.Event()
-        # Keep startup serialized just like the launcher: first connect before release.
         from filelock import FileLock
         with FileLock(str(address.parent / "start.lock")):
             thread = threading.Thread(target=_serve, args=(listener, address, clients, stopped.set))
@@ -279,8 +276,6 @@ async def test_background_presence_waits_for_activation_and_remembers_explicit_r
         with pytest.raises(asyncio.CancelledError):
             await watcher
     assert closed.is_set()
-    # A new gateway generation, including a protected update restart, reads the
-    # same intent without rewriting configuration or learning an updater protocol.
     entered.clear()
     watcher = asyncio.create_task(dock.watch_gateway_icon(
         "http://127.0.0.1:8765/", instance=instance, activated=activated,

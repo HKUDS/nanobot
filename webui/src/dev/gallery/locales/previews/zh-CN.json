@@ -1,18 +1,18 @@
 {
+  "goal": {
+    "title": "GoalIsland · 目标",
+    "description": "预览目标及其详情。",
+    "options": "传入目标状态、摘要、内容及可选的进展说明。",
+    "state": "状态",
+    "summary": "准备发布",
+    "objective": "检查变更并验证发布。\n\n- 检查测试\n- 审阅文档\n- 确认发布准备就绪",
+    "recap": "等待批准。"
+  },
   "rename": {
     "title": "RenameDialog · 分组与项目改名",
     "description": "预览分组和项目改名；话题在列表行内改名。",
     "options": "调用方提供 dialogTitle、description 和 placeholder。title 设置初值，onConfirm 接收去除两端空白的标题。空标题无法保存。",
     "hint": "保存后更新上方标题。"
-  },
-  "delete": {
-    "title": "DeleteConfirm · 删除确认",
-    "description": "比较单个、批量和带自动任务的删除确认。",
-    "options": "count 控制批量文案；automations 展示关联任务、计划和下次运行时间。确认按钮调用 onConfirm。",
-    "scenario": "删除场景",
-    "open": "打开删除确认",
-    "confirmed": "已确认删除示例。",
-    "hint": "选择单个、批量或带自动任务的会话。"
   },
   "inlineTokens": {
     "title": "Inline tokens · 命令与会话标识",
@@ -178,6 +178,18 @@
     "dismissed": "已关闭恢复提示。",
     "reset": "重置预览",
     "hint": "选择恢复状态，再试用继续或关闭。"
+  },
+  "sandbox": {
+    "gateway": "示例网关系统",
+    "unknownGateway": "未指定",
+    "title": "命令提示",
+    "description": "使用正式提示组件，体验缺失组件、安装位置受限和启动异常三种状态。",
+    "options": "提示不抢焦点，也不自动重试命令。可切换状态、关闭提示并继续输入。",
+    "missing": "找不到组件",
+    "permissions": "安装位置受限",
+    "startup": "启动异常",
+    "hint": "这里只演示组件，不会执行命令或修改设置。",
+    "settingsAction": "已请求打开沙箱设置（演示）。"
   },
   "fallback": {
     "title": "ModelFallbackNotice · 模型回退",

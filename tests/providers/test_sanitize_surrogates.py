@@ -27,19 +27,17 @@ from nanobot.utils.helpers import (
 
 class TestSanitizeSurrogates:
     def test_paired_surrogates_reconstructed_to_emoji(self):
-        # \uD83E\uDD16 is the UTF-16 surrogate pair for 🤖 (U+1F916).
         raw = "hello \ud83e\udd16 world"
         cleaned = sanitize_surrogates(raw)
         assert cleaned == "hello 🤖 world"
-        cleaned.encode("utf-8")  # must not raise
+        cleaned.encode("utf-8")
 
     def test_lone_surrogate_replaced_with_fffd(self):
-        raw = "hello \ud83e world"  # lone high surrogate
+        raw = "hello \ud83e world"
         cleaned = sanitize_surrogates(raw)
         assert "\ud83e" not in cleaned
-        # replacement char U+FFFD substitutes the unpaired surrogate
         assert "\ufffd" in cleaned
-        cleaned.encode("utf-8")  # must not raise
+        cleaned.encode("utf-8")
 
     def test_normal_text_returned_unchanged_identity(self):
         raw = "plain ascii + 中文 + 🤖"
@@ -54,7 +52,6 @@ class TestSanitizeSurrogatesDeep:
     def test_clean_input_returns_same_object(self):
         payload = {"role": "user", "content": [{"type": "text", "text": "hi 🤖"}]}
         result = sanitize_surrogates_deep(payload)
-        # No allocation on clean input: same object identity.
         assert result is payload
 
     def test_lone_surrogate_in_nested_content_cleaned(self):
@@ -66,11 +63,10 @@ class TestSanitizeSurrogatesDeep:
             ],
         }
         cleaned = sanitize_surrogates_deep(dirty)
-        assert cleaned is not dirty  # rebuilt
+        assert cleaned is not dirty
         first = cleaned["content"][0]["text"]
         assert "\ud83e" not in first
         assert cleaned["content"][1]["text"] == "normal 🤖"
-        # Full payload must be UTF-8 encodable.
         import json
 
         json.dumps(cleaned, ensure_ascii=False).encode("utf-8")
@@ -87,7 +83,6 @@ class TestSanitizeSurrogatesDeep:
             "\ud83e clean",
         )
         cleaned = sanitize_surrogates_deep(dirty)
-        # tuple preserved as tuple
         assert isinstance(cleaned, tuple)
         assert "\ud83e" not in cleaned[0]["k"]
         assert cleaned[1][1] == "🤖"
@@ -108,7 +103,7 @@ class TestProviderSanitizeEmptyContent:
         result = LLMProvider._sanitize_empty_content(messages)
         text = result[0]["content"]
         assert "\ud83e" not in text
-        text.encode("utf-8")  # would raise pre-fix
+        text.encode("utf-8")
 
     def test_lone_surrogate_in_content_block_scrubbed(self):
         messages = [
@@ -156,7 +151,6 @@ class TestProviderSanitizeEmptyContent:
             },
         ]
         cleaned = LLMProvider._sanitize_empty_content(messages)
-        # This is the operation that previously raised UnicodeEncodeError.
         json.dumps({"model": "x", "messages": cleaned}, ensure_ascii=False).encode("utf-8")
         assert cleaned[0]["content"] == "You are a 🐱 assistant."
         assert cleaned[1]["content"] == "🤖 fixed?"

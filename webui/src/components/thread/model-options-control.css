@@ -1,0 +1,153 @@
+.reasoning-effort {
+  --effort-gap: 0.375rem;
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
+  gap: var(--effort-gap);
+}
+
+.reasoning-effort-slider {
+  --effort-track-size: 20px;
+  --effort-thumb-size: 24px;
+  --effort-axis-inset: calc(var(--effort-track-size) / 2);
+  position: relative;
+  display: grid;
+  align-items: center;
+  flex: none;
+  inline-size: calc(var(--effort-steps) * var(--effort-thumb-size) + 2 * var(--effort-axis-inset));
+  max-inline-size: calc(100% - var(--effort-gap));
+  block-size: 36px;
+  cursor: grab;
+  touch-action: pan-y pinch-zoom;
+}
+
+.reasoning-effort-slider[data-pending] {
+  cursor: default;
+}
+
+.reasoning-effort-track {
+  --effort-lane: #e6e5e6;
+  --effort-lane-edge: #dad9da;
+  --effort-fill: #000;
+  position: relative;
+  isolation: isolate;
+  block-size: var(--effort-track-size);
+  border-radius: var(--radius-pill);
+  corner-shape: round;
+  pointer-events: none;
+}
+
+:where(.dark) .reasoning-effort-track {
+  --effort-lane: #4b4a4b;
+  --effort-lane-edge: #555455;
+  --effort-fill: #d4d4d4;
+}
+
+.reasoning-effort-lane {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  corner-shape: round;
+  background: var(--effort-lane);
+  box-shadow: inset 0 0 0 1px var(--effort-lane-edge);
+}
+
+.reasoning-effort-axis {
+  position: absolute;
+  inset: 0 var(--effort-axis-inset);
+}
+
+.reasoning-effort-fill {
+  display: block;
+  /* The fill stops at the center of the thumb, which covers its edge. */
+  inline-size: calc(var(--effort-axis-inset) + (100% - 2 * var(--effort-axis-inset)) * var(--effort-progress));
+  block-size: 100%;
+  background: var(--effort-fill);
+  transition-property: inline-size, opacity;
+}
+
+.reasoning-effort-slider[data-at-start] .reasoning-effort-fill { opacity: 0; }
+
+.reasoning-effort-tick,
+.reasoning-effort-thumb {
+  position: absolute;
+  inset-block-start: 50%;
+  translate: 0 -50%;
+  margin-inline-start: calc(var(--marker-size) / -2);
+  inline-size: var(--marker-size);
+  block-size: var(--marker-size);
+  border-radius: 50%;
+  corner-shape: round;
+}
+
+.reasoning-effort-tick {
+  --marker-size: 4px;
+  background: white;
+  mix-blend-mode: difference;
+  opacity: 0.24;
+}
+
+.reasoning-effort-thumb {
+  --marker-size: var(--effort-thumb-size);
+  inset-inline-start: calc(100% * var(--effort-progress));
+  border: 1px solid #d9d9d9;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  transition-property: inset-inline-start, scale;
+}
+
+.reasoning-effort-fill,
+.reasoning-effort-thumb {
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0.75, 0.25, 1);
+}
+
+.reasoning-effort-slider[data-dragging] .reasoning-effort-fill {
+  transition-property: none;
+}
+
+.reasoning-effort-slider[data-dragging] .reasoning-effort-thumb {
+  scale: 1.06;
+  transition-property: scale;
+}
+
+/* Keep native keyboard and assistive-technology input; pointer drag previews independently. */
+.reasoning-effort-slider > input {
+  position: absolute;
+  inset: 0;
+  appearance: none;
+  inline-size: 100%;
+  block-size: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.reasoning-effort-slider[data-dragging] {
+  cursor: grabbing;
+}
+
+:where(:root:not([data-focus-modality="pointer"])) .reasoning-effort-slider:has(input:focus-visible) .reasoning-effort-track {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 5px;
+}
+
+@media (max-width: 639px) {
+  .reasoning-effort-slider { block-size: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reasoning-effort-fill,
+  .reasoning-effort-thumb { transition-duration: 0s; }
+}
+
+@media (forced-colors: active) {
+  .reasoning-effort-track { forced-color-adjust: none; }
+  .reasoning-effort-lane { background: GrayText; box-shadow: none; }
+  .reasoning-effort-fill { background: Highlight; }
+  .reasoning-effort-tick { background: Canvas; mix-blend-mode: normal; opacity: 1; }
+  .reasoning-effort-thumb { background: Canvas; border-color: Highlight; box-shadow: inset 0 0 0 1px Highlight; }
+}

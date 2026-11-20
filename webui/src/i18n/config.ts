@@ -62,7 +62,9 @@ function readStoredLocale(): SupportedLocale | null {
 }
 
 export function resolveInitialLocale(): SupportedLocale {
-  return readStoredLocale() ?? defaultLocale;
+  return readStoredLocale() ?? normalizeLocale(
+    typeof navigator === "undefined" ? null : navigator.languages?.[0] || navigator.language,
+  );
 }
 
 export function persistLocale(locale: SupportedLocale): void {

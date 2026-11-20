@@ -1,5 +1,3 @@
-"""Dependency-free Feishu/Lark management contract."""
-
 from nanobot.channels._manifest import DIRECT_GROUP_POLICIES, field, required_fields
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.feishu.instances import FEISHU_MANAGEMENT

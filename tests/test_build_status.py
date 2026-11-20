@@ -1,5 +1,3 @@
-"""Tests for build_status_content cache hit rate display."""
-
 from nanobot.providers.base import LLMUsage
 from nanobot.utils.helpers import build_status_content
 
@@ -20,7 +18,6 @@ def test_status_shows_cache_hit_rate():
 
 
 def test_status_no_cache_info():
-    """Without a reported cache-read count, omit the cache percentage."""
     content = build_status_content(
         version="0.1.0",
         model="glm-4-plus",
@@ -36,7 +33,6 @@ def test_status_no_cache_info():
 
 
 def test_status_zero_cache_read_tokens():
-    """An explicit zero cache-read count should not show cache percentage."""
     content = build_status_content(
         version="0.1.0",
         model="glm-4-plus",
@@ -63,7 +59,6 @@ def test_status_100_percent_cached():
 
 
 def test_status_context_pct_uses_budget_not_total():
-    """Percentage should be calculated against input budget, not raw context window."""
     content = build_status_content(
         version="0.1.0",
         model="test",
@@ -74,12 +69,10 @@ def test_status_context_pct_uses_budget_not_total():
         context_tokens_estimate=120000,
         max_completion_tokens=8192,
     )
-    # budget = 128000 - 8192 - 1024 = 118784; pct = 120000/118784*100 ≈ 101%
     assert "(101% of input budget)" in content
 
 
 def test_status_context_pct_capped_at_999():
-    """Extreme overflow should be capped at 999."""
     content = build_status_content(
         version="0.1.0",
         model="test",

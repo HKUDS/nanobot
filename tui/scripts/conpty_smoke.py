@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Exercise the TUI through the native Windows ConPTY boundary."""
 
 from __future__ import annotations
 

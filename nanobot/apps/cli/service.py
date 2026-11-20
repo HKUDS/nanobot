@@ -1,5 +1,3 @@
-"""CLI-Anything catalog, install state, and safe CLI execution."""
-
 from __future__ import annotations
 
 import asyncio
@@ -209,7 +207,6 @@ def _now() -> float:
 
 
 def _as_object_dict(value: object) -> dict[str, Any] | None:
-    """Narrow a JSON-like object to the string-keyed mapping used by this module."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
@@ -410,7 +407,6 @@ def _truncate(text: str, limit: int = _MAX_TOOL_OUTPUT_CHARS) -> str:
 
 
 def _catalog_description(app: dict[str, Any]) -> str:
-    """Return catalog copy without implying vendor endorsement."""
     description = str(app.get("description") or "")
     return _ENDORSEMENT_WORD_RE.sub("", description).strip()
 
@@ -460,6 +456,13 @@ class CliAppManager:
     def installed_names(self) -> list[str]:
         """Return registry names explicitly installed through CLI Apps."""
         return sorted(str(name) for name in self._load_installed())
+
+    def managed_plugin_owners(self) -> dict[Path, str]:
+        """Map the plugin directories managed by installed CLI Apps to their owners."""
+        return {
+            (self.workspace / _plugin_skill_relative_path(name)).parents[2].resolve(): name
+            for name in self.installed_names()
+        }
 
     def installed_skill_aliases(self) -> dict[str, str]:
         """Map pre-plugin CLI App skill names to their portable identities."""

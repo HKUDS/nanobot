@@ -1,8 +1,7 @@
-"""Responses request construction, transport dispatch, and replay state ownership."""
-
 from __future__ import annotations
 
 import asyncio
+import json
 import ssl
 from collections import OrderedDict
 from collections.abc import AsyncIterable, Awaitable, Callable
@@ -33,6 +32,7 @@ from nanobot.providers.openai_responses.parsing import (
 from nanobot.providers.openai_responses.state import (
     attach_responses_state,
     build_responses_compaction_state,
+    build_responses_state,
     is_compaction_compatibility_error,
     prepare_responses_input,
     resolve_compact_threshold,
@@ -40,6 +40,7 @@ from nanobot.providers.openai_responses.state import (
     responses_state_context_tokens,
     responses_state_items,
 )
+from nanobot.utils.helpers import estimate_prompt_tokens
 
 if TYPE_CHECKING:
     from nanobot.providers.openai_responses.websocket import ResponsesWebSocketSession
@@ -162,8 +163,8 @@ class ResponsesBackend:
         max_output_tokens: int,
         input_budget: int | None,
         send: Callable[[dict[str, Any]], Awaitable[LLMResponse]],
-    ) -> ProviderConversationState | None:
-        """Compact prior history with a trigger while keeping pending tool pairs intact."""
+    ) -> tuple[ProviderConversationState, ProviderConversationState] | None:
+        """Return resumable and summary-only states, keeping pending tool pairs intact."""
         threshold = resolve_compact_threshold(context_window_tokens, max_output_tokens)
         if input_budget is None and (
             threshold is None or responses_state_context_tokens(state) < threshold
@@ -171,14 +172,11 @@ class ResponsesBackend:
             return None
         history = responses_state_items(state) or []
         items = cast(list[dict[str, Any]], body["input"])
-        history, delta = split_compaction_input(history, items[len(history):])
+        pending = items[len(history):]
+        history, delta = split_compaction_input(history, pending)
         try:
             compacted = await send({**body, "input": [*history, {"type": "compaction_trigger"}]})
             compact_items = responses_compaction_items(compacted)
-            body["input"] = [*retained_compaction_messages(history), *compact_items, *delta]
-            return build_responses_compaction_state(
-                provider=provider, model=model, output_items=compact_items,
-            )
         except Exception as exc:
             if is_compaction_compatibility_error(exc):
                 self.native_compaction_available = False
@@ -192,6 +190,25 @@ class ResponsesBackend:
                 not self.native_compaction_available,
             )
             return None
+
+        # Calls paired with pending outputs belong to the reusable prefix; the
+        # Chat-style pending delta is kept separately and converted exactly once.
+        relocated_calls = delta[:len(delta) - len(pending)]
+        prefix = [*retained_compaction_messages(history), *compact_items, *relocated_calls]
+        body["input"] = [*prefix, *pending]
+        continuation = build_responses_state(
+            provider=provider, model=model, input_items=prefix, output_items=[],
+        ).with_pending_messages(state.pending_messages)
+        # Compaction usage measures the old input, not the retained prefix.
+        continuation.payload["context_tokens"] = estimate_prompt_tokens([{
+            "role": "user", "content": json.dumps({**body, "input": prefix}, ensure_ascii=False),
+        }])
+        continuation.payload["context_tokens_source"] = "estimated"
+        summary = build_responses_compaction_state(
+            provider=provider, model=model, output_items=compact_items,
+        )
+        assert summary is not None  # Validated by responses_compaction_items above.
+        return continuation, summary
 
     @staticmethod
     async def consume(
@@ -273,13 +290,18 @@ class ResponsesBackend:
         idle_timeout = resolve_stream_idle_timeout_s()
         if body.get("stream"):
             options["timeout"] = idle_timeout
+        # Older supported SDKs accept server compaction through extra_body.
+        sdk_body = dict(body)
+        if "context_management" in sdk_body:
+            options["extra_body"] = {"context_management": sdk_body.pop("context_management")}
         try:
-            response = await client.responses.create(**body, **options)
+            response = await client.responses.create(**sdk_body, **options)
         except Exception as exc:
             if "context_management" not in body or not is_compaction_compatibility_error(exc):
                 raise
             self.native_compaction_available = False
             body.pop("context_management")
+            options.pop("extra_body")
             logger.warning(
                 "Responses server compaction unsupported; disabled for {} (status={})",
                 provider, getattr(exc, "status_code", None),

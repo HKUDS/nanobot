@@ -49,7 +49,7 @@ async def edited_loop(tmp_path):
 
 async def edit(loop, index=1):
     value = await loop.sessions.state.read("websocket:editing")
-    anchor = HistoryEditSource(str(value.revision), "live-id", f"old-{index}")
+    anchor = HistoryEditSource.from_text(str(value.revision), "live-id", f"old-{index}", f"question-{index}")
     msg = InboundMessage(channel="websocket", sender_id="webui", chat_id="editing", content="modified question",
                          metadata={"webui": True, "webui_turn_id": "edit-turn", "_wants_stream": True})
     return msg, anchor
@@ -128,9 +128,55 @@ async def test_simultaneous_confirmations_only_admit_one_replacement(edited_loop
         loop.replace_user_input(msg, anchor, display_replacement, AsyncMock())
         for _ in range(2)
     ), return_exceptions=True)
-    assert sum(isinstance(value, HistoryEditError) for value in results) == 1
+    # The second delivery of the same request is acknowledged from its receipt.
+    assert results == [None, None]
     await drain(loop)
     assert loop.provider.chat_stream_with_retry.await_count == 1
+
+
+@pytest.mark.parametrize("commit_edit", [True, False])
+async def test_ordinary_input_arriving_during_edit_is_not_lost(edited_loop, monkeypatch, commit_edit):
+    loop = edited_loop
+    msg, anchor = await edit(loop)
+    writing, resume = threading.Event(), threading.Event()
+    replace = loop.sessions._store.replace_generation
+
+    def hold_write(*args, **kwargs):
+        writing.set()
+        assert resume.wait(5)
+        if not commit_edit:
+            raise OSError("fixture write failure")
+        return replace(*args, **kwargs)
+
+    monkeypatch.setattr(loop.sessions._store, "replace_generation", hold_write)
+    editing = asyncio.create_task(loop.replace_user_input(msg, anchor, display_replacement, AsyncMock()))
+    arrived = asyncio.Event()
+
+    async def ordinary_input():
+        arrived.set()
+        await loop._enqueue_session_message(InboundMessage(
+            channel="websocket", sender_id="webui", chat_id="editing", content="ordinary follow-up",
+            metadata={"webui": True, "webui_turn_id": "ordinary-turn", "_wants_stream": True},
+        ))
+
+    try:
+        assert await asyncio.to_thread(writing.wait, 5)
+        ordinary = asyncio.create_task(ordinary_input())
+        await asyncio.wait_for(arrived.wait(), 5)
+        assert not ordinary.done()
+    finally:
+        resume.set()
+    if commit_edit:
+        await editing
+    else:
+        with pytest.raises(OSError, match="fixture write failure"):
+            await editing
+    await asyncio.wait_for(ordinary, 5)
+    await drain(loop)
+    saved = await loop.sessions.state.read(msg.session_key)
+    inputs = [public_history_message(row)["content"] for row in saved.messages if row["role"] == "user"]
+    expected = ["question-0", "modified question"] if commit_edit else [f"question-{i}" for i in range(3)]
+    assert inputs == [*expected, "ordinary follow-up"]
 
 
 @pytest.mark.parametrize("arrival", ["during_reply", "after_reply"])

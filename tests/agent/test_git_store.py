@@ -1,5 +1,3 @@
-"""Tests for GitStore — git-backed version control for memory files."""
-
 import os
 from unittest.mock import patch
 
@@ -114,7 +112,7 @@ class TestAutoCommit:
     def test_does_not_create_empty_commits(self, git_ready):
         git_ready.auto_commit("nothing 1")
         git_ready.auto_commit("nothing 2")
-        assert len(git_ready.log()) == 1  # only init commit
+        assert len(git_ready.log()) == 1
 
     def test_status_failure_is_explicit(self, git_ready):
         with patch("dulwich.porcelain.status", side_effect=OSError("broken index")):
@@ -133,7 +131,7 @@ class TestLog:
             git_ready.auto_commit(f"commit {i}")
 
         commits = git_ready.log()
-        assert len(commits) == 4  # init + 3
+        assert len(commits) == 4
         assert "commit 2" in commits[0].message
         assert "init" in commits[-1].message
 
@@ -252,20 +250,16 @@ class TestRevert:
         assert git.revert("abc") is None
 
     def test_undoes_commit_changes(self, git_ready):
-        """revert(sha) should undo the given commit by restoring to its parent."""
         ws = git_ready._workspace
         (ws / "SOUL.md").write_text("v2 content", encoding="utf-8")
         git_ready.auto_commit("v2")
 
         commits = git_ready.log()
-        # commits[0] = v2 (HEAD), commits[1] = init
-        # Revert v2 → restore to init's state (empty SOUL.md)
         new_sha = git_ready.revert(commits[0].sha)
         assert new_sha is not None
         assert (ws / "SOUL.md").read_text(encoding="utf-8") == ""
 
     def test_root_commit_returns_none(self, git_ready):
-        """Cannot revert the root commit (no parent to restore to)."""
         commits = git_ready.log()
         assert len(commits) == 1
         assert git_ready.revert(commits[0].sha) is None

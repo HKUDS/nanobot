@@ -1,5 +1,3 @@
-"""Shared path helpers for workspace-scoped tools."""
-
 from pathlib import Path
 
 from nanobot.config.paths import get_media_dir

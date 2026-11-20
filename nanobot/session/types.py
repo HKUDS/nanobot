@@ -1,5 +1,3 @@
-"""Session kinds declare their public identity and history access."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping

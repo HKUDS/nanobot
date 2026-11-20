@@ -41,7 +41,6 @@ interface RuntimeControlsOptions {
   onVisibilityChange: (visible: boolean) => void
 }
 
-/** Model and workspace policy controls expose one small, mouse-optional interface. */
 export class RuntimeControls {
   readonly modelText: TextRenderable
   readonly accessText: TextRenderable
@@ -110,7 +109,6 @@ export class RuntimeControls {
     this.contextText.content = text
   }
 
-  /** Warm the small settings payload while the user is reading the first frame. */
   preload(): void {
     void this.load().catch(() => {})
   }

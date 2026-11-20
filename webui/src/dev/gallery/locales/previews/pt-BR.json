@@ -1,18 +1,18 @@
 {
+  "goal": {
+    "title": "GoalIsland · Objetivo",
+    "description": "Visualize o objetivo e seus detalhes.",
+    "options": "Informe o estado, resumo, objetivo e um balanço opcional.",
+    "state": "Estado",
+    "summary": "Preparar o lançamento",
+    "objective": "Revise as alterações e verifique o lançamento.\n\n- Verificar os testes\n- Revisar a documentação\n- Confirmar que está pronto",
+    "recap": "Aguardando aprovação."
+  },
   "rename": {
     "title": "RenameDialog · Renomear grupos e projetos",
     "description": "Teste a renomeação de grupos e projetos. Os tópicos são renomeados na lista de conversas.",
     "options": "O chamador fornece dialogTitle, description e placeholder. title define o valor inicial; onConfirm recebe o título sem espaços nas extremidades. Títulos vazios não podem ser salvos.",
     "hint": "Ao salvar, o título acima é atualizado."
-  },
-  "delete": {
-    "title": "DeleteConfirm · Confirmação de exclusão",
-    "description": "Compare a exclusão de uma conversa, várias conversas ou uma conversa com automações.",
-    "options": "count controla o texto de exclusão em lote. automations mostra tarefas vinculadas, agendamentos e próximas execuções. Confirmar chama onConfirm.",
-    "scenario": "Cenário de exclusão",
-    "open": "Abrir confirmação de exclusão",
-    "confirmed": "Exclusão de exemplo confirmada.",
-    "hint": "Escolha uma conversa, várias conversas ou uma conversa com automações."
   },
   "inlineTokens": {
     "title": "Inline tokens · Comandos e identificadores de sessão",
@@ -178,6 +178,18 @@
     "dismissed": "Aviso de recuperação fechado.",
     "reset": "Redefinir prévia",
     "hint": "Selecione um estado de recuperação e teste continuar ou fechar."
+  },
+  "sandbox": {
+    "gateway": "Gateway de exemplo",
+    "unknownGateway": "Não especificado",
+    "title": "Aviso de comandos",
+    "description": "Compare componentes ausentes, instalações desprotegidas e falhas de inicialização com o componente real.",
+    "options": "O aviso não toma o foco nem repete comandos. Mude o estado, feche-o e continue digitando.",
+    "missing": "Componente não encontrado",
+    "permissions": "Verificar instalação",
+    "startup": "Inicialização indisponível",
+    "hint": "Apenas demonstração. Nenhum comando é executado ou ajuste alterado.",
+    "settingsAction": "Configurações do sandbox solicitadas (demonstração)."
   },
   "fallback": {
     "title": "ModelFallbackNotice · Modelo alternativo",

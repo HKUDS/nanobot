@@ -1,5 +1,3 @@
-"""Application orchestration for typed WebUI WebSocket commands."""
-
 from __future__ import annotations
 
 import asyncio
@@ -8,6 +6,7 @@ import json
 import re
 import time
 import uuid
+import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast
@@ -15,10 +14,16 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
+from nanobot.bus.events import (
+    INBOUND_META_LOCAL_MEDIA,
+    INBOUND_META_MODEL_OPTIONS,
+    INBOUND_META_USER_SHELL,
+)
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
-from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
+from nanobot.command.application import builtin_command_starts_agent_turn
+from nanobot.command.builtin import USER_SHELL_COMMAND
+from nanobot.providers.model_options import ModelOptions, ModelOptionsPayload
 from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
@@ -32,14 +37,14 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.history_edit import HistoryEditError
-from nanobot.session.keys import session_key_for_channel
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
+    latest_live_websocket_turn,
+    live_websocket_turns,
     register_queued_websocket_turn_if_idle,
-    websocket_turn_id,
-    websocket_turn_wall_started_at,
 )
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.prompt_templates import render_template
 from nanobot.webui.attachments import inspect_local_attachment
@@ -67,7 +72,6 @@ from nanobot.webui.session_access import (
     session_mentions_runtime_context,
 )
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
-from nanobot.webui.sidebar_state import write_webui_sidebar_state
 from nanobot.webui.temporary_chats import TemporaryChatError
 from nanobot.webui.transcription_ws import webui_transcription_event
 
@@ -76,6 +80,7 @@ if TYPE_CHECKING:
 
 _WEBUI_REQUEST_CACHE_TTL_S = 5 * 60.0
 _WEBUI_REQUEST_CACHE_MAX = 256
+_WEBUI_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 
 
 @dataclass(frozen=True)
@@ -132,7 +137,6 @@ class WebUICommandTransport(Protocol):
         media: list[str] | None,
         metadata: dict[str, Any],
         is_dm: bool,
-        session_key: str | None,
         require_existing_session: bool,
         session_generation: str | None,
     ) -> None: ...
@@ -167,18 +171,24 @@ class WebUICommandRouter:
         ] = {}
         self.request_operations: dict[str, WebUIRequestOperation] = {}
         self.request_locks: dict[ServerConnection, asyncio.Lock] = {}
+        self._background_lock = asyncio.Lock()
         self._accepted_messages: dict[tuple[str, str], float] = {}
-        self._message_locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
+        self._message_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
     def workspace_project_selection_available(self, connection: ServerConnection) -> bool:
-        return self._http_router.workspace_project_selection_available(connection)
+        return connection in self._webui_connections
 
     async def send_webui_protocol_error(
         self,
         connection: ServerConnection,
         detail: str,
+        *,
+        request_id: str | None = None,
     ) -> None:
-        await self._transport.webui_send_event(connection, "error", detail=detail)
+        await self._transport.webui_send_event(
+            connection, "error", detail=detail,
+            **({"request_id": request_id} if request_id is not None else {}),
+        )
 
     async def attach_webui_fork(
         self,
@@ -186,6 +196,7 @@ class WebUICommandRouter:
         *,
         fork_id: str,
         fork_key: str,
+        request_id: str | None = None,
     ) -> None:
         scope = await self._workspaces.async_scope_for_session_key(fork_key)
         self._transport.webui_attach(connection, fork_id)
@@ -193,6 +204,7 @@ class WebUICommandRouter:
             connection,
             "attached",
             chat_id=fork_id,
+            **({"request_id": request_id} if request_id is not None else {}),
             **(await self._session_projection.attach_fields(fork_key)),
         )
         await self._transport.webui_send_event(
@@ -251,6 +263,7 @@ class WebUICommandRouter:
         *,
         turn_id: str | None,
         starts_turn: bool,
+        waiting_for_model: bool,
         media: list[dict[str, Any]],
         cli_apps: list[dict[str, Any]],
         mcp_presets: list[dict[str, Any]],
@@ -264,6 +277,9 @@ class WebUICommandRouter:
         }
         if turn_id is not None:
             body["turn_id"] = turn_id
+            body["input_id"] = f"user:{turn_id}"
+        if waiting_for_model:
+            body["waiting_for_model"] = True
         if media:
             body["media_urls"] = media
         if cli_apps:
@@ -272,12 +288,9 @@ class WebUICommandRouter:
             body["mcp_presets"] = mcp_presets
         if session_mentions:
             body["session_mentions"] = session_mentions
-        active_turn_id = websocket_turn_id(chat_id)
-        if active_turn_id is not None:
-            body["active_turn_id"] = active_turn_id
-        started_at = websocket_turn_wall_started_at(chat_id)
-        if active_turn_id is not None and started_at is not None:
-            body["started_at"] = started_at
+        live_turn = latest_live_websocket_turn(chat_id)
+        if live_turn is not None and live_turn[1] is not None:
+            body["started_at"], body["active_turn_id"] = live_turn
         raw = json.dumps(body, ensure_ascii=False)
         for connection in self._transport.webui_subscribers(chat_id):
             if connection is not origin:
@@ -290,6 +303,7 @@ class WebUICommandRouter:
         *,
         chat_id: str | None = None,
         turn_id: str | None = None,
+        request_id: str | None = None,
     ) -> Any | None:
         try:
             return await resolver()
@@ -299,10 +313,41 @@ class WebUICommandRouter:
                 "error",
                 detail="workspace_scope_rejected",
                 reason=exc.message,
+                **({"request_id": request_id} if request_id is not None else {}),
                 **({"chat_id": chat_id} if chat_id else {}),
                 **({"turn_id": turn_id} if turn_id else {}),
             )
             return None
+
+    async def dispatch_legacy_message(
+        self,
+        connection: ServerConnection,
+        client_id: str,
+        chat_id: str,
+        content: str,
+    ) -> None:
+        """Authorize legacy text frames through the same workspace boundary."""
+        scope = await self.workspace_scope_or_error(
+            connection,
+            lambda: self._workspaces.scope_for_message(
+                {}, chat_id=chat_id, chat_running=False,
+                can_change_project=self.workspace_project_selection_available(connection),
+            ),
+            chat_id=chat_id,
+        )
+        if scope is None:
+            return
+        await self._transport.webui_dispatch_message(
+            sender_id=client_id, chat_id=chat_id, content=content,
+            media=None,
+            metadata={
+                "remote": getattr(connection, "remote_address", None),
+                WORKSPACE_SCOPE_METADATA_KEY: scope.metadata(),
+            },
+            is_dm=False,
+            require_existing_session=False,
+            session_generation=None,
+        )
 
     async def dispatch(
         self,
@@ -315,6 +360,14 @@ class WebUICommandRouter:
         if command_type == "webui_request":
             await self.start_webui_request(connection, envelope)
             return
+        request_id: str | None = None
+        if command_type in ("new_chat", "new_temporary_chat", "fork_chat") and "request_id" in envelope:
+            raw_request_id = envelope["request_id"]
+            if not isinstance(raw_request_id, str) or _WEBUI_REQUEST_ID_RE.fullmatch(raw_request_id) is None:
+                await self.send_webui_protocol_error(connection, "invalid chat request_id")
+                return
+            request_id = raw_request_id
+        request_fields = {"request_id": request_id} if request_id is not None else {}
         if command_type == "new_chat":
             new_id = str(uuid.uuid4())
             scope = await self.workspace_scope_or_error(
@@ -323,6 +376,7 @@ class WebUICommandRouter:
                     envelope,
                     can_change_project=self.workspace_project_selection_available(connection),
                 ),
+                request_id=request_id,
             )
             if scope is None:
                 return
@@ -332,6 +386,7 @@ class WebUICommandRouter:
                 connection,
                 "attached",
                 chat_id=new_id,
+                **request_fields,
                 **(await self._session_projection.attach_fields(webui_session_key(new_id))),
             )
             await self._transport.webui_send_event(
@@ -350,7 +405,9 @@ class WebUICommandRouter:
                     trusted_webui=connection in self._webui_connections,
                 )
             except TemporaryChatError as exc:
-                await self._transport.webui_send_event(connection, "error", detail=exc.detail)
+                await self._transport.webui_send_event(
+                    connection, "error", detail=exc.detail, **request_fields,
+                )
                 return
             self._transport.webui_attach(connection, new_id)
             await self._transport.webui_send_event(
@@ -358,10 +415,11 @@ class WebUICommandRouter:
                 "attached",
                 chat_id=new_id,
                 temporary=True,
+                **request_fields,
             )
             return
         if command_type == "fork_chat":
-            await handle_webui_fork_chat(self, connection, envelope)
+            await handle_webui_fork_chat(self, connection, envelope, **request_fields)
             return
         if command_type == "discard_temporary_chat":
             chat_id = envelope.get("chat_id")
@@ -402,12 +460,13 @@ class WebUICommandRouter:
                 )
                 return
             self._transport.webui_attach(connection, chat_id)
-            await self._transport.webui_send_event(
-                connection,
-                "attached",
-                chat_id=chat_id,
-                **(await self._session_projection.attach_fields(webui_session_key(chat_id))),
-            )
+            fields = await self._session_projection.attach_fields(webui_session_key(chat_id))
+            if connection in self._webui_connections:
+                # Sample after the metadata read and enqueue without another yield.
+                fields["live_turn_ids"] = [
+                    turn_id for _, turn_id in live_websocket_turns(chat_id) if turn_id is not None
+                ]
+            await self._transport.webui_send_event(connection, "attached", chat_id=chat_id, **fields)
             await self._outbound.hydrate(chat_id)
             return
         if command_type == "set_sidebar_state":
@@ -423,10 +482,7 @@ class WebUICommandRouter:
                 )
                 return
             try:
-                saved_state = await asyncio.to_thread(
-                    write_webui_sidebar_state,
-                    cast(dict[str, Any], state),
-                )
+                saved_state = await self._http_router.sidebar_state.write(cast(dict[str, Any], state))
             except (OSError, ValueError):
                 await self._transport.webui_send_event(
                     connection,
@@ -460,7 +516,7 @@ class WebUICommandRouter:
                 lambda: self._workspaces.scope_for_set_request(
                     envelope,
                     chat_id=chat_id,
-                    chat_running=websocket_turn_wall_started_at(chat_id) is not None,
+                    chat_running=latest_live_websocket_turn(chat_id) is not None,
                     can_change_project=self.workspace_project_selection_available(connection),
                 ),
                 chat_id=chat_id,
@@ -502,22 +558,83 @@ class WebUICommandRouter:
         client_id: str,
         envelope: dict[str, Any],
     ) -> None:
-        chat_id, turn_id = envelope.get("chat_id"), envelope.get("turn_id")
-        if not isinstance(chat_id, str) or not isinstance(turn_id, str) or not turn_id:
+        chat_id = envelope.get("chat_id")
+        if not is_valid_webui_chat_id(chat_id):
             await self._dispatch_message_once(connection, client_id, envelope)
             return
-        key = (chat_id, turn_id)
-        lock, users = self._message_locks.get(key, (asyncio.Lock(), 0))
-        self._message_locks[key] = (lock, users + 1)
-        try:
-            async with lock:
-                await self._dispatch_message_once(connection, client_id, envelope)
-        finally:
-            _, users = self._message_locks[key]
-            if users == 1:
-                del self._message_locks[key]
+        async with self._message_lock(chat_id):
+            await self._dispatch_message_once(connection, client_id, envelope)
+
+    def _message_lock(self, chat_id: str) -> asyncio.Lock:
+        lock = self._message_locks.get(chat_id)
+        if lock is None:
+            lock = self._message_locks[chat_id] = asyncio.Lock()
+        return lock
+
+    def _parse_inbound_attachments(
+        self,
+        raw_media: Any,
+    ) -> tuple[list[str], list[str], list[str | None], list[tuple[bool, int]]]:
+        if not isinstance(raw_media, list):
+            raise AttachmentUploadError("malformed")
+        attachments = cast(list[Any], raw_media)
+        if len(attachments) > self._uploads.store.limits.max_count + 1:
+            raise AttachmentUploadError("Too many attachments")
+        references: list[str] = []
+        local_paths: list[str] = []
+        media_names: list[str | None] = []
+        attachment_order: list[tuple[bool, int]] = []
+        for item in attachments:
+            if not isinstance(item, dict):
+                raise AttachmentUploadError("malformed")
+            attachment = cast(dict[str, Any], item)
+            reference = attachment.get("reference")
+            path = attachment.get("path")
+            if "data_url" in attachment or (reference is None) == (path is None):
+                raise AttachmentUploadError("Expected an upload reference or local path")
+            if path is not None:
+                if not isinstance(path, str) or not path or len(path) > 4096:
+                    raise AttachmentUploadError("Invalid local attachment path")
+                attachment_order.append((True, len(local_paths)))
+                local_paths.append(path)
             else:
-                self._message_locks[key] = (lock, users - 1)
+                if not isinstance(reference, str) or len(reference) > 64:
+                    raise AttachmentUploadError("Invalid upload reference")
+                attachment_order.append((False, len(references)))
+                references.append(reference)
+            name = attachment.get("name")
+            media_names.append((safe_filename(name) or None) if isinstance(name, str) else None)
+        return references, local_paths, media_names, attachment_order
+
+    @staticmethod
+    def _model_options_for_message(
+        envelope: dict[str, Any], content: str, *, trusted_webui: bool, is_user_shell: bool,
+    ) -> ModelOptionsPayload | None:
+        if "model_options" not in envelope:
+            return None
+        if not trusted_webui:
+            raise ValueError("model_options requires a trusted WebUI message")
+        if is_user_shell or not builtin_command_starts_agent_turn(content):
+            return None
+        return ModelOptions.parse(envelope["model_options"]).to_dict()
+
+    @staticmethod
+    def _message_context_blocks(
+        envelope: dict[str, Any], session_mentions: list[SessionMention], *, is_user_shell: bool,
+    ) -> list[RuntimeContextBlock]:
+        blocks: list[RuntimeContextBlock] = []
+        if not is_user_shell and envelope.get("intent") == "create_automation":
+            blocks.append(RuntimeContextBlock(
+                source="webui_automation_creation",
+                content=render_template("agent/automation_creation.md", strip=True),
+            ))
+        quote = webui_quote_runtime_context({WEBUI_QUOTE_METADATA: envelope.get("quoted_context")})
+        if quote is not None:
+            blocks.append(quote)
+        session_context = session_mentions_runtime_context(session_mentions)
+        if session_context is not None:
+            blocks.append(session_context)
+        return blocks
 
     async def _dispatch_message_once(
         self,
@@ -593,37 +710,11 @@ class WebUICommandRouter:
 
         raw_media = envelope.get("media", [])
         media_paths: list[str] = []
-        media_names: list[str | None] = []
-        references: list[str] = []
-        local_paths: list[str] = []
-        attachment_order: list[tuple[bool, int]] = []
         upload_owner = self._uploads.owner(connection) if raw_media else ""
         try:
-            if not isinstance(raw_media, list):
-                raise AttachmentUploadError("malformed")
-            attachments = cast(list[Any], raw_media)
-            if len(attachments) > self._uploads.store.limits.max_count + 1:
-                raise AttachmentUploadError("Too many attachments")
-            for item in attachments:
-                if not isinstance(item, dict):
-                    raise AttachmentUploadError("malformed")
-                attachment = cast(dict[str, Any], item)
-                reference = attachment.get("reference")
-                path = attachment.get("path")
-                if "data_url" in attachment or (reference is None) == (path is None):
-                    raise AttachmentUploadError("Expected an upload reference or local path")
-                if path is not None:
-                    if not isinstance(path, str) or not path or len(path) > 4096:
-                        raise AttachmentUploadError("Invalid local attachment path")
-                    attachment_order.append((True, len(local_paths)))
-                    local_paths.append(path)
-                else:
-                    if not isinstance(reference, str) or len(reference) > 64:
-                        raise AttachmentUploadError("Invalid upload reference")
-                    attachment_order.append((False, len(references)))
-                    references.append(reference)
-                name = attachment.get("name")
-                media_names.append((safe_filename(name) or None) if isinstance(name, str) else None)
+            references, local_paths, media_names, attachment_order = (
+                self._parse_inbound_attachments(raw_media)
+            )
         except AttachmentUploadError as exc:
             await self._transport.webui_send_event(
                 connection, "error", detail="attachment_rejected", reason=str(exc),
@@ -640,7 +731,7 @@ class WebUICommandRouter:
             )
             return
         self._transport.webui_attach(connection, chat_id)
-        if temporary_policy is None or temporary_policy.hydrate_transcript:
+        if temporary_policy is None:
             await self._outbound.hydrate(chat_id)
 
         scope = temporary_policy.workspace_scope if temporary_policy is not None else (
@@ -649,7 +740,7 @@ class WebUICommandRouter:
                 lambda: self._workspaces.scope_for_message(
                     envelope,
                     chat_id=chat_id,
-                    chat_running=websocket_turn_wall_started_at(chat_id) is not None,
+                    chat_running=latest_live_websocket_turn(chat_id) is not None,
                     can_change_project=self.workspace_project_selection_available(connection),
                 ),
                 chat_id=chat_id,
@@ -659,6 +750,7 @@ class WebUICommandRouter:
         if scope is None:
             return
 
+        # Re-check after awaiting scope resolution in case allowlist access was revoked mid-flight.
         if not self._transport.is_allowed(client_id):
             await self._transport.webui_send_event(
                 connection,
@@ -693,15 +785,32 @@ class WebUICommandRouter:
         )
         if is_user_shell:
             metadata[INBOUND_META_USER_SHELL] = True
+        try:
+            options = self._model_options_for_message(
+                envelope, content, trusted_webui=trusted_webui, is_user_shell=is_user_shell,
+            )
+        except ValueError as exc:
+            await self._transport.webui_send_event(
+                connection, "error", detail=str(exc), **rejection_fields,
+            )
+            return
+        if options is not None:
+            metadata[INBOUND_META_MODEL_OPTIONS] = options
         dispatch_content = (
             f"{USER_SHELL_COMMAND} {content[1:].lstrip()}" if is_user_shell else content
         )
         cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
         if cli_apps:
             metadata["cli_apps"] = cli_apps
-        mcp_presets = normalize_mcp_preset_mentions(
-            envelope.get("mcp_presets"),
-            config_path=self.gateway.settings.config.path,
+        raw_mcp_presets = envelope.get("mcp_presets")
+        mcp_presets = (
+            await asyncio.to_thread(
+                normalize_mcp_preset_mentions,
+                raw_mcp_presets,
+                config_path=self.gateway.settings.config.path,
+            )
+            if raw_mcp_presets
+            else []
         )
         if mcp_presets:
             metadata["mcp_presets"] = mcp_presets
@@ -754,23 +863,15 @@ class WebUICommandRouter:
             if queued_owner is not None:
                 metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
+        # Live presentation only: a follow-up accepted while another turn owns the chat.
+        waiting_for_model = (
+            is_webui and temporary_policy is None and turn_id is not None
+            and not restart_control and not is_user_shell and not content.lstrip().startswith("/")
+            and queued_owner is None and latest_live_websocket_turn(chat_id) is not None
+        )
         accepted = False
-        admission_session_key = (
-            temporary_policy.session_key
-            if temporary_policy is not None
-            else webui_session_key(chat_id)
-        )
-        execution_session_key = (
-            temporary_policy.session_key
-            if temporary_policy is not None
-            else session_key_for_channel(
-                "websocket", chat_id, unified_session=self.gateway.unified_session,
-            )
-        )
         session_generation: str | None = None
         session_created = False
-        execution_generation: str | None = None
-        execution_created = False
         try:
             if not restart_control:
                 admission = await self.workspace_scope_or_error(
@@ -778,7 +879,6 @@ class WebUICommandRouter:
                     lambda: self._workspaces.persist_scope(
                         chat_id,
                         scope,
-                        session_key=admission_session_key,
                         expected_generation=(
                             temporary_policy.session_generation
                             if temporary_policy is not None
@@ -791,21 +891,9 @@ class WebUICommandRouter:
                 if admission is None:
                     return
                 session_generation, session_created = admission
-                execution_generation = session_generation
-                if (
-                    execution_session_key != admission_session_key
-                    and self.gateway.session_manager is not None
-                ):
-                    execution_generation, execution_created = (
-                        await self.gateway.session_manager.state.open_with_metadata(
-                            execution_session_key, {},
-                        )
-                    )
             if session_generation is not None:
                 metadata[HISTORY_GENERATION_METADATA_KEY] = session_generation
-            if is_webui and not restart_control and (
-                temporary_policy is None or temporary_policy.persist_transcript
-            ):
+            if is_webui and not restart_control and temporary_policy is None:
                 await self._transcripts.append_user_message(
                     chat_id,
                     content,
@@ -816,20 +904,9 @@ class WebUICommandRouter:
                     session_mentions=session_mentions or None,
                 )
             if trusted_webui:
-                context_blocks: list[RuntimeContextBlock] = []
-                if not is_user_shell and envelope.get("intent") == "create_automation":
-                    context_blocks.append(RuntimeContextBlock(
-                        source="webui_automation_creation",
-                        content=render_template("agent/automation_creation.md", strip=True),
-                    ))
-                quote = webui_quote_runtime_context(
-                    {WEBUI_QUOTE_METADATA: envelope.get("quoted_context")}
+                context_blocks = self._message_context_blocks(
+                    envelope, session_mentions, is_user_shell=is_user_shell,
                 )
-                if quote is not None:
-                    context_blocks.append(quote)
-                session_context = session_mentions_runtime_context(session_mentions)
-                if session_context is not None:
-                    context_blocks.append(session_context)
                 if context_blocks:
                     metadata[RUNTIME_CONTEXT_INPUT_META] = context_blocks
             await self._transport.webui_dispatch_message(
@@ -839,18 +916,8 @@ class WebUICommandRouter:
                 media=media_paths or None,
                 metadata=metadata,
                 is_dm=False,
-                session_key=(
-                    execution_session_key
-                    if temporary_policy is not None
-                    or execution_session_key != admission_session_key
-                    else None
-                ),
-                require_existing_session=(
-                    temporary_policy.require_existing_session
-                    if temporary_policy is not None
-                    else False
-                ),
-                session_generation=execution_generation,
+                require_existing_session=temporary_policy is not None,
+                session_generation=session_generation,
             )
             accepted = True
             if turn_id:
@@ -859,12 +926,7 @@ class WebUICommandRouter:
                     del self._accepted_messages[next(iter(self._accepted_messages))]
         except BaseException:
             await self._workspaces.rollback_scope_admission(
-                execution_session_key,
-                execution_generation,
-                created=execution_created,
-            )
-            await self._workspaces.rollback_scope_admission(
-                admission_session_key,
+                chat_id,
                 session_generation,
                 created=session_created,
             )
@@ -889,20 +951,21 @@ class WebUICommandRouter:
                 content,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
+                waiting_for_model=waiting_for_model,
                 media=media,
                 cli_apps=cli_apps,
                 mcp_presets=mcp_presets,
                 session_mentions=session_mentions,
             )
         if is_webui and turn_id:
-            active_turn_id = websocket_turn_id(chat_id)
-            started_at = websocket_turn_wall_started_at(chat_id)
+            started_at, active_turn_id = latest_live_websocket_turn(chat_id) or (None, None)
             await self._transport.webui_send_event(
                 connection,
                 "message_accepted",
                 chat_id=chat_id,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
+                **({"waiting_for_model": True} if waiting_for_model else {}),
                 **({"media_urls": media} if media else {}),
                 **(
                     {"active_turn_id": active_turn_id}
@@ -922,10 +985,7 @@ class WebUICommandRouter:
         envelope: dict[str, Any],
     ) -> None:
         request_id = envelope.get("request_id")
-        if not isinstance(request_id, str) or re.fullmatch(
-            r"[A-Za-z0-9._:-]{1,128}",
-            request_id,
-        ) is None:
+        if not isinstance(request_id, str) or _WEBUI_REQUEST_ID_RE.fullmatch(request_id) is None:
             await self._transport.webui_send_event(
                 connection,
                 "error",
@@ -983,7 +1043,7 @@ class WebUICommandRouter:
                     scope = policy.workspace_scope if policy is not None else (
                         await self._workspaces.scope_for_message(
                             payload, chat_id=chat_id,
-                            chat_running=websocket_turn_wall_started_at(chat_id) is not None,
+                            chat_running=latest_live_websocket_turn(chat_id) is not None,
                             can_change_project=self.workspace_project_selection_available(connection),
                         )
                     )
@@ -1021,11 +1081,17 @@ class WebUICommandRouter:
                 if policy is None:
                     raise TemporaryChatError("temporary_chat_unavailable")
                 if metadata_only:
-                    result = file_reference_payload(path, scope=policy.workspace_scope)
+                    result = await asyncio.to_thread(
+                        file_reference_payload, path, scope=policy.workspace_scope,
+                    )
                 elif probe:
-                    result = file_preview_availability_payload(path, scope=policy.workspace_scope)
+                    result = await asyncio.to_thread(
+                        file_preview_availability_payload, path, scope=policy.workspace_scope,
+                    )
                 else:
-                    result = file_preview_payload(path, scope=policy.workspace_scope)
+                    result = await asyncio.to_thread(
+                        file_preview_payload, path, scope=policy.workspace_scope,
+                    )
             except TemporaryChatError as exc:
                 await self.send_webui_response(
                     connection, request_id, status=404, message=exc.detail,
@@ -1173,8 +1239,12 @@ class WebUICommandRouter:
             async with lock:
                 if action == "chat.fork":
                     try:
+                        chat_id = payload.get("chat_id")
+                        if not is_valid_webui_chat_id(chat_id):
+                            raise HistoryEditError("edit_invalid_request")
                         with self._http_router.bus.admission.activity():
-                            result = await replace_webui_chat_input(self, payload)
+                            async with self._message_lock(chat_id), self._outbound.history_lock(chat_id):
+                                result = await replace_webui_chat_input(self, payload)
                     except HistoryEditError as exc:
                         return WebUIRequestResult(status=409, message=exc.code)
                     except RuntimeMaintenanceError:
@@ -1182,31 +1252,66 @@ class WebUICommandRouter:
                             status=503, message="Gateway update is being verified. Retry shortly.",
                         )
                     return WebUIRequestResult(result=result)
+                if action in {"background.update", "background.delete", "background.style"}:
+                    from nanobot.webui.background import (
+                        MAX_BYTES,
+                        save_background,
+                        save_background_style,
+                    )
+
+                    async def mutate_background() -> WebUIRequestResult:
+                        try:
+                            with self._http_router.bus.admission.activity():
+                                directory = self._http_router.settings.config.path.parent / "webui"
+                                if action == "background.delete":
+                                    await asyncio.to_thread((directory / "background.png").unlink, missing_ok=True)
+                                elif action == "background.style":
+                                    try:
+                                        await asyncio.to_thread(save_background_style, directory, payload.get("blur"), payload.get("veil"))
+                                    except ValueError as exc:
+                                        return WebUIRequestResult(status=400, message=str(exc))
+                                else:
+                                    reference = payload.get("reference")
+                                    if not isinstance(reference, str):
+                                        return WebUIRequestResult(status=400, message="Invalid attachment reference")
+                                    owner = self._uploads.owner(connection)
+                                    try:
+                                        entry = self._uploads.store.inspect([reference], owner=owner)[0]
+                                        # Claim before yielding so disconnect cleanup cannot unlink the worker's source.
+                                        self._uploads.store.commit([reference], owner=owner)
+
+                                        def persist_staged_background() -> None:
+                                            try:
+                                                with entry.path.open("rb") as source:
+                                                    data = source.read(MAX_BYTES + 1)
+                                                save_background(directory, data, entry.mime)
+                                            finally:
+                                                entry.path.unlink(missing_ok=True)
+
+                                        await asyncio.to_thread(persist_staged_background)
+                                    except (AttachmentUploadError, ValueError) as exc:
+                                        return WebUIRequestResult(status=400, message=str(exc))
+                                return WebUIRequestResult(result={"ok": True})
+                        except RuntimeMaintenanceError:
+                            return WebUIRequestResult(status=503, message="Gateway update is being verified. Retry shortly.")
+                        except Exception:
+                            # shield_and_drain gives cancellation precedence; retain an
+                            # observable failure even when its caller was cancelled.
+                            logger.exception("Background mutation '{}' failed", action)
+                            raise
+
+                    async with self._background_lock:
+                        return await shield_and_drain(mutate_background())
                 response = await self._http_router.dispatch_webui_mutation(
                     connection,
                     action,
                     payload,
                 )
-                status = response.status_code
-                body = bytes(response.body).decode("utf-8", errors="replace").strip()
-                if 200 <= status < 300:
-                    try:
-                        result = json.loads(body)
-                    except json.JSONDecodeError:
-                        return WebUIRequestResult(
-                            status=502,
-                            message="WebUI mutation returned an invalid response",
-                        )
-                    if action == "sidebar.update" and isinstance(result, dict):
-                        await self.broadcast_webui_event(
-                            "sidebar_state_updated",
-                            state=result,
-                        )
-                    return WebUIRequestResult(result=result)
-                return WebUIRequestResult(
-                    status=status,
-                    message=body or response.reason_phrase,
-                )
+                if 200 <= response.status_code < 300:
+                    if action == "sidebar.update":
+                        await self.broadcast_webui_event("sidebar_state_updated", state=response.result)
+                    return WebUIRequestResult(result=response.result)
+                return WebUIRequestResult(status=response.status_code, message=response.message)
         except asyncio.CancelledError:
             raise
         except Exception:

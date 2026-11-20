@@ -1,5 +1,3 @@
-"""WebUI chat fork orchestration."""
-
 from __future__ import annotations
 
 import uuid
@@ -27,6 +25,8 @@ class WebUIForkHost(Protocol):
         self,
         connection: ServerConnection,
         detail: str,
+        *,
+        request_id: str | None = None,
     ) -> None: ...
 
     async def announce_webui_history_replacement(
@@ -39,6 +39,7 @@ class WebUIForkHost(Protocol):
         *,
         fork_id: str,
         fork_key: str,
+        request_id: str | None = None,
     ) -> None: ...
 
 
@@ -66,6 +67,8 @@ async def handle_webui_fork_chat(
     channel: WebUIForkHost,
     connection: ServerConnection,
     envelope: Mapping[str, Any],
+    *,
+    request_id: str | None = None,
 ) -> None:
     """Handle the WebUI ``fork_chat`` websocket command.
 
@@ -73,21 +76,22 @@ async def handle_webui_fork_chat(
     validate the request, clone session/transcript state, attach the new chat,
     and hydrate the client.
     """
+    request_fields = {"request_id": request_id} if request_id is not None else {}
     if envelope.get("mode", "new") != "new":
-        await channel.send_webui_protocol_error(connection, "replace requires an acknowledged WebUI request")
+        await channel.send_webui_protocol_error(connection, "replace requires an acknowledged WebUI request", **request_fields)
         return
     source_chat_id = envelope.get("source_chat_id")
     raw_index = envelope.get("before_user_index")
     if not is_valid_webui_chat_id(source_chat_id):
-        await channel.send_webui_protocol_error(connection, "invalid source_chat_id")
+        await channel.send_webui_protocol_error(connection, "invalid source_chat_id", **request_fields)
         return
     if isinstance(raw_index, bool) or not isinstance(raw_index, int) or raw_index < 0:
-        await channel.send_webui_protocol_error(connection, "invalid before_user_index")
+        await channel.send_webui_protocol_error(connection, "invalid before_user_index", **request_fields)
         return
 
     session_manager = channel.gateway.session_manager
     if session_manager is None:
-        await channel.send_webui_protocol_error(connection, "session_manager_unavailable")
+        await channel.send_webui_protocol_error(connection, "session_manager_unavailable", **request_fields)
         return
 
     try:
@@ -98,18 +102,19 @@ async def handle_webui_fork_chat(
             title=envelope.get("title") if isinstance(envelope.get("title"), str) else None,
         )
         if forked is None:
-            await channel.send_webui_protocol_error(connection, "invalid fork source or index")
+            await channel.send_webui_protocol_error(connection, "invalid fork source or index", **request_fields)
             return
         fork_id, fork_key = forked
     except Exception as exc:
         logger.warning("fork_chat failed: {}", exc)
-        await channel.send_webui_protocol_error(connection, "fork_chat_failed")
+        await channel.send_webui_protocol_error(connection, "fork_chat_failed", **request_fields)
         return
 
     await channel.attach_webui_fork(
         connection,
         fork_id=fork_id,
         fork_key=fork_key,
+        **request_fields,
     )
 
 
@@ -117,7 +122,6 @@ async def replace_webui_chat_input(
     channel: WebUIForkHost, payload: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Confirm a versioned source and replace both histories before execution."""
-    from dataclasses import asdict
 
     from nanobot.bus.events import InboundMessage
     from nanobot.runtime_context import public_history_message
@@ -159,39 +163,34 @@ async def replace_webui_chat_input(
             or not isinstance(original_text, str)
             or (source_turn_id is not None and not isinstance(source_turn_id, str))):
         raise HistoryEditError("edit_invalid_request")
-    source = HistoryEditSource(revision, message_id, source_turn_id)
-    if gateway.unified_session:
-        raise HistoryEditError("edit_shared_history")
+    source = HistoryEditSource.from_text(revision, message_id, source_turn_id, original_text)
     if gateway.ingress.validate_text(text) is not None:
         raise HistoryEditError("edit_text_too_large")
-    assert gateway.session_manager is not None
-    assert gateway.replace_user_input is not None
+    if gateway.session_manager is None or gateway.replace_user_input is None:
+        raise HistoryEditError("edit_unavailable")
     key = webui_session_key(chat_id)
     manager = gateway.session_manager
-    current = await manager.state.read(key)
-    if current is None:
-        raise HistoryEditError("edit_source_changed")
-    raw_receipt = current.metadata.get("history_edit_receipt")
-    receipt = cast(dict[str, Any], raw_receipt) if isinstance(raw_receipt, dict) else None
-    if receipt is not None and receipt.get("turn_id") == turn_id:
-        if (receipt.get("text"), receipt.get("source")) != (text, asdict(source)):
-            raise HistoryEditError("edit_request_conflict")
-        return {"accepted": True, "turn_id": turn_id}
     queued_owner = register_queued_websocket_turn_if_idle(chat_id, turn_id)
-    if queued_owner is None:
-        raise HistoryEditError("edit_session_busy")
     message = InboundMessage(
         channel="websocket", chat_id=chat_id, sender_id="webui", content=text,
         metadata={"webui": True, "_wants_stream": True, "webui_turn_id": turn_id,
                   "_webui_history_replacement": True,
                   WEBSOCKET_TURN_OWNER_METADATA_KEY: queued_owner},
     )
+    if queued_owner is None:
+        await manager.state.replace_user_input(key, source, message, None)
+        return {"accepted": True, "turn_id": turn_id}
     retired_turn_ids: list[str] = []
+    previous_generation = ""
     committed = False
 
     def projection(session: Session, history: HistoryReader) -> HistoryEditTarget:
         if prompt_index_revision(key, (session.generation, session.revision), history=history) != source.revision:
             raise HistoryEditError("edit_source_changed")
+        nonlocal previous_generation
+        previous_generation = session.generation
+        if history.has_input(f"user:{turn_id}") or any(m.get("webui_turn_id") == turn_id for m in session.messages):
+            raise HistoryEditError("edit_request_conflict")
         target = transcript_edit_target(key, source.message_id, source.turn_id, history=history)
         if target is None or target[0].get("text") != original_text:
             raise HistoryEditError("edit_source_changed")
@@ -236,13 +235,12 @@ async def replace_webui_chat_input(
         body["active_turn_id"] = turn_id
         body["has_pending_tool_calls"] = True
         await channel.announce_webui_history_replacement(
-            chat_id, body, retired_turn_ids=retired_turn_ids, previous_generation=current.generation,
+            chat_id, body, retired_turn_ids=retired_turn_ids, previous_generation=previous_generation,
         )
 
     try:
         await gateway.replace_user_input(message, source, projection, accepted)
-    except BaseException:
+    finally:
         if not committed:
             clear_websocket_turn_if_current(chat_id, queued_owner)
-        raise
     return {"accepted": True, "turn_id": turn_id}

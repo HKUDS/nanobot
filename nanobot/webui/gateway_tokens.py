@@ -1,5 +1,3 @@
-"""Token state for the embedded WebUI gateway."""
-
 from __future__ import annotations
 
 import secrets

@@ -11,6 +11,7 @@ You can ask nanobot to guide your next task using the built-in `nanobot-document
 | Build a personal AI agent | [Build a personal AI agent](./build-a-personal-ai-agent.md) |
 | Use the browser workbench | [AI agent WebUI](./ai-agent-webui.md) |
 | Run a self-hosted AI agent | [Self-hosted AI agent](./self-hosted-ai-agent.md) |
+| Connect to a remote nanobot from your local WebUI | [Connect to an existing remote nanobot](./remote-instances.md) |
 | Run a sustained goal | [Long-running AI agent](./long-running-ai-agent.md) |
 | Add long-term memory | [AI agent memory](./ai-agent-memory.md) |
 
@@ -38,7 +39,6 @@ Use **Channels** in the WebUI for guided setup. These guides explain the account
 | Goal | Guide |
 |---|---|
 | Run from Python | [Python AI agent SDK](./python-ai-agent-sdk.md) |
-| Expose `/v1/chat/completions` | [OpenAI-compatible agent API](./openai-compatible-agent-api.md) |
 
 ## Configure and Operate
 

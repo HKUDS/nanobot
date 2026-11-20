@@ -1,11 +1,16 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { CliAppInfo, McpPresetInfo, NanobotFeatureInfo } from "@/lib/types";
+import type { NanobotClient } from "@/lib/nanobot-client";
+import { invalidateToolsCatalog, TOOLS_CATALOG_TTL_MS } from "@/lib/tools-catalog-cache";
+import { CLI_APPS_REFRESH_RETRY_MS } from "@/components/settings/system/AppsSettings";
 import {
   installSettingsViewTestHooks,
   jsonResponse,
   renderSettingsView,
+  selectToolType,
+  showOnlyReadyTools,
   settingsPayload,
 } from "@/tests/settings-test-utils";
 
@@ -37,6 +42,97 @@ const channel: NanobotFeatureInfo = {
 describe("catalog loading", () => {
   installSettingsViewTestHooks();
 
+  it("reuses both catalogs after leaving settings and keeps expired rows visible during refresh", async () => {
+    const client = { status: "open", onStatus: () => () => {} } as unknown as NanobotClient;
+    const cli = deferred<Response>();
+    const mcp = deferred<Response>();
+    let refresh = false;
+    const fetch = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings/cli-apps") return refresh ? cli.promise : Promise.resolve(jsonResponse({ apps: [app], installed_count: 1 }));
+      if (url === "/api/settings/mcp-presets") return refresh ? mcp.promise : Promise.resolve(jsonResponse({ presets: [plugin], installed_count: 1 }));
+      return Promise.resolve(jsonResponse(settingsPayload()));
+    });
+    vi.stubGlobal("fetch", fetch);
+    renderSettingsView({ client, initialSettings: settingsPayload() });
+    await act(async () => {});
+    cleanup();
+    fetch.mockClear();
+    renderSettingsView({ client, initialSettings: settingsPayload() });
+    await selectToolType("CLI Apps");
+    expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
+    expect(screen.getByRole("heading", { name: "Computer Use" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
+    expect(fetch.mock.calls.filter(([url]) => String(url).match(/cli-apps|mcp-presets/))).toHaveLength(0);
+    cleanup();
+    refresh = true;
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + TOOLS_CATALOG_TTL_MS + 1);
+    try {
+      renderSettingsView({ client, initialSettings: settingsPayload() });
+      await selectToolType("CLI Apps");
+      expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
+      await selectToolType("Agent Plugins");
+      await showOnlyReadyTools(false);
+      expect(screen.getByRole("heading", { name: "Computer Use" })).toBeInTheDocument();
+      expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
+      expect(fetch.mock.calls.filter(([url]) => String(url).match(/cli-apps|mcp-presets/))).toHaveLength(2);
+      await act(async () => {
+        cli.resolve(jsonResponse({ apps: [{ ...app, display_name: "Updated app" }], installed_count: 1 }));
+        mcp.resolve(jsonResponse({ presets: [{ ...plugin, display_name: "Updated plugin" }], installed_count: 1 }));
+      });
+      expect(screen.getByRole("heading", { name: "Updated plugin" })).toBeInTheDocument();
+      await selectToolType("CLI Apps");
+      expect(screen.getByRole("heading", { name: "Updated app" })).toBeInTheDocument();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("refreshes an invalidated initial read immediately and ignores its superseded response", async () => {
+    const client = { status: "open", onStatus: () => () => {} } as unknown as NanobotClient;
+    const old = deferred<Response>();
+    let reads = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === "/api/settings") return Promise.resolve(jsonResponse(settingsPayload()));
+      if (String(input) === "/api/settings/cli-apps") {
+        reads++;
+        return reads === 1 ? old.promise : Promise.resolve(jsonResponse({ apps: [app], installed_count: 1 }));
+      }
+      return Promise.resolve(jsonResponse({ presets: [], installed_count: 0 }));
+    }));
+    renderSettingsView({ client, initialSettings: settingsPayload() });
+    await act(async () => { invalidateToolsCatalog(client); });
+    expect(reads).toBe(2);
+    expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
+    await act(async () => { old.resolve(jsonResponse({ apps: [], installed_count: 0 })); });
+    expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
+  });
+
+  it("resumes a pending CLI catalog refresh after remount", async () => {
+    vi.useFakeTimers();
+    const client = { status: "open", onStatus: () => () => {} } as unknown as NanobotClient;
+    let reads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/settings") return jsonResponse(settingsPayload());
+      if (String(input) === "/api/settings/cli-apps") {
+        reads++;
+        return jsonResponse({ apps: [{ ...app, display_name: reads === 1 ? "AnyGen" : "Refreshed app" }], installed_count: 1, catalog_refresh_pending: reads === 1 });
+      }
+      return jsonResponse({ presets: [], installed_count: 0 });
+    }));
+    renderSettingsView({ client, initialSettings: settingsPayload() });
+    await act(async () => {});
+    cleanup();
+    renderSettingsView({ client, initialSettings: settingsPayload() });
+    expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
+    expect(reads).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(CLI_APPS_REFRESH_RETRY_MS); });
+    expect(reads).toBe(2);
+    expect(screen.getByRole("heading", { name: "Refreshed app" })).toBeInTheDocument();
+  });
+
   it("keeps loaded Apps rows visible while waiting for Agent Plugins", async () => {
     const cli = deferred<Response>();
     const mcp = deferred<Response>();
@@ -47,12 +143,16 @@ describe("catalog loading", () => {
       return Promise.resolve(jsonResponse(settingsPayload()));
     }));
     renderSettingsView({ initialSettings: settingsPayload() });
+    await selectToolType("CLI Apps");
     expect(screen.getByRole("status", { name: "Loading apps…" })).toHaveAttribute("aria-busy", "true");
 
     await act(async () => { cli.resolve(jsonResponse({ apps: [app], installed_count: 1 })); });
     expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Loading apps…" })).toBeInTheDocument();
     await act(async () => { mcp.resolve(jsonResponse({ presets: [plugin], installed_count: 1 })); });
+    expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
     expect(screen.getByRole("heading", { name: "Computer Use" })).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
   });
@@ -70,17 +170,18 @@ describe("catalog loading", () => {
     renderSettingsView({ initialSettings: settingsPayload() });
     await act(async () => {});
     expect(screen.getByRole("status", { name: "Loading apps…" })).toBeInTheDocument();
-    expect(screen.queryByText("No apps available.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No tools available")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
-    expect(screen.getByText("No MCP tools available.")).toBeInTheDocument();
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
+    expect(screen.getByText("No MCP tools available")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("Search tools"), { target: { value: "AnyGen" } });
-    expect(screen.getByText("No tools match your search.")).toBeInTheDocument();
+    expect(screen.getByText("No tools match your search")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Apps" }));
+    await selectToolType("CLI Apps");
     expect(screen.getByRole("status", { name: "Loading apps…" })).toBeInTheDocument();
-    expect(screen.queryByText("No tools match your search.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No tools match your search")).not.toBeInTheDocument();
     await act(async () => { cli.resolve(jsonResponse({ apps: [app], installed_count: 1 })); });
     expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
@@ -96,7 +197,7 @@ describe("catalog loading", () => {
     renderSettingsView({ initialSection: section, initialSettings: settingsPayload() });
     expect(await screen.findByText("Catalog offline")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: /Loading (apps|channels)/ })).not.toBeInTheDocument();
-    expect(screen.queryByText("No apps available.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No tools available")).not.toBeInTheDocument();
     expect(screen.queryByText("No channels match this filter.")).not.toBeInTheDocument();
   });
 

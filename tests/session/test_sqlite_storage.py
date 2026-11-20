@@ -1,5 +1,3 @@
-"""SQLite durability, migration, and asynchronous state ownership contracts."""
-
 import asyncio
 import json
 import shutil
@@ -789,3 +787,54 @@ def test_committed_version_tracks_history_and_session_replacement(tmp_path, monk
 
     monkeypatch.setattr("nanobot.session.sqlite_store._object", unexpected_decode)
     assert manager.read_session_version(key) == (replacement.generation, replacement.revision)
+
+
+async def test_archive_state_survives_reopen_for_persisted_sessions_only(tmp_path):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    try:
+        await state.import_messages("websocket:active", [{"role": "user", "content": "keep history"}])
+        fork = await state.fork("websocket:active", "websocket:empty", 0)
+        assert fork is not None and fork.messages == []
+        manager.get_or_create("websocket:draft")
+        original = manager.read_session_snapshot("websocket:active")
+        assert await state.import_archives(["websocket:active"]) == ["websocket:active"]
+        assert await state.set_archived_keys(["websocket:active", "websocket:empty", "websocket:draft", "websocket:missing"]) == ["websocket:active", "websocket:empty"]
+        assert manager.read_session_snapshot("websocket:draft") is None
+        assert manager.read_session_snapshot("websocket:missing") is None
+        assert manager.read_session_snapshot("websocket:empty") == fork
+        assert manager.read_session_snapshot("websocket:active") == original
+    finally:
+        await state.aclose()
+
+    reopened = SessionManager(tmp_path).state
+    try:
+        assert await reopened.archived_keys() == ["websocket:active", "websocket:empty"]
+        await reopened.reset("websocket:active")
+        assert await reopened.archived_keys() == ["websocket:active", "websocket:empty"]
+        assert (await reopened.read("websocket:active")).messages == []
+        assert await reopened.set_archived_keys(["websocket:empty"]) == ["websocket:empty"]
+        # A repeated legacy import must not revive a restored session.
+        assert await reopened.import_archives(["websocket:active"]) == ["websocket:empty"]
+        assert await reopened.delete("websocket:empty") is True
+        assert await reopened.archived_keys() == []
+    finally:
+        await reopened.aclose()
+
+
+async def test_archive_batch_rolls_back_on_database_failure(tmp_path):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    try:
+        await state.import_archives([])
+        for key in ("websocket:first", "websocket:fail"):
+            await state.import_messages(key, [{"role": "user", "content": "saved"}])
+        with sqlite3.connect(manager._store.path) as db:
+            db.execute("""CREATE TRIGGER fail_archive BEFORE INSERT ON session_archives
+                          WHEN NEW.key='websocket:fail'
+                          BEGIN SELECT RAISE(ABORT, 'archive failed'); END""")
+        with pytest.raises(sqlite3.IntegrityError, match="archive failed"):
+            await state.set_archived_keys(["websocket:first", "websocket:fail"])
+        assert await state.archived_keys() == []
+    finally:
+        await state.aclose()

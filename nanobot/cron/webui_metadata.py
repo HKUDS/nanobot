@@ -1,5 +1,3 @@
-"""WebUI metadata helpers for cron deliveries."""
-
 from __future__ import annotations
 
 import uuid

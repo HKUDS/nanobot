@@ -1,5 +1,3 @@
-"""Tests for FeishuChannel._resolve_mentions."""
-
 from types import SimpleNamespace
 
 from nanobot.channels.feishu.runtime import FeishuChannel
@@ -26,7 +24,6 @@ class TestResolveMentions:
         assert "@Bob (ou_abc, user id: uid_456)" in result
 
     def test_mention_no_id_skipped(self):
-        """When mention has no id object, the placeholder is left unchanged."""
         text = "@_user_1 said hi"
         mentions = [SimpleNamespace(key="@_user_1", name="Charlie", id=None)]
         result = FeishuChannel._resolve_mentions(text, mentions)

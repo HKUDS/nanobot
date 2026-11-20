@@ -1,5 +1,3 @@
-"""Shared MIME and batch limits for WebSocket attachment ingress."""
-
 from dataclasses import dataclass
 
 

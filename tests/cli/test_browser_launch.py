@@ -1,5 +1,3 @@
-"""Credential-bearing browser URLs must not enter a macOS command line."""
-
 import ctypes
 import subprocess
 from unittest.mock import MagicMock

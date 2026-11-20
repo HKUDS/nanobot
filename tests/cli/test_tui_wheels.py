@@ -1,5 +1,3 @@
-"""Release wheels carry a complete native bundle, with installable metadata."""
-
 import csv
 import hashlib
 import io
@@ -258,7 +256,6 @@ def complete_candidate(tmp_path, candidate):
 
 
 def test_complete_manifest_binds_wheels_sdist_and_fallback_archives(tmp_path, complete_candidate):
-    """Real archive/RECORD checks, with synthetic binaries (not native execution)."""
     root, commit, artifacts = complete_candidate
     manifest = verify_candidate(root, artifacts, source_commit=commit)
     assert len(manifest.artifacts) == 16
@@ -276,7 +273,7 @@ def test_complete_manifest_binds_wheels_sdist_and_fallback_archives(tmp_path, co
     write_install_guide(root, artifacts, guide, source_commit=commit)
     assert guide.read_bytes() == original_guide
     assert commit.encode() in original_guide
-    assert len(list(artifacts.iterdir())) == 17  # 16 artifacts and the manifest, no guide.
+    assert len(list(artifacts.iterdir())) == 17
     with pytest.raises(ValueError, match="outside"):
         write_install_guide(root, artifacts, artifacts / "install.md", source_commit=commit)
     guide.write_text("previous reviewed handoff\n")
@@ -341,8 +338,6 @@ def test_interrupted_retention_has_no_accepted_handoff(tmp_path, complete_candid
 @pytest.mark.parametrize("mutation", ["wheel-code", "wheel-webui", "source-code", "source-missing", "source-extra"])
 def test_complete_candidate_rejects_mixed_or_incomplete_application_payload(tmp_path, complete_candidate, mutation):
     root, commit, artifacts = complete_candidate
-    # These are intact archives with valid versions/commit markers and RECORDs.
-    # A stale intermediate or a stray local file can still be packaged correctly.
     if mutation.startswith("wheel-"):
         wheel = next(artifacts.glob("*-macosx_13_0_arm64.whl"))
         with zipfile.ZipFile(wheel) as archive:

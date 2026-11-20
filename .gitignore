@@ -1,4 +1,3 @@
-# Project-specific
 .worktrees/
 .worktree/
 .assets
@@ -7,11 +6,9 @@
 .web
 .orion
 
-# Claude / AI assistant artifacts
 docs/superpowers/
 docs/plans/
 
-# webui (monorepo frontend)
 webui/node_modules/
 webui/dist/
 webui/coverage/
@@ -20,7 +17,6 @@ tui/node_modules/
 tui/dist/
 *.tsbuildinfo
 
-# Python bytecode & caches
 *.pyc
 *.pyo
 *.pyd
@@ -41,7 +37,6 @@ dmypy.json
 .nox/
 .hypothesis/
 
-# Build & packaging
 dist/
 build/
 *.manifest
@@ -49,34 +44,27 @@ build/
 pip-wheel-metadata/
 share/python-wheels/
 
-# Test & coverage
 .coverage
 .coverage.*
 htmlcov/
 coverage.xml
 *.cover
 
-# Lock files (project policy)
 poetry.lock
 uv.lock
 
-# Jupyter
 .ipynb_checkpoints/
 
-# macOS
 .DS_Store
 .AppleDouble
 .LSOverride
 
-# Windows
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Linux
 .directory
 
-# Editors & IDEs (local workspace / user settings)
 .vscode/
 .cursor/
 .idea/
@@ -89,11 +77,9 @@ Desktop.ini
 *~
 nano.*.save
 
-# Environment & secrets (keep examples tracked if needed)
 .env.*
 !.env.example
 
-# Logs & temp
 *.log
 logs/
 tmp/
@@ -105,8 +91,6 @@ bridge/node_modules/
 webui/.verify-*
 .playwright-cli/
 
-# Generated source revision for wheels and sdists
 nanobot/_build_commit.txt
 
-# Generated from docs/ by the Hatch build hook (including editable installs)
 nanobot/skills/nanobot-document/references/

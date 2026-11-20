@@ -5,11 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from nanobot.bus.events import InboundMessage
-from nanobot.command.builtin import (
-    build_help_text,
-    builtin_command_palette,
-    cmd_evaluator_prompt,
-)
+from nanobot.command.application import build_help_text, builtin_command_palette
+from nanobot.command.builtin import cmd_evaluator_prompt
 from nanobot.command.router import CommandContext
 from nanobot.utils.evaluator import default_evaluator_prompt
 

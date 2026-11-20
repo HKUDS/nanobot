@@ -25,7 +25,7 @@ export function parseSSHAddress(input: string): SSHAddress {
     if (!match) throw invalid();
     words.push(match[1] ?? match[2] ?? match[3]);
   }
-  words.shift(); // ssh
+  words.shift();
   const result: SSHAddress = { host: "" };
   const seen = new Set<string>();
   let user = "";

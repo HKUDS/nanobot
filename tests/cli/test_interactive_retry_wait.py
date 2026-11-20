@@ -9,7 +9,6 @@ from nanobot.cli import terminal
 
 @pytest.mark.asyncio
 async def test_interactive_retry_wait_is_rendered_as_progress_even_when_progress_disabled():
-    """Provider retry waits should not fall through as assistant responses."""
     calls: list[tuple[str, object | None]] = []
     thinking = None
     channels_config = SimpleNamespace(send_progress=False, send_tool_hints=False)
@@ -61,7 +60,6 @@ async def test_reasoning_display_is_independent_of_send_progress(send_progress):
 
 @pytest.mark.asyncio
 async def test_reasoning_delta_displayed_when_show_reasoning_enabled():
-    """Streamed reasoning delta frames should use the reasoning renderer."""
     calls: list[str] = []
     channels_config = SimpleNamespace(
         send_progress=True, send_tool_hints=False, show_reasoning=True,
@@ -151,7 +149,6 @@ async def test_reasoning_end_flushes_buffered_delta():
 
 @pytest.mark.asyncio
 async def test_reasoning_hidden_when_show_reasoning_disabled():
-    """Reasoning content should be suppressed when show_reasoning is False."""
     channels_config = SimpleNamespace(
         send_progress=True, send_tool_hints=False, show_reasoning=False,
     )
@@ -170,7 +167,6 @@ async def test_reasoning_hidden_when_show_reasoning_disabled():
 
 @pytest.mark.asyncio
 async def test_non_reasoning_progress_not_affected_by_show_reasoning():
-    """Regular progress lines should display regardless of show_reasoning."""
     calls: list[str] = []
     channels_config = SimpleNamespace(
         send_progress=True, send_tool_hints=False, show_reasoning=False,
@@ -189,3 +185,26 @@ async def test_non_reasoning_progress_not_affected_by_show_reasoning():
 
     assert handled is True
     assert calls == ["working on it..."]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_interactive_structured_tool_hint_uses_cli_length_and_switch(enabled):
+    msg = SimpleNamespace(
+        content="",
+        event=ProgressEvent(tool_hint=True, tool_events=[{
+            "phase": "start", "call_id": "search-1", "name": "web_search",
+            "arguments": {"query": "abcdefghijklmnopqrstuvwxyz"},
+        }]),
+        metadata={},
+    )
+    config = SimpleNamespace(send_tool_hints=enabled, send_progress=False)
+    with patch("nanobot.cli.terminal._print_interactive_progress_line") as print_progress:
+        handled = await terminal._maybe_print_interactive_progress(
+            msg, None, config, tool_hint_max_length=20,
+        )
+    assert handled is True
+    if enabled:
+        print_progress.assert_awaited_once_with('search "abcdefghijklmnopqrs…"', None, None)
+    else:
+        print_progress.assert_not_awaited()

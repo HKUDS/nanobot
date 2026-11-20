@@ -1,5 +1,3 @@
-"""Published package versions never substitute for wire compatibility."""
-
 import pytest
 
 from nanobot.webui.client_contract import assess_webui_contract, compatibility_error, webui_contract

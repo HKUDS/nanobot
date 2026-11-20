@@ -1,21 +1,22 @@
 # Multiple Instances
 
-Use a separate home directory for each instance. Place `--home` before the subcommand; without it, nanobot uses `~/.nanobot`.
+Run separate nanobot instances whenever you want completely independent settings, chat bots, and long-term memory—for example, separating personal and work agents or isolating different clients.
 
-Use this for separate clients, users, or personal/work agents that need independent configuration and long-term memory. A new topic or a different project folder inside one instance does not provide that separation.
-
-Separate homes and workspaces separate stored application data; they do not create an operating-system security boundary. Processes running as the same OS user may still access each other's files through unrestricted tools. For mutually untrusted users, use separate OS accounts or containers with separate mounts and credentials, and configure [tool restrictions](./configuration.md#security) for each instance.
+> [!NOTE]
+> Starting a new topic or picking a different project folder inside one instance does **not** separate long-term memory. Use separate instances when data must not mix.
+>
+> Separate instances separate nanobot data, not OS permissions. For mutually untrusted users, run them under separate OS accounts or containers and configure [tool restrictions](./configuration.md#security).
 
 ## Quick Start
+
+Pass `--home <directory>` before the subcommand (without it, nanobot uses `~/.nanobot`). Give each running instance its own WebUI and gateway ports:
 
 ```bash
 nanobot --home ~/.nanobot-work onboard
 nanobot --home ~/.nanobot-work webui --port 8766 --gateway-port 18791
 ```
 
-Configure this instance's models in **Settings → Models** and chat apps through **Channels** in the sidebar. Onboarding saves its default workspace as `~/.nanobot-work/workspace`. Use the collapsed examples in the [configuration reference](./configuration.md) for deployment-managed JSON.
-
-Use the same home for other commands:
+Configure this instance's models in **Settings → Models** and chat apps in **Channels**. Use the same `--home` flag for any other command targeting this instance:
 
 ```bash
 nanobot --home ~/.nanobot-work status
@@ -23,34 +24,31 @@ nanobot --home ~/.nanobot-work agent
 nanobot --home ~/.nanobot-work gateway --port 18791
 ```
 
-Concurrent instances need distinct gateway health ports and WebUI/channel ports. `webui --port` sets the WebUI/WebSocket port; `--gateway-port` sets the health port. For `gateway`, `--port` sets the health port. You can also save these ports in each config. Chat channels should use separate bot credentials.
+Each concurrent instance needs distinct `--port` (WebUI, default `8765`) and `--gateway-port` (gateway health, default `18790`) values, plus its own chat-bot tokens. You can also save those ports in each instance's `config.json`.
 
-## Path Resolution
+## Where Each Instance Stores Data
 
 | Data | Location |
-|------|----------|
-| Config | `<home>/config.json`, or explicit `--config` |
-| Workspace | `<home>/workspace` by default; saved `agents.defaults.workspace` takes precedence; `--workspace` overrides both |
-| Sessions | `<config-directory>/sessions/<workspace-id>/` |
-| Media, logs, runtime state | Under the config directory |
-| Memory, skills, cron jobs | Under the workspace |
-| CLI input history | `<home>/history/cli_history` |
+|---|---|
+| Config | `<home>/config.json` (or explicit `--config`) |
+| Workspace (memory, skills, automations) | `<home>/workspace/` by default (or explicit `--workspace`) |
+| Sessions, media, logs, and CLI history | Inside `<home>/` (or the directory of `--config`) |
 
-An explicit `--config` also selects the runtime data directory. Keep each config in its own directory and use separate workspaces to isolate memory, skills, and sessions. A new home gets its own config and default workspace; existing paths saved in a config remain unchanged when you select a different `--home`. Check which paths this instance will use with `nanobot --home ~/.nanobot-work status`. Selecting a home does not move or rewrite paths saved in an existing config.
+Verify which paths an instance will use at any time with:
 
-For custom config/workspace locations:
+```bash
+nanobot --home ~/.nanobot-work status
+```
+
+If you prefer custom directories instead of `--home`, pass `--config` and `--workspace` directly:
 
 ```bash
 nanobot onboard --config ~/bots/work/config.json --workspace ~/work-agent
 nanobot webui --config ~/bots/work/config.json --port 8766 --gateway-port 18791
 ```
 
-You can also copy an existing config into the new directory and change `agents.defaults.workspace`. Model presets can be reused; select a different `agents.defaults.modelPreset` when needed.
-
-Interactive `agent` and `webui` commands with the same config and explicit workspace selectors share a gateway. Different selectors produce separate runtime state and processes; one-shot and `--classic` agent runs execute directly. Background gateways receive `--home` through their command-line arguments.
+Keep each instance's config file in its own directory and outside its workspace so sessions and runtime files stay cleanly separated.
 
 ## Health Check
 
-Each gateway serves `GET /health` on `gateway.host:gateway.port`, bound to `127.0.0.1` by default. It returns `200` when the WebSocket channel is disabled or running, and `503` when enabled but not running. The JSON fields are `status`, `process`, `ready`, and `websocket`; other paths return `404`.
-
-This checks process liveness and WebSocket readiness, not other chat channels, MCP servers, or model connectivity. See [CLI Reference](./cli-reference.md#gateway) for gateway management commands.
+Each gateway exposes `GET /health` on `127.0.0.1:<gateway-port>` (`18790` by default), returning HTTP `200` when the gateway and WebSocket channel are ready (or `503` if WebSocket is enabled but not ready). See [CLI Reference: Gateway](./cli-reference.md#gateway) for service management commands.

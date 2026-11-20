@@ -1,5 +1,3 @@
-"""Reproducible, synthetic JSONL/SQLite storage and ownership comparison."""
-
 from __future__ import annotations
 
 import argparse
@@ -25,7 +23,7 @@ from pathlib import Path
 
 try:
     import resource
-except ModuleNotFoundError:  # Windows
+except ModuleNotFoundError:
     resource = None  # type: ignore[assignment]
 
 

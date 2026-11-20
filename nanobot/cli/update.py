@@ -1,5 +1,3 @@
-"""Command-line updates for release and source installations."""
-
 import asyncio
 import subprocess
 from typing import Literal

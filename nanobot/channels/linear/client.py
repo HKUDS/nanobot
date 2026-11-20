@@ -1,5 +1,3 @@
-"""Minimal async Linear OAuth and GraphQL client."""
-
 from __future__ import annotations
 
 import asyncio

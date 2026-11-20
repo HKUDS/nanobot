@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -42,12 +43,12 @@ async def editing(tmp_path):
     submissions = []
 
     async def submit(message, anchor, projection, accepted):
-        value = await manager.state.replace_user_input(KEY, anchor, message, projection)
-        submissions.append(message)
-        await accepted(value)
-        return value
+        value = await manager.state.replace_user_input(message.session_key, anchor, message, projection)
+        if value is not None:
+            submissions.append(message)
+            await accepted(value)
 
-    gateway = SimpleNamespace(session_manager=manager, unified_session=False, replace_user_input=submit,
+    gateway = SimpleNamespace(session_manager=manager, replace_user_input=submit,
                               transcripts=transcript.WebUITranscriptRecorder(manager),
                               ingress=SimpleNamespace(validate_text=lambda _: None))
     host = SimpleNamespace(gateway=gateway, announce_webui_history_replacement=AsyncMock())
@@ -96,7 +97,8 @@ async def test_edit_keeps_identity_prefix_and_one_new_input(editing, index):
     assert after.metadata["pending_user_turn"] is True
     assert after.metadata["history_edit_receipt"] == {
         "turn_id": "new-edit", "text": "replacement",
-        "source": {name: prepared[name] for name in ("revision", "message_id", "turn_id")},
+        "source": {**{name: prepared[name] for name in ("revision", "message_id", "turn_id")},
+                   "text_digest": sha256(prepared["text"].encode()).hexdigest()},
     }
     rows = read_rows(manager)
     assert [row["text"] for row in rows if row.get("event") == "user"] == [*[f"question-{i}" for i in range(index)], "replacement"]
@@ -109,14 +111,17 @@ async def test_edit_keeps_identity_prefix_and_one_new_input(editing, index):
     assert "obsolete suffix" not in str((await manager.state.read(KEY)).messages)
 
 
-async def test_shared_history_is_rejected_without_editing_a_display_only_session(editing):
+async def test_other_chat_revision_cannot_authorize_replacement(editing):
     manager, host, submissions, _ = editing
     before = await manager.state.read(KEY)
     rows = read_rows(manager)
     prepared = await read_source(host, 1)
-    host.gateway.unified_session = True
-    with pytest.raises(HistoryEditError, match="edit_shared_history"):
-        await replace_webui_chat_input(host, payload(prepared))
+    other = await manager.state.get("websocket:other-chat")
+    other.add_message("user", "other question", webui_turn_id="old-1")
+    await manager.state.finish_turn(other)
+    with pytest.raises(HistoryEditError, match="edit_source_changed"):
+        await replace_webui_chat_input(host, {**payload(prepared), "chat_id": "other-chat"})
+    assert (await manager.state.read(other.key)).messages == other.messages
     assert (await manager.state.read(KEY)).messages == before.messages
     assert read_rows(manager) == rows
     assert not submissions
@@ -356,17 +361,23 @@ async def test_new_fork_and_replace_share_the_source_owner_boundary(editing, mon
 
 
 async def test_edit_does_not_schedule_a_new_title_for_an_untitled_session(editing):
-    from nanobot.session.webui_turns import maybe_generate_webui_title_after_turn
+    from unittest.mock import Mock
+
+    from nanobot.bus.queue import MessageBus
+    from nanobot.bus.runtime_events import RuntimeEventContext, TurnCompleted
+    from nanobot.providers.base import GenerationSettings
+    from nanobot.session.webui_turns import WebuiTurnCoordinator
+    from nanobot.utils.llm_runtime import LLMRuntime
 
     manager, host, submissions, _ = editing
     await manager.state.update_metadata(KEY, {}, remove=("title", "title_user_edited"))
     prepared = await read_source(host, 1)
     await replace_webui_chat_input(host, payload(prepared))
-    provider = SimpleNamespace(chat_stream_with_retry=AsyncMock())
-    generated = await maybe_generate_webui_title_after_turn(
-        channel="websocket", chat_id="edit-chat", metadata=submissions[0].metadata,
-        sessions=manager, session_key=KEY, provider=provider, model="fixture",
-    )
-    assert generated is False
-    provider.chat_stream_with_retry.assert_not_awaited()
+    bus = MessageBus()
+    schedule = Mock()
+    runtime = LLMRuntime(Mock(), "fixture", GenerationSettings(), 8192)
+    ctx = RuntimeEventContext("websocket", "edit-chat", KEY, submissions[0].metadata)
+    with WebuiTurnCoordinator(bus, manager, schedule).connected():
+        await bus.publish(TurnCompleted(context=ctx, runtime=runtime))
+    schedule.assert_not_called()
     assert "title" not in (await manager.state.read(KEY)).metadata

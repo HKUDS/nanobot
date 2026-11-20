@@ -1,5 +1,3 @@
-"""Explicit audience policy for operation notifications."""
-
 from typing import Literal
 
 from nanobot.bus.outbound_events import (
@@ -9,9 +7,11 @@ from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamEndEvent,
 )
+from nanobot.context_sources import PromptSourcesEvent
 from nanobot.events import (
     AgentEvent,
     ContextCompactionEvent,
+    ModelRequestEvent,
     RecoveryStateEvent,
     ResponseSourceEvent,
     RetryWaitEvent,
@@ -29,6 +29,8 @@ NOTIFICATION_AUDIENCES: dict[type[AgentEvent], NotificationAudience] = {
     RecoveryStateEvent: "interactive",
     RetryStatusEvent: "interactive",
     ResponseSourceEvent: "interactive",
+    ModelRequestEvent: "interactive",
+    PromptSourcesEvent: "interactive",
 }
 
 

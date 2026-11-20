@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-/** L→R sheen on the glyphs themselves; inactive labels stay solid muted text. */
 export function StreamingLabelSheen({
   children,
   active,

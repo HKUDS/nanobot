@@ -20,7 +20,7 @@ function setup(options: { busy?: boolean; messages?: UIMessage[]; onBegin?: (mes
   const send = vi.spyOn(client, "sendMessage");
   const tree = (busy = options.busy ?? false, messages = options.messages ?? [message]) => <ClientProvider client={client} token="test">
     <MessageEditingProvider chatId="same-chat" busy={busy} enabled onBegin={options.onBegin}>
-      <ThreadMessages messages={messages} hiddenUserMessageCount={24} />
+      <ThreadMessages editScope="websocket:same-chat" messages={messages} hiddenUserMessageCount={24} />
     </MessageEditingProvider>
     <textarea aria-label="Composer draft" defaultValue="untouched bottom draft" />
   </ClientProvider>;

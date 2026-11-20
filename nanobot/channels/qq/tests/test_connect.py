@@ -275,14 +275,12 @@ def test_qq_credentials_serialize_with_settings_mutations(monkeypatch: pytest.Mo
 
     def qq_load(path: Path | None = None) -> Config:
         config = original_load(path)
-        # An unlocked QQ read must finish after Settings, exposing a stale write.
         qq_started.set()
         if not settings_saved.wait(timeout=5):
             raise TimeoutError("settings mutation did not finish")
         return config
 
     def acquire(lock, *args, **kwargs):
-        # Observe contention without replacing the real cross-process file lock.
         if threading.current_thread().name == "qq-credentials":
             qq_started.set()
         return original_acquire(lock, *args, **kwargs)

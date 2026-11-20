@@ -97,6 +97,7 @@ Send the message again after approval. Confirm that your private chat now receiv
 
 ## Troubleshooting
 
+- If WhatsApp cannot load `libmagic`, install it with `brew install libmagic` on macOS or `sudo apt install libmagic1` on Debian/Ubuntu. On Windows, check the `python-magic-bin` installation and Python architecture.
 - If QR linking fails, rerun `nanobot channels login whatsapp`.
 - If you are migrating from the old bridge, remove `bridgeUrl` and `bridgeToken`, then re-login.
 - If a sender appears as a LID instead of a phone number, let nanobot learn the mapping at runtime or use `lidMappings` in the full reference.

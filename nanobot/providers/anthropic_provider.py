@@ -1,5 +1,3 @@
-"""Anthropic provider — direct SDK integration for Claude models."""
-
 from __future__ import annotations
 
 import asyncio
@@ -195,14 +193,10 @@ class AnthropicProvider(LLMProvider):
             return model[len("anthropic/"):]
         return model
 
-    # ------------------------------------------------------------------
-    # Message conversion: OpenAI chat format → Anthropic Messages API
-    # ------------------------------------------------------------------
 
     def _convert_messages(
         self, messages: list[dict[str, Any]],
     ) -> tuple[str | list[dict[str, Any]], list[dict[str, Any]]]:
-        """Return ``(system, anthropic_messages)``."""
         system: str | list[dict[str, Any]] = ""
         raw: list[dict[str, Any]] = []
         seen_tool_ids: set[str] = set()
@@ -504,9 +498,6 @@ class AnthropicProvider(LLMProvider):
 
         return merged
 
-    # ------------------------------------------------------------------
-    # Tool definition conversion
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _convert_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
@@ -546,9 +537,6 @@ class AnthropicProvider(LLMProvider):
                 return {"type": "tool", "name": name}
         return {"type": "auto"}
 
-    # ------------------------------------------------------------------
-    # Prompt caching
-    # ------------------------------------------------------------------
 
     @classmethod
     def _apply_cache_control(
@@ -584,9 +572,6 @@ class AnthropicProvider(LLMProvider):
 
         return system, new_msgs, new_tools
 
-    # ------------------------------------------------------------------
-    # Build API kwargs
-    # ------------------------------------------------------------------
 
     def _build_kwargs(
         self,
@@ -670,9 +655,6 @@ class AnthropicProvider(LLMProvider):
 
         return kwargs
 
-    # ------------------------------------------------------------------
-    # Response parsing
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _parse_response(response: Any) -> LLMResponse:
@@ -739,9 +721,6 @@ class AnthropicProvider(LLMProvider):
             thinking_blocks=thinking_blocks or None,
         )
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _is_streaming_required_error(e: Exception) -> bool:

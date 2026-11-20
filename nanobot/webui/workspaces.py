@@ -1,5 +1,3 @@
-"""Persisted WebUI project workspace state."""
-
 from __future__ import annotations
 
 import asyncio
@@ -26,7 +24,7 @@ from nanobot.security.workspace_access import (
     default_workspace_scope,
     validate_workspace_scope_payload,
 )
-from nanobot.session.webui_turns import websocket_turn_wall_started_at
+from nanobot.session.webui_turns import latest_live_websocket_turn
 from nanobot.webui.session_identity import webui_session_key
 
 if TYPE_CHECKING:
@@ -41,7 +39,6 @@ _MAX_DRAFT_SCOPES = 128
 
 
 def _scope_change_is_non_escalating(current: WorkspaceScope, requested: WorkspaceScope) -> bool:
-    """Allow a remote request only when it keeps the project and does not add access."""
     return (
         requested.project_path == current.project_path
         and (not current.restrict_to_workspace or requested.restrict_to_workspace)
@@ -230,7 +227,6 @@ class WebUIWorkspaceController:
         self._scope_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
     def _scope_lock(self, chat_id: str) -> asyncio.Lock:
-        """Serialize draft edits with message admission, not with agent execution."""
         lock = self._scope_locks.get(chat_id)
         if lock is None:
             lock = asyncio.Lock()
@@ -318,15 +314,20 @@ class WebUIWorkspaceController:
         data = await self._sessions.state.read_metadata(session_key)
         return self._scope_from_snapshot(data)
 
-    def _scope_from_snapshot(self, data: dict[str, Any] | None) -> WorkspaceScope:
+    def _scope_from_snapshot(
+        self, data: dict[str, Any] | None, *, default_scope: WorkspaceScope | None = None,
+    ) -> WorkspaceScope:
+        if default_scope is None:
+            default_scope = self.default_scope()
         if not isinstance(data, dict):
-            return self.default_scope()
+            return default_scope
         metadata = data.get("metadata", {})
         if not isinstance(metadata, dict) or WORKSPACE_SCOPE_METADATA_KEY not in metadata:
-            return self.default_scope()
+            return default_scope
         metadata_data = cast(dict[str, Any], metadata)
         return self._scope_from_metadata_value(
-            cast(object, metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY))
+            cast(object, metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY)),
+            default_scope=default_scope,
         )
 
     def _validate_existing_project(self, metadata: Mapping[str, Any], scope: WorkspaceScope) -> None:
@@ -397,17 +398,23 @@ class WebUIWorkspaceController:
         session_key: str | None,
         can_change_project: bool,
     ) -> WorkspaceScope:
+        baseline = default_workspace_scope(
+            self._default_workspace,
+            self._default_restrict_to_workspace,
+            source_channel=_WEBUI_SCOPE_CHANNEL,
+        )
+        default = self.default_scope() if can_change_project else baseline
         data = (
             await self._sessions.state.read_metadata(session_key)
             if self._sessions is not None and session_key else None
         )
         if data is not None:
-            current = self._scope_from_snapshot(data)
+            current = self._scope_from_snapshot(data, default_scope=default)
         elif session_key and (draft := self._draft_scopes.get(session_key)) is not None:
             self._draft_scopes.move_to_end(session_key)
             current = draft
         else:
-            current = self.default_scope()
+            current = default
         raw = envelope.get(WORKSPACE_SCOPE_METADATA_KEY)
         if raw is None:
             scope = current
@@ -420,7 +427,9 @@ class WebUIWorkspaceController:
             )
         if data is not None:
             self._validate_existing_project(data["metadata"], scope)
-        if not can_change_project and not _scope_change_is_non_escalating(current, scope):
+        # An owner's draft, saved scope or UI preference cannot authorize a client.
+        # Its ceiling is operator config, including deliberately unrestricted use.
+        if not can_change_project and not _scope_change_is_non_escalating(baseline, scope):
             raise WorkspaceScopeError(
                 "project selection is unavailable for this connection",
                 status=403,
@@ -482,12 +491,11 @@ class WebUIWorkspaceController:
         chat_id: str,
         scope: WorkspaceScope,
         *,
-        session_key: str | None = None,
         expected_generation: str | None = None,
     ) -> tuple[str | None, bool]:
         async with self._scope_lock(chat_id):
             return await self._persist_scope(
-                session_key or webui_session_key(chat_id), scope, expected_generation,
+                webui_session_key(chat_id), scope, expected_generation,
             )
 
     async def _persist_scope(
@@ -508,7 +516,7 @@ class WebUIWorkspaceController:
 
     async def rollback_scope_admission(
         self,
-        session_key: str,
+        chat_id: str,
         generation: str | None,
         *,
         created: bool,
@@ -517,14 +525,14 @@ class WebUIWorkspaceController:
         if not created or generation is None or self._sessions is None:
             return
         await self._sessions.state.delete(
-            session_key,
+            webui_session_key(chat_id),
             expected_generation=generation,
         )
 
     async def stage_scope(self, chat_id: str, scope: WorkspaceScope) -> WorkspaceScope:
         """Keep a new chat's scope transient until its first accepted message."""
         async with self._scope_lock(chat_id):
-            if websocket_turn_wall_started_at(chat_id) is not None:
+            if latest_live_websocket_turn(chat_id) is not None:
                 raise WorkspaceScopeError("chat_running", status=409)
             session_key = webui_session_key(chat_id)
             if (

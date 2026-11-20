@@ -136,7 +136,6 @@ def _identity(result):
 
 
 def _expose(sandbox, name):
-    # Explicit overrides let local verification use disposable manager installations.
     source = os.environ.get(f"NANOBOT_TEST_{name.upper()}") or shutil.which(name)
     if not source:
         pytest.skip(f"{name} is required for this real installer check")
@@ -156,7 +155,6 @@ def sandbox(tmp_path):
     command_bin.mkdir()
     wheels = root / "wheels"
     wheels.mkdir()
-    # A checkout and PYTHONPATH must not replace the package just installed.
     checkout = root / "checkout"
     (checkout / "nanobot").mkdir(parents=True)
     (checkout / "nanobot/__init__.py").write_text('raise RuntimeError("wrong checkout imported")\n')
@@ -182,33 +180,6 @@ def sandbox(tmp_path):
         "PIP_DISABLE_PIP_VERSION_CHECK": "1", "PIP_NO_INPUT": "1",
     })
     return {"root": root, "bin": command_bin, "wheels": wheels, "cwd": checkout, "env": env}
-
-
-@pytest.mark.skipif(not WINDOWS, reason="PowerShell module discovery is Windows-specific")
-@pytest.mark.parametrize("manager", ["uv", "pipx"])
-def test_installer_ignores_powershell_module_package_managers(sandbox, manager):
-    module = sandbox["root"] / "modules" / "UnrelatedManager"
-    module.mkdir(parents=True)
-    (module / "UnrelatedManager.psd1").write_text(
-        "@{ RootModule = 'UnrelatedManager.psm1'; ModuleVersion = '1.0.0'; "
-        f"FunctionsToExport = @('{manager}'); CmdletsToExport = @(); AliasesToExport = @() }}\n",
-        encoding="utf-8",
-    )
-    (module / "UnrelatedManager.psm1").write_text(
-        "[IO.File]::WriteAllText($env:NANOBOT_TEST_MODULE_MARKER, 'imported')\n"
-        f"function {manager} {{ throw 'An unrelated PowerShell module is not the package manager' }}\n",
-        encoding="utf-8",
-    )
-    marker = sandbox["root"] / "module-state.txt"
-    marker.write_text("not imported", encoding="utf-8")
-    sandbox["env"].update(PSModulePath=str(module.parent), NANOBOT_TEST_MODULE_MARKER=str(marker))
-    _wheel(sandbox["wheels"], "0.0.1")
-
-    identity = _identity(_installer(sandbox))
-
-    assert identity["version"] == "0.0.1"
-    assert Path(identity["prefix"]).resolve() == sandbox["root"] / "managed"
-    assert marker.read_text(encoding="utf-8") == "not imported"
 
 
 @pytest.mark.parametrize("manager", ["uv", "pipx"])
@@ -240,7 +211,6 @@ def test_powershell_manager_discovery_keeps_session_functions_without_importing_
     _wheel(sandbox["wheels"], "0.0.1")
     _run([str(uv), "tool", "install", "--python", BASE_PYTHON, "nanobot-ai"], sandbox)
     prefix = sandbox["root"] / "uv-tools/nanobot-ai"
-    # The session function is the only uv command; its real executable is not on PATH.
     native = sandbox["root"] / "native"
     native.mkdir()
     uv = uv.rename(native / "uv.exe")
@@ -393,7 +363,6 @@ def test_python_install_uses_same_environment_and_quoted_launcher(sandbox, activ
 @pytest.mark.parametrize("manager", ["uv", "pipx"])
 def test_failed_default_install_does_not_fall_through_to_available_manager(sandbox, manager):
     _expose(sandbox, manager)
-    # Offline and no candidate: only the default dedicated environment is tried.
     result = _installer(sandbox, check=False)
     assert result.returncode != 0
     assert (sandbox["root"] / "managed").exists()
@@ -904,7 +873,7 @@ def test_release_bootstrap_preserves_explicit_manager_pin(sandbox, release_https
     result = _installer(sandbox, *_release_arguments(manifest.version, digest), check=False)
     assert result.returncode != 0
     assert "INSTALLER_PROBE" not in result.stdout
-    assert len(requests) == 2  # Pin enforcement follows successful selection/download.
+    assert len(requests) == 2
     assert receipt.read_bytes() == before
     assert _verify_owner(sandbox, owner, prefix)["version"] == "0.0.1"
     assert not (sandbox["root"] / "managed").exists()

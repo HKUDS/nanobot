@@ -1,11 +1,13 @@
-"""Runtime path helpers derived from the active config context."""
-
 from __future__ import annotations
 
 from pathlib import Path
 
 from nanobot.config.home import get_home_path
 from nanobot.utils.file_io import ensure_dir
+
+MEMORY_JOURNAL_PATH = Path("memory/history.jsonl")
+MEMORY_CURSOR_PATH = Path("memory/.cursor")
+DREAM_CURSOR_PATH = Path("memory/.dream_cursor")
 
 
 def get_config_path() -> Path:

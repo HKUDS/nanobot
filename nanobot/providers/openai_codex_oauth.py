@@ -1,5 +1,3 @@
-"""WebUI adapter around oauth-cli-kit's interactive Codex login."""
-
 # oauth-cli-kit does not publish type stubs.
 # pyright: reportMissingTypeStubs=false
 

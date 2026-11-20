@@ -1,5 +1,3 @@
-"""Tests for lazy provider exports from nanobot.providers."""
-
 from __future__ import annotations
 
 import importlib

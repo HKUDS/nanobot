@@ -1,5 +1,3 @@
-"""Backend timezone detection for automatic agent defaults."""
-
 from zoneinfo import ZoneInfo
 
 from tzlocal import get_localzone_name
