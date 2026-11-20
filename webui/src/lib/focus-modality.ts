@@ -50,6 +50,11 @@ interface InstalledModality {
 
 const installedDocuments = new WeakMap<Document, InstalledModality>();
 
+/** Mark a keyboard action handled by a control outside the shared navigation keys. */
+export function markKeyboardFocus(doc: Document): void {
+  doc.documentElement.dataset.focusModality = "keyboard";
+}
+
 /**
  * Track whether the user is navigating by keyboard or pointer on `html[data-focus-modality]`.
  *
@@ -82,7 +87,7 @@ export function installFocusModality(doc: Document = document): () => void {
     root.dataset.focusModality = "pointer";
   };
   const onKeyDown = (event: KeyboardEvent) => {
-    if (isKeyboardFocusKey(event)) root.dataset.focusModality = "keyboard";
+    if (isKeyboardFocusKey(event)) markKeyboardFocus(doc);
   };
 
   doc.addEventListener("pointerdown", setPointer, { capture: true, passive: true });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent } from "rea
 import { Minus, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { markKeyboardFocus } from "@/lib/focus-modality";
 import { cn } from "@/lib/utils";
 
 type Point = { x: number; y: number };
@@ -136,6 +137,7 @@ export function ImageViewport({
         else if (panWithArrows && event.key === "ArrowUp") apply({ ...current, y: current.y + PAN_STEP });
         else if (panWithArrows && event.key === "ArrowDown") apply({ ...current, y: current.y - PAN_STEP });
         else return;
+        markKeyboardFocus(event.currentTarget.ownerDocument);
         event.preventDefault();
         event.stopPropagation();
       }}>
