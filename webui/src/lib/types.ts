@@ -1601,6 +1601,7 @@ export type InboundEvent =
       event: "message";
       chat_id: string;
       text: string;
+      side_channel?: true;
       render_as?: "text";
       reply_to?: string;
       media?: string[];

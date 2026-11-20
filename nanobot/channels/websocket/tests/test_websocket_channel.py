@@ -15,6 +15,7 @@ from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
 
+from nanobot.agent.dream import DreamResult
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
     INBOUND_META_USER_SHELL,
@@ -47,6 +48,8 @@ from nanobot.channels.websocket.runtime import (
     _parse_envelope,
     _parse_inbound_payload,
 )
+from nanobot.command.builtin import cmd_dream
+from nanobot.command.router import CommandContext
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelAPIConfig, ModelPresetConfig
 from nanobot.pairing.events import PairingChanged
@@ -3529,6 +3532,50 @@ async def test_context_compaction_is_structured_persisted_and_summary_free(histo
     assert _sent_ws_payloads(mock_ws) == [expected]
     [persisted] = history.read("websocket:chat-compaction")
     assert {key: persisted[key] for key in expected} == expected
+
+
+async def test_deferred_dream_reply_is_delivered_and_replayed_after_command_turn_end(history, monkeypatch) -> None:
+    finish_dream = asyncio.Event()
+
+    async def run_dream(*_args, **_kwargs):
+        await finish_dream.wait()
+        return DreamResult(had_input=True, changed=True)
+
+    monkeypatch.setattr("nanobot.agent.dream.run_dream", run_dream)
+    bus = MessageBus()
+    channel = _ch(bus, session_manager=history.sessions)
+    chat_id = "chat-dream"
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, chat_id)
+    metadata = await history.metadata(chat_id, {WEBUI_TURN_METADATA_KEY: "dream-turn"})
+    msg = InboundMessage("websocket", "user", chat_id, "/dream", metadata=metadata)
+    context = CommandContext(msg=msg, session=None, key=msg.session_key, raw=msg.content,
+                             loop=cast(Any, SimpleNamespace(bus=bus)))
+
+    acknowledgement = await cmd_dream(context)
+    try:
+        await channel.send(acknowledgement)
+        await channel.send(OutboundMessage("websocket", chat_id, "", metadata=metadata, event=TurnEndEvent()))
+    finally:
+        finish_dream.set()
+        completion = await asyncio.wait_for(bus.consume_outbound(), 2)
+    await channel.send(completion)
+
+    replies, replayed = (
+        [event for event in events if event["event"] == "message"]
+        for events in (_sent_ws_payloads(mock_ws), history.build(msg.session_key)["events"])
+    )
+    assert len(replies) == len(replayed) == 2
+    ack, completed = replies
+    assert ack["text"] == "Dreaming..."
+    assert ack["turn_id"] == "dream-turn"
+    assert completed["text"].startswith("Dream completed")
+    assert completed["turn_id"] != ack["turn_id"]
+    for reply, replay in zip(replies, replayed, strict=True):
+        assert reply["side_channel"] is True
+        assert {key: replay[key] for key in ("turn_id", "turn_seq", "side_channel", "text")} == {
+            key: reply[key] for key in ("turn_id", "turn_seq", "side_channel", "text")
+        }
 
 
 @pytest.mark.asyncio

@@ -3399,6 +3399,43 @@ describe("useNanobotStream", () => {
     }
   });
 
+  it("keeps streaming when a deferred Dream reply arrives after its command has ended", async () => {
+    const fake = fakeClient();
+    const chatId = "chat-dream";
+    const { result } = renderHook(() => useNanobotStream(chatId, EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => { result.current.send("/dream", undefined, { sideChannel: true }); });
+    const dreamTurnId = fake.client.sendMessage.mock.calls.at(-1)![3]?.turnId;
+    act(() => {
+      fake.emit(chatId, { event: "message", chat_id: chatId, text: "Dreaming...",
+        turn_id: dreamTurnId, turn_seq: 1, side_channel: true });
+      fake.emit(chatId, { event: "turn_end", chat_id: chatId, turn_id: dreamTurnId, turn_seq: 2 });
+    });
+    act(() => { result.current.send("write normally"); });
+    const answerTurnId = fake.client.sendMessage.mock.calls.at(-1)![3]?.turnId;
+    act(() => {
+      fake.emit(chatId, { event: "delta", chat_id: chatId, text: "First half",
+        turn_id: answerTurnId, turn_seq: 1, stream_id: "answer-1" });
+    });
+    await flushStreamFrame();
+    const answerId = result.current.messages.find((message) => message.content === "First half")?.id;
+    expect(answerId).toBeDefined();
+
+    act(() => {
+      fake.emit(chatId, { event: "message", chat_id: chatId, text: "Dream completed.",
+        turn_id: "command-result:completion", turn_seq: 1, side_channel: true });
+      fake.emit(chatId, { event: "delta", chat_id: chatId, text: " and second half",
+        turn_id: answerTurnId, turn_seq: 2, stream_id: "answer-1" });
+    });
+    await flushStreamFrame();
+
+    expect(result.current.messages.find((message) => message.id === answerId)?.content)
+      .toBe("First half and second half");
+    expect(result.current.messages.map((message) => message.content)).toContain("Dream completed.");
+  });
+
   it("keeps guided output in place while the active turn resumes", async () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-guide", EMPTY_MESSAGES), {
