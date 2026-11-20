@@ -2528,7 +2528,10 @@
     "deleteFailed": "Không thể xóa {{count}} cuộc trò chuyện",
     "confirmDeleteAutomationsSingle": "Xóa cuộc trò chuyện và các tác vụ tự động?",
     "confirmDeleteAutomations": "Xóa {{count}} cuộc trò chuyện và các tác vụ tự động?",
-    "moreAutomations": "+ {{count}} mục nữa"
+    "automationCountSingle": "1 tác vụ",
+    "automationCount": "{{count}} tác vụ",
+    "excludeSession": "Giữ lại",
+    "excludeSessionAria": "Bỏ {{title}} khỏi lần xóa này"
   },
   "common": {
     "retry": "Thử lại",

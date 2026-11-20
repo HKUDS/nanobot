@@ -1,11 +1,17 @@
-import { Check, Trash2, TriangleAlert } from "lucide-react";
-import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
+import { Check, ChevronDown, Trash2, TriangleAlert } from "lucide-react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import "./toast.css";
 
 const TOAST_NOTICE_MS = 3_000;
 export const TOAST_ACTION_MS = 8_000;
+
+export type ToastController = {
+  update: (next: ToastNotice) => void;
+  dismiss: () => void;
+};
 
 type ToastAction = {
   label: string;
@@ -19,6 +25,10 @@ export type ToastNotice = {
   tone: "success" | "error" | "pending";
   dedupeKey?: string;
   persistent?: boolean;
+  details?: {
+    label: string;
+    render: (controller: ToastController) => ReactNode;
+  };
   action?: ToastAction;
   secondaryAction?: { label: string; run?: () => void };
   onExpire?: () => void;
@@ -33,26 +43,31 @@ const ToastContext = createContext<((notice: ToastNotice) => void) | null>(null)
 export const useToast = () => useContext(ToastContext);
 
 function ToastViewport({ children, viewportRef, hidden }: { children: ReactNode; viewportRef: Ref<HTMLDivElement>; hidden: boolean }) {
-  return <div ref={viewportRef} className="pointer-events-none fixed inset-x-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-50 mx-auto flex max-w-[min(calc(100vw-1.5rem),28rem)] flex-col items-center gap-2 [.native-host_&]:top-12" style={hidden ? { visibility: "hidden" } : undefined}>
+  return <div ref={viewportRef} className="pointer-events-none fixed inset-x-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-50 mx-auto flex max-w-[min(calc(100vw-1.5rem),32rem)] flex-col items-center gap-2 [.native-host_&]:top-12" style={hidden ? { visibility: "hidden" } : undefined}>
     {children}
   </div>;
 }
 
-function ToastCard({ notice, step, paused, onAction, onSecondaryAction, onHoverChange, onFocusChange }: {
+function ToastCard({ notice, step, paused, unavailable, controller, onAction, onSecondaryAction, onHoverChange, onFocusChange }: {
   notice: ToastNotice;
   step: number;
   paused: boolean;
+  unavailable: boolean;
+  controller: ToastController;
   onAction: () => void;
   onSecondaryAction: () => void;
   onHoverChange?: (hovered: boolean) => void;
   onFocusChange?: (focused: boolean) => void;
 }) {
-  const { message, detail, tone, persistent, action, secondaryAction } = notice;
+  const { message, detail, tone, persistent, details, action, secondaryAction } = notice;
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  useEffect(() => {
+    if (!details || unavailable) setDetailsOpen(false);
+  }, [details, unavailable]);
   const Icon = tone === "error" ? TriangleAlert : tone === "pending" ? Trash2 : Check;
-  const interactive = Boolean(action || secondaryAction);
-  const stacked = Boolean(persistent && detail);
+  const interactive = Boolean(action || secondaryAction || details);
   return <div
-    className={`toast-card isolate relative flex min-h-10 max-w-full items-center gap-2 ${stacked ? "px-3.5 py-1.5" : "px-3 py-0.5"}${interactive ? " pointer-events-auto" : ""}`}
+    className={`toast-card isolate relative flex min-h-10 max-w-full items-center gap-2 px-3 py-0.5${interactive ? " pointer-events-auto" : ""}`}
     style={{
       "--toast-duration": `${toastDurationMs(notice)}ms`,
       "--toast-play-state": paused ? "paused" : "running",
@@ -65,20 +80,36 @@ function ToastCard({ notice, step, paused, onAction, onSecondaryAction, onHoverC
     data-toast-timed={persistent ? "false" : "true"}
   >
     <Icon aria-hidden="true" size={15} strokeWidth={2} className="shrink-0" />
-    <div role={tone === "error" ? "alert" : "status"} className={stacked ? "flex min-w-0 flex-col text-sm leading-5" : "min-w-0 truncate text-sm leading-5"}
-      title={detail ? `${message} ${detail}` : message}>
-      {stacked ? (
-        <>
-          <span className="truncate font-medium">{message}</span>
-          <span className="truncate text-xs text-muted-foreground">{detail}</span>
-        </>
-      ) : (
-        <>
-          <span className={detail ? "text-muted-foreground" : "font-medium"}>{message}</span>
-          {detail && <> <span className="font-medium">{detail}</span></>}
-        </>
-      )}
+    <div role={tone === "error" ? "alert" : "status"} className="min-w-0 truncate text-sm leading-5">
+      <span className={detail ? "text-muted-foreground" : "font-medium"}>{message}</span>
+      {detail && <> <span className="font-medium">{detail}</span></>}
     </div>
+    {details && (
+      <Popover open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 shrink-0 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <span>{details.label}</span>
+            <ChevronDown
+              className={`h-3.5 w-3.5 transition-transform duration-150 ${detailsOpen ? "rotate-180" : ""}`}
+              aria-hidden="true"
+            />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="center"
+          side="bottom"
+          sideOffset={8}
+          className="w-[min(calc(100vw-1.5rem),22rem)] p-1.5"
+        >
+          {details.render(controller)}
+        </PopoverContent>
+      </Popover>
+    )}
     {secondaryAction && (
       <Button
         key={`secondary-${step}`}
@@ -110,9 +141,11 @@ function ToastCard({ notice, step, paused, onAction, onSecondaryAction, onHoverC
 
 type ToastFinishReason = "action" | "secondary" | "expired";
 
-function TimedToast({ entry, finish, unavailable }: {
+function TimedToast({ entry, finish, update, dismiss, unavailable }: {
   entry: ToastEntry;
   finish: (entry: ToastEntry, reason: ToastFinishReason) => void;
+  update: (entry: ToastEntry, next: ToastNotice) => void;
+  dismiss: (entry: ToastEntry) => void;
   unavailable: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -139,8 +172,13 @@ function TimedToast({ entry, finish, unavailable }: {
       remaining.current = Math.max(0, remaining.current - (performance.now() - start));
     };
   }, [entry, finish, paused]);
+  const controller = useMemo<ToastController>(() => ({
+    update: (next) => update(entry, next),
+    dismiss: () => dismiss(entry),
+  }), [dismiss, entry, update]);
 
-  return <ToastCard notice={entry} step={entry.step} paused={paused}
+  return <ToastCard notice={entry} step={entry.step} paused={paused} unavailable={unavailable}
+    controller={controller}
     onAction={() => finish(entry, "action")}
     onSecondaryAction={() => finish(entry, "secondary")}
     onHoverChange={!persistent && entry.action ? setHovered : undefined}
@@ -182,6 +220,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     live.current.set(entry.id, entry);
     publish();
   }, [publish]);
+  const update = useCallback((entry: ToastEntry, next: ToastNotice) => {
+    const current = live.current.get(entry.id);
+    if (!current || current.step !== entry.step) return;
+    live.current.set(entry.id, { ...next, id: entry.id, step: current.step + 1 });
+    publish();
+  }, [publish]);
+  const dismiss = useCallback((entry: ToastEntry) => {
+    const current = live.current.get(entry.id);
+    if (!current || current.step !== entry.step) return;
+    live.current.delete(entry.id);
+    publish();
+  }, [publish]);
   const finish = useCallback((entry: ToastEntry, reason: ToastFinishReason) => {
     const current = live.current.get(entry.id);
     if (!current || current.step !== entry.step) return;
@@ -201,7 +251,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return <ToastContext.Provider value={show}>
     {children}
     <ToastViewport viewportRef={viewportRef} hidden={unavailable}>
-      {entries.map((entry) => <TimedToast key={entry.id} entry={entry} finish={finish} unavailable={unavailable} />)}
+      {entries.map((entry) => (
+        <TimedToast
+          key={entry.id}
+          entry={entry}
+          finish={finish}
+          update={update}
+          dismiss={dismiss}
+          unavailable={unavailable}
+        />
+      ))}
     </ToastViewport>
   </ToastContext.Provider>;
 }

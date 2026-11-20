@@ -2528,7 +2528,10 @@
     "deleteFailed": "Gagal menghapus {{count}} percakapan",
     "confirmDeleteAutomationsSingle": "Hapus percakapan dan otomatisasi terkait?",
     "confirmDeleteAutomations": "Hapus {{count}} percakapan dan otomatisasi terkait?",
-    "moreAutomations": "+ {{count}} lagi"
+    "automationCountSingle": "1 otomatisasi",
+    "automationCount": "{{count}} otomatisasi",
+    "excludeSession": "Simpan",
+    "excludeSessionAria": "Keluarkan {{title}} dari penghapusan ini"
   },
   "common": {
     "retry": "Coba lagi",

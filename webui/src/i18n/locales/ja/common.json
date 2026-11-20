@@ -2528,7 +2528,10 @@
     "deleteFailed": "{{count}} 件の会話を削除できませんでした",
     "confirmDeleteAutomationsSingle": "会話と関連する自動タスクを削除しますか？",
     "confirmDeleteAutomations": "{{count}} 件の会話と関連する自動タスクを削除しますか？",
-    "moreAutomations": "他 {{count}} 件"
+    "automationCountSingle": "タスク 1 件",
+    "automationCount": "タスク {{count}} 件",
+    "excludeSession": "残す",
+    "excludeSessionAria": "「{{title}}」を削除対象から外す"
   },
   "common": {
     "retry": "再試行",

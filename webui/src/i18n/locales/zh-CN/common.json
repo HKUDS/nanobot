@@ -2710,7 +2710,10 @@
     "deleteFailed": "{{count}} 个会话删除失败",
     "confirmDeleteAutomationsSingle": "删除会话及关联自动任务？",
     "confirmDeleteAutomations": "删除 {{count}} 个会话及关联自动任务？",
-    "moreAutomations": "另有 {{count}} 个"
+    "automationCountSingle": "1 个任务",
+    "automationCount": "{{count}} 个任务",
+    "excludeSession": "保留",
+    "excludeSessionAria": "从本次删除中移除「{{title}}」"
   },
   "common": {
     "retry": "重试",

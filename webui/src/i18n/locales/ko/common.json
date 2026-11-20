@@ -2528,7 +2528,10 @@
     "deleteFailed": "대화 {{count}}개를 삭제하지 못했습니다",
     "confirmDeleteAutomationsSingle": "대화와 연결된 자동 작업을 삭제할까요?",
     "confirmDeleteAutomations": "대화 {{count}}개와 연결된 자동 작업을 삭제할까요?",
-    "moreAutomations": "+ {{count}}개 더"
+    "automationCountSingle": "작업 1개",
+    "automationCount": "작업 {{count}}개",
+    "excludeSession": "유지",
+    "excludeSessionAria": "{{title}}을(를) 삭제 대상에서 제외"
   },
   "common": {
     "retry": "다시 시도",

@@ -2528,7 +2528,10 @@
     "deleteFailed": "無法刪除 {{count}} 個對話",
     "confirmDeleteAutomationsSingle": "刪除對話及關聯自動任務？",
     "confirmDeleteAutomations": "刪除 {{count}} 個對話及關聯自動任務？",
-    "moreAutomations": "另有 {{count}} 個"
+    "automationCountSingle": "1 個任務",
+    "automationCount": "{{count}} 個任務",
+    "excludeSession": "保留",
+    "excludeSessionAria": "從本次刪除中移除「{{title}}」"
   },
   "common": {
     "retry": "重試",

@@ -60,6 +60,10 @@ import {
   type WorkbenchState,
 } from "@/components/workbench/workbench-model";
 import { ToastProvider, useToast, type ToastNotice } from "@/components/ui/toast";
+import {
+  AutomationDeleteToastDetails,
+  type AutomationDeleteSessionGroup,
+} from "@/components/AutomationDeleteToastDetails";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 import { useLocalGateway } from "@/hooks/useLocalGateway";
@@ -1665,8 +1669,7 @@ function Shell({
   const checkingDeleteKeysRef = useRef<Set<string>>(new Set());
   const showAutomationConfirmRef = useRef<(
     items: SidebarDeleteItem[],
-    automations: SessionAutomationJob[],
-    automationKeys: ReadonlySet<string>,
+    jobsByKey: ReadonlyMap<string, SessionAutomationJob[]>,
   ) => void>(() => {});
 
   const prepareStagedDelete = useCallback((
@@ -1699,7 +1702,7 @@ function Shell({
     const commit = async () => {
       let failed = 0;
       const blockedItems: SidebarDeleteItem[] = [];
-      const blockedJobs: SessionAutomationJob[] = [];
+      const blockedJobsByKey = new Map<string, SessionAutomationJob[]>();
       try {
         for (const item of items) {
           try {
@@ -1712,7 +1715,7 @@ function Shell({
               draftStore.delete(item.key);
             } else if (result.blocked_by_automations && result.automations?.length) {
               blockedItems.push(item);
-              blockedJobs.push(...result.automations);
+              blockedJobsByKey.set(item.key, result.automations);
             } else {
               failed++;
             }
@@ -1725,11 +1728,7 @@ function Shell({
         reveal();
       }
       if (blockedItems.length) {
-        showAutomationConfirmRef.current(
-          blockedItems,
-          blockedJobs,
-          new Set(blockedItems.map((item) => item.key)),
-        );
+        showAutomationConfirmRef.current(blockedItems, blockedJobsByKey);
       }
       if (failed) showToast({
         message: t(failed === 1 ? "toast.deleteFailedSingle" : "toast.deleteFailed", { count: failed }),
@@ -1745,33 +1744,70 @@ function Shell({
     };
   }, [closeMobileSidebar, deleteChat, draftStore, filePreviewStore, navigate, showToast, t]);
 
-  const showAutomationDeleteConfirmToast = useCallback((
+  const buildAutomationDeleteConfirmNotice = useCallback((
     items: SidebarDeleteItem[],
-    automations: SessionAutomationJob[],
-    automationKeys: ReadonlySet<string>,
-  ) => {
-    closeMobileSidebar();
-    const firstJob = automations[0];
-    const firstName = firstJob?.name || firstJob?.id || "";
-    const detail = automations.length > 1
-      ? `${firstName} · ${t("toast.moreAutomations", { count: automations.length - 1 })}`
-      : firstName || undefined;
-    showToast({
+    jobsByKey: ReadonlyMap<string, SessionAutomationJob[]>,
+  ): ToastNotice => {
+    const groups: AutomationDeleteSessionGroup[] = items.flatMap((item) => {
+      const jobs = jobsByKey.get(item.key);
+      return jobs?.length ? [{ item, jobs }] : [];
+    });
+    const automationKeys = new Set(groups.map((group) => group.item.key));
+    const totalAutomations = groups.reduce((sum, group) => sum + group.jobs.length, 0);
+    const detailsLabel = totalAutomations === 1
+      ? t("toast.automationCountSingle")
+      : t("toast.automationCount", { count: totalAutomations });
+    return {
       message: items.length === 1
         ? t("toast.confirmDeleteAutomationsSingle")
         : t("toast.confirmDeleteAutomations", { count: items.length }),
-      detail,
       tone: "pending",
       persistent: true,
       dedupeKey: `delete-confirm:${items.map((item) => item.key).sort().join(",")}`,
+      details: {
+        label: detailsLabel,
+        render: (controller) => (
+          <AutomationDeleteToastDetails
+            groups={groups}
+            onExcludeSession={(excludedKey) => {
+              const remainingItems = items.filter((item) => item.key !== excludedKey);
+              if (!remainingItems.length) {
+                controller.dismiss();
+                return;
+              }
+              const nextJobsByKey = new Map(
+                Array.from(jobsByKey.entries()).filter(([key]) => key !== excludedKey),
+              );
+              const stillHasAutomations = remainingItems.some(
+                (item) => (nextJobsByKey.get(item.key)?.length ?? 0) > 0,
+              );
+              if (stillHasAutomations) {
+                controller.update(buildAutomationDeleteConfirmNotice(remainingItems, nextJobsByKey));
+                return;
+              }
+              const staged = prepareStagedDelete(remainingItems);
+              if (staged) controller.update(staged);
+              else controller.dismiss();
+            }}
+          />
+        ),
+      },
       secondaryAction: { label: t("common.cancel") },
       action: {
         label: t("chat.delete"),
         tone: "destructive",
         run: () => prepareStagedDelete(items, automationKeys) ?? undefined,
       },
-    });
-  }, [closeMobileSidebar, prepareStagedDelete, showToast, t]);
+    };
+  }, [prepareStagedDelete, t]);
+
+  const showAutomationDeleteConfirmToast = useCallback((
+    items: SidebarDeleteItem[],
+    jobsByKey: ReadonlyMap<string, SessionAutomationJob[]>,
+  ) => {
+    closeMobileSidebar();
+    showToast(buildAutomationDeleteConfirmNotice(items, jobsByKey));
+  }, [buildAutomationDeleteConfirmNotice, closeMobileSidebar, showToast]);
   showAutomationConfirmRef.current = showAutomationDeleteConfirmToast;
 
   const onRequestDeleteMany = useCallback(async (requested: SidebarDeleteItem[]) => {
@@ -1799,15 +1835,14 @@ function Shell({
     const stillLiveKeys = new Set(deleteContextRef.current.topicSessions.map((session) => session.key));
     const items = uniqueItems.filter((item) => stillLiveKeys.has(item.key));
     if (!items.length) return;
-    const automationKeys = new Set<string>();
-    const automations = items.flatMap((item) => {
-      const jobs = jobsByKey.get(item.key);
-      if (!jobs?.length) return [];
-      automationKeys.add(item.key);
-      return jobs;
-    });
-    if (automations.length > 0) {
-      showAutomationDeleteConfirmToast(items, automations, automationKeys);
+    const liveJobsByKey = new Map(
+      items.flatMap((item) => {
+        const jobs = jobsByKey.get(item.key);
+        return jobs?.length ? [[item.key, jobs] as const] : [];
+      }),
+    );
+    if (liveJobsByKey.size > 0) {
+      showAutomationDeleteConfirmToast(items, liveJobsByKey);
       return;
     }
     const notice = prepareStagedDelete(items);

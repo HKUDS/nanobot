@@ -2528,7 +2528,10 @@
     "deleteFailed": "Impossible de supprimer {{count}} conversations",
     "confirmDeleteAutomationsSingle": "Supprimer la conversation et ses automatisations ?",
     "confirmDeleteAutomations": "Supprimer {{count}} conversations et leurs automatisations ?",
-    "moreAutomations": "+ {{count}} autres"
+    "automationCountSingle": "1 automatisation",
+    "automationCount": "{{count}} automatisations",
+    "excludeSession": "Conserver",
+    "excludeSessionAria": "Retirer {{title}} de cette suppression"
   },
   "common": {
     "retry": "Réessayer",

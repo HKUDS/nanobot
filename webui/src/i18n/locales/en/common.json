@@ -2710,7 +2710,10 @@
     "deleteFailed": "Could not delete {{count}} topics",
     "confirmDeleteAutomationsSingle": "Delete topic and linked automations?",
     "confirmDeleteAutomations": "Delete {{count}} topics and linked automations?",
-    "moreAutomations": "+ {{count}} more"
+    "automationCountSingle": "1 automation",
+    "automationCount": "{{count}} automations",
+    "excludeSession": "Keep",
+    "excludeSessionAria": "Exclude {{title}} from deletion"
   },
   "common": {
     "retry": "Retry",

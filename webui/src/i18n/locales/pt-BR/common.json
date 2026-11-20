@@ -2530,7 +2530,10 @@
     "deleteFailed": "Não foi possível excluir {{count}} conversas",
     "confirmDeleteAutomationsSingle": "Excluir a conversa e as automações vinculadas?",
     "confirmDeleteAutomations": "Excluir {{count}} conversas e as automações vinculadas?",
-    "moreAutomations": "+ {{count}} a mais"
+    "automationCountSingle": "1 automação",
+    "automationCount": "{{count}} automações",
+    "excludeSession": "Manter",
+    "excludeSessionAria": "Remover {{title}} desta exclusão"
   },
   "common": {
     "retry": "Tentar novamente",
