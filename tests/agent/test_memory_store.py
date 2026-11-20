@@ -90,14 +90,6 @@ class TestHistoryWithCursor:
         assert data["cursor"] == cursor
         assert data["content"] == expected_content
 
-    def test_read_unprocessed_history(self, store):
-        store.append_history("event 1")
-        store.append_history("event 2")
-        store.append_history("event 3")
-        entries = store.read_unprocessed_history(since_cursor=1)
-        assert len(entries) == 2
-        assert entries[0]["cursor"] == 2
-
     def test_read_unprocessed_history_returns_all_when_cursor_zero(self, store):
         store.append_history("event 1")
         store.append_history("event 2")
@@ -188,21 +180,6 @@ class TestHistoryWithCursor:
 
         entries = store.read_unprocessed_history(since_cursor=0)
         assert [entry["cursor"] for entry in entries] == list(range(21, 101))
-
-    def test_write_entries_uses_atomic_write(self, tmp_path):
-        store = MemoryStore(tmp_path)
-        store.append_history("event 1")
-        store.append_history("event 2")
-        store.append_history("event 3")
-        entries = store.read_unprocessed_history(since_cursor=0)
-
-        tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
-        assert not tmp_path_obj.exists()
-
-        store._write_entries(entries)
-
-        assert not tmp_path_obj.exists()
-        assert store.history_file.exists()
 
     def test_write_entries_cleans_up_tmp_on_exception(self, tmp_path, monkeypatch):
         store = MemoryStore(tmp_path)

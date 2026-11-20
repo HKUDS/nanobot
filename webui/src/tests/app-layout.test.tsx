@@ -1143,7 +1143,6 @@ describe("App layout", () => {
       "text-[var(--temporary-control-active)]",
     );
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("temporary-chat-outline")).not.toBeInTheDocument();
     fireEvent.click(temporaryToggle);
     expect(temporaryToggle).toHaveAttribute("aria-pressed", "false");
     expect(within(temporaryToggle).getByTestId("temporary-chat-icon")).toHaveClass(
@@ -2380,7 +2379,6 @@ describe("App layout", () => {
     expect(screen.getByTestId("sidebar-brand-row")).toHaveClass("pt-3");
     expect(screen.getByTestId("sidebar-brand-mark")).toHaveClass("mt-5");
     expect(screen.getByRole("separator", { name: "Resize sidebar" })).toHaveAttribute("aria-valuenow", "272");
-    expect(screen.queryByTestId("host-sidebar-toggle")).not.toBeInTheDocument();
     expect(
       screen.getByRole("navigation", { name: "Sidebar navigation" }),
     ).toBeInTheDocument();

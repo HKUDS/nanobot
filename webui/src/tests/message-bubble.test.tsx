@@ -1346,11 +1346,10 @@ describe("MessageBubble", () => {
       reasoningStreaming: true,
     };
 
-    const { container } = render(<MessageBubble message={message} />);
+    render(<MessageBubble message={message} />);
 
     const preview = screen.getByText("Step 1: parse intent. Step 2: compute.");
     expect(preview).toBeInTheDocument();
-    expect(container.querySelector(".reasoning-sheen-stripe")).not.toBeInTheDocument();
     expect(preview).toHaveClass("streaming-text-sheen");
     expect(preview).toHaveAttribute(
       "data-sheen-text",

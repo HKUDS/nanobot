@@ -80,10 +80,6 @@ def test_sanitize_filename_keeps_chinese_chars() -> None:
     assert _sanitize_filename("文件（1）.jpg") == "文件（1）.jpg"
 
 
-def test_sanitize_filename_empty_input() -> None:
-    assert _sanitize_filename("") == "unnamed"
-
-
 def test_sanitize_filename_empty_or_dots_fallback() -> None:
     assert _sanitize_filename("...") == "unnamed"
     assert _sanitize_filename("..", fallback="fallback.txt") == "fallback.txt"

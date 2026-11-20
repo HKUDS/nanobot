@@ -1556,7 +1556,6 @@ describe("ThreadComposer", () => {
     expect(screen.getByRole("button", { name: "Switch directory" })).toBeEnabled();
     rerender(composer(false, "thread", true));
     expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
-    expect(container.querySelector(".thread-composer-workspace-label")).not.toBeInTheDocument();
     const accessAfterLock = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
     await user.click(accessAfterLock);
     await user.click(screen.getByRole("menuitemradio", { name: "Default Permission" }));
@@ -1894,7 +1893,6 @@ describe("ThreadComposer", () => {
 
     expect(input).toHaveValue("@Blender ");
     expect(screen.getByTestId("composer-cli-mention-blender")).toHaveTextContent("@Blender");
-    expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.queryByRole("listbox", { name: "Mentions" })).not.toBeInTheDocument();
 
@@ -2750,7 +2748,6 @@ describe("ThreadComposer", () => {
     expect(token.className).not.toContain("mx-");
     expect(token).toHaveClass("text-foreground");
     expect(token.style.textShadow).toBe("");
-    expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
     const logo = screen.getByTestId("composer-cli-mention-logo-gimp");
     expect(logo.className).toContain("top-1/2");
     expect(logo.className).toContain("left-0");

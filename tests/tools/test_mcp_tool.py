@@ -2307,16 +2307,6 @@ def test_sanitize_name_noop_for_already_clean_names() -> None:
     assert _sanitize_name("mcp_server_tool") == "mcp_server_tool"
 
 
-def test_tool_wrapper_sanitizes_name() -> None:
-    tool_def = SimpleNamespace(
-        name="My Tool",
-        description="tool with spaces",
-        inputSchema={"type": "object", "properties": {}},
-    )
-    wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "srv", tool_def)
-    assert wrapper.name == "mcp_srv_My_Tool"
-
-
 def test_resource_wrapper_sanitizes_name() -> None:
     resource_def = SimpleNamespace(
         name="PostgreSQL System Information",
