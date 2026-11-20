@@ -1,13 +1,15 @@
 import {
   useCallback,
+  useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Quote, Wrench } from "lucide-react";
+import { Activity, Check, ChevronDown, ChevronRight, CircleAlert, Clock3, Copy, Quote, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DisclosureContent } from "@/components/ui/disclosure";
 
@@ -21,6 +23,7 @@ import { INLINE_REFERENCE_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/compon
 import { MarkdownText } from "@/components/MarkdownText";
 import { PendingEdgeOverlay, usePendingEdgeState, type PendingEdgeState } from "@/components/PendingEdgeOverlay";
 import { SlashCommandText } from "@/components/SlashCommandText";
+import { DiffViewportContext } from "@/components/thread/activity/DiffViewportContext";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
 import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
@@ -510,25 +513,17 @@ export function MessageBubble({
           />
         ) : null}
         {hasText ? (
-          <div data-user-text-bubble className="relative ml-auto w-fit max-w-full min-w-0">
-            {contextMenu}
-            <p
-              data-theme-surface
-              data-temporary-message={temporary ? "true" : undefined}
-              data-pending-edge={edgeState !== "solid" ? edgeState : undefined}
-              className={cn(
-                "relative ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
-                "text-left text-reading whitespace-pre-wrap [overflow-wrap:anywhere]",
-                temporary
-                  ? "border border-dashed border-muted-foreground/40 bg-transparent"
-                  : "user-message-surface bg-secondary/70",
-                showProcessingStatus && "user-message-surface-dashed",
-              )}
-            >
-              <PendingEdgeOverlay state={edgeState} onSealEnd={completeSeal} />
-              {messageText}
-            </p>
-          </div>
+          <UserTextBubble
+            messageId={message.id}
+            contentKey={userContent}
+            temporary={temporary}
+            showProcessingStatus={showProcessingStatus}
+            edgeState={edgeState}
+            onSealEnd={completeSeal}
+            contextMenu={contextMenu}
+          >
+            {messageText}
+          </UserTextBubble>
         ) : null}
         {!showDeliveryStatus && showProcessingStatus ? (
           <span role="status" className="sr-only">
@@ -587,6 +582,221 @@ export function MessageBubble({
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
         </InlineImageProvider>
       )}
+    </div>
+  );
+}
+
+const USER_MESSAGE_COLLAPSE_THRESHOLD_RATIO = 0.5;
+const USER_MESSAGE_COLLAPSED_HEIGHT_RATIO = 0.38;
+const MIN_USER_MESSAGE_COLLAPSE_THRESHOLD_PX = 200;
+const MIN_USER_MESSAGE_COLLAPSED_BUBBLE_PX = 160;
+const MIN_USER_MESSAGE_COLLAPSED_TEXT_PX = 96;
+const DEFAULT_COLLAPSIBLE_PADDING_BOTTOM_PX = 44;
+const COLLAPSE_SCROLL_TOP_INSET_PX = 48;
+
+interface UserTextCollapseLayout {
+  collapsible: boolean;
+  fullTextHeight: number;
+  collapsedTextHeight: number;
+}
+
+interface UserTextBubbleProps {
+  messageId: string;
+  contentKey: string;
+  temporary: boolean;
+  showProcessingStatus: boolean;
+  edgeState: PendingEdgeState;
+  onSealEnd: () => void;
+  contextMenu?: ReactNode;
+  children: ReactNode;
+}
+
+function UserTextBubble({
+  messageId,
+  contentKey,
+  temporary,
+  showProcessingStatus,
+  edgeState,
+  onSealEnd,
+  contextMenu,
+  children,
+}: UserTextBubbleProps) {
+  const { t } = useTranslation();
+  const viewport = useContext(DiffViewportContext);
+  const bubbleRef = useRef<HTMLParagraphElement>(null);
+  const contentRef = useRef<HTMLSpanElement>(null);
+  const contentId = useId();
+  const [layout, setLayout] = useState<UserTextCollapseLayout | null>(null);
+  const [expandedForId, setExpandedForId] = useState<string | null>(null);
+  const expanded = expandedForId === messageId;
+  const isCollapsible = layout?.collapsible ?? false;
+  const isCollapsed = isCollapsible && !expanded;
+
+  useLayoutEffect(() => {
+    const bubble = bubbleRef.current;
+    if (!bubble) return;
+    const scroller = viewport?.scroller.current ?? null;
+
+    const measure = () => {
+      const currentBubble = bubbleRef.current;
+      if (!currentBubble) return;
+      const scrollerHeight = scroller?.clientHeight ?? 0;
+      const referenceHeight = scrollerHeight > 0 ? scrollerHeight : window.innerHeight;
+      if (!Number.isFinite(referenceHeight) || referenceHeight <= 0) return;
+
+      const style = getComputedStyle(currentBubble);
+      const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+      const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+      const normalPaddingY = paddingTop * 2;
+      const content = contentRef.current;
+      const fullTextHeight = content
+        ? content.scrollHeight
+        : Math.max(0, currentBubble.scrollHeight - paddingTop - paddingBottom);
+      if (fullTextHeight <= 0) return;
+
+      const naturalBubbleHeight = fullTextHeight + normalPaddingY;
+      const collapseThreshold = Math.max(
+        MIN_USER_MESSAGE_COLLAPSE_THRESHOLD_PX,
+        Math.round(referenceHeight * USER_MESSAGE_COLLAPSE_THRESHOLD_RATIO),
+      );
+      const collapsible = naturalBubbleHeight > collapseThreshold;
+      const collapsedPaddingY = content
+        ? paddingTop + paddingBottom
+        : paddingTop + DEFAULT_COLLAPSIBLE_PADDING_BOTTOM_PX;
+      const targetBubbleHeight = Math.max(
+        MIN_USER_MESSAGE_COLLAPSED_BUBBLE_PX,
+        Math.round(referenceHeight * USER_MESSAGE_COLLAPSED_HEIGHT_RATIO),
+      );
+      const collapsedTextHeight = Math.min(
+        fullTextHeight,
+        Math.max(MIN_USER_MESSAGE_COLLAPSED_TEXT_PX, targetBubbleHeight - collapsedPaddingY),
+      );
+
+      setLayout((current) => (
+        current?.collapsible === collapsible
+        && current.fullTextHeight === fullTextHeight
+        && current.collapsedTextHeight === collapsedTextHeight
+          ? current
+          : { collapsible, fullTextHeight, collapsedTextHeight }
+      ));
+    };
+
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(contentRef.current ?? bubble);
+    if (scroller) observer?.observe(scroller);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [contentKey, isCollapsible, messageId, viewport]);
+
+  const toggleCollapsed = useCallback(() => {
+    if (expanded) {
+      const bubble = bubbleRef.current;
+      if (bubble) {
+        const scroller = viewport?.scroller.current ?? null;
+        if (scroller) {
+          const scrollerRect = scroller.getBoundingClientRect();
+          const bubbleRect = bubble.getBoundingClientRect();
+          if (bubbleRect.top < scrollerRect.top + COLLAPSE_SCROLL_TOP_INSET_PX) {
+            const targetTop = Math.max(
+              0,
+              scroller.scrollTop + (bubbleRect.top - scrollerRect.top) - COLLAPSE_SCROLL_TOP_INSET_PX,
+            );
+            scroller.scrollTo({ top: targetTop, behavior: "auto" });
+          }
+        } else if (bubble.getBoundingClientRect().top < 16) {
+          bubble.scrollIntoView({ block: "nearest" });
+        }
+      }
+      setExpandedForId(null);
+      return;
+    }
+    setExpandedForId(messageId);
+  }, [expanded, messageId, viewport]);
+
+  const clipHeight = layout
+    ? (isCollapsed ? layout.collapsedTextHeight : layout.fullTextHeight)
+    : undefined;
+
+  return (
+    <div
+      data-user-text-bubble
+      data-user-message-collapsible={isCollapsible ? "true" : undefined}
+      data-user-message-collapsed={isCollapsed ? "true" : undefined}
+      className="relative ml-auto w-fit max-w-full min-w-0"
+    >
+      {contextMenu}
+      <p
+        ref={bubbleRef}
+        id={isCollapsible ? contentId : undefined}
+        data-theme-surface
+        data-temporary-message={temporary ? "true" : undefined}
+        data-pending-edge={edgeState !== "solid" ? edgeState : undefined}
+        className={cn(
+          "relative ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
+          "text-left text-reading whitespace-pre-wrap [overflow-wrap:anywhere]",
+          temporary
+            ? "border border-dashed border-muted-foreground/40 bg-transparent"
+            : "user-message-surface bg-secondary/70",
+          showProcessingStatus && "user-message-surface-dashed",
+          isCollapsible && "user-message-collapsible",
+        )}
+      >
+        <PendingEdgeOverlay state={edgeState} onSealEnd={onSealEnd} />
+        {isCollapsible ? (
+          <span
+            data-user-message-clip
+            data-state={isCollapsed ? "closed" : "open"}
+            className={cn(
+              "user-message-collapsible-body block overflow-hidden",
+              isCollapsed && "user-message-collapsible-masked",
+            )}
+            style={clipHeight !== undefined ? { height: clipHeight } : undefined}
+          >
+            <span ref={contentRef} className="block">
+              {children}
+            </span>
+          </span>
+        ) : (
+          children
+        )}
+      </p>
+      {isCollapsible ? (
+        <div
+          data-user-message-toggle-bar
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] flex items-center justify-center px-3 pb-1.5 pt-1"
+        >
+          <button
+            type="button"
+            data-thread-disclosure=""
+            data-user-message-toggle
+            aria-expanded={!isCollapsed}
+            aria-controls={contentId}
+            onClick={toggleCollapsed}
+            className={cn(
+              "pointer-events-auto touch-target inline-flex h-7 items-center gap-1 rounded-full px-3",
+              "text-ui-label text-muted-foreground transition-colors",
+              "hover:bg-foreground/[0.06] hover:text-foreground dark:hover:bg-foreground/[0.09]",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+          >
+            <span>
+              {isCollapsed ? t("message.expandUserMessage") : t("message.collapseUserMessage")}
+            </span>
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 shrink-0 transition-transform duration-200 motion-reduce:transition-none",
+                !isCollapsed && "rotate-180",
+              )}
+              strokeWidth={1.75}
+              aria-hidden
+            />
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

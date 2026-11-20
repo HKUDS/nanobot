@@ -2188,6 +2188,8 @@
     "fallbackResponse": "Esta respuesta usa un modelo de respaldo: {{preset}}.",
     "copyReply": "Copiar",
     "copiedReply": "Copiado",
+    "expandUserMessage": "Mostrar más",
+    "collapseUserMessage": "Mostrar menos",
     "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)",
     "fileEditViewDiff": "Ver cambios",
     "fileEditViewLargeDiff": "Expandir cambios",

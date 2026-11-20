@@ -2576,6 +2576,8 @@
     "fallbackResponse": "本条回复已切换至备用模型，由 {{preset}} 回答。",
     "copyReply": "复制",
     "copiedReply": "已复制",
+    "expandUserMessage": "展开",
+    "collapseUserMessage": "收起",
     "turnLatencyTitle": "回复耗时",
     "fileEditViewDiff": "查看修改",
     "fileEditViewLargeDiff": "展开修改",

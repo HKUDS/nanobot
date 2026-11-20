@@ -1509,4 +1509,65 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("link", { name: "Download growth.svg" })).not.toBeInTheDocument();
   });
 
+  it("collapses user messages taller than half the viewport and restores them on toggle or resize", () => {
+    let textHeight = 620;
+    let resize: ResizeObserverCallback | undefined;
+    const disconnect = vi.fn();
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      if (this.tagName === "P" || this.parentElement?.hasAttribute("data-user-message-clip")) {
+        return textHeight;
+      }
+      return 0;
+    });
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) { resize = callback; }
+      observe() {}
+      disconnect = disconnect;
+    });
+
+    try {
+      const content = Array.from({ length: 24 }, (_, i) => `Line ${i + 1}: detailed release log entry`).join("\n");
+      const message: UIMessage = {
+        id: "u-long",
+        role: "user",
+        content,
+        createdAt: Date.now(),
+      };
+      const { container, unmount } = render(<MessageBubble message={message} />);
+
+      const wrapper = container.querySelector("[data-user-text-bubble]")!;
+      const toggle = screen.getByRole("button", { name: "Show more" });
+      const clip = container.querySelector("[data-user-message-clip]") as HTMLElement;
+      expect(wrapper).toHaveAttribute("data-user-message-collapsible", "true");
+      expect(wrapper).toHaveAttribute("data-user-message-collapsed", "true");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveAttribute("data-thread-disclosure", "");
+      expect(toggle.getAttribute("aria-controls")).toBe(container.querySelector("[data-user-text-bubble] > p")?.id);
+      expect(clip).toHaveClass("user-message-collapsible-masked");
+      expect(clip.style.height).toBe("304px");
+
+      fireEvent.click(toggle);
+      expect(wrapper).not.toHaveAttribute("data-user-message-collapsed");
+      expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+      expect(clip).not.toHaveClass("user-message-collapsible-masked");
+      expect(clip.style.height).toBe("620px");
+
+      fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+      expect(wrapper).toHaveAttribute("data-user-message-collapsed", "true");
+      expect(clip.style.height).toBe("304px");
+
+      textHeight = 320;
+      act(() => { resize?.([], {} as ResizeObserver); });
+      expect(wrapper).not.toHaveAttribute("data-user-message-collapsible");
+      expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+
+      unmount();
+      expect(disconnect).toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
+  });
+
 });

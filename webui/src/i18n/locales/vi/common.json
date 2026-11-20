@@ -2188,6 +2188,8 @@
     "fallbackResponse": "Phản hồi này đã chuyển sang mô hình dự phòng, do {{preset}} trả lời.",
     "copyReply": "Sao chép",
     "copiedReply": "Đã sao chép",
+    "expandUserMessage": "Hiển thị thêm",
+    "collapseUserMessage": "Thu gọn",
     "turnLatencyTitle": "Thời gian phản hồi (end-to-end)",
       "fileEditViewDiff": "Xem thay đổi",
       "fileEditViewLargeDiff": "Mở rộng thay đổi",

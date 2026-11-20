@@ -761,7 +761,8 @@
     overflow: hidden;
   }
   @media (prefers-reduced-motion: no-preference) {
-    .expandable-text {
+    .expandable-text,
+    .user-message-collapsible-body {
       transition: height 240ms cubic-bezier(0.4, 0, 0.2, 1);
     }
     .inline-disclosure {
@@ -1227,6 +1228,21 @@
   --tw-shadow: var(--surface-depth-shadow);
 }
 
+.user-message-collapsible {
+  padding-bottom: 2.75rem;
+}
+
+.user-message-collapsible-masked {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 3.5rem), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 3.5rem), transparent 100%);
+}
+
+@media (pointer: coarse) {
+  .user-message-collapsible {
+    padding-bottom: 3.5rem;
+  }
+}
+
 .pending-edge-overlay {
   --pending-edge-progress: -20%;
   --pending-edge-solid-color: hsl(var(--border) / 0.75);
@@ -1457,6 +1473,13 @@
 @media (forced-colors: active) {
   .thread-composer-surface, .composer-palette-surface, .context-inspector-surface, .user-message-surface, .side-panel-surface { outline: 1px solid CanvasText; }
   .user-message-surface-dashed { outline-style: dashed; }
+  .user-message-collapsible-masked {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  [data-user-message-toggle] {
+    border: 1px solid ButtonBorder;
+  }
   .pending-edge-overlay { display: none; }
   :has(> .pending-edge-overlay[data-solid-tone="card"][data-pending-edge-overlay="pending"]) {
     border-color: CanvasText;
