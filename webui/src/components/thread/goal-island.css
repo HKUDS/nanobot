@@ -11,7 +11,7 @@
 @property --goal-island-radius {
   syntax: "<length>";
   inherits: true;
-  initial-value: 13px;
+  initial-value: 16px;
 }
 
 .thread-header-container {
@@ -28,10 +28,11 @@
 }
 .goal-island-position {
   position: absolute;
-  top: 6px;
+  top: 4px;
   left: 50%;
   width: max-content;
-  max-width: min(34cqw, 16.5rem);
+  min-width: min(10rem, 32cqw);
+  max-width: min(36cqw, 20rem);
   transform: translateX(-50%);
   pointer-events: auto;
 }
@@ -39,34 +40,30 @@
 .goal-island-panel {
   --goal-island-width: 100%;
   --goal-island-height: 100%;
-  --goal-island-radius: 13px;
-  --goal-pad-x: 16px;
-  --goal-surface: rgb(251 251 252 / 80%);
-  --goal-surface-hover: rgb(246 246 248 / 90%);
-  --goal-panel-surface: rgb(255 255 255 / 86%);
-  --goal-border: rgb(0 0 0 / 8%);
-  --goal-border-hover: rgb(0 0 0 / 13%);
-  --goal-rim: rgb(255 255 255 / 92%);
-  --goal-shadow: 0 1px 3px rgb(0 0 0 / 5%);
-  --goal-panel-shadow: 0 4px 20px rgb(0 0 0 / 8%), 0 1px 3px rgb(0 0 0 / 4%);
+  --goal-island-radius: 16px;
+  --goal-pad-x: 18px;
+  --goal-surface: hsl(40 10% 97.2% / 90%);
+  --goal-surface-hover: hsl(40 10% 95.2% / 95%);
+  --goal-shadow-color: 240 10% 16%;
+  --goal-border-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75);
+  --goal-border-hover-shadow: inset 0 0 0 1px hsl(var(--border));
+  --goal-depth-shadow: 0 4px 18px -8px hsl(var(--goal-shadow-color) / 0.12);
+  --goal-panel-depth-shadow: 0 10px 28px -10px hsl(var(--goal-shadow-color) / 0.16);
   --goal-activity-track: hsl(var(--foreground) / 14%);
   --goal-activity-arc: hsl(var(--foreground) / 58%);
   --goal-blocked-color: hsl(2 68% 46%);
   --goal-cancel-bg: hsl(var(--foreground) / 5.5%);
   --goal-cancel-fg: hsl(var(--foreground) / 62%);
   --goal-cancel-hover-bg: hsl(2 72% 52% / 11%);
-  color: hsl(var(--foreground) / 86%);
+  color: hsl(var(--foreground) / 88%);
 }
 :where(.dark) .goal-island,
 :where(.dark) .goal-island-panel {
-  --goal-surface: rgb(60 60 64 / 76%);
-  --goal-surface-hover: rgb(68 68 72 / 86%);
-  --goal-panel-surface: rgb(52 52 56 / 84%);
-  --goal-border: rgb(255 255 255 / 13%);
-  --goal-border-hover: rgb(255 255 255 / 20%);
-  --goal-rim: rgb(255 255 255 / 14%);
-  --goal-shadow: 0 2px 10px rgb(0 0 0 / 20%);
-  --goal-panel-shadow: 0 10px 30px rgb(0 0 0 / 34%), 0 2px 6px rgb(0 0 0 / 18%);
+  --goal-surface: hsl(0 0% 23.5% / 92%);
+  --goal-surface-hover: hsl(0 0% 25.5% / 95%);
+  --goal-shadow-color: 240 12% 3%;
+  --goal-depth-shadow: 0 4px 18px -8px hsl(var(--goal-shadow-color) / 0.32);
+  --goal-panel-depth-shadow: 0 12px 32px -10px hsl(var(--goal-shadow-color) / 0.44);
   --goal-activity-track: rgb(255 255 255 / 16%);
   --goal-activity-arc: rgb(255 255 255 / 68%);
   --goal-blocked-color: hsl(3 82% 72%);
@@ -79,23 +76,25 @@
   isolation: isolate;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
   max-width: 100%;
-  height: 26px;
-  padding: 0 11px 0 9px;
-  border-radius: 13px;
+  height: 32px;
+  padding: 0 14px 0 12px;
+  border-radius: 16px;
   corner-shape: round;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
   letter-spacing: -0.005em;
-  line-height: 16px;
+  line-height: 18px;
   text-align: left;
   cursor: pointer;
   transition: opacity 120ms ease;
 }
 .goal-island-trigger:hover > .goal-island-surface::before {
   background: var(--goal-surface-hover);
-  border-color: var(--goal-border-hover);
+  box-shadow: var(--goal-border-hover-shadow), var(--goal-depth-shadow);
 }
 .goal-island[data-detail-mounted="true"] .goal-island-trigger {
   opacity: 0;
@@ -106,12 +105,12 @@
 }
 .goal-island-label {
   display: block;
-  line-height: 16px;
+  line-height: 18px;
   color: inherit;
 }
 .goal-island-activity {
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
   flex: none;
   border-radius: 9999px;
   border: 1.5px solid var(--goal-activity-track);
@@ -119,9 +118,9 @@
   animation: goal-island-spin 1.35s linear infinite;
 }
 .goal-island-panel {
-  --goal-island-radius: 18px;
+  --goal-island-radius: 20px;
   isolation: isolate;
-  width: min(26rem, calc(100vw - 48px));
+  width: min(29rem, calc(100vw - 48px));
   color: hsl(var(--foreground));
   text-align: left;
   outline: none;
@@ -142,17 +141,15 @@
   inset: 0;
   border-radius: var(--goal-island-radius);
   corner-shape: round;
-  border: 1px solid var(--goal-border);
   background: var(--goal-surface);
-  box-shadow: inset 0 0.5px 0 var(--goal-rim), var(--goal-shadow);
-  backdrop-filter: blur(20px) saturate(1.8);
-  -webkit-backdrop-filter: blur(20px) saturate(1.8);
-  transition: background-color 160ms ease, border-color 160ms ease;
+  box-shadow: var(--goal-border-shadow), var(--goal-depth-shadow);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  transition: background-color 160ms ease, box-shadow 160ms ease;
 }
 .goal-island-panel > .goal-island-surface::before {
   corner-shape: var(--corner-shape);
-  background: var(--goal-panel-surface);
-  box-shadow: inset 0 0.5px 0 var(--goal-rim), var(--goal-panel-shadow);
+  box-shadow: var(--goal-border-shadow), var(--goal-panel-depth-shadow);
 }
 .goal-island-panel-content {
   display: flex;
@@ -165,11 +162,11 @@
   gap: 10px;
   flex-shrink: 0;
   margin: 0;
-  padding: 14px 12px 6px var(--goal-pad-x);
+  padding: 15px 14px 6px var(--goal-pad-x);
   color: hsl(var(--foreground) / 92%);
 }
 .goal-island-summary .markdown-content {
-  --text-reading-size: 12.5px;
+  --text-reading-size: 13px;
 }
 .goal-island-summary .markdown-content h2 {
   display: -webkit-box;
@@ -178,7 +175,7 @@
   margin: 0;
   overflow: hidden;
   overflow-wrap: anywhere;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 20px;
@@ -211,10 +208,10 @@
   --goal-fade-bottom: min(24px, 22%);
 }
 .goal-island-document {
-  padding: 2px var(--goal-pad-x) 14px;
+  padding: 2px var(--goal-pad-x) 16px;
 }
 .goal-island-body .markdown-content {
-  --text-reading-size: 12.5px;
+  --text-reading-size: 13px;
   --reading-line-height: 1.58;
   overflow-wrap: anywhere;
   color: hsl(var(--foreground) / 72%);
@@ -227,27 +224,27 @@
   align-items: flex-start;
   gap: 6px;
   color: var(--goal-blocked-color);
-  font-size: 12.5px;
-  line-height: 18px;
+  font-size: 13px;
+  line-height: 19px;
 }
 .goal-island-blocked .markdown-content.goal-island-reason {
-  --text-reading-size: 12.5px;
-  --reading-line-height: 18px;
+  --text-reading-size: 13px;
+  --reading-line-height: 19px;
   --tw-prose-body: var(--goal-blocked-color);
   --tw-prose-headings: var(--goal-blocked-color);
   --tw-prose-bold: var(--goal-blocked-color);
   --tw-prose-lead: var(--goal-blocked-color);
   min-width: 0;
   color: var(--goal-blocked-color);
-  font-size: 12.5px;
-  line-height: 18px;
+  font-size: 13px;
+  line-height: 19px;
 }
 .goal-island-panel[data-goal-status="blocked"] .goal-island-body[data-overflow-bottom] {
   --goal-fade-bottom: 14px;
 }
 .goal-island-status-icon {
-  width: 12.5px;
-  height: 12.5px;
+  width: 13.5px;
+  height: 13.5px;
   flex: none;
   color: var(--goal-blocked-color);
 }
@@ -258,10 +255,10 @@
   margin-top: 2.75px;
 }
 .goal-island-panel[data-state="open"] {
-  animation: goal-island-expand 380ms cubic-bezier(0.22, 1.12, 0.36, 1) both;
+  animation: goal-island-expand 380ms cubic-bezier(0.22, 1.06, 0.36, 1) backwards;
 }
 .goal-island-panel[data-state="open"] .goal-island-panel-content {
-  animation: goal-island-content-in 180ms cubic-bezier(0.2, 0, 0, 1) 70ms both;
+  animation: goal-island-content-in 200ms cubic-bezier(0.2, 0, 0, 1) 75ms both;
 }
 .goal-island-panel[data-state="closed"] {
   animation: goal-island-collapse 220ms cubic-bezier(0.32, 0.72, 0, 1) both;
@@ -275,14 +272,14 @@
 }
 @keyframes goal-island-expand {
   from {
-    --goal-island-width: var(--goal-from-width, var(--radix-popover-trigger-width));
-    --goal-island-height: var(--goal-from-height, 26px);
-    --goal-island-radius: var(--goal-from-radius, 13px);
+    --goal-island-width: var(--goal-from-width, var(--goal-trigger-width, var(--radix-popover-trigger-width)));
+    --goal-island-height: var(--goal-from-height, var(--goal-trigger-height, 32px));
+    --goal-island-radius: var(--goal-from-radius, 16px);
   }
   to {
-    --goal-island-width: 100%;
-    --goal-island-height: 100%;
-    --goal-island-radius: 18px;
+    --goal-island-width: var(--goal-to-width, 100%);
+    --goal-island-height: var(--goal-to-height, 100%);
+    --goal-island-radius: 20px;
   }
 }
 @keyframes goal-island-collapse {
@@ -292,37 +289,37 @@
     --goal-island-radius: var(--goal-from-radius);
   }
   to {
-    --goal-island-width: var(--radix-popover-trigger-width);
-    --goal-island-height: 26px;
-    --goal-island-radius: 13px;
+    --goal-island-width: var(--goal-trigger-width, var(--radix-popover-trigger-width));
+    --goal-island-height: var(--goal-trigger-height, 32px);
+    --goal-island-radius: 16px;
   }
 }
 @keyframes goal-island-content-in {
-  from { opacity: var(--goal-from-opacity, 0); transform: var(--goal-from-transform, translateY(-4px)); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: var(--goal-from-opacity, 0); transform: var(--goal-from-transform, translateY(-6px) scale(0.98)); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 @keyframes goal-island-content-out {
   from { opacity: var(--goal-from-opacity); transform: var(--goal-from-transform); }
-  to { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 0; transform: translateY(-4px) scale(0.98); }
 }
 @keyframes goal-island-spin {
   to { transform: rotate(360deg); }
 }
 @media (max-width: 767px) {
   .goal-island-panel[data-narrow="true"][data-state="open"] > .goal-island-surface {
-    animation: goal-island-mobile-drop-in 380ms cubic-bezier(0.22, 1.12, 0.36, 1) both;
+    animation: goal-island-mobile-drop-in 380ms cubic-bezier(0.22, 1.06, 0.36, 1) backwards;
   }
   .goal-island-panel[data-narrow="true"][data-state="closed"] > .goal-island-surface {
     animation: goal-island-mobile-drop-out 220ms cubic-bezier(0.32, 0.72, 0, 1) both;
   }
 }
 @keyframes goal-island-mobile-drop-in {
-  from { translate: 0 -36px; }
+  from { translate: 0 -42px; }
   to { translate: 0 0; }
 }
 @keyframes goal-island-mobile-drop-out {
   from { translate: 0 0; }
-  to { translate: 0 -36px; }
+  to { translate: 0 -42px; }
 }
 @media (max-height: 600px) {
   .goal-island-summary .markdown-content h2 {
@@ -346,17 +343,14 @@
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .goal-island,
   .goal-island-panel {
-    --goal-surface: rgb(246 246 248);
-    --goal-surface-hover: rgb(238 238 241);
-    --goal-panel-surface: rgb(255 255 255);
-    --goal-border: rgb(0 0 0 / 24%);
+    --goal-surface: hsl(40 10% 97%);
+    --goal-surface-hover: hsl(40 10% 94%);
+    --goal-border-shadow: inset 0 0 0 1px hsl(var(--border));
   }
   :where(.dark) .goal-island,
   :where(.dark) .goal-island-panel {
-    --goal-surface: rgb(62 62 66);
-    --goal-surface-hover: rgb(72 72 76);
-    --goal-panel-surface: rgb(54 54 58);
-    --goal-border: rgb(255 255 255 / 28%);
+    --goal-surface: hsl(0 0% 24%);
+    --goal-surface-hover: hsl(0 0% 27%);
   }
   .goal-island-surface::before {
     backdrop-filter: none;
@@ -368,12 +362,10 @@
   .goal-island-panel {
     --goal-surface: Canvas;
     --goal-surface-hover: Canvas;
-    --goal-panel-surface: Canvas;
-    --goal-border: CanvasText;
+    --goal-border-shadow: inset 0 0 0 1px CanvasText;
+    --goal-depth-shadow: none;
+    --goal-panel-depth-shadow: none;
     color: CanvasText;
-  }
-  .goal-island-surface::before {
-    box-shadow: none;
   }
   .goal-island-activity {
     border-color: CanvasText;

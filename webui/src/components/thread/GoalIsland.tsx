@@ -35,14 +35,32 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
   const [cancelling, setCancelling] = useState(false);
   const showToast = useToast();
   const [scrollBody, setScrollBody] = useState<HTMLDivElement | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const escapeFocus = useOverlayEscapeFocus();
   const narrow = useSyncExternalStore(subscribeNarrowViewport, getNarrowViewportSnapshot, () => false);
+  const syncGeometry = (panel: HTMLDivElement) => {
+    const triggerRect = triggerRef.current?.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    if (triggerRect && triggerRect.width > 0) {
+      panel.style.setProperty("--goal-trigger-width", `${triggerRect.width}px`);
+      panel.style.setProperty("--goal-trigger-height", `${triggerRect.height}px`);
+    }
+    if (panelRect.width > 0 && panelRect.height > 0) {
+      panel.style.setProperty("--goal-to-width", `${panelRect.width}px`);
+      panel.style.setProperty("--goal-to-height", `${panelRect.height}px`);
+    }
+  };
+  const setPanelNode = (node: HTMLDivElement | null) => {
+    panelRef.current = node;
+    if (node) syncGeometry(node);
+  };
   const changeOpen = (nextOpen: boolean) => {
     const panel = panelRef.current;
     const surface = panel?.querySelector<HTMLElement>(":scope > .goal-island-surface");
     const content = panel?.querySelector<HTMLElement>(".goal-island-panel-content");
     if (panel && surface && content) {
+      syncGeometry(panel);
       const shape = getComputedStyle(surface);
       const text = getComputedStyle(content);
       panel.style.setProperty("--goal-from-width", shape.width);
@@ -109,6 +127,7 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
         >
           <PopoverTrigger asChild>
             <button
+              ref={triggerRef}
               type="button"
               className="goal-island-trigger"
               aria-label={t("thread.composer.goalStateExpandAria")}
@@ -125,14 +144,14 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
           </PopoverTrigger>
         </div>
         <PopoverContent
-          ref={panelRef}
+          ref={setPanelNode}
           {...escapeFocus.contentProps}
-          className="goal-island-panel max-h-[min(25dvh,16rem,var(--radix-popover-content-available-height))] overflow-visible rounded-[18px] bg-transparent p-0 shadow-none dark:shadow-none"
+          className="goal-island-panel max-h-[min(25dvh,16rem,var(--radix-popover-content-available-height))] overflow-visible rounded-[20px] bg-transparent p-0 shadow-none dark:shadow-none"
           motionClassName=""
           data-goal-status={status}
           data-narrow={narrow || undefined}
           side="bottom"
-          sideOffset={narrow ? 10 : -26}
+          sideOffset={narrow ? 10 : -32}
           collisionPadding={{ top: 8, bottom: 12, left: 24, right: 24 }}
           aria-label={t("thread.composer.goalStateSheetTitle")}
         >
