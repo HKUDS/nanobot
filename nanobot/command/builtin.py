@@ -7,11 +7,13 @@ import sys
 from contextlib import suppress
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from loguru import logger
 
 from nanobot import __version__
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import SideChannelReplyEvent
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.command.spec import BuiltinCommandSpec
 from nanobot.command.spec import CommandLifecycle as CommandLifecycle
@@ -367,12 +369,23 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+def _side_channel_reply(msg: InboundMessage, content: str, **metadata: Any) -> OutboundMessage:
+    return OutboundMessage(
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        content=content,
+        metadata={**msg.metadata, **metadata},
+        event=SideChannelReplyEvent(),
+    )
+
+
 async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     """Manually trigger a Dream consolidation run."""
     import time
 
     loop = ctx.loop
-    msg = ctx.msg
+    acknowledgement = _side_channel_reply(ctx.msg, "Dreaming...")
+    metadata = dict(acknowledgement.metadata)
 
     async def _run_dream():
         from nanobot.agent.dream import run_dream
@@ -390,15 +403,15 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
             content = f"Dream completed in {elapsed:.1f}s; no memory changes."
         if result.commit_sha:
             content += f" (commit {result.commit_sha})"
-        await loop.bus.publish_outbound(OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content=content,
-            metadata={"render_as": "text"} if not result.had_input else {},
+        await loop.bus.publish_outbound(replace(
+            acknowledgement,
+            content=content,
+            metadata=metadata if result.had_input else {**metadata, "render_as": "text"},
+            event=SideChannelReplyEvent(notification_id=f"command-result:{uuid4().hex}"),
         ))
 
     asyncio.create_task(_run_dream())
-    return OutboundMessage(
-        channel=msg.channel, chat_id=msg.chat_id, content="Dreaming...",
-    )
+    return acknowledgement
 
 
 async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
@@ -608,10 +621,7 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
             )
         else:
             msg = "Dream history is not available because memory versioning is not initialized."
-        return OutboundMessage(
-            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
-            content=msg, metadata={"render_as": "text"},
-        )
+        return _side_channel_reply(ctx.msg, msg, render_as="text")
 
     args = ctx.args.strip()
 
@@ -646,10 +656,7 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
                 "Use `/dream-prompt` to see or change how Dream organizes memory."
             )
 
-    return OutboundMessage(
-        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
-        content=content, metadata={"render_as": "text"},
-    )
+    return _side_channel_reply(ctx.msg, content, render_as="text")
 
 
 async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
@@ -662,9 +669,8 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
     store = ctx.loop.consolidator.store
     git = store.git
     if not git.is_initialized():
-        return OutboundMessage(
-            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
-            content="Dream history is not available because memory versioning is not initialized.",
+        return _side_channel_reply(
+            ctx.msg, "Dream history is not available because memory versioning is not initialized.",
         )
 
     args = ctx.args.strip()
@@ -706,10 +712,7 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
                         f"Couldn't restore Dream change `{sha}`.\n\n"
                         "It may be the first saved version with no earlier state to restore."
                     )
-    return OutboundMessage(
-        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
-        content=content, metadata={"render_as": "text"},
-    )
+    return _side_channel_reply(ctx.msg, content, render_as="text")
 
 
 async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:
@@ -721,12 +724,7 @@ async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:
         ctx.loop.bus.publish_nowait(PairingChanged())
 
     reply = handle_pairing_command(ctx.msg.channel, ctx.args, on_change=changed)
-    return OutboundMessage(
-        channel=ctx.msg.channel,
-        chat_id=ctx.msg.chat_id,
-        content=reply,
-        metadata={PAIRING_COMMAND_META_KEY: True},
-    )
+    return _side_channel_reply(ctx.msg, reply, **{PAIRING_COMMAND_META_KEY: True})
 
 
 async def cmd_skill(ctx: CommandContext) -> OutboundMessage:
