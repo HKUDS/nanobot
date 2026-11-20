@@ -4,7 +4,10 @@ import { createRoot } from "react-dom/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initializeI18n, setAppLanguage } from "@/i18n";
 import { LOCALE_STORAGE_KEY, normalizeLocale } from "@/i18n/config";
+import { installFocusModality } from "@/lib/focus-modality";
 import "../src/globals.css";
+
+installFocusModality();
 
 const parameters = new URLSearchParams(location.search);
 const fixtureCase = parameters.get("case");

@@ -260,3 +260,20 @@ for (const [file, renderedIndex, sourceLine, reverse] of [["long.ts", 58, 59, fa
     await expect(line).toHaveCount(0);
   });
 }
+
+test("diff toggle stays quiet on Shift+click and Escape, then shows ring on keyboard Tab", async ({ page }) => {
+  await page.goto("/browser/fixture.html?case=file-diff");
+  const toggle = page.getByRole("region", { name: "long.ts", exact: true }).getByTestId("file-edit-diff-toggle");
+  await page.keyboard.down("Shift");
+  await toggle.click();
+  await page.keyboard.press("Escape");
+  await page.keyboard.up("Shift");
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toHaveCSS("outline-style", "none");
+  await expect(toggle).toHaveCSS("box-shadow", "none");
+
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(toggle).toBeFocused();
+  expect(await toggle.evaluate((node) => getComputedStyle(node).boxShadow)).not.toBe("none");
+});

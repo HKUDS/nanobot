@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { modelAPIConfigurable, preferredModelAPI, REQUEST_API_LABELS } from "@/components/settings/models/modelAPI";
@@ -6,7 +5,6 @@ import { ToggleButton } from "@/components/ui/toggle-button";
 import { SettingsRow } from "@/components/settings/shared/SettingsControls";
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
 import type { ModelAPIConfig, ProviderRequestAPI, SettingsPayload } from "@/lib/types";
 
 export function ModelAPIControl({
@@ -26,7 +24,6 @@ export function ModelAPIControl({
 }) {
   const { t } = useTranslation();
   const controlTitle = title ?? t("settings.models.requestAPI");
-  const [pointerFocus, setPointerFocus] = useState(false);
   const requestAPIs = Array.isArray(provider?.request_apis) ? provider.request_apis : undefined;
   const configurable = modelAPIConfigurable(provider);
   const fixedAPI = requestAPIs?.length === 1 ? requestAPIs[0] : undefined;
@@ -69,19 +66,11 @@ export function ModelAPIControl({
           }}>
             <SelectTrigger
               aria-label={controlTitle}
-              className={cn("w-full rounded-full", pointerFocus && "focus-visible:ring-0")}
-              onPointerDown={() => setPointerFocus(true)}
-              onKeyDown={() => setPointerFocus(false)}
-              onBlur={() => setPointerFocus(false)}
+              className="w-full rounded-full"
             >
               <SelectValue />
             </SelectTrigger>
-            <SelectContent
-              onPointerUpCapture={() => setPointerFocus(true)}
-              onPointerDownOutside={() => setPointerFocus(true)}
-              onKeyDownCapture={() => setPointerFocus(false)}
-              onEscapeKeyDown={() => setPointerFocus(false)}
-            >
+            <SelectContent>
               {options.map((option) => (
                 <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
               ))}

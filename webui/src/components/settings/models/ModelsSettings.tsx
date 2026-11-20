@@ -275,7 +275,6 @@ export function ModelsSettings({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
-  const [hideEditorReturnFocus, setHideEditorReturnFocus] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const resolvedAutomaticAPI = useAutomaticModelAPI({
     token,
@@ -437,7 +436,6 @@ export function ModelsSettings({
     preset: SettingsPayload["model_presets"][number],
     rowKey: string,
   ) => {
-    setHideEditorReturnFocus(false);
     editorTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (edits.needsCompletion() && !(await edits.commit())) return;
     if (!creating && selectedPreset?.name === preset.name && activeEditorRowKey === rowKey) {
@@ -848,11 +846,9 @@ export function ModelsSettings({
                         aria-label={ordered ? `${name}. ${t("settings.models.dragToReorder")}` : name}
                         data-testid={`model-call-order-row-${name}`}
                         onPointerDown={(event) => {
-                          setHideEditorReturnFocus(false);
                           presetDrag.start(event, key);
                         }}
                         onKeyDown={(event) => {
-                          if (event.key !== "Escape") setHideEditorReturnFocus(false);
                           if (event.currentTarget !== event.target) return;
                           if (ordered && event.key === "ArrowUp") {
                             event.preventDefault();
@@ -871,7 +867,7 @@ export function ModelsSettings({
                           ordered && (callOrderBusy ? "cursor-wait" : "cursor-grab active:cursor-grabbing"),
                           !isDragging && "settings-hover",
                           isSelected && "bg-muted/45",
-                          !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                          "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                         )}
                       >
                         <div className="contents">
@@ -881,8 +877,7 @@ export function ModelsSettings({
                             aria-haspopup="dialog"
                             disabled={!preset}
                             onClick={() => preset && selectPreset(preset, key)}
-                            className={cn("col-span-2 grid min-w-0 grid-cols-subgrid items-center rounded-control text-left outline-none",
-                              !hideEditorReturnFocus && "focus-visible:ring-2 focus-visible:ring-ring")}
+                            className="col-span-2 grid min-w-0 grid-cols-subgrid items-center rounded-control text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             {presetConfigured ? (
                               <span className={cn("relative aspect-square min-w-8", primary ? "w-[calc(var(--preset-title-size)*1.375+1.5rem)]" : "h-8")}>
@@ -978,13 +973,10 @@ export function ModelsSettings({
               type="button"
               variant="link"
               size="sm"
-              className={cn("mr-auto h-11 gap-2 text-[13px] font-normal text-muted-foreground hover:font-semibold hover:text-orange-700 hover:no-underline dark:hover:text-orange-400 sm:h-9",
-                hideEditorReturnFocus && "focus-visible:ring-0 focus-visible:ring-offset-0")}
-              onKeyDown={(event) => { if (event.key !== "Escape") setHideEditorReturnFocus(false); }}
+              className="mr-auto h-11 gap-2 text-[13px] font-normal text-muted-foreground hover:font-semibold hover:text-orange-700 hover:no-underline dark:hover:text-orange-400 sm:h-9"
               disabled={callOrderBusy}
               onClick={(event) => {
                 editorTriggerRef.current = event.currentTarget;
-                setHideEditorReturnFocus(false);
                 setEditorRowKey(null);
                 setEditorOpen(true);
                 onBeginCreate();
@@ -1011,7 +1003,6 @@ export function ModelsSettings({
         <DialogContent aria-describedby={undefined}
           onChangeCapture={edits.onChangeCapture} onFocusCapture={edits.onFocusCapture}
           onBlurCapture={edits.onBlurCapture}
-          onEscapeKeyDown={() => setHideEditorReturnFocus(true)}
           className="relative max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none gap-0 overflow-y-auto p-0"
           onOpenAutoFocus={(event) => {
             if (!focusImageInput.current || !imageInputRef.current) return;

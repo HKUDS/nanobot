@@ -1,4 +1,3 @@
-import { surfaceFocusProps } from "@/lib/surface-focus";
 import {
   Children,
   isValidElement,
@@ -689,7 +688,7 @@ export default function MarkdownTextRenderer({
         void _node;
         return (
           <div
-            data-testid="markdown-data-table" {...surfaceFocusProps}
+            data-testid="markdown-data-table"
             data-table-kind="data"
             role="region"
             tabIndex={0}
@@ -697,7 +696,7 @@ export default function MarkdownTextRenderer({
             className={cn(
               "not-prose mb-5 mt-3 w-full max-w-full overflow-x-auto rounded-lg",
               "border border-border/65 bg-muted/20",
-              "overscroll-x-contain outline-none data-[keyboard-focus]:ring-2 data-[keyboard-focus]:ring-ring",
+              "overscroll-x-contain outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
           >
             <table
