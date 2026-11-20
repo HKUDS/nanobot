@@ -1384,6 +1384,54 @@
   container-type: inline-size;
 }
 
+@keyframes composer-palette-enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes composer-palette-enter-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes composer-palette-enter-beside {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.composer-palette-surface {
+  transform-origin: bottom left;
+  animation: composer-palette-enter-up 130ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.composer-palette-surface[data-placement="below"] {
+  transform-origin: top left;
+  animation-name: composer-palette-enter-down;
+}
+
+.composer-palette-surface[data-placement="beside"] {
+  transform-origin: left center;
+  animation-name: composer-palette-enter-beside;
+}
+
 .dark .thread-composer-surface,
 .dark .context-inspector-surface,
 .dark .user-message-surface,
@@ -1393,6 +1441,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .thread-composer-surface { transition: var(--theme-paint-transition, none); }
+  .composer-palette-surface { animation: none; }
   .pending-edge-overlay[data-pending-edge-overlay="pending"] .pending-edge-layer-dashed {
     border-color: hsl(var(--muted-foreground) / 0.30);
     animation: none;
@@ -1412,7 +1461,7 @@
 }
 
 @media (forced-colors: active) {
-  .thread-composer-surface, .context-inspector-surface, .user-message-surface, .side-panel-surface { outline: 1px solid CanvasText; }
+  .thread-composer-surface, .composer-palette-surface, .context-inspector-surface, .user-message-surface, .side-panel-surface { outline: 1px solid CanvasText; }
   .user-message-surface-dashed { outline-style: dashed; }
   .pending-edge-overlay { display: none; }
   :has(> .pending-edge-overlay[data-solid-tone="card"][data-pending-edge-overlay="pending"]) {
