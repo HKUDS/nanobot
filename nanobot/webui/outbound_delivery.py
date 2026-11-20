@@ -19,6 +19,7 @@ from nanobot.bus.outbound_events import (
     RetryWaitEvent,
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
+    SideChannelReplyEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
     UserInputEvent,
@@ -452,6 +453,8 @@ class WebUIOutboundDelivery:
         }
         if user_shell:
             payload["render_as"] = "text"
+        if isinstance(msg.event, SideChannelReplyEvent):
+            payload["side_channel"] = True
         turn_id = msg.metadata.get(WEBUI_TURN_METADATA_KEY)
         if isinstance(turn_id, str) and turn_id:
             payload["turn_id"] = turn_id
@@ -483,6 +486,9 @@ class WebUIOutboundDelivery:
         return dict(payload)
 
     async def _send_message(self, msg: OutboundMessage, progress: ProgressEvent | None) -> None:
+        if isinstance(msg.event, SideChannelReplyEvent) and msg.event.notification_id is not None:
+            # A deferred reply can outlive the command's turn_end. It must not reuse that sequence.
+            msg = replace(msg, metadata={**msg.metadata, WEBUI_TURN_METADATA_KEY: msg.event.notification_id})
         recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
         body = await self._message_payload(msg, progress)
         await self._persist_turn_transcript_event(

@@ -12,7 +12,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initializeI18n } from "@/i18n";
+import { installFocusModality } from "@/lib/focus-modality";
 import "../src/globals.css";
+
+installFocusModality();
 
 function OverlayFocusFixture() {
   const composer = useRef<HTMLTextAreaElement>(null);

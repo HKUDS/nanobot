@@ -369,6 +369,7 @@ function parseThreadProjectionEvent(value: unknown, validatedGraphs: ReadonlySet
       return value as unknown as ThreadProjectionEvent;
     case "message":
       if (typeof value.text !== "string") break;
+      if (value.side_channel !== undefined && value.side_channel !== true) break;
       if (value.tool_events !== undefined && !isRecordArray(value.tool_events)) break;
       if (value.trace_detail !== undefined && (
         !["tool_hint", "progress"].includes(String(value.kind))

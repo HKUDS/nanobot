@@ -1161,6 +1161,7 @@ function reduceThreadEvent(
     const latencyMs = typeof event.latency_ms === "number" && event.latency_ms >= 0
       ? Math.round(event.latency_ms)
       : undefined;
+    const sideChannel = event.side_channel === true || options.sideChannel;
     const projected = {
       content: event.text,
       ...(event.render_as === "text" ? { renderAs: event.render_as } : {}),
@@ -1170,12 +1171,12 @@ function reduceThreadEvent(
       ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
       ...(event.response_input_ids !== undefined ? { responseInputIds: event.response_input_ids } : {}),
       ...positionedTurnFields(
-        options.sideChannel ? undefined : state.messages.find((message) => message.id === state.activeAssistantId),
+        sideChannel ? undefined : state.messages.find((message) => message.id === state.activeAssistantId),
         turnFieldsForProjection(state, event, "answer"),
         options,
       ),
     };
-    if (options.sideChannel) {
+    if (sideChannel) {
       absorbProjectedAssistantMessage(state, event, projected, options);
       return state;
     }

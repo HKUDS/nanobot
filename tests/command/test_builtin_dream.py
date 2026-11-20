@@ -155,12 +155,15 @@ async def _run_dream_command(ctx: CommandContext) -> OutboundMessage:
 @pytest.mark.asyncio
 async def test_dream_no_history_explains_how_to_create_input(tmp_path) -> None:
     ctx, bus = _make_dream_ctx(tmp_path)
+    ctx.msg.metadata = {"slack": {"thread_ts": "123.456"}}
 
     immediate = await _run_dream_command(ctx)
 
     assert immediate.content == "Dreaming..."
-    assert len(bus.outbound) == 1
-    content = bus.outbound[0].content
+    assert immediate.metadata == ctx.msg.metadata
+    [completion] = bus.outbound
+    assert completion.metadata == {**ctx.msg.metadata, "render_as": "text"}
+    content = completion.content
     assert "Dream has no conversation history to process yet." in content
     assert "`memory/history.jsonl`" in content
     assert "idle auto-compact" in content
@@ -212,6 +215,20 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
     assert (completion.channel, completion.chat_id) == ("feishu", "chat1")
     assert completion.content.startswith("Dream completed")
     assert progress_sentinel not in completion.content
+
+
+@pytest.mark.parametrize("command,handler", [("/dream-log", cmd_dream_log), ("/dream-restore", cmd_dream_restore)])
+@pytest.mark.parametrize("initialized", [False, True])
+async def test_dream_inspection_replies_preserve_topic_routing(command, handler, initialized) -> None:
+    ctx = _make_ctx(command, _FakeGit(initialized=initialized))
+    ctx.msg.metadata = {"message_thread_id": 12, "message_id": 34}
+
+    reply = await handler(ctx)
+
+    assert reply.metadata == {
+        **ctx.msg.metadata,
+        **({"render_as": "text"} if initialized or command == "/dream-log" else {}),
+    }
 
 
 @pytest.mark.parametrize("completed", [True, False])

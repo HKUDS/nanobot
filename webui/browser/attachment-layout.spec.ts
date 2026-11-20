@@ -187,9 +187,17 @@ test("image lightbox and file download remain keyboard accessible", async ({ pag
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("dialog", { name: "Blue study.svg" })).toBeVisible();
   await page.keyboard.press("End");
-  await expect(page.getByRole("dialog", { name: "Green study.svg" })).toBeVisible();
+  const lightbox = page.getByRole("dialog", { name: "Green study.svg" });
+  await expect(lightbox).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("lightbox.png") });
   await testInfo.attach("image lightbox", { path: testInfo.outputPath("lightbox.png"), contentType: "image/png" });
+  const viewport = lightbox.getByTestId("image-zoom-viewport");
+  await viewport.click();
+  await expect(viewport).toHaveCSS("box-shadow", "none");
+  await page.keyboard.press("=");
+  await expect(lightbox.getByRole("button", { name: "Fit image" })).toHaveText("150%");
+  await expect(viewport).toBeFocused();
+  await expect(viewport).not.toHaveCSS("box-shadow", "none");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(firstImage).toBeFocused();

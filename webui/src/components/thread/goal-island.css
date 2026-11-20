@@ -99,6 +99,9 @@
   opacity: 0;
 }
 .goal-island-trigger:focus-visible {
+  outline: none;
+}
+:where(:root:not([data-focus-modality="pointer"])) .goal-island-trigger:focus-visible {
   outline: 2px solid hsl(var(--ring) / 55%);
   outline-offset: 2px;
 }

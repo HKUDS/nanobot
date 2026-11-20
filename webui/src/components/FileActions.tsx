@@ -7,6 +7,7 @@ import { useFloatingPortal } from "@/components/ui/floating-portal";
 import { useToast } from "@/components/ui/toast";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
+import { markKeyboardFocus } from "@/lib/focus-modality";
 import type { FileReferenceMetadata, FilePreviewPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -104,6 +105,7 @@ export function FileActions({
         }}
         onKeyDown={(event) => {
           if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+            markKeyboardFocus(event.currentTarget.ownerDocument);
             event.preventDefault();
             event.stopPropagation();
             const bounds = event.currentTarget.getBoundingClientRect();
