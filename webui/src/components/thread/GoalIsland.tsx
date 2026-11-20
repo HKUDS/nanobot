@@ -1,4 +1,4 @@
-import { ChevronDown, CircleAlert } from "lucide-react";
+import { CircleAlert } from "lucide-react";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -63,7 +63,7 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
     type="button"
     variant="ghost"
     size="sm"
-    className="goal-island-cancel ml-auto h-7 shrink-0 rounded-control px-2 text-caption text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+    className="goal-island-cancel -mr-1.5 -mt-0.5 ml-auto h-6 shrink-0 rounded-compact px-1.5 text-[11.5px] font-normal leading-none text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
     disabled={cancelDisabled || cancelling}
     aria-busy={cancelling}
     title={cancelDisabled ? t("thread.composer.cancelGoalOffline") : undefined}
@@ -121,55 +121,41 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
                 ? <CircleAlert className="goal-island-status-icon" strokeWidth={2.2} aria-hidden="true" />
                 : <span className="goal-island-dot" aria-hidden="true" />}
               {collapsedLabel ? <span className={status === "blocked" ? "goal-island-label goal-island-reason min-w-0 truncate" : "goal-island-label min-w-0 truncate"}>{collapsedLabel}</span> : null}
-              <ChevronDown className="goal-island-chevron" strokeWidth={2} aria-hidden="true" />
             </button>
           </PopoverTrigger>
         </div>
         <PopoverContent
           ref={panelRef}
           {...escapeFocus.contentProps}
-          className="goal-island-panel max-h-[min(32dvh,20rem,var(--radix-popover-content-available-height))] overflow-visible rounded-[18px] bg-transparent p-0 shadow-none dark:shadow-none"
+          className="goal-island-panel max-h-[min(25dvh,16rem,var(--radix-popover-content-available-height))] overflow-visible rounded-[14px] bg-transparent p-0 shadow-none dark:shadow-none"
           motionClassName=""
           data-goal-status={status}
           data-narrow={narrow || undefined}
           side="bottom"
-          sideOffset={narrow ? 8 : -28}
+          sideOffset={narrow ? 10 : -24}
           collisionPadding={{ top: 8, bottom: 12, left: 24, right: 24 }}
           aria-label={t("thread.composer.goalStateSheetTitle")}
         >
           <div className="goal-island-surface" aria-hidden />
           <div className="goal-island-panel-content">
             <div className="goal-island-summary">
-              <div className="goal-island-summary-main">
-                {status === "blocked" ? (
-                  <span className="goal-island-blocked-badge">
-                    <span className="goal-island-dot goal-island-dot-blocked" aria-hidden="true" />
-                    <span>{t("thread.composer.goalBlocked")}</span>
-                  </span>
-                ) : (
-                  <span className="goal-island-dot goal-island-dot-header" aria-hidden="true" />
-                )}
-                {summary || status !== "blocked" ? (
-                  <div className="markdown-content min-w-0 flex-1">
-                    <h2>{summary || t("thread.composer.goalStateSheetTitle")}</h2>
-                  </div>
-                ) : null}
+              <div className="markdown-content min-w-0 flex-1">
+                <h2>{summary || (status === "blocked" ? t("thread.composer.goalBlocked") : t("thread.composer.goalStateSheetTitle"))}</h2>
               </div>
               {cancelButton}
             </div>
             <div ref={setScrollBody} className="goal-island-body">
               <div className="goal-island-document">
-                {status === "blocked" && recap ? (
+                {status === "blocked" ? (
                   <div className="goal-island-blocked">
                     <CircleAlert className="goal-island-status-icon" strokeWidth={2.2} aria-hidden="true" />
-                    <MarkdownText className="goal-island-reason flex-1">{recap}</MarkdownText>
+                    <span className="sr-only">{t("thread.composer.goalBlocked")}</span>
+                    {recap ? <MarkdownText className="goal-island-reason flex-1">{recap}</MarkdownText> : null}
                   </div>
                 ) : null}
-                {objective ? <MarkdownText className={status === "blocked" && recap ? "mt-3" : undefined}>{objective}</MarkdownText> : null}
+                {objective ? <MarkdownText className={status === "blocked" ? "mt-2.5" : undefined}>{objective}</MarkdownText> : null}
                 {status !== "blocked" && recap ? (
-                  <div className="goal-island-recap">
-                    <MarkdownText className="text-muted-foreground">{recap}</MarkdownText>
-                  </div>
+                  <MarkdownText className="mt-2.5 text-muted-foreground">{recap}</MarkdownText>
                 ) : null}
               </div>
             </div>

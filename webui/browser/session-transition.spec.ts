@@ -108,7 +108,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }
       const paragraph = body.querySelector("p")!;
       return { titleBottom: title.bottom, panel: el.getBoundingClientRect().toJSON(), body: body.getBoundingClientRect().toJSON(), lineHeight: Number.parseFloat(getComputedStyle(paragraph).lineHeight) };
     });
-    expect(bounds.panel.height).toBeLessThanOrEqual(viewport.height * 0.32 + 1);
+    expect(bounds.panel.height).toBeLessThanOrEqual(viewport.height / 4);
     expect(bounds.body.height).toBeGreaterThanOrEqual(bounds.lineHeight);
     expect(bounds.titleBottom).toBeLessThanOrEqual(bounds.body.top);
     expect(bounds.body.bottom).toBeLessThanOrEqual(bounds.panel.bottom);
@@ -203,7 +203,7 @@ for (const width of [320, 390, 1440]) for (const dark of [false, true]) {
     expect(panel!.x).toBeGreaterThanOrEqual(24);
     expect(panel!.x + panel!.width).toBeLessThanOrEqual(width - 24);
     expect(panel!.y + panel!.height).toBeLessThan(844);
-    expect(panel!.height).toBeLessThanOrEqual(844 * 0.32 + 1);
+    expect(panel!.height).toBeLessThanOrEqual(844 / 4);
     const heading = dialog.getByRole("heading", { name: "Keep the composer stable" });
     const headingPosition = await heading.boundingBox();
     if (width < 768) {
@@ -292,7 +292,7 @@ for (const width of [390, 1440]) {
     const panel = await page.getByRole("dialog", { name: "Goal", exact: true }).boundingBox();
     expect(panel!.x).toBeGreaterThanOrEqual(0);
     expect(panel!.x + panel!.width).toBeLessThanOrEqual(width);
-    expect(panel!.height).toBeLessThanOrEqual(844 * 0.32 + 1);
+    expect(panel!.height).toBeLessThanOrEqual(844 / 4);
     await page.getByTestId("active-pane-composer").getByRole("textbox").click();
     await expect(page.getByRole("dialog", { name: "Goal", exact: true })).toHaveCount(0);
   });
