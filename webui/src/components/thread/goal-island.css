@@ -36,6 +36,9 @@
   transform: translateX(-50%);
   pointer-events: auto;
 }
+.goal-island[data-animate-enter] {
+  animation: goal-island-enter 340ms cubic-bezier(0.22, 1.06, 0.36, 1) both;
+}
 .goal-island,
 .goal-island-panel {
   --goal-island-width: 100%;
@@ -49,8 +52,6 @@
   --goal-border-hover-shadow: inset 0 0 0 1px hsl(var(--border));
   --goal-depth-shadow: 0 4px 18px -8px hsl(var(--goal-shadow-color) / 0.12);
   --goal-panel-depth-shadow: 0 10px 28px -10px hsl(var(--goal-shadow-color) / 0.16);
-  --goal-activity-track: hsl(var(--foreground) / 14%);
-  --goal-activity-arc: hsl(var(--foreground) / 58%);
   --goal-blocked-color: hsl(2 68% 46%);
   --goal-cancel-bg: hsl(var(--foreground) / 5.5%);
   --goal-cancel-fg: hsl(var(--foreground) / 62%);
@@ -64,8 +65,6 @@
   --goal-shadow-color: 240 12% 3%;
   --goal-depth-shadow: 0 4px 18px -8px hsl(var(--goal-shadow-color) / 0.32);
   --goal-panel-depth-shadow: 0 12px 32px -10px hsl(var(--goal-shadow-color) / 0.44);
-  --goal-activity-track: rgb(255 255 255 / 16%);
-  --goal-activity-arc: rgb(255 255 255 / 68%);
   --goal-blocked-color: hsl(3 82% 72%);
   --goal-cancel-bg: rgb(255 255 255 / 8%);
   --goal-cancel-fg: rgb(255 255 255 / 66%);
@@ -107,15 +106,6 @@
   display: block;
   line-height: 18px;
   color: inherit;
-}
-.goal-island-activity {
-  width: 12px;
-  height: 12px;
-  flex: none;
-  border-radius: 9999px;
-  border: 1.5px solid var(--goal-activity-track);
-  border-top-color: var(--goal-activity-arc);
-  animation: goal-island-spin 1.35s linear infinite;
 }
 .goal-island-panel {
   --goal-island-radius: 20px;
@@ -270,6 +260,16 @@
 .goal-island-panel[data-state="closed"] .goal-island-panel-content {
   animation: goal-island-content-out 70ms ease-in both;
 }
+@keyframes goal-island-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 @keyframes goal-island-expand {
   from {
     --goal-island-width: var(--goal-from-width, var(--goal-trigger-width, var(--radix-popover-trigger-width)));
@@ -302,9 +302,6 @@
   from { opacity: var(--goal-from-opacity); transform: var(--goal-from-transform); }
   to { opacity: 0; transform: translateY(-4px) scale(0.98); }
 }
-@keyframes goal-island-spin {
-  to { transform: rotate(360deg); }
-}
 @media (max-width: 767px) {
   .goal-island-panel[data-narrow="true"][data-state="open"] > .goal-island-surface {
     animation: goal-island-mobile-drop-in 380ms cubic-bezier(0.22, 1.06, 0.36, 1) backwards;
@@ -331,9 +328,7 @@
   .goal-island-surface::before {
     transition: none;
   }
-  .goal-island-activity {
-    animation: none;
-  }
+  .goal-island[data-animate-enter],
   .goal-island-panel[data-state],
   .goal-island-panel[data-state] > .goal-island-surface,
   .goal-island-panel[data-state] .goal-island-panel-content {
@@ -366,9 +361,5 @@
     --goal-depth-shadow: none;
     --goal-panel-depth-shadow: none;
     color: CanvasText;
-  }
-  .goal-island-activity {
-    border-color: CanvasText;
-    border-top-color: Highlight;
   }
 }

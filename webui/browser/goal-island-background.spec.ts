@@ -49,6 +49,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
 
     const trigger = page.getByRole("button", { name: "Show full goal" });
     await expect(trigger).toBeVisible();
+    await page.locator(".goal-island").evaluate(async el => { await Promise.all(el.getAnimations().map(animation => animation.finished)); });
     await expectBackgroundToCover(page, trigger);
 
     await trigger.click();

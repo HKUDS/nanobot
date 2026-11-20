@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import { Button } from "@/components/ui/button";
+import { LoadingRing } from "@/components/ui/loading-ring";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/components/ui/toast";
 import { useOverlayEscapeFocus } from "@/hooks/useOverlayEscapeFocus";
@@ -33,6 +34,9 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [animateEnter] = useState(() => (
+    typeof document === "undefined" || !document.documentElement.hasAttribute("data-session-transition")
+  ));
   const showToast = useToast();
   const [scrollBody, setScrollBody] = useState<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -122,6 +126,7 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
           className="goal-island"
           data-goal-status={status}
           data-detail-mounted={!!scrollBody}
+          data-animate-enter={animateEnter || undefined}
           role="status"
           aria-label={status === "blocked" ? [t("thread.composer.goalBlocked"), recap].filter(Boolean).join(" · ") : t("thread.composer.goalStateStrip", { label })}
         >
@@ -138,7 +143,7 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
               <span className="goal-island-surface" aria-hidden />
               {status === "blocked"
                 ? <CircleAlert className="goal-island-status-icon" strokeWidth={2.2} aria-hidden="true" />
-                : <span className="goal-island-activity" aria-hidden="true" />}
+                : <LoadingRing className="h-3 w-3 shrink-0 text-muted-foreground" />}
               {collapsedLabel ? <span className={status === "blocked" ? "goal-island-label goal-island-reason min-w-0 truncate" : "goal-island-label min-w-0 truncate"}>{collapsedLabel}</span> : null}
             </button>
           </PopoverTrigger>
