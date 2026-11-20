@@ -63,7 +63,7 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
     type="button"
     variant="ghost"
     size="sm"
-    className="goal-island-cancel -mr-1.5 -mt-0.5 ml-auto h-6 shrink-0 rounded-compact px-1.5 text-[11.5px] font-normal leading-none text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+    className="goal-island-cancel -mt-0.5 ml-auto h-6 shrink-0 rounded-full px-2.5 text-[11.5px] font-medium leading-none"
     disabled={cancelDisabled || cancelling}
     aria-busy={cancelling}
     title={cancelDisabled ? t("thread.composer.cancelGoalOffline") : undefined}
@@ -119,7 +119,7 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
               <span className="goal-island-surface" aria-hidden />
               {status === "blocked"
                 ? <CircleAlert className="goal-island-status-icon" strokeWidth={2.2} aria-hidden="true" />
-                : <span className="goal-island-dot" aria-hidden="true" />}
+                : <span className="goal-island-activity" aria-hidden="true" />}
               {collapsedLabel ? <span className={status === "blocked" ? "goal-island-label goal-island-reason min-w-0 truncate" : "goal-island-label min-w-0 truncate"}>{collapsedLabel}</span> : null}
             </button>
           </PopoverTrigger>
@@ -127,12 +127,12 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
         <PopoverContent
           ref={panelRef}
           {...escapeFocus.contentProps}
-          className="goal-island-panel max-h-[min(25dvh,16rem,var(--radix-popover-content-available-height))] overflow-visible rounded-[14px] bg-transparent p-0 shadow-none dark:shadow-none"
+          className="goal-island-panel max-h-[min(25dvh,16rem,var(--radix-popover-content-available-height))] overflow-visible rounded-[18px] bg-transparent p-0 shadow-none dark:shadow-none"
           motionClassName=""
           data-goal-status={status}
           data-narrow={narrow || undefined}
           side="bottom"
-          sideOffset={narrow ? 10 : -24}
+          sideOffset={narrow ? 10 : -26}
           collisionPadding={{ top: 8, bottom: 12, left: 24, right: 24 }}
           aria-label={t("thread.composer.goalStateSheetTitle")}
         >
@@ -155,7 +155,7 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
                 ) : null}
                 {objective ? <MarkdownText className={status === "blocked" ? "mt-2.5" : undefined}>{objective}</MarkdownText> : null}
                 {status !== "blocked" && recap ? (
-                  <MarkdownText className="mt-2.5 text-muted-foreground">{recap}</MarkdownText>
+                  <MarkdownText className="goal-island-recap mt-2.5">{recap}</MarkdownText>
                 ) : null}
               </div>
             </div>

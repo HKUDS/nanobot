@@ -11,7 +11,7 @@
 @property --goal-island-radius {
   syntax: "<length>";
   inherits: true;
-  initial-value: 12px;
+  initial-value: 13px;
 }
 
 .thread-header-container {
@@ -28,10 +28,10 @@
 }
 .goal-island-position {
   position: absolute;
-  top: 7px;
+  top: 6px;
   left: 50%;
   width: max-content;
-  max-width: min(32cqw, 15.5rem);
+  max-width: min(34cqw, 16.5rem);
   transform: translateX(-50%);
   pointer-events: auto;
 }
@@ -39,46 +39,40 @@
 .goal-island-panel {
   --goal-island-width: 100%;
   --goal-island-height: 100%;
-  --goal-island-radius: 12px;
-  --goal-pad-x: 14px;
-  --goal-surface: hsl(240 5% 95% / 92%);
-  --goal-surface-hover: hsl(240 5% 92.5% / 96%);
-  --goal-panel-surface: hsl(0 0% 100% / 96%);
-  --goal-border: rgb(15 23 42 / 10%);
-  --goal-border-hover: rgb(15 23 42 / 16%);
-  --goal-shadow: 0 1px 2px rgb(15 23 42 / 4%);
-  --goal-panel-shadow: 0 4px 16px rgb(15 23 42 / 7%), 0 1px 2px rgb(15 23 42 / 4%);
-  --goal-dot-color: hsl(158 52% 42%);
-  --goal-blocked-color: hsl(0 58% 45%);
+  --goal-island-radius: 13px;
+  --goal-pad-x: 16px;
+  --goal-surface: rgb(251 251 252 / 80%);
+  --goal-surface-hover: rgb(246 246 248 / 90%);
+  --goal-panel-surface: rgb(255 255 255 / 86%);
+  --goal-border: rgb(0 0 0 / 8%);
+  --goal-border-hover: rgb(0 0 0 / 13%);
+  --goal-rim: rgb(255 255 255 / 92%);
+  --goal-shadow: 0 1px 3px rgb(0 0 0 / 5%);
+  --goal-panel-shadow: 0 4px 20px rgb(0 0 0 / 8%), 0 1px 3px rgb(0 0 0 / 4%);
+  --goal-activity-track: hsl(var(--foreground) / 14%);
+  --goal-activity-arc: hsl(var(--foreground) / 58%);
+  --goal-blocked-color: hsl(2 68% 46%);
+  --goal-cancel-bg: hsl(var(--foreground) / 5.5%);
+  --goal-cancel-fg: hsl(var(--foreground) / 62%);
+  --goal-cancel-hover-bg: hsl(2 72% 52% / 11%);
   color: hsl(var(--foreground) / 86%);
 }
 :where(.dark) .goal-island,
 :where(.dark) .goal-island-panel {
-  --goal-surface: hsl(0 0% 24.5% / 92%);
-  --goal-surface-hover: hsl(0 0% 27% / 96%);
-  --goal-panel-surface: hsl(0 0% 22.5% / 96%);
-  --goal-border: rgb(255 255 255 / 12%);
-  --goal-border-hover: rgb(255 255 255 / 19%);
-  --goal-shadow: 0 1px 3px rgb(0 0 0 / 16%);
-  --goal-panel-shadow: 0 6px 20px rgb(0 0 0 / 26%), 0 1px 3px rgb(0 0 0 / 16%);
-  --goal-dot-color: hsl(158 54% 58%);
-  --goal-blocked-color: hsl(0 72% 74%);
-}
-.goal-island[data-goal-status="blocked"],
-.goal-island-panel[data-goal-status="blocked"] {
-  --goal-surface: hsl(0 65% 97% / 94%);
-  --goal-surface-hover: hsl(0 65% 95% / 97%);
-  --goal-panel-surface: hsl(0 50% 99% / 97%);
-  --goal-border: hsl(0 56% 52% / 24%);
-  --goal-border-hover: hsl(0 56% 52% / 36%);
-}
-:where(.dark) .goal-island[data-goal-status="blocked"],
-:where(.dark) .goal-island-panel[data-goal-status="blocked"] {
-  --goal-surface: hsl(0 18% 24.5% / 94%);
-  --goal-surface-hover: hsl(0 20% 27% / 97%);
-  --goal-panel-surface: hsl(0 14% 23% / 96%);
-  --goal-border: hsl(0 64% 68% / 28%);
-  --goal-border-hover: hsl(0 64% 68% / 40%);
+  --goal-surface: rgb(60 60 64 / 76%);
+  --goal-surface-hover: rgb(68 68 72 / 86%);
+  --goal-panel-surface: rgb(52 52 56 / 84%);
+  --goal-border: rgb(255 255 255 / 13%);
+  --goal-border-hover: rgb(255 255 255 / 20%);
+  --goal-rim: rgb(255 255 255 / 14%);
+  --goal-shadow: 0 2px 10px rgb(0 0 0 / 20%);
+  --goal-panel-shadow: 0 10px 30px rgb(0 0 0 / 34%), 0 2px 6px rgb(0 0 0 / 18%);
+  --goal-activity-track: rgb(255 255 255 / 16%);
+  --goal-activity-arc: rgb(255 255 255 / 68%);
+  --goal-blocked-color: hsl(3 82% 72%);
+  --goal-cancel-bg: rgb(255 255 255 / 8%);
+  --goal-cancel-fg: rgb(255 255 255 / 66%);
+  --goal-cancel-hover-bg: hsl(3 80% 64% / 18%);
 }
 .goal-island-trigger {
   position: relative;
@@ -87,12 +81,13 @@
   align-items: center;
   gap: 6px;
   max-width: 100%;
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 12px;
+  height: 26px;
+  padding: 0 11px 0 9px;
+  border-radius: 13px;
   corner-shape: round;
   font-size: 12px;
   font-weight: 500;
+  letter-spacing: -0.005em;
   line-height: 16px;
   text-align: left;
   cursor: pointer;
@@ -114,16 +109,17 @@
   line-height: 16px;
   color: inherit;
 }
-.goal-island-dot {
-  width: 5px;
-  height: 5px;
+.goal-island-activity {
+  width: 11px;
+  height: 11px;
   flex: none;
   border-radius: 9999px;
-  background: var(--goal-dot-color);
-  animation: goal-island-breathe 2.8s ease-in-out infinite;
+  border: 1.5px solid var(--goal-activity-track);
+  border-top-color: var(--goal-activity-arc);
+  animation: goal-island-spin 1.35s linear infinite;
 }
 .goal-island-panel {
-  --goal-island-radius: 14px;
+  --goal-island-radius: 18px;
   isolation: isolate;
   width: min(26rem, calc(100vw - 48px));
   color: hsl(var(--foreground));
@@ -148,14 +144,15 @@
   corner-shape: round;
   border: 1px solid var(--goal-border);
   background: var(--goal-surface);
-  box-shadow: var(--goal-shadow);
-  backdrop-filter: blur(20px) saturate(1.1);
-  -webkit-backdrop-filter: blur(20px) saturate(1.1);
-  transition: background-color 140ms ease, border-color 140ms ease;
+  box-shadow: inset 0 0.5px 0 var(--goal-rim), var(--goal-shadow);
+  backdrop-filter: blur(20px) saturate(1.8);
+  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  transition: background-color 160ms ease, border-color 160ms ease;
 }
 .goal-island-panel > .goal-island-surface::before {
+  corner-shape: var(--corner-shape);
   background: var(--goal-panel-surface);
-  box-shadow: var(--goal-panel-shadow);
+  box-shadow: inset 0 0.5px 0 var(--goal-rim), var(--goal-panel-shadow);
 }
 .goal-island-panel-content {
   display: flex;
@@ -165,11 +162,11 @@
 .goal-island-summary {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
   flex-shrink: 0;
   margin: 0;
-  padding: 12px var(--goal-pad-x) 6px;
-  color: hsl(var(--foreground));
+  padding: 14px 12px 6px var(--goal-pad-x);
+  color: hsl(var(--foreground) / 92%);
 }
 .goal-island-summary .markdown-content {
   --text-reading-size: 12.5px;
@@ -183,7 +180,16 @@
   overflow-wrap: anywhere;
   font-size: 13.5px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   line-height: 20px;
+}
+.goal-island-cancel {
+  background: var(--goal-cancel-bg);
+  color: var(--goal-cancel-fg);
+}
+.goal-island-cancel:hover:not(:disabled) {
+  background: var(--goal-cancel-hover-bg);
+  color: var(--goal-blocked-color);
 }
 .goal-island-body {
   --goal-fade-top: 0px;
@@ -205,20 +211,21 @@
   --goal-fade-bottom: min(24px, 22%);
 }
 .goal-island-document {
-  padding: 2px var(--goal-pad-x) 12px;
+  padding: 2px var(--goal-pad-x) 14px;
 }
 .goal-island-body .markdown-content {
   --text-reading-size: 12.5px;
-  --reading-line-height: 1.55;
+  --reading-line-height: 1.58;
   overflow-wrap: anywhere;
-  color: hsl(var(--foreground) / 85%);
+  color: hsl(var(--foreground) / 72%);
+}
+.goal-island-body .markdown-content.goal-island-recap {
+  color: hsl(var(--foreground) / 52%);
 }
 .goal-island-blocked {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid hsl(var(--border) / 60%);
   color: var(--goal-blocked-color);
   font-size: 12.5px;
   line-height: 18px;
@@ -239,8 +246,8 @@
   --goal-fade-bottom: 14px;
 }
 .goal-island-status-icon {
-  width: 13px;
-  height: 13px;
+  width: 12.5px;
+  height: 12.5px;
   flex: none;
   color: var(--goal-blocked-color);
 }
@@ -248,34 +255,34 @@
   color: var(--goal-blocked-color);
 }
 .goal-island-blocked .goal-island-status-icon {
-  margin-top: 2.5px;
+  margin-top: 2.75px;
 }
 .goal-island-panel[data-state="open"] {
-  animation: goal-island-expand 280ms cubic-bezier(0.2, 0.9, 0.15, 1) both;
+  animation: goal-island-expand 380ms cubic-bezier(0.22, 1.12, 0.36, 1) both;
 }
 .goal-island-panel[data-state="open"] .goal-island-panel-content {
-  animation: goal-island-content-in 150ms ease-out 60ms both;
+  animation: goal-island-content-in 180ms cubic-bezier(0.2, 0, 0, 1) 70ms both;
 }
 .goal-island-panel[data-state="closed"] {
-  animation: goal-island-collapse 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: goal-island-collapse 220ms cubic-bezier(0.32, 0.72, 0, 1) both;
   pointer-events: none;
 }
 [data-radix-popper-content-wrapper]:has(> .goal-island-panel[data-state="closed"]) {
   pointer-events: none;
 }
 .goal-island-panel[data-state="closed"] .goal-island-panel-content {
-  animation: goal-island-content-out 60ms ease-in both;
+  animation: goal-island-content-out 70ms ease-in both;
 }
 @keyframes goal-island-expand {
   from {
     --goal-island-width: var(--goal-from-width, var(--radix-popover-trigger-width));
-    --goal-island-height: var(--goal-from-height, 24px);
-    --goal-island-radius: var(--goal-from-radius, 12px);
+    --goal-island-height: var(--goal-from-height, 26px);
+    --goal-island-radius: var(--goal-from-radius, 13px);
   }
   to {
     --goal-island-width: 100%;
     --goal-island-height: 100%;
-    --goal-island-radius: 14px;
+    --goal-island-radius: 18px;
   }
 }
 @keyframes goal-island-collapse {
@@ -286,37 +293,36 @@
   }
   to {
     --goal-island-width: var(--radix-popover-trigger-width);
-    --goal-island-height: 24px;
-    --goal-island-radius: 12px;
+    --goal-island-height: 26px;
+    --goal-island-radius: 13px;
   }
 }
 @keyframes goal-island-content-in {
-  from { opacity: var(--goal-from-opacity, 0); transform: var(--goal-from-transform, translateY(-3px)); }
+  from { opacity: var(--goal-from-opacity, 0); transform: var(--goal-from-transform, translateY(-4px)); }
   to { opacity: 1; transform: translateY(0); }
 }
 @keyframes goal-island-content-out {
   from { opacity: var(--goal-from-opacity); transform: var(--goal-from-transform); }
-  to { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 0; transform: translateY(-4px); }
 }
-@keyframes goal-island-breathe {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.48; }
+@keyframes goal-island-spin {
+  to { transform: rotate(360deg); }
 }
 @media (max-width: 767px) {
   .goal-island-panel[data-narrow="true"][data-state="open"] > .goal-island-surface {
-    animation: goal-island-mobile-drop-in 280ms cubic-bezier(0.2, 0.9, 0.15, 1) both;
+    animation: goal-island-mobile-drop-in 380ms cubic-bezier(0.22, 1.12, 0.36, 1) both;
   }
   .goal-island-panel[data-narrow="true"][data-state="closed"] > .goal-island-surface {
-    animation: goal-island-mobile-drop-out 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
+    animation: goal-island-mobile-drop-out 220ms cubic-bezier(0.32, 0.72, 0, 1) both;
   }
 }
 @keyframes goal-island-mobile-drop-in {
-  from { translate: 0 -34px; }
+  from { translate: 0 -36px; }
   to { translate: 0 0; }
 }
 @keyframes goal-island-mobile-drop-out {
   from { translate: 0 0; }
-  to { translate: 0 -34px; }
+  to { translate: 0 -36px; }
 }
 @media (max-height: 600px) {
   .goal-island-summary .markdown-content h2 {
@@ -328,7 +334,7 @@
   .goal-island-surface::before {
     transition: none;
   }
-  .goal-island-dot {
+  .goal-island-activity {
     animation: none;
   }
   .goal-island-panel[data-state],
@@ -340,16 +346,16 @@
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .goal-island,
   .goal-island-panel {
-    --goal-surface: hsl(240 5% 95%);
-    --goal-surface-hover: hsl(240 5% 92%);
-    --goal-panel-surface: hsl(0 0% 100%);
-    --goal-border: rgb(15 23 42 / 24%);
+    --goal-surface: rgb(246 246 248);
+    --goal-surface-hover: rgb(238 238 241);
+    --goal-panel-surface: rgb(255 255 255);
+    --goal-border: rgb(0 0 0 / 24%);
   }
   :where(.dark) .goal-island,
   :where(.dark) .goal-island-panel {
-    --goal-surface: hsl(0 0% 25%);
-    --goal-surface-hover: hsl(0 0% 28%);
-    --goal-panel-surface: hsl(0 0% 23%);
+    --goal-surface: rgb(62 62 66);
+    --goal-surface-hover: rgb(72 72 76);
+    --goal-panel-surface: rgb(54 54 58);
     --goal-border: rgb(255 255 255 / 28%);
   }
   .goal-island-surface::before {
@@ -369,7 +375,8 @@
   .goal-island-surface::before {
     box-shadow: none;
   }
-  .goal-island-dot {
-    background: Highlight;
+  .goal-island-activity {
+    border-color: CanvasText;
+    border-top-color: Highlight;
   }
 }
