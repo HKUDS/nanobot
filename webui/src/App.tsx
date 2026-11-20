@@ -59,7 +59,7 @@ import {
   workbenchTabForPane,
   type WorkbenchState,
 } from "@/components/workbench/workbench-model";
-import { ToastProvider, useToast } from "@/components/ui/toast";
+import { ToastProvider, useToast, type ToastNotice } from "@/components/ui/toast";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 import { useLocalGateway } from "@/hooks/useLocalGateway";
@@ -123,10 +123,6 @@ const SettingsView = lazy(async () => {
 const SessionSearchDialog = lazy(async () => {
   const module = await import("@/components/SessionSearchDialog");
   return { default: module.SessionSearchDialog };
-});
-const DeleteConfirm = lazy(async () => {
-  const module = await import("@/components/DeleteConfirm");
-  return { default: module.DeleteConfirm };
 });
 const RenameDialog = lazy(async () => {
   const module = await import("@/components/RenameDialog");
@@ -412,12 +408,6 @@ export default function App() {
   );
 }
 
-type PendingDelete = {
-  id: number;
-  items: SidebarDeleteItem[];
-  automations: SessionAutomationJob[];
-};
-
 function restorePinOrder(pins: readonly string[], previous: readonly string[], restoring: ReadonlySet<string>) {
   const next = [...pins];
   previous.forEach((key, index) => {
@@ -478,6 +468,7 @@ function Shell({
     createChat,
     forkChat,
     deleteChat,
+    getSessionAutomations,
   } = useSessions();
   // Failed reads retain an empty list or partial reload cache, not proof of deletion.
   const sessionsLoaded = !loading && sessionsError === null;
@@ -535,9 +526,6 @@ function Shell({
   const [deletingKeys, setDeletingKeys] = useState<Set<string>>(() => new Set());
   const topicSessions = useMemo(() => deletingKeys.size === 0 ? sessions
     : sessions.filter((session) => !deletingKeys.has(session.key)), [deletingKeys, sessions]);
-  const [deleteQueue, setDeleteQueue] = useState<PendingDelete[]>([]);
-  const [pendingDelete] = deleteQueue;
-  const nextDeleteId = useRef(0);
   const archiveUndoOwners = useRef(new Map<string, { operation: symbol; pinOrder?: string[] }>());
   const canNavigateArchiveRef = useRef(false);
   useEffect(() => {
@@ -1672,23 +1660,37 @@ function Shell({
     refresh,
   );
 
-  const dismissDeleteConfirmation = useCallback((id: number) => {
-    setDeleteQueue((queue) => queue.filter((entry) => entry.id !== id));
-  }, []);
+  const deleteContextRef = useRef({ topicSessions, activeKey, activeTabState, view });
+  deleteContextRef.current = { topicSessions, activeKey, activeTabState, view };
+  const checkingDeleteKeysRef = useRef<Set<string>>(new Set());
+  const showAutomationConfirmRef = useRef<(
+    items: SidebarDeleteItem[],
+    automations: SessionAutomationJob[],
+    automationKeys: ReadonlySet<string>,
+  ) => void>(() => {});
 
-  const stageDelete = useCallback((requested: SidebarDeleteItem[], deleteAutomations = false) => {
-    const items = requested.filter((item) => topicSessions.some((session) => session.key === item.key));
-    if (!items.length) return;
+  const prepareStagedDelete = useCallback((
+    requested: SidebarDeleteItem[],
+    automationKeys?: ReadonlySet<string>,
+  ): ToastNotice | null => {
+    const {
+      topicSessions: liveSessions,
+      activeKey: currentActiveKey,
+      activeTabState: currentActiveTabState,
+      view: currentView,
+    } = deleteContextRef.current;
+    const items = requested.filter((item) => liveSessions.some((session) => session.key === item.key));
+    if (!items.length) return null;
     const batchKeys = new Set(items.map((item) => item.key));
     setDeletingKeys((current) => new Set([...current, ...batchKeys]));
     closeMobileSidebar();
 
-    if (view === "chat" && activeKey && batchKeys.has(activeKey)) {
-      const currentIndex = topicSessions.findIndex((session) => session.key === activeKey);
-      const available = new Set(topicSessions.filter((session) => !batchKeys.has(session.key)).map((session) => session.key));
-      const fallbackKey = activeTabState?.paneKeys.find((key) => available.has(key))
-        ?? topicSessions.slice(currentIndex + 1).find((session) => available.has(session.key))?.key
-        ?? topicSessions.slice(0, Math.max(0, currentIndex)).reverse().find((session) => available.has(session.key))?.key
+    if (currentView === "chat" && currentActiveKey && batchKeys.has(currentActiveKey)) {
+      const currentIndex = liveSessions.findIndex((session) => session.key === currentActiveKey);
+      const available = new Set(liveSessions.filter((session) => !batchKeys.has(session.key)).map((session) => session.key));
+      const fallbackKey = currentActiveTabState?.paneKeys.find((key) => available.has(key))
+        ?? liveSessions.slice(currentIndex + 1).find((session) => available.has(session.key))?.key
+        ?? liveSessions.slice(0, Math.max(0, currentIndex)).reverse().find((session) => available.has(session.key))?.key
         ?? null;
       navigate({ view: "chat", activeKey: fallbackKey, settingsSection: "overview" }, { replace: true });
     }
@@ -1701,7 +1703,10 @@ function Shell({
       try {
         for (const item of items) {
           try {
-            const result = await deleteChat(item.key, deleteAutomations ? { deleteAutomations: true } : undefined);
+            const result = await deleteChat(
+              item.key,
+              automationKeys?.has(item.key) ? { deleteAutomations: true } : undefined,
+            );
             if (result.deleted) {
               filePreviewStore.delete(item.key);
               draftStore.delete(item.key);
@@ -1720,30 +1725,98 @@ function Shell({
         reveal();
       }
       if (blockedItems.length) {
-        const confirmation: PendingDelete = {
-          id: ++nextDeleteId.current,
-          items: blockedItems,
-          automations: blockedJobs,
-        };
-        setDeleteQueue((queue) => [...queue, confirmation]);
+        showAutomationConfirmRef.current(
+          blockedItems,
+          blockedJobs,
+          new Set(blockedItems.map((item) => item.key)),
+        );
       }
       if (failed) showToast({
         message: t(failed === 1 ? "toast.deleteFailedSingle" : "toast.deleteFailed", { count: failed }),
         tone: "error",
       });
     };
-    showToast({
+    return {
       message: t(items.length === 1 ? "toast.pendingDeleteSingle" : "toast.pendingDelete", { count: items.length }),
       detail: items.length === 1 ? items[0].label : undefined,
       tone: "pending",
       action: { label: t("toast.undo"), run: reveal },
       onExpire: () => { void commit(); },
+    };
+  }, [closeMobileSidebar, deleteChat, draftStore, filePreviewStore, navigate, showToast, t]);
+
+  const showAutomationDeleteConfirmToast = useCallback((
+    items: SidebarDeleteItem[],
+    automations: SessionAutomationJob[],
+    automationKeys: ReadonlySet<string>,
+  ) => {
+    closeMobileSidebar();
+    const firstJob = automations[0];
+    const firstName = firstJob?.name || firstJob?.id || "";
+    const detail = automations.length > 1
+      ? `${firstName} · ${t("toast.moreAutomations", { count: automations.length - 1 })}`
+      : firstName || undefined;
+    showToast({
+      message: items.length === 1
+        ? t("toast.confirmDeleteAutomationsSingle")
+        : t("toast.confirmDeleteAutomations", { count: items.length }),
+      detail,
+      tone: "pending",
+      persistent: true,
+      dedupeKey: `delete-confirm:${items.map((item) => item.key).sort().join(",")}`,
+      secondaryAction: { label: t("common.cancel") },
+      action: {
+        label: t("chat.delete"),
+        tone: "destructive",
+        run: () => prepareStagedDelete(items, automationKeys) ?? undefined,
+      },
     });
-  }, [activeKey, activeTabState, closeMobileSidebar, deleteChat, draftStore, filePreviewStore, navigate, showToast, t, topicSessions, view]);
+  }, [closeMobileSidebar, prepareStagedDelete, showToast, t]);
+  showAutomationConfirmRef.current = showAutomationDeleteConfirmToast;
+
+  const onRequestDeleteMany = useCallback(async (requested: SidebarDeleteItem[]) => {
+    const liveKeys = new Set(deleteContextRef.current.topicSessions.map((session) => session.key));
+    const uniqueItems = Array.from(new Map(
+      requested
+        .filter((item) => liveKeys.has(item.key) && !checkingDeleteKeysRef.current.has(item.key))
+        .map((item) => [item.key, item]),
+    ).values());
+    if (!uniqueItems.length) return;
+    for (const item of uniqueItems) checkingDeleteKeysRef.current.add(item.key);
+    const jobsByKey = new Map<string, SessionAutomationJob[]>();
+    try {
+      const results = await Promise.allSettled(
+        uniqueItems.map((item) => getSessionAutomations(item.key)),
+      );
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled" && result.value.length) {
+          jobsByKey.set(uniqueItems[index].key, result.value);
+        }
+      });
+    } finally {
+      for (const item of uniqueItems) checkingDeleteKeysRef.current.delete(item.key);
+    }
+    const stillLiveKeys = new Set(deleteContextRef.current.topicSessions.map((session) => session.key));
+    const items = uniqueItems.filter((item) => stillLiveKeys.has(item.key));
+    if (!items.length) return;
+    const automationKeys = new Set<string>();
+    const automations = items.flatMap((item) => {
+      const jobs = jobsByKey.get(item.key);
+      if (!jobs?.length) return [];
+      automationKeys.add(item.key);
+      return jobs;
+    });
+    if (automations.length > 0) {
+      showAutomationDeleteConfirmToast(items, automations, automationKeys);
+      return;
+    }
+    const notice = prepareStagedDelete(items);
+    if (notice) showToast(notice);
+  }, [getSessionAutomations, prepareStagedDelete, showAutomationDeleteConfirmToast, showToast]);
 
   const onRequestDelete = useCallback((key: string, label: string) => {
-    stageDelete([{ key, label }]);
-  }, [stageDelete]);
+    void onRequestDeleteMany([{ key, label }]);
+  }, [onRequestDeleteMany]);
 
   const automaticSidebarSort = sidebarState.view.sort === "manual"
     ? "updated_desc"
@@ -2015,7 +2088,7 @@ function Shell({
     onSelect: onSelectSidebarItem,
     onCloseTemporaryChat,
     onRequestDelete,
-    onRequestDeleteMany: stageDelete,
+    onRequestDeleteMany: (items: SidebarDeleteItem[]) => { void onRequestDeleteMany(items); },
     onTogglePin,
     onRequestRename,
     onToggleArchive,
@@ -2407,22 +2480,6 @@ function Shell({
           </main>
         </div>
 
-        {pendingDelete && localActive && !managingConnections ? (
-          <Suspense fallback={null}>
-            <DeleteConfirm
-              key={pendingDelete.id}
-              open
-              title={pendingDelete.items[0]?.label ?? ""}
-              count={pendingDelete.items.length}
-              automations={pendingDelete.automations}
-              onCancel={() => dismissDeleteConfirmation(pendingDelete.id)}
-              onConfirm={() => {
-                dismissDeleteConfirmation(pendingDelete.id);
-                stageDelete(pendingDelete.items, true);
-              }}
-            />
-          </Suspense>
-        ) : null}
         {pendingTabRename ? (
           <Suspense fallback={null}>
             <RenameDialog

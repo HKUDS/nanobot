@@ -5,12 +5,14 @@ import { useNanobotStream } from "@/hooks/useNanobotStream";
 import {
   ApiError,
   deleteSession as apiDeleteSession,
+  fetchSessionAutomations,
   listSessions,
 } from "@/lib/api";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { readReloadSessions, writeReloadCache } from "@/lib/reload-cache";
 import type {
   ChatSummary,
+  SessionAutomationJob,
   SessionDeleteResult,
   WorkspaceScopePayload,
 } from "@/lib/types";
@@ -32,6 +34,7 @@ export function useSessions(): {
     key: string,
     options?: { deleteAutomations?: boolean },
   ) => Promise<SessionDeleteResult>;
+  getSessionAutomations: (key: string) => Promise<SessionAutomationJob[]>;
 } {
   const { client, token } = useClient();
   const [sessions, setSessions] = useState<ChatSummary[]>(readReloadSessions);
@@ -184,6 +187,11 @@ export function useSessions(): {
     [client],
   );
 
+  const getSessionAutomations = useCallback(async (key: string) => {
+    const result = await fetchSessionAutomations(tokenRef.current, key);
+    return result.jobs;
+  }, []);
+
   return {
     sessions,
     loading,
@@ -193,6 +201,7 @@ export function useSessions(): {
     createChat,
     forkChat,
     deleteChat,
+    getSessionAutomations,
   };
 }
 

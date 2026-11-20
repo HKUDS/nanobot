@@ -14,15 +14,6 @@
     "options": "L’appelant fournit dialogTitle, description et placeholder. title définit la valeur initiale ; onConfirm reçoit le titre sans espaces aux extrémités. Un titre vide ne peut pas être enregistré.",
     "hint": "L’enregistrement met à jour le titre ci-dessus."
   },
-  "delete": {
-    "title": "DeleteConfirm · Confirmation de suppression",
-    "description": "Comparez la suppression d’une discussion, de plusieurs discussions ou d’une discussion avec automatisations.",
-    "options": "count détermine le texte de suppression groupée. automations affiche les tâches liées, leur planification et leur prochaine exécution. La confirmation appelle onConfirm.",
-    "scenario": "Scénario de suppression",
-    "open": "Ouvrir la confirmation de suppression",
-    "confirmed": "Suppression d’exemple confirmée.",
-    "hint": "Choisissez une discussion, plusieurs discussions ou une discussion avec automatisations."
-  },
   "inlineTokens": {
     "title": "Inline tokens · Commandes et identifiants de session",
     "description": "Modifiez les commandes et identifiants pour observer la mise en évidence et les couleurs stables.",

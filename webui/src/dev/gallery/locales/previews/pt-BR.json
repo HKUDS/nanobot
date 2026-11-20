@@ -14,15 +14,6 @@
     "options": "O chamador fornece dialogTitle, description e placeholder. title define o valor inicial; onConfirm recebe o título sem espaços nas extremidades. Títulos vazios não podem ser salvos.",
     "hint": "Ao salvar, o título acima é atualizado."
   },
-  "delete": {
-    "title": "DeleteConfirm · Confirmação de exclusão",
-    "description": "Compare a exclusão de uma conversa, várias conversas ou uma conversa com automações.",
-    "options": "count controla o texto de exclusão em lote. automations mostra tarefas vinculadas, agendamentos e próximas execuções. Confirmar chama onConfirm.",
-    "scenario": "Cenário de exclusão",
-    "open": "Abrir confirmação de exclusão",
-    "confirmed": "Exclusão de exemplo confirmada.",
-    "hint": "Escolha uma conversa, várias conversas ou uma conversa com automações."
-  },
   "inlineTokens": {
     "title": "Inline tokens · Comandos e identificadores de sessão",
     "description": "Edite comandos e identificadores para ver o destaque e as cores estáveis das sessões.",

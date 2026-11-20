@@ -14,15 +14,6 @@
     "options": "The caller supplies dialogTitle, description and placeholder. title sets the initial value; onConfirm receives the trimmed title. Empty titles cannot be saved.",
     "hint": "Saving updates the title above."
   },
-  "delete": {
-    "title": "DeleteConfirm · Delete confirmation",
-    "description": "Compare deletion of one chat, multiple chats, or a chat with automations.",
-    "options": "count controls bulk deletion copy. automations shows linked jobs, schedules and next runs. Confirm calls onConfirm.",
-    "scenario": "Deletion scenario",
-    "open": "Open delete confirmation",
-    "confirmed": "Example deletion confirmed.",
-    "hint": "Choose a single chat, multiple chats, or a chat with automations."
-  },
   "inlineTokens": {
     "title": "Inline tokens · Commands and session handles",
     "description": "Edit commands and handles to see highlighting and stable session colors.",

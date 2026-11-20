@@ -1766,29 +1766,6 @@
     "description": "Les conversations sont conservées. Vous pouvez les désarchiver à tout moment.",
     "unarchiveDescription": "Ces sujets réapparaîtront dans la barre latérale."
   },
-  "deleteConfirm": {
-    "title": "Supprimer cette discussion ?",
-    "titleMany": "Supprimer {{count}} conversations ?",
-    "cancel": "Annuler",
-    "confirm": "Supprimer",
-    "automationsDescription": "Supprimer ce sujet supprime aussi ses tâches automatiques liées.",
-    "automationsDescriptionMany": "Les automatisations liées seront également supprimées.",
-    "moreAutomations": "+ {{count}} autres",
-    "schedule": {
-      "at": "{{time}}",
-      "every": "Tous les {{duration}}",
-      "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} ({{tz}})",
-      "local": "Déclencheur local",
-      "unknown": "Planification personnalisée"
-    },
-    "next": {
-      "label": "Prochaine exécution : {{time}}",
-      "disabled": "En pause",
-      "local": "En attente du déclencheur",
-      "none": "Aucune prochaine exécution"
-    }
-  },
   "connection": {
     "idle": "Inactif",
     "connecting": "Connexion…",
@@ -2548,7 +2525,10 @@
     "pendingDelete": "{{count}} conversations vont être supprimées",
     "archived": "{{count}} conversations archivées",
     "unarchived": "{{count}} conversations désarchivées",
-    "deleteFailed": "Impossible de supprimer {{count}} conversations"
+    "deleteFailed": "Impossible de supprimer {{count}} conversations",
+    "confirmDeleteAutomationsSingle": "Supprimer la conversation et ses automatisations ?",
+    "confirmDeleteAutomations": "Supprimer {{count}} conversations et leurs automatisations ?",
+    "moreAutomations": "+ {{count}} autres"
   },
   "common": {
     "retry": "Réessayer",

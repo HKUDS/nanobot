@@ -11,7 +11,7 @@
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.18), 0 8px 24px -8px rgb(0 0 0 / 0.45);
 }
 
-.toast-card::before {
+.toast-card[data-toast-timed="true"]::before {
   content: "";
   position: absolute;
   z-index: -1;
@@ -26,7 +26,7 @@
   animation-play-state: var(--toast-play-state);
 }
 
-.toast-card:dir(rtl)::before {
+.toast-card[data-toast-timed="true"]:dir(rtl)::before {
   --toast-sweep-direction: to left;
   animation-direction: reverse;
 }

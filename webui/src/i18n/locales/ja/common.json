@@ -1766,29 +1766,6 @@
     "description": "会話履歴は保持され、いつでもアーカイブを解除できます。",
     "unarchiveDescription": "これらのトピックがサイドバーに再表示されます。"
   },
-  "deleteConfirm": {
-    "title": "このチャットを削除しますか？",
-    "titleMany": "{{count}} 件の会話を削除しますか？",
-    "cancel": "キャンセル",
-    "confirm": "削除",
-    "automationsDescription": "このトピックを削除すると、関連する自動タスクも削除されます。",
-    "automationsDescriptionMany": "関連する自動タスクも削除されます。",
-    "moreAutomations": "他 {{count}} 件",
-    "schedule": {
-      "at": "{{time}}",
-      "every": "{{duration}} ごと",
-      "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}}（{{tz}}）",
-      "local": "ローカルトリガー",
-      "unknown": "カスタムスケジュール"
-    },
-    "next": {
-      "label": "次回: {{time}}",
-      "disabled": "一時停止中",
-      "local": "トリガー待ち",
-      "none": "次回実行なし"
-    }
-  },
   "connection": {
     "idle": "待機中",
     "connecting": "接続中…",
@@ -2548,7 +2525,10 @@
     "pendingDelete": "{{count}} 件の会話を削除します",
     "archived": "{{count}} 件の会話をアーカイブしました",
     "unarchived": "{{count}} 件の会話のアーカイブを解除しました",
-    "deleteFailed": "{{count}} 件の会話を削除できませんでした"
+    "deleteFailed": "{{count}} 件の会話を削除できませんでした",
+    "confirmDeleteAutomationsSingle": "会話と関連する自動タスクを削除しますか？",
+    "confirmDeleteAutomations": "{{count}} 件の会話と関連する自動タスクを削除しますか？",
+    "moreAutomations": "他 {{count}} 件"
   },
   "common": {
     "retry": "再試行",

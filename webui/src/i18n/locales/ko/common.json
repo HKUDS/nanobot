@@ -1766,29 +1766,6 @@
     "description": "대화 기록은 유지되며 언제든지 보관을 해제할 수 있습니다.",
     "unarchiveDescription": "이 주제들이 사이드바에 다시 표시됩니다."
   },
-  "deleteConfirm": {
-    "title": "이 채팅을 삭제할까요?",
-    "titleMany": "대화 {{count}}개를 삭제할까요?",
-    "cancel": "취소",
-    "confirm": "삭제",
-    "automationsDescription": "이 주제를 삭제하면 연결된 자동 작업도 삭제됩니다.",
-    "automationsDescriptionMany": "연결된 자동화도 함께 삭제됩니다.",
-    "moreAutomations": "+ {{count}}개 더",
-    "schedule": {
-      "at": "{{time}}",
-      "every": "{{duration}}마다",
-      "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} ({{tz}})",
-      "local": "로컬 트리거",
-      "unknown": "사용자 지정 일정"
-    },
-    "next": {
-      "label": "다음: {{time}}",
-      "disabled": "일시 중지됨",
-      "local": "트리거 대기 중",
-      "none": "다음 실행 없음"
-    }
-  },
   "connection": {
     "idle": "대기 중",
     "connecting": "연결 중…",
@@ -2548,7 +2525,10 @@
     "pendingDelete": "대화 {{count}}개가 곧 삭제됩니다",
     "archived": "대화 {{count}}개를 보관했습니다",
     "unarchived": "대화 {{count}}개의 보관을 해제했습니다",
-    "deleteFailed": "대화 {{count}}개를 삭제하지 못했습니다"
+    "deleteFailed": "대화 {{count}}개를 삭제하지 못했습니다",
+    "confirmDeleteAutomationsSingle": "대화와 연결된 자동 작업을 삭제할까요?",
+    "confirmDeleteAutomations": "대화 {{count}}개와 연결된 자동 작업을 삭제할까요?",
+    "moreAutomations": "+ {{count}}개 더"
   },
   "common": {
     "retry": "다시 시도",

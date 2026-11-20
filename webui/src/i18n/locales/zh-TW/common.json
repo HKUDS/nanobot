@@ -1766,29 +1766,6 @@
     "description": "聊天記錄會保留，可隨時取消封存。",
     "unarchiveDescription": "這些話題將重新顯示在側欄中。"
   },
-  "deleteConfirm": {
-    "title": "刪除這個話題？",
-    "titleMany": "刪除這 {{count}} 個對話？",
-    "cancel": "取消",
-    "confirm": "刪除",
-    "automationsDescription": "刪除話題也會刪除關聯的自動任務",
-    "automationsDescriptionMany": "關聯的自動任務也會一併刪除。",
-    "moreAutomations": "另有 {{count}} 個",
-    "schedule": {
-      "at": "{{time}}",
-      "every": "每 {{duration}}",
-      "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}}（{{tz}}）",
-      "local": "本機觸發器",
-      "unknown": "自訂排程"
-    },
-    "next": {
-      "label": "下次：{{time}}",
-      "disabled": "已暫停",
-      "local": "等待觸發",
-      "none": "沒有下次執行"
-    }
-  },
   "connection": {
     "idle": "閒置",
     "connecting": "連線中…",
@@ -2548,7 +2525,10 @@
     "pendingDelete": "即將刪除 {{count}} 個對話",
     "archived": "已封存 {{count}} 個對話",
     "unarchived": "已取消封存 {{count}} 個對話",
-    "deleteFailed": "無法刪除 {{count}} 個對話"
+    "deleteFailed": "無法刪除 {{count}} 個對話",
+    "confirmDeleteAutomationsSingle": "刪除對話及關聯自動任務？",
+    "confirmDeleteAutomations": "刪除 {{count}} 個對話及關聯自動任務？",
+    "moreAutomations": "另有 {{count}} 個"
   },
   "common": {
     "retry": "重試",

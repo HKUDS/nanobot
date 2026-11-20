@@ -14,15 +14,6 @@
     "options": "调用方提供 dialogTitle、description 和 placeholder。title 设置初值，onConfirm 接收去除两端空白的标题。空标题无法保存。",
     "hint": "保存后更新上方标题。"
   },
-  "delete": {
-    "title": "DeleteConfirm · 删除确认",
-    "description": "比较单个、批量和带自动任务的删除确认。",
-    "options": "count 控制批量文案；automations 展示关联任务、计划和下次运行时间。确认按钮调用 onConfirm。",
-    "scenario": "删除场景",
-    "open": "打开删除确认",
-    "confirmed": "已确认删除示例。",
-    "hint": "选择单个、批量或带自动任务的会话。"
-  },
   "inlineTokens": {
     "title": "Inline tokens · 命令与会话标识",
     "description": "编辑命令与标识，查看高亮和会话颜色。",

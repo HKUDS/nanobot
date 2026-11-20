@@ -63,7 +63,7 @@ Each topic in the sidebar keeps its own history, title, project folder, and link
 
 - **Organize:** Drag topics to reorder them, or use **Rename** to edit a title inline.
 - **Bulk actions:** Choose **Select** in a topic's menu to archive or delete multiple topics at once (press `Esc` to exit selection mode). Archived topics stay saved and can be restored from **Show archived**.
-- **Delete with undo:** Deleting a topic hides it with an 8-second **Undo** window. Topics with linked automations ask for confirmation before removing their automations.
+- **Delete with undo:** Deleting a topic hides it with an 8-second **Undo** window. Topics with linked automations pause for confirmation in the toast before starting the undo countdown.
 - **Navigate long conversations:** Use the message rail on wide screens or prompt-summary search in the header to jump directly to earlier messages. Scroll past the top (or pull down on touch devices) to load older history.
 
 ### Conversation groups and panes
