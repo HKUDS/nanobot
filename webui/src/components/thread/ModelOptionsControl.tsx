@@ -2,6 +2,7 @@ import { useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { CodexSpeedControl } from "@/components/ui/codex-speed-control";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip-primitives";
 import type { ModelOptionsCapability, SessionModelOptions } from "@/lib/types";
 
@@ -58,13 +59,19 @@ function ReasoningEffortControl({ options, selected, mode, onChange }: {
   }
   if (mode === "custom" && last > 0) {
     return (
-      <label className="reasoning-effort flex-1 justify-between text-xs">
+      <div className="reasoning-effort flex-1 justify-between text-xs">
         <span className="min-w-0 truncate" title={label}>{label}</span>
-        <select className="min-h-7 min-w-0 max-w-[55%] shrink-0 truncate rounded-control border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11"
-          value={selected} onChange={(event) => onChange(options[Number(event.currentTarget.value)])}>
-          {options.map((option, index) => <option key={index} value={index}>{option ?? auto}</option>)}
-        </select>
-      </label>
+        <Select value={String(selected)} onValueChange={(index) => onChange(options[Number(index)])}>
+          <SelectTrigger aria-label={label} className="h-7 min-w-0 max-w-[55%] shrink-0 px-2 text-xs max-sm:h-11">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((option, index) => (
+              <SelectItem key={index} value={String(index)} className="max-sm:min-h-11">{option ?? auto}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
     );
   }
   return (

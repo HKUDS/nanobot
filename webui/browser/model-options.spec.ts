@@ -251,20 +251,42 @@ test("keeps the reasoning slider track visible while a Codex preset awaits its e
   await expect(effort).toHaveAttribute("aria-valuetext", "high");
 });
 
-test("keeps the custom reasoning effort as a concrete value for a self-hosted preset", async ({ page }) => {
-  await page.goto("/browser/fixture.html?case=model-options&group=local");
-  await page.getByRole("button", { name: "Default", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Switch model", exact: true });
-  await dialog.getByRole("option", { name: "Custom API", exact: true }).click();
-  await page.getByRole("button", { name: "Custom API", exact: true }).click();
-  const effort = dialog.getByRole("combobox", { name: "Reasoning effort" });
-  await expect(effort.locator("option:checked")).toHaveText("extended");
-  await effort.selectOption({ label: "low" });
-  await dialog.press("Escape");
-  await page.getByLabel("Message input").fill("Review custom API reasoning options");
-  await page.getByRole("button", { name: "Send message", exact: true }).click();
-  await expect(page.getByLabel("Sent model options")).toHaveText("Reasoning: low; Codex Fast: unchanged");
-});
+for (const { width, height, theme } of [
+  { width: 1280, height: 900, theme: "light" },
+  { width: 390, height: 440, theme: "dark" },
+]) {
+  test(`selects a custom preset's reasoning effort in the themed picker at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height });
+    await page.goto(`/browser/fixture.html?case=model-options&group=local&${theme}`);
+    await page.getByRole("button", { name: "Default", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Switch model", exact: true });
+    await dialog.getByRole("option", { name: "Custom API", exact: true }).click();
+    await page.getByRole("button", { name: "Custom API", exact: true }).click();
+    const effort = dialog.getByRole("combobox", { name: "Reasoning effort" });
+    await expect(effort).toHaveText("extended");
+    await dialog.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+    await effort.press("Enter");
+    const list = page.getByRole("listbox").filter({ has: page.getByRole("option", { name: "extended", exact: true }) });
+    const current = list.getByRole("option", { name: "extended", exact: true });
+    const low = list.getByRole("option", { name: "low", exact: true });
+    await expect(current).toBeFocused();
+    await expect(current).toHaveAttribute("aria-selected", "true");
+    await expect(low).toBeInViewport({ ratio: 1 });
+    await page.screenshot({ path: testInfo.outputPath(`custom-reasoning-effort-${theme}.png`) });
+    await current.press("Home");
+    await expect(low).toBeFocused();
+    await low.press("Escape");
+    await expect(list).toBeHidden();
+    await expect(effort).toBeFocused();
+    await effort.click();
+    await low.click();
+    await expect(effort).toHaveText("low");
+    await effort.press("Escape");
+    await page.getByLabel("Message input").fill("Review custom API reasoning options");
+    await page.getByRole("button", { name: "Send message", exact: true }).click();
+    await expect(page.getByLabel("Sent model options")).toHaveText("Reasoning: low; Codex Fast: unchanged");
+  });
+}
 
 test("touch drag previews the next effort without saving it until release", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 800 });
