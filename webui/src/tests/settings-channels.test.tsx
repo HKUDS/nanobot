@@ -1843,6 +1843,11 @@ describe("Settings channels", () => {
       }),
       150_000,
     ));
+    const savedValues = requestMutationMock.mock.calls.find(
+      ([action]) => action === "settings.channel.configure",
+    )?.[1].values;
+    expect(savedValues).not.toHaveProperty(["channels.email.imapPassword"]);
+    expect(savedValues).not.toHaveProperty(["channels.email.smtpPassword"]);
     expect(within(dialog).getByText("Saving")).toBeVisible();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
@@ -1990,7 +1995,7 @@ describe("Settings channels", () => {
     expect(screen.getByLabelText("Discord channel")).toBeEnabled();
     const savedSecret = screen.getByPlaceholderText("Saved secret");
     expect(savedSecret).toHaveValue("");
-    expect(savedSecret).toHaveAttribute("autocomplete", "off");
+    expect(savedSecret).toHaveAttribute("autocomplete", "new-password");
     expect(savedSecret.closest("form")).not.toBeNull();
     expect(screen.queryByDisplayValue("discord-secret-token")).not.toBeInTheDocument();
 
