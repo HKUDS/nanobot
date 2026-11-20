@@ -225,8 +225,10 @@ async def replace_webui_chat_input(
     async def accepted(session: Session) -> None:
         nonlocal committed
         committed = True
+        # Send the regular latest page on the wire. The retained prefix stays
+        # in SQLite and can be paged by the same cursor as after a reconnect.
         body = await manager.state.project_history(key, lambda history: build_webui_thread_response(
-            key, history=history,
+            key, history=history, limit=40,
             session_messages_loader=lambda: session.messages,
             session_version_loader=lambda: manager.read_session_version(key),
         ))

@@ -146,6 +146,40 @@ async def test_source_revision_is_shared_by_different_history_pages(editing):
     assert latest["events"][0]["text"] != older["events"][0]["text"]
 
 
+async def test_long_replacement_broadcast_is_a_page_with_a_recoverable_prefix(editing):
+    manager, host, _, _ = editing
+    session = await manager.state.get(KEY)
+    facts = []
+    for index in range(4, 32):
+        turn_id = f"old-{index}"
+        session.add_message("user", f"question-{index}", webui_turn_id=turn_id)
+        session.add_message("assistant", f"answer-{index}")
+        for event, text in (("user", f"question-{index}"), ("message", f"answer-{index}"), ("turn_end", None)):
+            facts.append(fact_from_record({"event": event, "turn_id": turn_id, "text": text}))
+    await manager.state.finish_turn(session)
+    await manager.state.append_history(KEY, facts, expected_generation=session.generation)
+    await replace_webui_chat_input(host, payload(await read_source(host, 27)))
+
+    async def page(before=None):
+        return await manager.state.project_history(KEY, lambda history: transcript.build_webui_thread_response(
+            KEY, history=history, limit=40, before=before,
+        ))
+
+    live = host.announce_webui_history_replacement.await_args.args[1]
+    latest = await page()
+    assert live["events"] == latest["events"] and live["page"] == latest["page"]
+    assert live["page"]["has_more_before"]
+    chunks = [live["events"]]
+    cursor = live["page"]["before_cursor"]
+    while cursor:
+        older = await page(cursor)
+        chunks.insert(0, older["events"])
+        cursor = older["page"]["before_cursor"]
+    assert [e["text"] for chunk in chunks for e in chunk if e["event"] == "user_message"] == [
+        *(f"question-{i}" for i in range(27)), "replacement",
+    ]
+
+
 async def test_reading_the_edit_source_does_not_change_history(editing):
     manager, host, _, _ = editing
     before = await manager.state.read(KEY)

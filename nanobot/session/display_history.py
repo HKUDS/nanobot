@@ -5,6 +5,7 @@ import sqlite3
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from functools import cached_property
 from pathlib import Path
 from typing import Any, cast
 
@@ -100,7 +101,9 @@ class HistoryReader:
         self.key = key
         self.storage_path = storage_path
 
-    @property
+    # A reader belongs to one transaction snapshot. Page cursors, edit sources and
+    # conditional responses can reuse its header, never one from an earlier request.
+    @cached_property
     def revision(self) -> tuple[str, int] | None:
         row = self._db.execute(
             """SELECT sessions.generation, coalesce(history_heads.revision, -1) FROM sessions
@@ -109,7 +112,7 @@ class HistoryReader:
         ).fetchone()
         return (str(row[0]), int(row[1])) if row is not None else None
 
-    @property
+    @cached_property
     def turn_count(self) -> int:
         return int(self._db.execute(
             "SELECT coalesce(max(ordinal)+1, 0) FROM history_turns WHERE session_key=?",
