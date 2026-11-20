@@ -45,6 +45,11 @@ const commands: SlashCommand[] = [
     command: "/status", title: "Show status", description: "Check runtime, provider, and channel status.",
     icon: "activity", lifecycle: "side_channel", acceptsArgs: false,
   },
+  {
+    command: "/pairing", title: "Pairing", description: "Manage pairing requests.",
+    icon: "shield", argHint: "[list|approve <code>|deny <code>|revoke <user_id>]",
+    lifecycle: "side_channel", acceptsArgs: true,
+  },
 ];
 const skills: SkillSummary[] = [
   {

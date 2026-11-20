@@ -181,6 +181,7 @@ for (const narrow of [false, true]) {
       expect(Math.abs(slashBox.x - surfaceBox.x)).toBeLessThanOrEqual(2);
       if (!narrow) expect(slashBox.width).toBeLessThan(surfaceBox.width);
       expect(await slashPalette.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      expect(await slashPalette.locator(":scope > div").evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
       await page.screenshot({ path: info.outputPath("slash-palette.png") });
 
       await input.fill("$");
@@ -192,6 +193,7 @@ for (const narrow of [false, true]) {
       expect(Math.abs(skillBox.x - surfaceBox.x)).toBeLessThanOrEqual(2);
       if (!narrow) expect(skillBox.width).toBeLessThan(surfaceBox.width);
       expect(await skillPalette.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      expect(await skillPalette.locator(":scope > div").evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
       await page.screenshot({ path: info.outputPath("skill-palette.png") });
     });
 

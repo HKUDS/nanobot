@@ -240,7 +240,7 @@ function ComposerPaletteSurface({
     >
       <div
         ref={listRef}
-        className="inset-scrollbar overflow-y-auto overscroll-contain"
+        className="inset-scrollbar overflow-x-hidden overflow-y-auto overscroll-contain"
         style={{ maxHeight: listMaxHeight }}
       >
         {children}
@@ -314,7 +314,7 @@ export function SlashCommandPalette({
               className={cn(
                 floatingItemClassName,
                 floatingItemFocusClassName,
-                "flex min-h-[44px] w-full items-start gap-2.5 px-2.5 py-2 text-left transition-colors duration-100",
+                "flex min-h-[44px] w-full min-w-0 items-start gap-2.5 overflow-hidden px-2.5 py-2 text-left transition-colors duration-100",
                 paletteItemSelectionClassName(selected),
               )}
             >
@@ -331,10 +331,10 @@ export function SlashCommandPalette({
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="flex min-w-0 items-baseline gap-2">
-                  <span className="shrink-0 font-mono text-[13px] font-semibold tracking-tight text-foreground">
+                  <span className="min-w-0 truncate font-mono text-[13px] font-semibold tracking-tight text-foreground">
                     <HighlightedText text={commandLabel} query={query} />
                   </span>
-                  <span className="min-w-0 truncate text-[12px] font-medium text-muted-foreground/85">
+                  <span className="max-w-[40%] shrink-0 truncate text-[12px] font-medium text-muted-foreground/85">
                     <HighlightedText text={title} query={query} />
                   </span>
                 </span>
@@ -473,7 +473,7 @@ export function SkillPalette({
                 className={cn(
                   floatingItemClassName,
                   floatingItemFocusClassName,
-                  "flex min-h-[42px] w-full flex-col items-stretch gap-0.5 px-2.5 py-2 text-left transition-colors duration-100",
+                  "flex min-h-[42px] w-full min-w-0 flex-col items-stretch gap-0.5 overflow-hidden px-2.5 py-2 text-left transition-colors duration-100",
                   paletteItemSelectionClassName(selected),
                 )}
               >
@@ -486,7 +486,7 @@ export function SkillPalette({
                     >
                       $
                     </span>
-                    <span data-palette-skill-name className="min-w-0 break-words">
+                    <span data-palette-skill-name className="min-w-0 break-words [overflow-wrap:anywhere]">
                       <HighlightedText text={skill.name} query={query} />
                     </span>
                   </span>
@@ -501,7 +501,7 @@ export function SkillPalette({
                   ) : null}
                 </span>
                 {showDescription ? (
-                  <span className="line-clamp-2 w-full text-[12px] leading-[1.45] text-muted-foreground">
+                  <span className="line-clamp-2 w-full break-words text-[12px] leading-[1.45] text-muted-foreground">
                     <HighlightedText text={skill.description} query={query} />
                   </span>
                 ) : null}
@@ -591,7 +591,7 @@ export function CliAppMentionPalette({
                 className={cn(
                   floatingItemClassName,
                   floatingItemFocusClassName,
-                  "touch-target flex min-h-10 w-full flex-wrap items-center gap-x-2.5 gap-y-1 px-2.5 py-1.5 text-left transition-colors duration-100",
+                  "touch-target flex min-h-10 w-full min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 overflow-hidden px-2.5 py-1.5 text-left transition-colors duration-100",
                   paletteItemSelectionClassName(selected),
                 )}
               >
