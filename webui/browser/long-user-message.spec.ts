@@ -19,24 +19,29 @@ for (const theme of ["light", "dark"] as const) {
       await expect(longBubble).toHaveAttribute("data-user-message-collapsed", "true");
 
       const toggle = longBubble.locator("[data-user-message-toggle]");
+      const stack = longBubble.locator("[data-user-message-stack]");
       await expect(toggle).toBeVisible();
       await expect(toggle).toHaveAttribute("aria-expanded", "false");
       await expect(toggle).toHaveAttribute("data-thread-disclosure", "");
       await expect(toggle).toHaveText("Show more");
+      await expect(stack).toHaveAttribute("data-state", "visible");
 
       const collapsedMetrics = await page.evaluate(() => {
         const scroller = document.querySelector<HTMLElement>("[data-testid='thread-message-region']")!;
         const longRow = document.querySelectorAll<HTMLElement>("[data-user-text-bubble]")[1]!;
         const pill = longRow.querySelector<HTMLElement>(":scope > p")!;
         const clip = pill.querySelector<HTMLElement>("[data-user-message-clip]")!;
+        const stackEl = longRow.querySelector<HTMLElement>("[data-user-message-stack]")!;
         const toggleEl = longRow.querySelector<HTMLElement>("[data-user-message-toggle]")!;
         const scrollerRect = scroller.getBoundingClientRect();
         const pillRect = pill.getBoundingClientRect();
+        const stackRect = stackEl.getBoundingClientRect();
         const toggleRect = toggleEl.getBoundingClientRect();
         const clipStyle = getComputedStyle(clip);
         return {
           scrollerHeight: scrollerRect.height,
           pillHeight: pillRect.height,
+          stackHeight: stackRect.height,
           clipHeight: clip.getBoundingClientRect().height,
           naturalTextHeight: clip.firstElementChild!.getBoundingClientRect().height,
           maskImage: clipStyle.maskImage || clipStyle.webkitMaskImage,
@@ -49,6 +54,7 @@ for (const theme of ["light", "dark"] as const) {
       expect(collapsedMetrics.pageOverflows).toBe(false);
       expect(collapsedMetrics.naturalTextHeight).toBeGreaterThan(collapsedMetrics.scrollerHeight * 0.5);
       expect(collapsedMetrics.pillHeight).toBeLessThanOrEqual(collapsedMetrics.scrollerHeight * 0.5);
+      expect(collapsedMetrics.stackHeight).toBeGreaterThan(6);
       expect(collapsedMetrics.clipHeight).toBeLessThan(collapsedMetrics.naturalTextHeight - 60);
       expect(collapsedMetrics.maskImage).toContain("linear-gradient");
       expect(collapsedMetrics.toggleInsidePill).toBe(true);
@@ -58,11 +64,14 @@ for (const theme of ["light", "dark"] as const) {
       await expect(longBubble).not.toHaveAttribute("data-user-message-collapsed");
       await expect(toggle).toHaveAttribute("aria-expanded", "true");
       await expect(toggle).toHaveText("Show less");
+      await expect(stack).toHaveAttribute("data-state", "hidden");
 
       await expect.poll(async () => {
         return longBubble.evaluate((el) => {
           const clip = el.querySelector<HTMLElement>("[data-user-message-clip]")!;
-          return Math.abs(clip.getBoundingClientRect().height - clip.firstElementChild!.getBoundingClientRect().height);
+          const stackEl = el.querySelector<HTMLElement>("[data-user-message-stack]")!;
+          return Math.abs(clip.getBoundingClientRect().height - clip.firstElementChild!.getBoundingClientRect().height)
+            + stackEl.getBoundingClientRect().height;
         });
       }).toBeLessThan(2);
 

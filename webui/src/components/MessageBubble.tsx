@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Activity, Check, ChevronDown, ChevronRight, CircleAlert, Clock3, Copy, Quote, Wrench } from "lucide-react";
+import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Quote, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DisclosureContent } from "@/components/ui/disclosure";
 
@@ -591,7 +591,7 @@ const USER_MESSAGE_COLLAPSED_HEIGHT_RATIO = 0.38;
 const MIN_USER_MESSAGE_COLLAPSE_THRESHOLD_PX = 200;
 const MIN_USER_MESSAGE_COLLAPSED_BUBBLE_PX = 160;
 const MIN_USER_MESSAGE_COLLAPSED_TEXT_PX = 96;
-const DEFAULT_COLLAPSIBLE_PADDING_BOTTOM_PX = 44;
+const DEFAULT_COLLAPSIBLE_PADDING_BOTTOM_PX = 40;
 const COLLAPSE_SCROLL_TOP_INSET_PX = 48;
 
 interface UserTextCollapseLayout {
@@ -765,37 +765,39 @@ function UserTextBubble({
         )}
       </p>
       {isCollapsible ? (
-        <div
-          data-user-message-toggle-bar
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] flex items-center justify-center px-3 pb-1.5 pt-1"
-        >
-          <button
-            type="button"
-            data-thread-disclosure=""
-            data-user-message-toggle
-            aria-expanded={!isCollapsed}
-            aria-controls={contentId}
-            onClick={toggleCollapsed}
-            className={cn(
-              "pointer-events-auto touch-target inline-flex h-7 items-center gap-1 rounded-full px-3",
-              "text-ui-label text-muted-foreground transition-colors",
-              "hover:bg-foreground/[0.06] hover:text-foreground dark:hover:bg-foreground/[0.09]",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            )}
+        <>
+          <div
+            data-user-message-stack
+            data-state={isCollapsed ? "visible" : "hidden"}
+            data-temporary={temporary ? "true" : undefined}
+            aria-hidden="true"
+            className="user-message-stack pointer-events-none flex flex-col"
           >
-            <span>
-              {isCollapsed ? t("message.expandUserMessage") : t("message.collapseUserMessage")}
-            </span>
-            <ChevronDown
+            <span className="user-message-stack-sheet user-message-stack-sheet-first" />
+            <span className="user-message-stack-sheet user-message-stack-sheet-second" />
+          </div>
+          <div
+            data-user-message-toggle-bar
+            className="user-message-toggle-bar pointer-events-none absolute inset-x-0 z-[2] flex items-center justify-center px-3 pb-1.5 pt-1"
+          >
+            <button
+              type="button"
+              data-thread-disclosure=""
+              data-user-message-toggle
+              aria-expanded={!isCollapsed}
+              aria-controls={contentId}
+              onClick={toggleCollapsed}
               className={cn(
-                "h-3.5 w-3.5 shrink-0 transition-transform duration-200 motion-reduce:transition-none",
-                !isCollapsed && "rotate-180",
+                "pointer-events-auto touch-target inline-flex h-7 items-center rounded-full px-3.5",
+                "text-ui-label text-muted-foreground transition-colors",
+                "hover:bg-foreground/[0.06] hover:text-foreground dark:hover:bg-foreground/[0.09]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               )}
-              strokeWidth={1.75}
-              aria-hidden
-            />
-          </button>
-        </div>
+            >
+              {isCollapsed ? t("message.expandUserMessage") : t("message.collapseUserMessage")}
+            </button>
+          </div>
+        </>
       ) : null}
     </div>
   );
