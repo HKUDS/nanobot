@@ -1384,52 +1384,15 @@
   container-type: inline-size;
 }
 
-@keyframes composer-palette-enter-up {
+@keyframes composer-palette-enter {
   from {
     opacity: 0;
-    transform: translateY(4px) scale(0.985);
+    transform: translateY(var(--palette-enter-y, 4px)) scale(0.985);
   }
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
-}
-
-@keyframes composer-palette-enter-down {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes composer-palette-enter-beside {
-  from {
-    opacity: 0;
-    transform: scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.composer-palette-surface {
-  transform-origin: bottom center;
-  animation: composer-palette-enter-up 130ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.composer-palette-surface[data-placement="below"] {
-  transform-origin: top center;
-  animation-name: composer-palette-enter-down;
-}
-
-.composer-palette-surface[data-placement="beside"] {
-  transform-origin: left center;
-  animation-name: composer-palette-enter-beside;
 }
 
 @keyframes composer-palette-preview-in {
@@ -1441,6 +1404,22 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.composer-palette-surface {
+  --palette-enter-y: 4px;
+  transform-origin: bottom center;
+  animation: composer-palette-enter 130ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.composer-palette-surface[data-placement="below"] {
+  --palette-enter-y: -4px;
+  transform-origin: top center;
+}
+
+.composer-palette-surface[data-placement="beside"] {
+  --palette-enter-y: 0px;
+  transform-origin: left center;
 }
 
 .composer-palette-preview-body {
