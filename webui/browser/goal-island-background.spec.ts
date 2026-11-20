@@ -17,7 +17,7 @@ async function expectBackgroundToCover(page: Page, owner: Locator) {
     surface.boundingBox(),
     surface.evaluate(el => {
       const style = getComputedStyle(el, "::before");
-      return { color: style.backgroundColor, clip: style.clipPath };
+      return { color: style.backgroundColor, radius: style.borderRadius };
     }),
   ]);
   expect(ownerBox).not.toBeNull();
@@ -25,7 +25,7 @@ async function expectBackgroundToCover(page: Page, owner: Locator) {
   expect(surfaceBox!.width).toBeCloseTo(ownerBox!.width, 1);
   expect(surfaceBox!.height).toBeCloseTo(ownerBox!.height, 1);
   expect(background.color).not.toBe("rgba(0, 0, 0, 0)");
-  expect(background.clip).not.toBe("none");
+  expect(background.radius).not.toBe("0px");
 
   const image = await page.screenshot({ clip: { x: ownerBox!.x + 12, y: ownerBox!.y + 10, width: 1, height: 1 } });
   const pixel = await page.evaluate(async bytes => {
@@ -36,7 +36,7 @@ async function expectBackgroundToCover(page: Page, owner: Locator) {
     context.drawImage(bitmap, 0, 0);
     return Array.from(context.getImageData(0, 0, 1, 1).data);
   }, Array.from(image));
-  expect(pixel.slice(0, 3).every(channel => channel > 180)).toBe(true);
+  expect(pixel.slice(0, 3).every(channel => channel < 80)).toBe(true);
 }
 
 for (const reducedMotion of ["no-preference", "reduce"] as const) {
@@ -45,7 +45,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
     await page.addInitScript(() => { localStorage.setItem("nanobot.locale", "en"); });
     await disableGoalPropertyRegistration(page);
     await page.goto("/browser/fixture.html?case=session-transition&preview&topic=goal");
-    await page.addStyleTag({ content: '[data-testid="thread-header"] { background: black !important; }' });
+    await page.addStyleTag({ content: '[data-testid="thread-header"] { background: rgb(0, 255, 0) !important; }' });
 
     const trigger = page.getByRole("button", { name: "Show full goal" });
     await expect(trigger).toBeVisible();

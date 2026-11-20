@@ -1,5 +1,5 @@
-import { CircleAlert } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { ChevronDown, CircleAlert } from "lucide-react";
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
@@ -10,6 +10,20 @@ import { useOverlayEscapeFocus } from "@/hooks/useOverlayEscapeFocus";
 import type { GoalStateWsPayload } from "@/lib/types";
 
 import "./goal-island.css";
+
+const NARROW_MEDIA_QUERY = "(max-width: 767px)";
+
+function subscribeNarrowViewport(onStoreChange: () => void) {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+  const mql = window.matchMedia(NARROW_MEDIA_QUERY);
+  mql.addEventListener("change", onStoreChange);
+  return () => mql.removeEventListener("change", onStoreChange);
+}
+
+function getNarrowViewportSnapshot() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia(NARROW_MEDIA_QUERY).matches;
+}
 
 export function GoalIsland({ goal, cancelDisabled, onCancel }: {
   goal: GoalStateWsPayload;
@@ -23,6 +37,7 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
   const [scrollBody, setScrollBody] = useState<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const escapeFocus = useOverlayEscapeFocus();
+  const narrow = useSyncExternalStore(subscribeNarrowViewport, getNarrowViewportSnapshot, () => false);
   const changeOpen = (nextOpen: boolean) => {
     const panel = panelRef.current;
     const surface = panel?.querySelector<HTMLElement>(":scope > .goal-island-surface");
@@ -43,12 +58,12 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
   const label = summary || objective || t("thread.composer.goalStateFallback");
   const status = goal.status === "blocked" ? "blocked" : "active";
   const recap = goal.recap?.trim() ?? "";
-  const collapsedLabel = status === "blocked" ? recap : label;
+  const collapsedLabel = status === "blocked" ? (recap || t("thread.composer.goalBlocked")) : label;
   const cancelButton = <Button
     type="button"
     variant="ghost"
     size="sm"
-    className="ml-auto h-7 shrink-0 px-2 text-caption text-muted-foreground"
+    className="goal-island-cancel ml-auto h-7 shrink-0 rounded-full px-2.5 text-caption"
     disabled={cancelDisabled || cancelling}
     aria-busy={cancelling}
     title={cancelDisabled ? t("thread.composer.cancelGoalOffline") : undefined}
@@ -85,7 +100,13 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
   return (
     <div className="goal-island-position">
       <Popover open={open} onOpenChange={changeOpen}>
-        <div className="goal-island" data-goal-status={status} data-detail-mounted={!!scrollBody} role="status" aria-label={status === "blocked" ? [t("thread.composer.goalBlocked"), recap].filter(Boolean).join(" · ") : t("thread.composer.goalStateStrip", { label })}>
+        <div
+          className="goal-island"
+          data-goal-status={status}
+          data-detail-mounted={!!scrollBody}
+          role="status"
+          aria-label={status === "blocked" ? [t("thread.composer.goalBlocked"), recap].filter(Boolean).join(" · ") : t("thread.composer.goalStateStrip", { label })}
+        >
           <PopoverTrigger asChild>
             <button
               type="button"
@@ -96,38 +117,60 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
               onFocus={() => { void preloadMarkdownText(); }}
             >
               <span className="goal-island-surface" aria-hidden />
-              {status === "blocked" ? <CircleAlert className="goal-island-status-icon" strokeWidth={2.5} aria-hidden="true" /> : null}
-              {collapsedLabel ? <span className={status === "blocked" ? "goal-island-reason min-w-0 truncate" : "min-w-0 truncate"}>{collapsedLabel}</span> : null}
+              {status === "blocked"
+                ? <CircleAlert className="goal-island-status-icon" strokeWidth={2.25} aria-hidden="true" />
+                : <span className="goal-island-dot" aria-hidden="true" />}
+              {collapsedLabel ? <span className={status === "blocked" ? "goal-island-label goal-island-reason min-w-0 truncate" : "goal-island-label min-w-0 truncate"}>{collapsedLabel}</span> : null}
+              <ChevronDown className="goal-island-chevron" strokeWidth={2.2} aria-hidden="true" />
             </button>
           </PopoverTrigger>
         </div>
         <PopoverContent
           ref={panelRef}
           {...escapeFocus.contentProps}
-          className="goal-island-panel max-h-[min(25dvh,var(--radix-popover-content-available-height))] overflow-visible rounded-t-none rounded-b-[28px] bg-transparent p-0 shadow-none dark:shadow-none"
+          className="goal-island-panel max-h-[min(32dvh,20rem,var(--radix-popover-content-available-height))] overflow-visible rounded-[20px] bg-transparent p-0 shadow-none dark:shadow-none"
           motionClassName=""
           data-goal-status={status}
+          data-narrow={narrow || undefined}
           side="bottom"
-          sideOffset={-40}
-          collisionPadding={{ top: 0, bottom: 12, left: 32, right: 32 }}
+          sideOffset={narrow ? 8 : -30}
+          collisionPadding={{ top: 8, bottom: 12, left: 24, right: 24 }}
           aria-label={t("thread.composer.goalStateSheetTitle")}
         >
           <div className="goal-island-surface" aria-hidden />
           <div className="goal-island-panel-content">
-            {status !== "blocked" ? <div className="goal-island-summary flex items-start gap-3">
-              {summary ? <div className="markdown-content min-w-0 flex-1"><h2>{summary}</h2></div> : null}
+            <div className="goal-island-summary">
+              <div className="goal-island-summary-main">
+                {status === "blocked" ? (
+                  <span className="goal-island-blocked-badge">
+                    <span className="goal-island-dot goal-island-dot-blocked" aria-hidden="true" />
+                    <span>{t("thread.composer.goalBlocked")}</span>
+                  </span>
+                ) : (
+                  <span className="goal-island-dot goal-island-dot-header" aria-hidden="true" />
+                )}
+                {summary || status !== "blocked" ? (
+                  <div className="markdown-content min-w-0 flex-1">
+                    <h2>{summary || t("thread.composer.goalStateSheetTitle")}</h2>
+                  </div>
+                ) : null}
+              </div>
               {cancelButton}
-            </div> : null}
+            </div>
             <div ref={setScrollBody} className="goal-island-body">
               <div className="goal-island-document">
-                {status === "blocked" ? <div className="goal-island-blocked">
-                  <CircleAlert className="goal-island-status-icon" strokeWidth={2.5} aria-hidden="true" />
-                  <span className="sr-only">{t("thread.composer.goalBlocked")}</span>
-                  {recap ? <MarkdownText className="goal-island-reason flex-1">{recap}</MarkdownText> : null}
-                  {cancelButton}
-                </div> : null}
-                {objective ? <MarkdownText className={status === "blocked" ? "mt-4" : undefined}>{objective}</MarkdownText> : null}
-                {status !== "blocked" && recap ? <MarkdownText className="mt-4 text-muted-foreground">{recap}</MarkdownText> : null}
+                {status === "blocked" && recap ? (
+                  <div className="goal-island-blocked">
+                    <CircleAlert className="goal-island-status-icon" strokeWidth={2.25} aria-hidden="true" />
+                    <MarkdownText className="goal-island-reason flex-1">{recap}</MarkdownText>
+                  </div>
+                ) : null}
+                {objective ? <MarkdownText className={status === "blocked" && recap ? "mt-3" : undefined}>{objective}</MarkdownText> : null}
+                {status !== "blocked" && recap ? (
+                  <div className="goal-island-recap">
+                    <MarkdownText className="text-muted-foreground">{recap}</MarkdownText>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
