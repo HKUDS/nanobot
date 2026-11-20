@@ -101,11 +101,12 @@ function HostMenuItems({ picker }: { picker: HostPicker }) {
 }
 
 /** Shared sidebar control. Remote frames can only open the trusted shell's menu. */
-export function HostSwitcherView({ picker, status, collapsed = false, portalContainer }: {
+export function HostSwitcherView({ picker, status, collapsed = false, portalContainer, className }: {
   picker: HostPicker | EmbeddedPicker | null;
   status: ConnectionStatus;
   collapsed?: boolean;
   portalContainer?: HTMLElement | null;
+  className?: string;
 }) {
   const { t } = useTranslation();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -128,7 +129,7 @@ export function HostSwitcherView({ picker, status, collapsed = false, portalCont
   const detail = pendingName ? `${current}. ${t("remote.preparing", { name: pendingName })}` : current;
   const button = <Button ref={buttonRef} variant="ghost" size="sm" aria-label={t("remote.switchHost")}
     data-host-switcher data-theme-surface data-theme-ink className={cn("host-no-drag touch-target h-8 min-w-0 gap-2 rounded-xl px-2 text-xs font-normal text-sidebar-content/75 hover:text-sidebar-content",
-      collapsed ? "w-8 justify-center px-0" : "max-w-full flex-1 justify-start")}
+      collapsed ? "w-8 justify-center px-0" : "max-w-full flex-1 justify-start", className)}
     onClick={picker.kind === "embedded" ? () => {
       const rect = buttonRef.current?.getBoundingClientRect();
       if (rect) picker.open({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
