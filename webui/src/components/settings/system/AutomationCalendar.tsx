@@ -8,6 +8,7 @@ import { formControlFocusClassName } from "@/components/ui/form-control";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { SessionAutomationJob } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import "./automation-calendar.css";
 
 type CalendarEntry = {
   id: string;

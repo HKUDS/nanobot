@@ -1489,48 +1489,6 @@
   container-type: inline-size;
 }
 
-@keyframes composer-palette-enter {
-  from {
-    opacity: 0;
-    transform: translateY(var(--palette-enter-y, 4px)) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes composer-palette-preview-in {
-  from {
-    opacity: 0.55;
-    transform: translateY(2px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.composer-palette-surface {
-  --palette-enter-y: 4px;
-  transform-origin: bottom center;
-  animation: composer-palette-enter 130ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.composer-palette-surface[data-placement="below"] {
-  --palette-enter-y: -4px;
-  transform-origin: top center;
-}
-
-.composer-palette-surface[data-placement="beside"] {
-  --palette-enter-y: 0px;
-  transform-origin: left center;
-}
-
-.composer-palette-preview-body {
-  animation: composer-palette-preview-in 110ms ease-out;
-}
-
 .dark .thread-composer-surface,
 .dark .context-inspector-surface,
 .dark .user-message-surface,
@@ -1540,7 +1498,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .thread-composer-surface { transition: var(--theme-paint-transition, none); }
-  .composer-palette-surface, .composer-palette-preview-body { animation: none; }
   .pending-edge-overlay[data-pending-edge-overlay="pending"] .pending-edge-layer-dashed {
     border-color: hsl(var(--muted-foreground) / 0.30);
     animation: none;
@@ -1560,7 +1517,7 @@
 }
 
 @media (forced-colors: active) {
-  .thread-composer-surface, .composer-palette-surface, .context-inspector-surface, .user-message-surface, .side-panel-surface { outline: 1px solid CanvasText; }
+  .thread-composer-surface, .context-inspector-surface, .user-message-surface, .side-panel-surface { outline: 1px solid CanvasText; }
   .user-message-surface-dashed { outline-style: dashed; }
   .user-message-collapsible-masked {
     -webkit-mask-image: none;
@@ -1965,35 +1922,6 @@
         transition: flex-grow 220ms ease-out;
       }
     }
-  }
-  .automation-calendar-grid { display: none; }
-  .automation-calendar-agenda { display: block; }
-  @container automations (min-width: 44rem) {
-    .automation-calendar-grid { display: block; }
-    .automation-calendar-agenda { display: none; }
-    .automation-calendar-weekdays {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-    }
-    .automation-calendar-weekdays > div {
-      padding: 8px 10px;
-      color: hsl(var(--muted-foreground));
-      font-size: 10px;
-      line-height: 16px;
-      text-align: end;
-    }
-    .automation-calendar-month {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-    }
-    .automation-calendar-day {
-      min-block-size: 112px;
-      min-inline-size: 0;
-      border-inline-end: 1px solid hsl(var(--border) / 0.55);
-      border-block-end: 1px solid hsl(var(--border) / 0.55);
-    }
-    .automation-calendar-day:nth-child(7n) { border-inline-end: 0; }
-    .automation-calendar-day:nth-last-child(-n + 7) { border-block-end: 0; }
   }
   .settings-stack > :not([hidden]) ~ :not([hidden]) {
     margin-block-start: var(--settings-module-gap, 20px);

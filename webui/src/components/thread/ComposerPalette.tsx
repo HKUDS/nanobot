@@ -21,6 +21,7 @@ import { logoFallbackUrls } from "@/lib/provider-brand";
 import { sessionHandleColor } from "@/lib/session-handle";
 import type { SessionMention } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import "./composer-palette.css";
 
 const PALETTE_CHROME_PX = 12;
 

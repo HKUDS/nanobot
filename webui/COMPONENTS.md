@@ -46,7 +46,7 @@ Bundled channel marks in `public/brand/channels/` use the SVG paths and brand co
 | `src/components/icons/` | Product-specific icon vocabulary | `product-icons.tsx` |
 | `nanobot/channels/<channel>/webui/` | Channel-owned screens, components, and translations | Feishu assistants, Linear setup, Weixin connection |
 
-Supporting hooks and display-model helpers stay near the feature that owns them. Common theme tokens and reusable CSS treatments live in `src/globals.css`, `tailwind.config.js`, and the relevant `ui/` modules. The component inventory lists `.tsx` modules; pure `.ts` helpers remain discoverable through their callers and source imports.
+Supporting hooks and display-model helpers stay near the feature that owns them. Keep a component’s styles, including its responsive and accessibility variants, next to the component and import them there. Reserve `src/globals.css`, `tailwind.config.js`, and the shared `ui/` modules for theme tokens, document defaults, and treatments used across features. The component inventory lists `.tsx` modules; pure `.ts` helpers remain discoverable through their callers and source imports.
 
 `NanobotClient` adapts WebSocket frames into observations for its `ClientRunLedger`. The ledger owns each chat's message delivery, run identities, clocks, and completion records, and returns effects for the client to apply to its queues and subscribers. A dropped connection makes unconfirmed delivery unknown while durable runs remain unresolved. Wire completion still permits late final messages; canonical completion records suppress matching top-level turn events. `useNanobotStream` owns message projection and render batching, while `ThreadShell` adopts canonical history and confirms completion after the messages commit.
 
