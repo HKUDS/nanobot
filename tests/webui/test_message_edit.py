@@ -94,6 +94,8 @@ async def test_edit_keeps_identity_prefix_and_one_new_input(editing, index):
     assert after.generation != before.generation
     assert after.messages[:-1] == before.messages[:index * 2]
     assert after.messages[-1]["content"] == "replacement"
+    assert after.messages[-1]["input_id"] == "user:new-edit"
+    assert after.get_history(include_runtime_context=True)[-1]["_meta"]["input_id"] == "user:new-edit"
     assert after.metadata["pending_user_turn"] is True
     assert after.metadata["history_edit_receipt"] == {
         "turn_id": "new-edit", "text": "replacement",

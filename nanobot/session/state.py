@@ -27,6 +27,7 @@ from nanobot.session.manager import (
     SessionPolicy,
     fork_session,
 )
+from nanobot.session.message_metadata import input_history_metadata
 from nanobot.session.sqlite_store import SessionConflictError, SqliteSessionStore
 from nanobot.session.types import PARENT_SESSION_KEY, SessionTypes
 from nanobot.utils.cancellation import shield_and_drain
@@ -1075,24 +1076,22 @@ class SessionState:
                 if header is None or not header.policy.persist:
                     raise HistoryEditError("edit_source_changed")
                 previous = header.metadata.get("history_edit_receipt")
-                if isinstance(previous, dict) and previous.get("turn_id") == receipt["turn_id"]:
+                if isinstance(previous, dict) and cast(dict[str, object], previous).get("turn_id") == receipt["turn_id"]:
                     if previous != receipt:
                         raise HistoryEditError("edit_request_conflict")
                     return None
-                if projection is None or any(header.metadata.get(name) for name in _RESERVED_KEYS):
+                resolve = projection
+                if resolve is None or any(header.metadata.get(name) for name in _RESERVED_KEYS):
                     raise HistoryEditError("edit_session_busy")
                 current = self._load(key)
                 assert current is not None
-                target = self._store.project_history(key, lambda history: projection(current, history))
+                target = self._store.project_history(key, lambda history: resolve(current, history))
                 previous_generation = current.generation
                 current.retain_history_prefix(target.model_position)
                 for name in (*self._generation_exclusions, "webui_recovery", "_last_usage", "request_origin", "_stopped_at_iteration_limit"):
                     current.metadata.pop(name, None)
                 current.generation = uuid4().hex
-                current.add_message(
-                    "user", message.content, timestamp=message.timestamp.isoformat(),
-                    webui_turn_id=message.metadata["webui_turn_id"],
-                )
+                current.add_message("user", message.content, **input_history_metadata(message))
                 current.metadata[_PENDING_KEY] = True
                 current.metadata["history_edit_receipt"] = receipt
                 self._store.replace_generation(current, previous_generation=previous_generation, message_start=target.model_position)

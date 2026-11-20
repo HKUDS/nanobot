@@ -1095,8 +1095,10 @@ describe("ThreadShell", () => {
   it("does not hydrate a replacement history with a late trace from the retired generation", async () => {
     const client = makeClient();
     let retired = false;
-    const isRetired = vi.fn((_chatId: string, snapshot: { history_generation?: string }) => retired && snapshot.history_generation === "before");
-    Object.assign(client, { isRetiredHistorySnapshot: isRetired, adoptHistorySnapshot: vi.fn(() => false) });
+    Object.assign(client, {
+      isRetiredHistorySnapshot: (_chatId: string, snapshot: { history_generation?: string }) => retired && snapshot.history_generation === "before",
+      adoptHistorySnapshot: () => false,
+    });
     let resolveOld!: (value: Response) => void;
     let resolveNew!: (value: Response) => void;
     const oldDetail = new Promise<Response>((resolve) => { resolveOld = resolve; });
@@ -1121,7 +1123,8 @@ describe("ThreadShell", () => {
     await act(async () => resolveOld(httpJson({ message_id: "history-aaaaaaaaaaaaaaaaaaaa", events: [
       { event: "message", chat_id: "trace-replaced", projection_id: "trace-shared", kind: "progress", text: 'exec({"command":"echo obsolete suffix"})' },
     ] }) as Response));
-    expect(isRetired).toHaveBeenCalledWith("trace-replaced", { history_generation: "before" });
+    // The old detail completed after the replacement; even reusing its ref cannot revive it.
+    expect(screen.getByText("replacement answer")).toBeVisible();
     expect(document.body).not.toHaveTextContent("obsolete suffix");
     if (!screen.queryByRole("button", { name: /Collapse activity details/ })) {
       fireEvent.click(within(await openMessageActions("replacement answer")).getByRole("button", { name: /Worked/ }));
