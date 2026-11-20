@@ -157,7 +157,7 @@ for (const narrow of [false, true]) {
       await expectMatchingInputLayers(input);
     });
 
-    test(`slash and skill palettes stay compact, aligned, and readable: ${narrow ? "narrow" : "desktop"}, ${theme}`, async ({ page }, info) => {
+    test(`slash and skill palettes match composer width with split preview on desktop: ${narrow ? "narrow" : "desktop"}, ${theme}`, async ({ page }, info) => {
       await page.setViewportSize(narrow ? { width: 320, height: 844 } : { width: 1440, height: 1000 });
       await page.addInitScript(theme => {
         localStorage.setItem("nanobot.locale", "en");
@@ -179,9 +179,12 @@ for (const narrow of [false, true]) {
       const slashBox = await settledBox(slashPalette);
       const surfaceBox = (await surface.boundingBox())!;
       expect(Math.abs(slashBox.x - surfaceBox.x)).toBeLessThanOrEqual(2);
-      if (!narrow) expect(slashBox.width).toBeLessThan(surfaceBox.width);
+      expect(Math.abs(slashBox.width - surfaceBox.width)).toBeLessThanOrEqual(2);
+      const slashPreview = slashPalette.locator("[data-palette-preview]");
+      if (narrow) await expect(slashPreview).toBeHidden();
+      else await expect(slashPreview).toBeVisible();
       expect(await slashPalette.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
-      expect(await slashPalette.locator(":scope > div").evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      expect(await slashPalette.locator(":scope > div").first().evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
       await page.screenshot({ path: info.outputPath("slash-palette.png") });
 
       await input.fill("$");
@@ -191,9 +194,12 @@ for (const narrow of [false, true]) {
       await expect(skillPalette.getByRole("group", { name: "Built-in" })).toBeVisible();
       const skillBox = await settledBox(skillPalette);
       expect(Math.abs(skillBox.x - surfaceBox.x)).toBeLessThanOrEqual(2);
-      if (!narrow) expect(skillBox.width).toBeLessThan(surfaceBox.width);
+      expect(Math.abs(skillBox.width - surfaceBox.width)).toBeLessThanOrEqual(2);
+      const skillPreview = skillPalette.locator("[data-palette-preview]");
+      if (narrow) await expect(skillPreview).toBeHidden();
+      else await expect(skillPreview).toBeVisible();
       expect(await skillPalette.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
-      expect(await skillPalette.locator(":scope > div").evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      expect(await skillPalette.locator(":scope > div").first().evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
       await page.screenshot({ path: info.outputPath("skill-palette.png") });
     });
 
