@@ -218,7 +218,7 @@ for (const width of [320, 390, 1440]) for (const dark of [false, true]) {
       const body = getComputedStyle(el.querySelector(".goal-island-document p")!);
       return { title: Number.parseFloat(title.fontSize), body: Number.parseFloat(body.fontSize), titleFont: title.fontFamily, bodyFont: body.fontFamily };
     });
-    expect(typography.title).toBeCloseTo(typography.body * 1.5, 1);
+    expect(typography.title).toBeGreaterThan(typography.body);
     expect(typography.titleFont).toBe(typography.bodyFont);
     const scrollBody = page.locator(".goal-island-body");
     expect(await scrollBody.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
