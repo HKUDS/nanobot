@@ -348,36 +348,6 @@
     overflow: hidden;
   }
 
-  .kv-cache-not-reused {
-    background: hsl(var(--usage-token) / 0.84);
-  }
-
-  .kv-cache-reused {
-    background-color: hsl(var(--usage-token) / 0.1);
-    background-image: repeating-linear-gradient(
-      135deg,
-      hsl(var(--usage-token) / 0.46) 0,
-      hsl(var(--usage-token) / 0.46) 1px,
-      transparent 1px,
-      transparent 4px
-    );
-  }
-
-  .dark .kv-cache-not-reused {
-    background: hsl(var(--usage-token) / 0.92);
-  }
-
-  .dark .kv-cache-reused {
-    background-color: hsl(var(--usage-token) / 0.15);
-    background-image: repeating-linear-gradient(
-      135deg,
-      hsl(var(--usage-token) / 0.58) 0,
-      hsl(var(--usage-token) / 0.58) 1px,
-      transparent 1px,
-      transparent 4px
-    );
-  }
-
   .composer-model-badge::before {
     content: "";
     position: absolute;
