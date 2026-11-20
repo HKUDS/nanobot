@@ -258,7 +258,9 @@ for (const { width, height, theme } of [
   test(`selects a custom preset's reasoning effort in the themed picker at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height });
     await page.goto(`/browser/fixture.html?case=model-options&group=local&${theme}`);
-    await page.getByRole("button", { name: "Default", exact: true }).click();
+    // Loading an empty thread moves the composer into the welcome layout.
+    const welcome = page.getByTestId("thread-welcome-layout");
+    await welcome.getByRole("button", { name: "Default", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Switch model", exact: true });
     await dialog.getByRole("option", { name: "Custom API", exact: true }).click();
     await page.getByRole("button", { name: "Custom API", exact: true }).click();

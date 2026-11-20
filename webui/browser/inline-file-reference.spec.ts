@@ -49,9 +49,19 @@ test("inferred files wrap without losing copy text or preview actions", async ({
 
   await files.nth(1).click();
   await expect(page.getByLabel("Opened file")).toHaveText(`notes/${"long directory/".repeat(16)}report.md`);
-  await files.first().press("Enter");
+  const first = files.first();
+  await first.press("Enter");
   await expect(page.getByLabel("Opened file")).toHaveText("notes/ready.md");
-  await files.first().press("Shift+F10");
+  await first.click();
+  await expect(first).toHaveCSS("box-shadow", "none");
+  await page.keyboard.press("Shift+F10");
+  const copyMenu = page.getByRole("menu");
+  await expect(copyMenu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(first).toBeFocused();
+  await expect(first).not.toHaveCSS("box-shadow", "none");
+
+  await page.keyboard.press("Shift+F10");
   await page.getByRole("menuitem", { name: "Copy absolute path", exact: true }).click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("notes/ready.md");
   await files.nth(6).hover();
