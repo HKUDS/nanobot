@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
+import math
 import os
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypedDict
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypedDict, cast
 
 from nanobot.agent.tools.web import SEARCH_PROVIDER_OPTIONS
 from nanobot.audio.transcription import resolve_transcription_config
@@ -344,6 +346,42 @@ def update_web_search_settings(config: Config, query: QueryParams) -> tuple[bool
         set_fetch_value("use_jina_reader", parse_bool(use_jina_reader, "use_jina_reader"))
         if web_config.fetch.use_jina_reader != previous_jina_reader:
             restart_required = True
+
+    # MST-specific fields: mstEngines and mstWeights
+    if provider_name == "mst":
+        raw_engines = query_first_alias(query, "mst_engines", "mstEngines")
+        if raw_engines is not None:
+            try:
+                parsed_engines: object = json.loads(raw_engines)
+            except json.JSONDecodeError as exc:
+                raise WebUISettingsError(f"Invalid mst_engines JSON: {exc}") from None
+            if not isinstance(parsed_engines, list):
+                raise WebUISettingsError("mst_engines must be a JSON array of strings")
+            engines: list[str] = []
+            for item in cast(list[object], parsed_engines):
+                if not isinstance(item, str) or not item.strip():
+                    raise WebUISettingsError("mst_engines must be a JSON array of non-empty strings")
+                engines.append(item.strip())
+            set_search_value("mst_engines", engines)
+
+        raw_weights = query_first_alias(query, "mst_weights", "mstWeights")
+        if raw_weights is not None:
+            try:
+                parsed_weights: object = json.loads(raw_weights)
+            except json.JSONDecodeError as exc:
+                raise WebUISettingsError(f"Invalid mst_weights JSON: {exc}") from None
+            if not isinstance(parsed_weights, dict):
+                raise WebUISettingsError("mst_weights must be a JSON object with numeric values")
+            weights: dict[str, float] = {}
+            for key, value in cast(dict[object, object], parsed_weights).items():
+                if (
+                    not isinstance(value, (int, float))
+                    or isinstance(value, bool)
+                    or not math.isfinite(value)
+                ):
+                    raise WebUISettingsError("mst_weights must be a JSON object with numeric values")
+                weights[str(key)] = float(value)
+            set_search_value("mst_weights", weights)
     return changed, restart_required
 
 
