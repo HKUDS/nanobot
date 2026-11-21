@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
-import { Maximize2, Minimize2 } from "lucide-react";
+import { Maximize2, Minimize2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -12,8 +12,8 @@ import { paintGraph, readGraphPalette, type GraphPalette } from "./graph-canvas"
 
 const surface = "context-inspector-surface select-none rounded-[20px] bg-card";
 
-export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch, expanded, onExpand, onOpenFile, onReady, sidebar = false }: {
-  graph: ContextGraph; epoch?: string; expanded: boolean; onExpand?: () => void; onOpenFile?: (path: string) => void; onReady?: (graph: ContextGraph) => void; sidebar?: boolean;
+export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch, expanded, onExpand, onClose, onOpenFile, onReady, sidebar = false }: {
+  graph: ContextGraph; epoch?: string; expanded: boolean; onExpand?: () => void; onClose?: () => void; onOpenFile?: (path: string) => void; onReady?: (graph: ContextGraph) => void; sidebar?: boolean;
 }) {
   const { t } = useTranslation();
   const container = useRef<HTMLDivElement>(null);
@@ -222,7 +222,7 @@ export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch,
         onBlur={() => { focused.current = null; setHovered(null); schedule(); }}
         onClick={() => setActive((path) => path === node.path ? null : node.path)}>{node.name}</button>)}
     </div>), [graph.nodes, active, schedule]);
-  return <div ref={container} className={cn(surface, "relative isolate overflow-clip touch-none cursor-grab active:cursor-grabbing", sidebar ? "min-h-0 flex-1" : expanded ? "h-[min(65dvh,600px)]" : "h-[300px]")}
+  return <div ref={container} className={cn(surface, "relative isolate overflow-clip touch-none cursor-grab active:cursor-grabbing", sidebar ? "min-h-0 flex-1" : expanded ? "h-[min(82dvh,900px)]" : "h-[300px]")}
     onPointerDown={(e) => {
       if (!(e.target instanceof Node) || !e.currentTarget.contains(e.target)) return;
       if (e.button !== 0 || !e.isPrimary || (e.target instanceof Element && e.target.closest("button"))) return;
@@ -273,6 +273,10 @@ export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch,
       interacted.current = false; setView({ k, x: size.width / 2 - (left + right) / 2 * k, y: (size.height + 22) / 2 - (top + bottom) / 2 * k });
     }}>
     <span ref={paletteProbe} aria-hidden className="invisible absolute bg-background text-muted-foreground" />
+    {onClose && <button type="button" onClick={onClose} aria-label={t("common.close")}
+      className="absolute left-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-background/90 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <X size={15} />
+    </button>}
     {onExpand && <button type="button" onClick={onExpand} aria-label={t(expanded ? "thread.composer.context.collapse" : "thread.composer.context.expand")}
       className="absolute right-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-background/90 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}

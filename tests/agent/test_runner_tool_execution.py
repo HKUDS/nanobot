@@ -31,7 +31,7 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
     ({"anyOf": [{"type": "object"}, {"type": "string"}]}, '{"count":12}', '{"count":12}'),
     ({"type": "array", "items": {"type": "integer"}}, '["1","2"]', [1, 2]),
 ])
-async def test_nested_arguments_reach_mcp_without_rewriting_model_history(schema, emitted, expected):
+async def test_mcp_arguments_can_be_corrected_without_rewriting_model_history(schema, emitted, expected):
     from mcp.server.lowlevel import Server
     from mcp.shared.memory import create_connected_server_and_client_session
     from mcp.types import TextContent
@@ -63,18 +63,27 @@ async def test_nested_arguments_reach_mcp_without_rewriting_model_history(schema
         schemas_before = json.dumps(registry.get_definitions())
         call = ToolCallRequest(id="nested", name=tool.name, arguments={"value": emitted})
         original_call = call.to_openai_tool_call()
+        responses = [LLMResponse(content=None, tool_calls=[call])]
+        needs_correction = emitted != expected
+        if needs_correction:
+            corrected = ToolCallRequest(id="corrected", name=tool.name, arguments={"value": expected})
+            responses.append(LLMResponse(content=None, tool_calls=[corrected]))
+        responses.append(LLMResponse(content="done"))
         provider = MagicMock()
-        provider.chat_stream_with_retry = AsyncMock(side_effect=[
-            LLMResponse(content=None, tool_calls=[call]), LLMResponse(content="done"),
-        ])
+        provider.chat_stream_with_retry = AsyncMock(side_effect=responses)
         result = await AgentRunner().run(make_run_spec(
-            provider, tools=registry, model="test-model", max_iterations=2,
+            provider, tools=registry, model="test-model", max_iterations=len(responses),
             initial_messages=[{"role": "user", "content": "echo the value"}],
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         ))
         assert result.final_content == "done"
         assert received == [("echo", {"value": expected})]
         requests = provider.chat_stream_with_retry.await_args_list
+        if needs_correction:
+            error = next(m for m in requests[1].kwargs["messages"] if m.get("role") == "tool")
+            assert "Invalid parameters" in error["content"]
+            assert "value:" in error["content"]
+            assert "is not of type" in error["content"]
         model_call = next(m for m in requests[1].kwargs["messages"] if m.get("tool_calls"))
         assert model_call["tool_calls"] == [original_call]
         assert call.to_openai_tool_call() == original_call

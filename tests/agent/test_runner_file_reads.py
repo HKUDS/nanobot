@@ -121,6 +121,44 @@ async def test_direct_read_without_model_context_never_omits_contents(tmp_path):
     assert "1| alpha" in second
 
 
+async def test_same_file_read_contract_under_two_tool_names(tmp_path):
+    class InspectFileTool(ReadFileTool):
+        @property
+        def name(self) -> str:
+            return "inspect_file"
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "data.txt").write_text("alpha\n", encoding="utf-8")
+    (tmp_path / "private.txt").write_text("private contents", encoding="utf-8")
+    states = FileStates()
+    tools = ToolRegistry()
+    for tool_class in (ReadFileTool, InspectFileTool):
+        tools.register(tool_class(workspace=workspace, allowed_dir=workspace, file_states=states))
+
+    async def run(name, call_id, path, messages=None):
+        settled = []
+        await execute_tool_calls(
+            tools, [ToolCallRequest(id=call_id, name=name, arguments={"path": path})],
+            concurrent=False, external_lookup_counts={}, workspace_violation_counts={},
+            hook=AgentHook(), context=AgentHookContext(iteration=0, messages=[]),
+            model_messages=messages, on_settled=AsyncMock(side_effect=settled.extend),
+        )
+        return settled[0].result
+
+    first = await run("inspect_file", "first", "data.txt")
+    assert "1| alpha" in first
+    history = [{"role": "tool", "tool_call_id": "first", "content": first}]
+    for name in ("read_file", "inspect_file"):
+        denied = await run(name, f"{name}-denied", "../private.txt")
+        assert "outside" in denied.lower()
+        assert "private contents" not in denied
+        assert await run(name, f"{name}-repeat", "data.txt", history) == (
+            "[File unchanged since last read: data.txt]"
+        )
+    assert await run("inspect_file", "missing-result", "data.txt") == first
+
+
 @pytest.mark.parametrize("operation", ["list_dir", "first_read", "forced_read", "repeat_batch"])
 async def test_only_repeat_reads_scan_model_results_once_per_batch(tmp_path, operation):
     tools = _tools(tmp_path)

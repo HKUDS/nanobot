@@ -118,4 +118,3 @@ Authentication failures remain skipped messages. Keep the default `postActionIgn
 - [Chat Apps reference](../chat-apps.md)
 - [Secure local AI agent](./secure-local-ai-agent.md)
 - [AI Agent Memory](./ai-agent-memory.md)
-- [OpenAI-compatible agent API](./openai-compatible-agent-api.md)

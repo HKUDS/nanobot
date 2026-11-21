@@ -11,7 +11,7 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     TurnEndEvent,
 )
-from nanobot.context_graph import ContextGraph, ContextSnapshot
+from nanobot.context_graph import ContextGraph, ContextGraphParts, ContextSnapshot
 from nanobot.events import AgentEvent, CompactionReason, ModelRequestEvent
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
@@ -108,9 +108,11 @@ class ModelRequestWirePayload(_ChatWirePayload):
     usage: NotRequired[dict[str, int]]
     round_usages: NotRequired[list[dict[str, int]]]
     context_window_tokens: NotRequired[int]
+    response_input_ids: NotRequired[list[str]]
 
 
 class ContextCompactionWirePayload(_ChatWirePayload):
+    context_graph: NotRequired[ContextGraph]
     context_snapshot: NotRequired[ContextSnapshot]
     event: Literal["context_compaction"]
     compaction_id: str
@@ -126,6 +128,7 @@ class SubagentTaskWirePayload(_ChatWirePayload):
 class MessageWirePayload(_ChatWirePayload):
     event: Literal["message"]
     text: str
+    side_channel: NotRequired[Literal[True]]
     render_as: NotRequired[Literal["text"]]
     media: NotRequired[list[str]]
     media_urls: NotRequired[list[dict[str, str]]]
@@ -171,6 +174,7 @@ class UserInputWirePayload(_ChatWirePayload):
     created_at_ms: int
     starts_turn: bool
     provenance: NotRequired[dict[str, Any]]
+    input_id: NotRequired[str]
 
 
 class PairingChangedWirePayload(TypedDict):
@@ -253,6 +257,7 @@ class NotificationProjection:
     persistence: WebUIWirePersistence = "transient"
     deliver_offline: bool = False
     attach_turn_metadata: bool = False
+    context_graph_parts: ContextGraphParts | None = None
 
 
 def project_notification(
@@ -269,6 +274,8 @@ def project_notification(
         }
         if context_graph is not None:
             payload["context_graph"] = context_graph
+        if event.phase == "started" and event.response_input_ids:
+            payload["response_input_ids"] = list(event.response_input_ids)
         if event.usage is not None:
             payload["usage"] = event.usage.to_turn_dict()
         payload["round_usages"] = [usage.to_turn_dict() for usage in event.round_usages[-8:]]
@@ -278,8 +285,11 @@ def project_notification(
             payload, persistence="turn_activity", deliver_offline=True, attach_turn_metadata=True,
         )
     if isinstance(event, ContextCompactionEvent):
+        compaction_payload = encode_context_compaction(chat_id, event)
+        if context_graph is not None:
+            compaction_payload["context_graph"] = context_graph
         return NotificationProjection(
-            encode_context_compaction(chat_id, event),
+            compaction_payload,
             persistence="transient" if event.phase == "started" else "turn_activity",
             deliver_offline=True,
             attach_turn_metadata=True,

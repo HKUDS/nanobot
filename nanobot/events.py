@@ -25,6 +25,15 @@ class ModelRequestEvent(AgentEvent):
     round_usages: tuple[LLMUsage, ...] = ()
     context_window_tokens: int | None = None
     request_usage: LLMUsage | None = None
+    # Only set on started: inputs this request is answering, not its full history.
+    response_input_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ResponseInputsEvent(AgentEvent):
+    """Identify the inputs being answered by the next model request."""
+
+    input_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)

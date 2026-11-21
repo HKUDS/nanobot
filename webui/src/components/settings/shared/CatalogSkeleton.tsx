@@ -47,7 +47,7 @@ export function CatalogSkeleton({ label, layout, appActionLabel }: {
             </div>
           ) : <>{icon}{text}</>}
           <div className={cn("flex shrink-0 items-center justify-center",
-            channels && "w-16", skills && "hidden h-[16.5px] w-[92px] justify-end sm:flex",
+            channels && "w-11", skills && "hidden h-[16.5px] w-[92px] justify-end sm:flex",
             appActionLabel && "ml-auto")}>
             {appActionLabel ? <div className={cn(block, "flex h-8 items-center gap-1.5 rounded-full px-3 text-[12px] font-semibold")}>
               <span className="h-4 w-4 shrink-0" />

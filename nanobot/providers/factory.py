@@ -77,6 +77,7 @@ def _make_provider_core(
             default_model=model,
             proxy=proxy,
             extra_body=p.extra_body if p else None,
+            fast_mode=preset.codex_fast_mode,
             provider_name=provider_name,
         )
     elif backend == "xai_grok":
@@ -153,6 +154,7 @@ def _make_provider_core(
         )
 
     provider.generation = preset.to_generation_settings()
+    provider.supports_images = preset.supports_images
     return provider
 
 
@@ -163,6 +165,7 @@ def _inline_fallback_preset(
     return ModelPresetConfig(
         model=fallback.model,
         provider=fallback.provider,
+        supports_images=fallback.supports_images,
         max_tokens=fallback.max_tokens if fallback.max_tokens is not None else primary.max_tokens,
         context_window_tokens=(
             fallback.context_window_tokens
@@ -247,6 +250,7 @@ def _preset_provider_signature(
     return (
         preset.model,
         preset.provider,
+        preset.supports_images,
         provider_name,
         config.get_api_key(preset.model, preset=preset),
         config.get_api_base(preset.model, preset=preset),
@@ -259,6 +263,7 @@ def _preset_provider_signature(
         preset.max_tokens,
         preset.temperature,
         preset.reasoning_effort,
+        preset.codex_fast_mode,
         preset.context_window_tokens,
         preset.api.model_dump_json() if preset.api is not None else None,
         config.network.resolve_proxy(provider_config.use_proxy) if provider_config else None,

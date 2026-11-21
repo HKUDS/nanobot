@@ -398,28 +398,24 @@ class SignalChannel(BaseChannel):
                     return True
         return False
 
-    async def _handle_message(
+    async def _publish_policy_checked_message(
         self,
         sender_id: str,
         chat_id: str,
         content: str,
         media: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
-        session_key: str | None = None,
-        is_dm: bool = False,
-        authorization_id: str | None = None,
-        require_existing_session: bool = False,
-        session_generation: str | None = None,
     ) -> None:
-        """Handle an inbound message whose policy has already been checked.
+        """Publish only an inbound message whose Signal policy has already been checked.
 
+        This is not the base ``_handle_message`` authorization contract; never
+        call it for a message that has not passed ``_check_inbound_policy``.
         ``_check_inbound_policy`` is the authoritative gate for DM/group
         access, so we skip the base-class ``is_allowed()`` check and publish
         directly to the bus.  The denied-DM pairing path calls
         ``super()._handle_message`` instead, which goes through
         ``is_allowed`` and issues a pairing code.
         """
-        del authorization_id
         meta = metadata or {}
         if self.supports_streaming:
             meta = {**meta, "_wants_stream": True}
@@ -431,9 +427,6 @@ class SignalChannel(BaseChannel):
                 content=content,
                 media=media or [],
                 metadata=meta,
-                session_key_override=session_key,
-                session_generation=session_generation,
-                require_existing_session=require_existing_session,
             )
         )
 
@@ -764,7 +757,7 @@ class SignalChannel(BaseChannel):
 
         await self._start_typing(chat_id)
         try:
-            await self._handle_message(
+            await self._publish_policy_checked_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=content,
@@ -776,7 +769,6 @@ class SignalChannel(BaseChannel):
                     "is_group": is_group_message,
                     "group_id": group_id,
                 },
-                is_dm=not is_group_message,
             )
         except Exception:
             await self._stop_typing(chat_id)

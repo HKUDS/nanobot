@@ -239,9 +239,8 @@ async def test_codex_exports_langfuse_usage(codex_peer, reject_upgrade):
 async def test_gateway_continues_image_then_pdf_attachment_turn(codex_peer, tmp_path):
     provider, server, _ = codex_peer
     image = tmp_path / "image.png"
-    image.write_bytes(base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP1kAAAAASUVORK5CYII="
-    ))
+    png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP1kAAAAASUVORK5CYII="
+    image.write_bytes(base64.b64decode(png))
     pdf = tmp_path / "report.pdf"
     writer = PdfWriter()
     writer.add_blank_page(width=100, height=100)
@@ -263,11 +262,11 @@ async def test_gateway_continues_image_then_pdf_attachment_turn(codex_peer, tmp_
         assert len(server.peers) == 1
         assert len(server.requests) == 2
         initial, continued = [body for _, body in server.requests]
-        assert "input_image" in json.dumps(initial["input"])
-        assert any(
-            block.get("type") == "input_text" and str(image) in block["text"]
-            for item in initial["input"] for block in item.get("content", [])
-        )
+        content = next(item["content"] for item in initial["input"] if item.get("role") == "user")
+        assert [b["image_url"] for b in content if b["type"] == "input_image"] == [f"data:image/png;base64,{png}"]
+        texts = [b["text"] for b in content if b["type"] == "input_text"]
+        assert "Describe this image." in texts
+        assert all(str(image) not in text for text in texts)
         assert continued["previous_response_id"] == "resp_1"
         assert "input_image" not in json.dumps(continued["input"])
         assert f"[Attachment: {pdf}]" in continued["input"][0]["content"][0]["text"]

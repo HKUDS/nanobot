@@ -8,7 +8,7 @@ function historyPage(start: number, count = 12, more = start > 0) {
     has_more_before: more, has_more_after: start + count < 52 } };
 }
 
-async function installHistory(page: Page, initialStart = 40, initialCount = 12) {
+async function installHistory(page: Page, initialStart = 40, initialCount = 12, pageContent = historyPage) {
   const reads: string[] = [];
   const pending: Array<(value: "success" | "error") => void> = [];
   let fastResponse = false;
@@ -19,9 +19,9 @@ async function installHistory(page: Page, initialStart = 40, initialCount = 12) 
       prompts: Array.from({ length: 52 }, (_, i) => ({ id: `u${i}`, preview: `Question ${i}`, answerPreview: "Historical answer", turnId: `turn${i}`, cursor: String(i), createdAt: i + 1 })),
     } });
     if (!url.pathname.endsWith("/webui-thread")) return route.fulfill({ json: {} });
-    if (url.pathname.includes("boundary-b")) return route.fulfill({ json: historyPage(0, 2, false) });
+    if (url.pathname.includes("boundary-b")) return route.fulfill({ json: pageContent(0, 2, false) });
     const cursor = url.searchParams.get("before") ?? url.searchParams.get("after");
-    if (cursor === null) return route.fulfill({ json: historyPage(initialStart, initialCount) });
+    if (cursor === null) return route.fulfill({ json: pageContent(initialStart, initialCount) });
     reads.push(url.search);
     const outcome = fastResponse
       ? await new Promise<"success">((resolve) => { releaseFastResponse = () => resolve("success"); })
@@ -29,7 +29,7 @@ async function installHistory(page: Page, initialStart = 40, initialCount = 12) 
     if (outcome === "error") return route.fulfill({ status: 503, body: "History unavailable" });
     const start = url.searchParams.has("after") ? Number(cursor) : Math.max(0, Number(cursor) - 12);
     const count = url.searchParams.has("after") ? 12 : Number(cursor) - start;
-    await route.fulfill({ json: historyPage(start, count, start > 0) });
+    await route.fulfill({ json: pageContent(start, count, start > 0) });
   });
   return {
     reads,
@@ -304,23 +304,149 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   expect(history.reads).toHaveLength(1);
 });
 
-test("archived task results stay with the retained boundary when earlier messages load", async ({ page }) => {
+for (const navigate of [false, true]) {
+  test(`one pull holds its header across non-display pages until content is ready (${navigate ? "navigation" : "latest"})`, async ({ page }) => {
+    const history = await installHistory(page, 40, 12, (start, count, more) => {
+      const payload = historyPage(start, count, more);
+      // Record-level history can return only bookkeeping, with an advancing cursor.
+      return start === (navigate ? 26 : 28) ? { ...payload, events: [] } : payload;
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const { body, header } = await openSettledHistory(page, navigate ? "&navigate=1" : "");
+    if (navigate) {
+      const rail = page.getByTestId("prompt-rail-scroll");
+      await rail.getByRole("button").first().focus();
+      await page.keyboard.press("Home");
+      await page.getByRole("button", { name: "Jump to message: Question 38", exact: true }).click();
+      await expect.poll(() => history.reads.length).toBe(1);
+      history.complete();
+      await expect(body.getByText("Question 38", { exact: true })).toBeInViewport();
+      await stableLayout(body);
+      await body.hover();
+      await page.mouse.wheel(0, 10000);
+      await expect.poll(() => history.reads.length).toBe(2);
+      history.complete();
+      await expect(body.getByText("Question 51", { exact: true })).toBeAttached();
+      await stableLayout(body);
+    }
+    const anchor = navigate ? "Question 38" : "Question 40";
+    await positionAtTop(body);
+    await requestOlderWithWheel(body, history, navigate ? 3 : 1);
+    const held = await expectHeld(body, anchor);
+    history.complete();
+    await expect.poll(() => history.reads.length).toBe(navigate ? 4 : 2);
+    await expect(header).toHaveAttribute("data-state", "loading");
+    await stableLayout(body);
+    await expectCoordinates(body, anchor, held);
+    history.complete();
+    await expect(body.getByText(navigate ? "Question 14" : "Question 16", { exact: true })).toBeAttached();
+    await expect(body.locator(".thread-history-slot")).toHaveCount(0);
+    await stableLayout(body);
+    await expectAnchorCoordinate(body, anchor, held.anchorTop);
+  });
+}
+
+for (const retryWith of ["Blocks button", "boundary wheel"] as const) {
+  test(`navigation older retries the failed cursor after a non-display page (${retryWith})`, async ({ page }) => {
+    const history = await installHistory(page, 40, 12, (start, count, more) => {
+      const payload = historyPage(start, count, more);
+      return start === 26 ? { ...payload, events: [] } : payload;
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const { body, header, slot } = await openSettledHistory(page, "&navigate=1");
+    // Keep the jump away from latest's bottom so setup cannot prefetch newer.
+    await positionAtTop(body);
+    await jumpViaRail(page, 38);
+    await expect.poll(() => history.reads.length).toBe(1);
+    history.complete();
+    await expect(body.getByText("Question 38", { exact: true })).toBeInViewport();
+    await stableLayout(body);
+    await positionAtTop(body);
+    await requestOlderWithWheel(body, history, 2);
+    await expectHeld(body, "Question 38");
+
+    history.complete();
+    await expect.poll(() => history.reads.length).toBe(3);
+    await expect(header).toHaveAttribute("data-state", "loading");
+    await expect(slot).toHaveCSS("height", "48px");
+    history.complete("error");
+    await expect(header).toHaveAttribute("data-state", "error");
+    const retry = page.getByRole("button", { name: "Loading failed. Retry", exact: true });
+    const blocks = retry.locator(".thread-history-blocks");
+    await expect(blocks).toBeInViewport();
+    await expect(blocks).toHaveCSS("color", "rgb(185, 28, 28)");
+    if (retryWith === "Blocks button") await blocks.click();
+    else await requestOlderWithWheel(body, history, 4);
+    await expect.poll(() => history.reads.length).toBe(4);
+    await expect(header).toHaveAttribute("data-state", "loading");
+    expect(history.reads).toEqual([
+      "?limit=24&after=38&include_model_requests=1&context_graph_encoding=references-v1",
+      "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
+      "?limit=24&before=26&include_model_requests=1&context_graph_encoding=references-v1",
+      "?limit=24&before=26&include_model_requests=1&context_graph_encoding=references-v1",
+    ]);
+    history.complete();
+    await expect(body.getByText("Question 14", { exact: true })).toBeAttached();
+    await expect(header).toHaveCount(0);
+    await expect(slot).toHaveCount(0);
+    await stableLayout(body);
+    expect(history.reads).toHaveLength(4);
+  });
+}
+
+test("content settling at the top during preparation does not restore an obsolete reading offset", async ({ page }) => {
   const history = await installHistory(page);
-  await page.route("**/api/sessions/**/subagents", (route) => route.fulfill({ json: { tasks: [{
-    task_id: "legacy", revision: 1, label: "Earlier check", task_description: "Check earlier work",
-    state: "done", phase: "completed", elapsed_seconds: 2, iteration: 1,
-    tool_events: [], usage: null, receipts: {}, result: "Verified", partial: false,
-    stop_reason: null, error: null, origin_turn_id: "legacy-turn", origin_message_id: null,
-    created_at: 100, completed_at: 102,
-  }] } }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { body } = await openSettledHistory(page);
+  const first = body.locator("[data-thread-display-unit]").first();
+  // A plain Markdown fallback can be taller than its final layout above the reading anchor.
+  await first.evaluate((node) => { (node as HTMLElement).style.paddingBottom = "160px"; });
+  await positionAtTop(body);
+  await requestOlderWithWheel(body, history, 1);
+  await expectHeld(body, "Question 40");
+  await first.evaluate((node) => { (node as HTMLElement).style.paddingBottom = ""; });
+  await stableLayout(body);
+  const top = await anchorTop(body, "Question 40");
+  await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBe(0);
+  history.complete();
+  await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
+  await stableLayout(body);
+  await expectAnchorCoordinate(body, "Question 40", top);
+});
+
+test("task results stay with their prompts and retain the reading boundary when earlier messages load", async ({ page }) => {
+  const history = await installHistory(page, 40, 12, (start, count, more) => {
+    const payload = historyPage(start, count, more);
+    return { ...payload, events: payload.events.map(event => ({
+      ...event, turn_id: `turn${event.projection_id.slice(1)}`,
+    })) };
+  });
+  const taskReads: string[][] = [];
+  await page.route("**/api/sessions/**/subagents?*", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    expect(query.get("scope")).toBe("window");
+    const turns = query.getAll("turn_id");
+    taskReads.push(turns);
+    return route.fulfill({ json: { tasks: [
+      { task_id: "current", label: "Current check", origin_turn_id: "turn40" },
+      { task_id: "earlier", label: "Earlier check", origin_turn_id: "turn28" },
+    ].filter(task => turns.includes(task.origin_turn_id)).map((task) => ({
+      ...task, revision: 1, task_description: "Check work",
+      state: "done", phase: "completed", elapsed_seconds: 2, iteration: 1,
+      tool_events: [], usage: null, receipts: {}, result: "Verified", partial: false,
+      stop_reason: null, error: null, origin_message_id: null, created_at: 100, completed_at: 102,
+    })) } });
+  });
   await page.goto("/browser/fixture.html?case=history-boundary&tasks");
   const body = page.getByTestId("thread-message-region");
-  const otherTasks = body.getByRole("region", { name: "Other tasks" });
-  await expect(otherTasks).toBeAttached();
+  const currentResults = body.locator('[data-user-prompt-id="u40"] + [data-subagent-results]');
+  const earlierResults = body.locator('[data-user-prompt-id="u28"] + [data-subagent-results]');
+  await expect(body.locator("[data-subagent-results]")).toHaveCount(1);
+  await expect(currentResults).toHaveCount(1);
   // Clicking an offscreen disclosure scrolls it into view and can prefetch history.
   await positionAtTop(body);
-  await otherTasks.getByRole("button", { name: /Other tasks/ }).click();
-  await expect(otherTasks.getByRole("button", { name: /Earlier check Completed/ })).toBeVisible();
+  await currentResults.locator("[data-subagent-results-summary]").click();
+  await expect(currentResults.getByRole("button", { name: /Current check Completed/ })).toBeVisible();
   await stableLayout(body);
   const originalTop = await positionAtTop(body);
   await body.hover();
@@ -336,9 +462,17 @@ test("archived task results stay with the retained boundary when earlier message
   await expect(page.locator(".thread-history-slot")).toHaveCount(0);
   await stableLayout(body);
   await expectAnchorCoordinate(body, "Question 40", preCompletionAnchorTop);
-  await expect(otherTasks).toHaveCount(1);
-  await expect(otherTasks.getByRole("button", { name: /Other tasks/ })).toHaveAttribute("aria-expanded", "true");
+  await expect(body.locator("[data-subagent-results]")).toHaveCount(2);
+  await expect(currentResults.locator("[data-subagent-results-summary]")).toHaveAttribute("aria-expanded", "true");
+  await expect(currentResults.getByRole("button", { name: /Current check Completed/ })).toBeVisible();
+  await expect(earlierResults.locator("[data-subagent-results-summary]")).toHaveAttribute("aria-expanded", "false");
   expect(history.reads).toHaveLength(1);
+  await earlierResults.locator("[data-subagent-results-summary]").click();
+  await expect(earlierResults.getByRole("button", { name: /Earlier check Completed/ })).toBeVisible();
+  expect(taskReads).toEqual([
+    Array.from({ length: 12 }, (_, index) => `turn${40 + index}`),
+    Array.from({ length: 12 }, (_, index) => `turn${28 + index}`),
+  ]);
 });
 
 test("touch reveals a static partial ready header, arms only on release, and retains a stable full loading header", async ({ browser, baseURL }) => {

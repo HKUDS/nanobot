@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubble";
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
+import { ToastProvider } from "@/components/ui/toast";
 import { setAppLanguage } from "@/i18n";
 import { parseWebuiThreadPayload } from "@/lib/api";
 import * as clipboard from "@/lib/clipboard";
@@ -375,6 +376,91 @@ describe("MessageBubble", () => {
     expect(bubble).toHaveClass("user-message-surface", "bg-secondary/70");
   });
 
+  it("seals the dashed edge into a solid border when the agent picks up a waiting message", () => {
+    const message: UIMessage = {
+      id: "u-pending",
+      role: "user",
+      content: "One more detail",
+      createdAt: Date.now(),
+      deliveryStatus: "accepted",
+    };
+    const { rerender } = render(<MessageBubble message={message} />);
+    const bubble = screen.getByText(message.content);
+    const originalClasses = bubble.className;
+
+    rerender(<MessageBubble message={{ ...message, processingStatus: "pending" }} />);
+    expect(bubble).toHaveClass("user-message-surface-dashed");
+    expect(bubble).toHaveAttribute("data-pending-edge", "pending");
+    expect(bubble.querySelector("[data-pending-edge-overlay='pending']")).toBeInTheDocument();
+    const waitingStatus = screen.getByRole("status");
+    expect(waitingStatus).toHaveClass("sr-only");
+    expect(waitingStatus).toHaveTextContent("Waiting to be processed");
+
+    rerender(<MessageBubble message={{ ...message, processingStatus: "consumed" }} />);
+    expect(bubble.className).toBe(originalClasses);
+    expect(bubble).toHaveAttribute("data-pending-edge", "sealing");
+    const sealingOverlay = bubble.querySelector("[data-pending-edge-overlay='sealing']");
+    expect(sealingOverlay).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    const endEvent = new Event("animationend", { bubbles: true });
+    Object.defineProperty(endEvent, "animationName", { value: "pending-edge-seal" });
+    fireEvent(sealingOverlay!, endEvent);
+
+    expect(bubble).not.toHaveAttribute("data-pending-edge");
+    expect(bubble.querySelector("[data-pending-edge-overlay]")).not.toBeInTheDocument();
+  });
+
+  it("does not play the seal transition for already-consumed or cancelled user messages", () => {
+    const { container, rerender } = render(
+      <MessageBubble
+        message={{
+          id: "u-history-consumed",
+          role: "user",
+          content: "Already consumed",
+          createdAt: Date.now(),
+          processingStatus: "consumed",
+        }}
+      />,
+    );
+    expect(container.querySelector("[data-pending-edge-overlay]")).not.toBeInTheDocument();
+
+    const pending: UIMessage = {
+      id: "u-waiting",
+      role: "user",
+      content: "Never picked up",
+      createdAt: Date.now(),
+      processingStatus: "pending",
+    };
+    rerender(<MessageBubble message={pending} />);
+    expect(container.querySelector("[data-pending-edge-overlay='pending']")).toBeInTheDocument();
+
+    rerender(<MessageBubble message={{ ...pending, processingStatus: undefined }} />);
+    expect(container.querySelector("[data-pending-edge-overlay]")).not.toBeInTheDocument();
+  });
+
+  it("seals media-only waiting user messages when consumed", () => {
+    const mediaMessage: UIMessage = {
+      id: "u-media-pending",
+      role: "user",
+      content: "",
+      createdAt: Date.now(),
+      processingStatus: "pending",
+      media: [{ kind: "file", name: "notes.txt", url: "/api/files/notes.txt" }],
+    };
+    const { container, rerender } = render(<MessageBubble message={mediaMessage} />);
+    expect(container.querySelector("[data-pending-edge-overlay='pending']")).toBeInTheDocument();
+
+    rerender(<MessageBubble message={{ ...mediaMessage, processingStatus: "consumed" }} />);
+    const sealingOverlay = container.querySelector("[data-pending-edge-overlay='sealing']");
+    expect(sealingOverlay).toBeInTheDocument();
+
+    const endEvent = new Event("animationend", { bubbles: true });
+    Object.defineProperty(endEvent, "animationName", { value: "pending-edge-seal" });
+    fireEvent(sealingOverlay!, endEvent);
+    expect(container.querySelector("[data-pending-edge-overlay]")).not.toBeInTheDocument();
+  });
+
   it("renders completed message branches with static wrapper classes", async () => {
     const messages: UIMessage[] = [
       {
@@ -474,7 +560,10 @@ describe("MessageBubble", () => {
     expect(quote).toHaveTextContent("selected assistant excerpt");
     expect(quote).not.toHaveAttribute("title");
     expect(screen.queryByText("Quoted context")).not.toBeInTheDocument();
-    expect(screen.getByText("What about this?")).toBeInTheDocument();
+    const messageBubble = screen.getByText("What about this?");
+    expect(messageBubble).toBeInTheDocument();
+    expect(quote).toHaveClass("rounded-floating");
+    expect(messageBubble).toHaveClass("rounded-floating");
 
     rerender(
       <MessageBubble
@@ -992,6 +1081,22 @@ describe("MessageBubble", () => {
     );
   });
 
+  it("announces clipboard failure and leaves Copy available for another attempt", async () => {
+    const copy = vi.spyOn(clipboard, "copyTextToClipboard").mockResolvedValue(false);
+    try {
+      const message: UIMessage = { id: "copy-failed", role: "assistant", content: "A reply", createdAt: 1 };
+      const { container } = render(<MessageBlockMenuActions message={message} />, { wrapper: ToastProvider });
+      menuActions(container);
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+      const alert = await screen.findByRole("alert");
+      expect(alert.closest("[data-toast-tone=error]")).not.toBeNull();
+      expect(alert).toHaveTextContent("Could not copy. Please try again.");
+      expect(screen.getByRole("button", { name: "Copy" })).toBeEnabled();
+    } finally {
+      copy.mockRestore();
+    }
+  });
+
   it("copies completed assistant replies with the textarea fallback", async () => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -1241,11 +1346,10 @@ describe("MessageBubble", () => {
       reasoningStreaming: true,
     };
 
-    const { container } = render(<MessageBubble message={message} />);
+    render(<MessageBubble message={message} />);
 
     const preview = screen.getByText("Step 1: parse intent. Step 2: compute.");
     expect(preview).toBeInTheDocument();
-    expect(container.querySelector(".reasoning-sheen-stripe")).not.toBeInTheDocument();
     expect(preview).toHaveClass("streaming-text-sheen");
     expect(preview).toHaveAttribute(
       "data-sheen-text",
@@ -1292,7 +1396,7 @@ describe("MessageBubble", () => {
     expect(container.querySelector("h3")).not.toBeInTheDocument();
   });
 
-  it("renders inline file paths as compact file references", async () => {
+  it("keeps complete inline file paths and their preview hints", async () => {
     await import("@/components/MarkdownTextRenderer");
     const message: UIMessage = {
       id: "a-file-path",
@@ -1311,10 +1415,8 @@ describe("MessageBubble", () => {
       expect(references[0].parentElement).toHaveClass("align-baseline");
       expect(references[0].parentElement).toHaveClass("leading-[inherit]");
       expect(references[0]).toHaveClass("items-baseline");
-      expect(references[0]).toHaveTextContent("MarkdownTextRenderer.tsx");
-      expect(references[0]).not.toHaveTextContent("webui/src/components");
-      expect(screen.getByText("index.html")).toBeInTheDocument();
-      expect(references[1]).not.toHaveTextContent("/Users/renxubin");
+      expect(references[0].textContent).toBe("webui/src/components/MarkdownTextRenderer.tsx");
+      expect(references[1].textContent).toBe("/Users/renxubin/.nanobot/workspace/minecraft-fps/index.html");
       expect(references[1]).not.toHaveAttribute("title");
       expect(references[1]).toHaveAttribute(
         "aria-label",
@@ -1405,6 +1507,67 @@ describe("MessageBubble", () => {
     expect(screen.getByRole("button", { name: /view image: growth.svg/i })).toBeInTheDocument();
     expect(container.querySelector('img[src="/api/media/sig/svg"]')).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Download growth.svg" })).not.toBeInTheDocument();
+  });
+
+  it("collapses user messages taller than half the viewport and restores them on toggle or resize", () => {
+    let textHeight = 620;
+    let resize: ResizeObserverCallback | undefined;
+    const disconnect = vi.fn();
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      if (this.tagName === "P" || this.parentElement?.hasAttribute("data-user-message-clip")) {
+        return textHeight;
+      }
+      return 0;
+    });
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) { resize = callback; }
+      observe() {}
+      disconnect = disconnect;
+    });
+
+    try {
+      const content = Array.from({ length: 24 }, (_, i) => `Line ${i + 1}: detailed release log entry`).join("\n");
+      const message: UIMessage = {
+        id: "u-long",
+        role: "user",
+        content,
+        createdAt: Date.now(),
+      };
+      const { container, unmount } = render(<MessageBubble message={message} />);
+
+      const wrapper = container.querySelector("[data-user-text-bubble]")!;
+      const toggle = screen.getByRole("button", { name: "Show more" });
+      const clip = container.querySelector("[data-user-message-clip]") as HTMLElement;
+      expect(wrapper).toHaveAttribute("data-user-message-collapsible", "true");
+      expect(wrapper).toHaveAttribute("data-user-message-collapsed", "true");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveAttribute("data-thread-disclosure", "");
+      expect(toggle.getAttribute("aria-controls")).toBe(container.querySelector("[data-user-text-bubble] > p")?.id);
+      expect(clip).toHaveClass("user-message-collapsible-masked");
+      expect(clip.style.height).toBe("304px");
+
+      fireEvent.click(toggle);
+      expect(wrapper).not.toHaveAttribute("data-user-message-collapsed");
+      expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+      expect(clip).not.toHaveClass("user-message-collapsible-masked");
+      expect(clip.style.height).toBe("620px");
+
+      fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+      expect(wrapper).toHaveAttribute("data-user-message-collapsed", "true");
+      expect(clip.style.height).toBe("304px");
+
+      textHeight = 320;
+      act(() => { resize?.([], {} as ResizeObserver); });
+      expect(wrapper).not.toHaveAttribute("data-user-message-collapsible");
+      expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+
+      unmount();
+      expect(disconnect).toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
   });
 
 });

@@ -654,6 +654,7 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
     assert result.messages[-1] == {
         "role": "assistant",
         "content": "Read the directory twice. More investigation remains.",
+        "_meta": {"response_input_ids": []},
     }
     assert len(calls) == 3
     assert calls[-1]["tools"] is None
@@ -718,7 +719,7 @@ async def test_runner_accounts_for_malformed_retry_and_no_tools_recovery():
     assert result.stop_reason == "completed"
     assert result.messages == [
         {"role": "user", "content": "do task"},
-        {"role": "assistant", "content": "recovered answer"},
+        {"role": "assistant", "content": "recovered answer", "_meta": {"response_input_ids": []}},
     ]
     assert [item["tools"] for item in calls] == [definitions, definitions, None]
     assert ["on_content_delta" in item for item in calls] == [True, True, False]
@@ -986,7 +987,7 @@ async def test_runner_length_recovery_returns_all_segments():
 
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
-        initial_messages=[{"role": "user", "content": "give a long answer"}],
+        initial_messages=[{"role": "user", "content": "give a long answer", "_meta": {"input_id": "long"}}],
         tools=tools,
         model="test-model",
         max_iterations=5,
@@ -1000,6 +1001,7 @@ async def test_runner_length_recovery_returns_all_segments():
         if message.get("role") == "assistant"
     ] == ["first", "second", "third"]
     assert provider.chat_stream_with_retry.await_count == 3
+    assert [m["_meta"]["response_input_ids"] for m in result.messages if m.get("role") == "assistant"] == [["long"]] * 3
 
 
 @pytest.mark.asyncio
@@ -1243,3 +1245,79 @@ async def test_runner_passes_generation_settings_to_provider():
     assert captured["temperature"] == 0.3
     assert captured["max_tokens"] == 8192
     assert captured["reasoning_effort"] == "high"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("automated", [False, True])
+async def test_runner_continuation_preserves_request_ownership(automated):
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="first"), LLMResponse(content="continued"),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    inputs = [
+        {"role": "user", "content": "old", "_meta": {"input_id": "old"}},
+        {"role": "assistant", "content": "old answer"},
+        ({"role": "user", "content": "scheduled", "_automation_turn": True}
+         if automated else {"role": "user", "content": "new", "_meta": {"input_id": "new"}}),
+    ]
+    result = await AgentRunner().run(make_run_spec(
+        provider, initial_messages=inputs, tools=tools, model="test-model",
+        max_iterations=2, max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        continuation_callback=AsyncMock(side_effect=["Continue", None]),
+    ))
+    answers = [m for m in result.messages if m.get("role") == "assistant"][-2:]
+    assert [m["_meta"]["response_input_ids"] for m in answers] == (
+        [[], []] if automated else [["new"], ["new"]]
+    )
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("automated", [False, True])
+async def test_interrupted_output_ownership_survives_persistence_and_later_checkpoint(tmp_path, automated):
+    from nanobot.agent.hook import AgentHook
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.session.manager import Session, SessionManager
+    from nanobot.session.message_metadata import persisted_message
+
+    provider = MagicMock(spec=LLMProvider)
+    calls = 0
+
+    async def chat_stream_with_retry(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await kwargs["on_content_delta"]("partial")
+            return LLMResponse(content="failed", finish_reason="error")
+        return LLMResponse(content="done")
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    hook = AgentHook()
+    hook.wants_streaming = MagicMock(return_value=True)
+    checkpoints = []
+    async def checkpoint(payload):
+        checkpoints.append(payload)
+
+    initial = [{"role": "user", "content": "task", **(
+        {"_automation_turn": True} if automated else {"_meta": {"input_id": "input-1"}}
+    )}]
+    # An injection after the failed request makes the next request and its checkpoint reachable.
+    injection = {"role": "user", "content": "follow up", "_meta": {"input_id": "next"}}
+    drain = AsyncMock(side_effect=[[], [], [injection], [], [], []])
+    result = await AgentRunner().run(make_run_spec(
+        provider, initial_messages=initial, tools=tools, model="test-model",
+        max_iterations=3, max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook, checkpoint_callback=checkpoint, injection_callback=drain,
+    ))
+    interrupted = next(m for m in result.messages if m.get("_interrupted"))
+    assert interrupted["_meta"]["response_input_ids"] == ([] if automated else ["input-1"])
+    manager = SessionManager(tmp_path)
+    manager.save(Session(key="cli:ownership", messages=[persisted_message(m) for m in result.messages]))
+    loaded = manager.read_session_snapshot("cli:ownership")
+    persisted_interrupted = next(m for m in loaded.messages if m.get("_interrupted"))
+    assert persisted_interrupted == persisted_message(interrupted)
+    assert persisted_interrupted["response_input_ids"] == ([] if automated else ["input-1"])
+    assert any(interrupted in cp["preceding_messages"] for cp in checkpoints)

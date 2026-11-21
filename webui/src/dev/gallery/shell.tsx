@@ -4,7 +4,6 @@ import { Trans, useTranslation } from "react-i18next";
 
 import { CapabilityMentionToken } from "@/components/CliAppMentionText";
 import type { CapabilityMentionSegment } from "@/lib/composer-mention-text";
-import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { FileActions } from "@/components/FileActions";
 import { InlineTokenHighlight, INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import { RenameDialog } from "@/components/RenameDialog";
@@ -21,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PaneWorkbench, type WorkbenchPane } from "@/components/workbench/PaneWorkbench";
 import type { HostCompatibility, RemoteProfile } from "@/lib/remote-instances";
-import type { CliAppInfo, McpPresetInfo, SessionAutomationJob, SessionMention, WorkbenchLayout } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SessionMention, WorkbenchLayout } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Sample, StatePicker, type ComponentExample } from "./example";
 import { useGalleryTranslation } from "./i18n";
@@ -58,30 +57,6 @@ function RenamePreview() {
       onConfirm={(next) => { setTitle(next); setOpen(false); }} />
     <p role="status" className="text-xs text-muted-foreground">{g("previews.rename.hint")}</p>
   </div>;
-}
-
-const automations: SessionAutomationJob[] = [
-  { id: "gallery-daily", name: "每日项目摘要", enabled: true, schedule: { kind: "cron", expr: "0 9 * * *", tz: "Asia/Shanghai" }, payload: { message: "Summarize project updates" }, state: { next_run_at_ms: Date.UTC(2026, 9, 14, 1) } },
-  { id: "gallery-hourly", name: "每小时检查", enabled: false, schedule: { kind: "every", every_ms: 3_600_000 }, payload: { message: "Check updates" }, state: {} },
-  { id: "gallery-trigger", name: "发布后检查", enabled: true, schedule: { kind: "local" }, payload: { message: "Check the release", kind: "local_trigger" }, state: {} },
-  { id: "gallery-once", name: "一次性提醒", enabled: true, schedule: { kind: "at", at_ms: Date.UTC(2026, 9, 15, 2) }, payload: { message: "Review the result" }, state: { next_run_at_ms: Date.UTC(2026, 9, 15, 2) } },
-  { id: "gallery-weekly", name: "每周回顾", enabled: true, schedule: { kind: "every", every_ms: 604_800_000 }, payload: { message: "Review the week" }, state: {} },
-];
-
-function DeletePreview() {
-  const { t } = useGalleryTranslation();
-  const [scenario, setScenario] = useState<"single" | "multiple" | "automations">("single");
-  const [open, setOpen] = useState(false);
-  const [deleted, setDeleted] = useState(false);
-  return <>
-    <StatePicker label={t("previews.delete.scenario")} value={scenario} options={["single", "multiple", "automations"]}
-      onChange={(next) => { setScenario(next); setDeleted(false); }} />
-    <Button variant="outline" onClick={() => { setDeleted(false); setOpen(true); }}>{t("previews.delete.open")}</Button>
-    <DeleteConfirm open={open} title="组件设计" count={scenario === "multiple" ? 3 : 1}
-      automations={scenario === "automations" ? automations : []} onCancel={() => setOpen(false)}
-      onConfirm={() => { setDeleted(true); setOpen(false); }} />
-    <p role="status" className="mt-4 text-xs text-muted-foreground">{t(deleted ? "previews.delete.confirmed" : "previews.delete.hint")}</p>
-  </>;
 }
 
 function InlineTokensPreview() {
@@ -244,9 +219,6 @@ export const shellExamples: ComponentExample[] = [
   { title: "previews.rename.title", files: ["RenameDialog"], Preview: RenamePreview,
     description: "previews.rename.description", options: "previews.rename.options",
     code: '<RenameDialog open={open} title={title} dialogTitle="Rename group" description="Give this group a name." placeholder="Group name" onCancel={close} onConfirm={rename} />' },
-  { title: "previews.delete.title", files: ["DeleteConfirm"], Preview: DeletePreview,
-    description: "previews.delete.description", options: "previews.delete.options",
-    code: '<DeleteConfirm open={open} title="组件设计" count={1} automations={jobs} onCancel={close} onConfirm={remove} />' },
   { title: "previews.inlineTokens.title", files: ["SlashCommandText", "InlineTokenHighlight", "SessionHandleLabel"], Preview: InlineTokensPreview,
     description: "previews.inlineTokens.description", options: "previews.inlineTokens.options",
     code: '<SlashCommandText command="/status" />\n<SessionHandleLabel id={session.id}>@design</SessionHandleLabel>\n<InlineTokenHighlight color="var(--inline-token-highlight)">review</InlineTokenHighlight>' },

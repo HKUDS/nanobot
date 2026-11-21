@@ -158,11 +158,41 @@ export default {
   plugins: [
     animate,
     typography,
-    plugin(({ addVariant, addUtilities }) => {
+    plugin(({ addVariant, matchVariant, addUtilities }) => {
+      const textEntrySelector =
+        'textarea, [contenteditable], input:not([type="button"], [type="submit"], [type="reset"], [type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="image"])';
       addUtilities({ ".rounded-full": { cornerShape: "round" } });
       // Revealing controls on emulated hover can consume the first Safari
       // tap. Keep these sidebar hover effects on hover-capable pointers.
       addVariant("media-hover", "@media (hover: hover)");
+      // Gate non-text-entry focus rings on keyboard navigation modality so
+      // Shift+click, Escape, and shortcuts after pointer clicks stay quiet.
+      addVariant(
+        "focus-visible",
+        `&:focus-visible:where(:root:not([data-focus-modality="pointer"]) *, ${textEntrySelector})`,
+      );
+      matchVariant(
+        "group-focus-visible",
+        (_value, { modifier }) => (
+          modifier
+            ? `:where(:root:not([data-focus-modality="pointer"])) :merge(.group\\/${modifier}):focus-visible &`
+            : `:where(:root:not([data-focus-modality="pointer"])) :merge(.group):focus-visible &`
+        ),
+        { values: { DEFAULT: "" } },
+      );
+      matchVariant(
+        "peer-focus-visible",
+        (_value, { modifier }) => (
+          modifier
+            ? `:where(:root:not([data-focus-modality="pointer"])) :merge(.peer\\/${modifier}):focus-visible ~ &`
+            : `:where(:root:not([data-focus-modality="pointer"])) :merge(.peer):focus-visible ~ &`
+        ),
+        { values: { DEFAULT: "" } },
+      );
+      addVariant(
+        "has-focus-visible",
+        ':where(:root:not([data-focus-modality="pointer"])) &:has(:focus-visible)',
+      );
     }),
   ],
 };

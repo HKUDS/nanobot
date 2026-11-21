@@ -5,29 +5,31 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import heapq
-import os
 import re
 import threading
 import time
-from contextlib import suppress
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
+from itertools import count, islice
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Iterator, TypeVar
 
 from nanobot.agent.tools._search_content import ContentPage, MatchTooLargeError
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.filesystem import ListDirTool, _FsTool
+from nanobot.execution.files import FileSearch, NotRegularFileError
 from nanobot.utils.document import (
     DocumentLineSource,
     LocatedDocumentLine,
     PdfPageRangeError,
-    open_document_line_source,
 )
 
 _DEFAULT_HEAD_LIMIT = 250
 _DEFAULT_FILE_HEAD_LIMIT = 200
 _DOCUMENT_EXTENSIONS = frozenset({".pdf", ".docx", ".xlsx", ".pptx"})
+_NON_TEXT_BYTES = re.compile(rb"[\x01-\x08\x0e-\x1f]")
 T = TypeVar("T")
 _TYPE_GLOB_MAP = {
     "py": ("*.py", "*.pyi"),
@@ -58,7 +60,6 @@ class _FindFilesEntry:
     path: Path
     rel_path: str
     display_path: str
-    name: str
     is_dir: bool
 
 
@@ -120,11 +121,19 @@ def _match_glob(rel_path: str, name: str, pattern: str) -> bool:
     return any(_match_path_glob(rel_path, name, item) for item in _glob_patterns(pattern))
 
 
+@lru_cache(maxsize=128)
+def _glob_path_parts(pattern: str) -> tuple[str, ...]:
+    return PurePosixPath(pattern).parts
+
+
 def _match_path_glob(rel_path: str, name: str, normalized: str) -> bool:
     if not normalized:
         return False
     if "/" in normalized:
-        pattern_parts = PurePosixPath(normalized).parts
+        pattern_parts = _glob_path_parts(normalized)
+        if len(pattern_parts) == 2 and pattern_parts[0] == "**" and pattern_parts[1] != "**":
+            # Any directory prefix is allowed, so only the basename matters.
+            return rel_path != "." and fnmatch.fnmatchcase(name, pattern_parts[1])
         path_parts = PurePosixPath(rel_path).parts
         matched = [True] + [False] * len(path_parts)
         for part in pattern_parts:
@@ -146,8 +155,7 @@ def _is_binary(raw: bytes) -> bool:
     sample = raw[:4096]
     if not sample:
         return False
-    non_text = sum(byte < 9 or 13 < byte < 32 for byte in sample)
-    return (non_text / len(sample)) > 0.2
+    return len(_NON_TEXT_BYTES.findall(sample)) / len(sample) > 0.2
 
 
 def _paginate(items: list[T], limit: int | None, offset: int) -> tuple[list[T], bool]:
@@ -172,6 +180,12 @@ def _text_page(
     return page, truncated
 
 
+def _ordered_prefix(
+    items: Iterable[T], size: int | None, *, key: Callable[[T], tuple[float, str]],
+) -> list[T]:
+    return sorted(items, key=key) if size is None else heapq.nsmallest(size, items, key=key)
+
+
 def _pagination_note(limit: int | None, offset: int, truncated: bool) -> str | None:
     if truncated:
         if limit is None:
@@ -192,14 +206,6 @@ def _matches_type(name: str, file_type: str | None) -> bool:
     return any(fnmatch.fnmatch(name.lower(), pattern.lower()) for pattern in patterns)
 
 
-def _matches_query(rel_path: str, query: str | None) -> bool:
-    if not query:
-        return True
-    haystack = rel_path.lower()
-    terms = [part for part in query.lower().split() if part]
-    return all(term in haystack for term in terms)
-
-
 class _SearchTool(_FsTool):
     _IGNORE_DIRS = ListDirTool._IGNORE_DIRS | {".worktrees", ".worktree", ".nanobot"}
     _MAX_SCAN_PATHS = 500_000
@@ -210,25 +216,30 @@ class _SearchTool(_FsTool):
     def _ignore_directory(cls, name: str) -> bool:
         return name in cls._IGNORE_DIRS or name.startswith(".verify-")
 
-    def _display_path(self, target: Path, root: Path) -> str:
-        workspace = self._display_workspace()
-        if workspace:
-            with suppress(ValueError):
-                return target.relative_to(workspace).as_posix()
-        return target.relative_to(root).as_posix()
-
-    def _iter_files(self, root: Path, budget: _SearchBudget) -> Iterable[Path]:
-        if root.is_file():
+    def _iter_files(self, tree: FileSearch, budget: _SearchBudget) -> Iterable[Path]:
+        if not tree.is_directory:
             budget.visit_path()
-            yield root
+            yield tree.root
             return
 
-        for dirpath, dirnames, filenames in os.walk(root):
+        pending = [tree.root]
+        while pending:
             budget.checkpoint()
-            for _ in dirnames:
-                budget.visit_path()
-            dirnames[:] = sorted(d for d in dirnames if not self._ignore_directory(d))
-            current = Path(dirpath)
+            current = pending.pop()
+            directories: list[str] = []
+            filenames: list[str] = []
+            try:
+                for entry in tree.entries(current):
+                    budget.checkpoint()
+                    if not entry.is_directory:
+                        filenames.append(entry.name)
+                    else:
+                        budget.visit_path()
+                        if not entry.is_directory_link and not self._ignore_directory(entry.name):
+                            directories.append(entry.name)
+            except OSError:
+                continue
+            pending.extend(current / name for name in sorted(directories, reverse=True))
             for filename in sorted(filenames):
                 budget.visit_path()
                 yield current / filename
@@ -298,101 +309,103 @@ class FindFilesTool(_SearchTool):
             },
         }
 
-    def _entry(self, path: Path, root: Path, *, is_dir: bool) -> _FindFilesEntry:
-        display_path = self._display_path(path, root)
-        return _FindFilesEntry(
-            path=path,
-            rel_path=path.relative_to(root).as_posix(),
-            display_path=display_path,
-            name=path.name,
-            is_dir=is_dir,
-        )
-
-    def _push_directory_entries(
+    def _directory_entries(
         self,
+        tree: FileSearch,
         directory: Path,
-        root: Path,
-        frontier: list[tuple[str, int, _FindFilesEntry]],
-        sequence: int,
+        entry_for: Callable[[Path, bool], _FindFilesEntry],
         budget: _SearchBudget,
-    ) -> int:
+    ) -> Iterator[_FindFilesEntry]:
         budget.checkpoint()
         try:
-            with os.scandir(directory) as entries:
-                for raw_entry in entries:
-                    budget.visit_path()
-                    try:
-                        is_dir = raw_entry.is_dir(follow_symlinks=False)
-                        # os.walk yields special files and broken file symlinks,
-                        # but does not descend into directory symlinks by default.
-                        if not is_dir and raw_entry.is_symlink() and raw_entry.is_dir():
-                            continue
-                    except OSError:
-                        continue
-                    if is_dir and self._ignore_directory(raw_entry.name):
-                        continue
-
-                    entry = self._entry(Path(raw_entry.path), root, is_dir=is_dir)
-                    sort_path = entry.display_path + ("/" if is_dir else "")
-                    heapq.heappush(frontier, (sort_path, sequence, entry))
-                    sequence += 1
+            for raw_entry in tree.entries(directory):
+                budget.visit_path()
+                is_dir = raw_entry.is_directory
+                if raw_entry.is_directory_link or (is_dir and self._ignore_directory(raw_entry.name)):
+                    continue
+                yield entry_for(directory / raw_entry.name, is_dir)
         except OSError:
             # os.walk silently skips directories that cannot be listed. Preserve
             # that behavior while still allowing cancellation and budget errors
             # to propagate from the explicit checkpoints above.
             pass
-        return sequence
 
     def _iter_paths(
         self,
-        root: Path,
+        tree: FileSearch,
         *,
         include_dirs: bool,
+        entry_for: Callable[[Path, bool], _FindFilesEntry],
         budget: _SearchBudget,
     ) -> Iterable[_FindFilesEntry]:
         budget.checkpoint()
-        if root.is_file():
+        root = tree.root
+        if not tree.is_directory:
             budget.visit_path()
-            yield self._entry(root, root.parent, is_dir=False)
+            yield entry_for(root, False)
             return
 
         if include_dirs:
-            yield self._entry(root, root, is_dir=True)
+            yield entry_for(root, True)
 
-        frontier: list[tuple[str, int, _FindFilesEntry]] = []
-        sequence = self._push_directory_entries(root, root, frontier, 0, budget)
+        sequence = count()
+
+        def queue(directory: Path) -> Iterator[tuple[str, int, _FindFilesEntry]]:
+            for entry in self._directory_entries(tree, directory, entry_for, budget):
+                sort_path = entry.display_path + ("/" if entry.is_dir else "")
+                yield sort_path, next(sequence), entry
+
+        frontier = list(queue(root))
+        heapq.heapify(frontier)
         while frontier:
             budget.checkpoint()
             _, _, entry = heapq.heappop(frontier)
             if entry.is_dir:
                 if include_dirs:
                     yield entry
-                sequence = self._push_directory_entries(
-                    entry.path,
-                    root,
-                    frontier,
-                    sequence,
-                    budget,
-                )
+                for item in queue(entry.path):
+                    heapq.heappush(frontier, item)
             else:
                 yield entry
 
-    @staticmethod
-    def _matches_entry(
-        entry: _FindFilesEntry,
+    def _iter_modified(
+        self,
+        tree: FileSearch,
         *,
-        query: str | None,
-        glob: str | None,
-        file_type: str | None,
-    ) -> bool:
-        if glob and not _match_glob(entry.rel_path, entry.name, glob):
-            return False
-        if entry.is_dir:
-            if file_type:
-                return False
-        elif not _matches_type(entry.name, file_type):
-            return False
-        return _matches_query(entry.display_path, query)
+        include_dirs: bool,
+        entry_for: Callable[[Path, bool], _FindFilesEntry],
+        matches: Callable[[_FindFilesEntry], bool],
+        budget: _SearchBudget,
+    ) -> Iterator[tuple[str, float]]:
+        budget.checkpoint()
+        root = tree.root
+        if not tree.is_directory or include_dirs:
+            if not tree.is_directory:
+                budget.visit_path()
+            entry = entry_for(root, tree.is_directory)
+            if matches(entry):
+                yield entry.display_path + ("/" if entry.is_dir else ""), tree.modified(root)
+        if not tree.is_directory:
+            return
+
+        # Modified order needs a full scan; only the final selection needs a heap.
+        pending = [root]
+        while pending:
+            directory = pending.pop()
+            selected: list[_FindFilesEntry] = []
+            for entry in self._directory_entries(tree, directory, entry_for, budget):
+                if entry.is_dir:
+                    pending.append(entry.path)
+                    if not include_dirs:
+                        continue
+                if matches(entry):
+                    selected.append(entry)
+            if selected:
+                times = tree.modified_children(
+                    directory, [entry.path.name for entry in selected], checkpoint=budget.checkpoint,
+                )
+                for entry, mtime in zip(selected, times, strict=True):
+                    yield entry.display_path + ("/" if entry.is_dir else ""), mtime
 
     async def execute(
         self,
@@ -416,8 +429,8 @@ class FindFilesTool(_SearchTool):
                 file_type=type,
                 include_dirs=include_dirs,
                 sort=sort,
-                head_limit=head_limit,
-                offset=offset,
+                head_limit=int(head_limit) if head_limit is not None else None,
+                offset=int(offset),
                 cancelled=cancelled,
             )
         except asyncio.CancelledError:
@@ -444,10 +457,11 @@ class FindFilesTool(_SearchTool):
         started_at = time.monotonic()
         if cancelled.is_set():
             raise _SearchCancelledError
-        target = self._resolve(path or ".")
-        if not target.exists():
+        try:
+            tree = self._files.search_tree(path or ".")
+        except FileNotFoundError:
             return ToolResult.error(f"Error: Path not found: {path}")
-        if not (target.is_dir() or target.is_file()):
+        except NotRegularFileError:
             return ToolResult.error(f"Error: Unsupported path: {path}")
 
         if glob:
@@ -467,47 +481,41 @@ class FindFilesTool(_SearchTool):
             max_paths=self._MAX_SCAN_PATHS,
         )
 
-        def matching_entries() -> Iterator[tuple[str, float]]:
-            for entry in self._iter_paths(
-                target,
-                include_dirs=include_dirs,
-                budget=budget,
-            ):
-                if not self._matches_entry(
-                    entry,
-                    query=query,
-                    glob=glob,
-                    file_type=file_type,
-                ):
-                    continue
-                mtime = 0.0
-                if sort == "modified":
-                    try:
-                        mtime = entry.path.stat().st_mtime
-                    except OSError:
-                        pass
-                suffix = "/" if entry.is_dir else ""
-                yield entry.display_path + suffix, mtime
+        terms = query.lower().split() if query else []
+        root = tree.root if tree.is_directory else tree.root.parent
+        workspace = self._files.display_workspace
+        display_root = workspace if workspace and root.is_relative_to(workspace) else root
 
-        matches: list[tuple[str, float]]
+        def entry_for(path: Path, is_dir: bool) -> _FindFilesEntry:
+            rel_path = path.relative_to(root).as_posix()
+            displayed = rel_path if display_root == root else path.relative_to(display_root).as_posix()
+            return _FindFilesEntry(path, rel_path, displayed, is_dir)
+
+        def matches_entry(entry: _FindFilesEntry) -> bool:
+            if glob and not _match_glob(entry.rel_path, entry.path.name, glob):
+                return False
+            if file_type and (entry.is_dir or not _matches_type(entry.path.name, file_type)):
+                return False
+            if not terms:
+                return True
+            haystack = entry.display_path.lower()
+            return all(term in haystack for term in terms)
+
+        selection_size = None if limit is None else offset + limit + 1
         try:
             if sort == "modified":
-                if limit is None:
-                    matches = sorted(matching_entries(), key=lambda item: (-item[1], item[0]))
-                else:
-                    selection_size = offset + limit + 1
-                    matches = heapq.nsmallest(
-                        selection_size,
-                        matching_entries(),
-                        key=lambda item: (-item[1], item[0]),
-                    )
+                by_modified = self._iter_modified(
+                    tree, include_dirs=include_dirs, entry_for=entry_for, matches=matches_entry, budget=budget,
+                )
+                matches = _ordered_prefix(by_modified, selection_size, key=lambda item: (-item[1], item[0]))
+                paths = [item[0] for item in matches]
             else:
-                selection_size = None if limit is None else offset + limit + 1
-                matches = []
-                for match in matching_entries():
-                    matches.append(match)
-                    if selection_size is not None and len(matches) >= selection_size:
-                        break
+                matching_paths = (
+                    entry.display_path + ("/" if entry.is_dir else "")
+                    for entry in self._iter_paths(tree, include_dirs=include_dirs, entry_for=entry_for, budget=budget)
+                    if matches_entry(entry)
+                )
+                paths = list(islice(matching_paths, selection_size))
             budget.checkpoint()
         except _SearchBudgetExceededError as exc:
             if str(exc) == "paths":
@@ -519,7 +527,6 @@ class FindFilesTool(_SearchTool):
                 "narrow path, query, glob, or type and retry."
             )
 
-        paths = [item[0] for item in matches]
         paged, truncated = _text_page(paths, limit, offset, self._MAX_RESULT_CHARS)
         if not paged:
             return "No files found"
@@ -627,11 +634,7 @@ class GrepTool(_SearchTool):
         }
 
     @staticmethod
-    def _open_source(path: Path, pages: str | None, max_bytes: int) -> DocumentLineSource | None:
-        if path.suffix.lower() in _DOCUMENT_EXTENSIONS:
-            return open_document_line_source(path, pages=pages)
-        with path.open("rb") as file:
-            raw = file.read(max_bytes + 1)
+    def _text_source(raw: bytes) -> DocumentLineSource | None:
         if _is_binary(raw):
             return None
         try:
@@ -667,9 +670,11 @@ class GrepTool(_SearchTool):
                 self._execute_sync,
                 pattern=pattern, path=path, glob=glob, type=type, pages=pages,
                 case_insensitive=case_insensitive, fixed_strings=fixed_strings,
-                output_mode=output_mode, context_before=context_before, context_after=context_after,
-                max_matches=max_matches, max_results=max_results, head_limit=head_limit,
-                offset=offset, cancelled=cancelled,
+                output_mode=output_mode, context_before=int(context_before), context_after=int(context_after),
+                max_matches=int(max_matches) if max_matches is not None else None,
+                max_results=int(max_results) if max_results is not None else None,
+                head_limit=int(head_limit) if head_limit is not None else None,
+                offset=int(offset), cancelled=cancelled,
             )
         except asyncio.CancelledError:
             cancelled.set()
@@ -709,10 +714,11 @@ class GrepTool(_SearchTool):
             budget.checkpoint()
             if glob:
                 _glob_patterns(glob)
-            target = self._resolve(path or ".")
-            if not target.exists():
+            try:
+                tree = self._files.search_tree(path or ".")
+            except FileNotFoundError:
                 return ToolResult.error(f"Error: Path not found: {path}")
-            if not (target.is_dir() or target.is_file()):
+            except NotRegularFileError:
                 return ToolResult.error(f"Error: Unsupported path: {path}")
 
             flags = re.IGNORECASE if case_insensitive else 0
@@ -733,85 +739,97 @@ class GrepTool(_SearchTool):
             content_page = ContentPage(limit, offset, self._MAX_RESULT_CHARS, self._MAX_RENDERED_LINE_CHARS)
             skipped_binary = 0
             skipped_large = 0
-            document_errors: list[str] = []
+            document_error: str | None = None
             document_continuations: list[str] = []
-            counts: dict[str, int] = {}
+            counts: Counter[str] = Counter()
             file_mtimes: dict[str, float] = {}
-            root = target if target.is_dir() else target.parent
+            root = tree.root if tree.is_directory else tree.root.parent
             max_file_bytes = (
-                self._MAX_EXPLICIT_FILE_BYTES if target.is_file() else self._MAX_FILE_BYTES
+                self._MAX_FILE_BYTES if tree.is_directory else self._MAX_EXPLICIT_FILE_BYTES
             )
 
-            for file_path in self._iter_files(target, budget):
-                rel_path = file_path.relative_to(root).as_posix()
-                if glob and not _match_glob(rel_path, file_path.name, glob):
-                    continue
-                if not _matches_type(file_path.name, type):
-                    continue
-                display_path = self._display_path(file_path, root)
-
-                try:
-                    file_size = file_path.stat().st_size
-                except OSError:
-                    skipped_binary += 1
-                    continue
-                if file_size > max_file_bytes:
-                    skipped_large += 1
-                    continue
-                try:
-                    mtime = file_path.stat().st_mtime
-                except OSError:
-                    mtime = 0.0
-                source_iterator: Iterator[LocatedDocumentLine] | None = None
-                is_document = file_path.suffix.lower() in _DOCUMENT_EXTENSIONS
-                try:
-                    source = self._open_source(file_path, pages, max_file_bytes)
-                    if source is None:
-                        skipped_binary += 1
+            workspace = self._files.display_workspace
+            display_root = workspace if workspace and root.is_relative_to(workspace) else root
+            with tree.search_bytes_reader() as read_bytes:
+                for file_path in self._iter_files(tree, budget):
+                    rel_path = file_path.relative_to(root).as_posix()
+                    if glob and not _match_glob(rel_path, file_path.name, glob):
                         continue
-                    source_iterator = source.lines
-                    if source.continuation:
-                        document_continuations.append(
-                            f"({display_path}: continue PDF search with {source.continuation})"
-                        )
-                    source_lines = checked_lines(source_iterator)
+                    if not _matches_type(file_path.name, type):
+                        continue
+                    display_path = rel_path if display_root == root else file_path.relative_to(display_root).as_posix()
 
-                    file_had_match = False
-                    if output_mode == "content":
-                        content_page.scan(display_path, source_lines, regex, context_before, context_after)
-                    else:
-                        for line in source_lines:
-                            if not line.searchable or regex.search(line.text) is None:
+                    source: DocumentLineSource | None = None
+                    is_document = file_path.suffix.lower() in _DOCUMENT_EXTENSIONS
+                    file_matches = 0
+                    try:
+                        if is_document:
+                            try:
+                                file = tree.read_file(file_path)
+                            except OSError:
+                                skipped_binary += 1
                                 continue
-                            file_had_match = True
-                            if output_mode == "count":
-                                counts[display_path] = counts.get(display_path, 0) + 1
+                            if file.size > max_file_bytes:
+                                skipped_large += 1
                                 continue
-                            break
-                except (_SearchCancelledError, _SearchBudgetExceededError, MatchTooLargeError):
-                    raise
-                except Exception as e:
-                    if not is_document:
-                        raise
-                    if target.is_file():
-                        if isinstance(e, PdfPageRangeError):
-                            return ToolResult.error(
-                                f"Error: Invalid PDF page range '{pages}': {e!s}."
+                            mtime = file.modified
+                            source = file.document_lines(pages=pages)
+                        else:
+                            contents = read_bytes(file_path, max_file_bytes)
+                            if contents is None:
+                                skipped_binary += 1
+                                continue
+                            if contents.data is None:
+                                skipped_large += 1
+                                continue
+                            mtime = contents.modified
+                            source = self._text_source(contents.data)
+                        if source is None:
+                            skipped_binary += 1
+                            continue
+                        if source.continuation and len(document_continuations) < 10:
+                            document_continuations.append(
+                                f"({display_path}: continue PDF search with {source.continuation})"
                             )
-                        return ToolResult.error(
-                            f"Error searching document {display_path}: {e!s}"
-                        )
-                    skipped_binary += 1
-                    document_errors.append(f"{display_path}: {e!s}")
-                    continue
-                finally:
-                    close = getattr(source_iterator, "close", None)
-                    if close is not None:
-                        close()
-                if file_had_match:
-                    file_mtimes[display_path] = mtime
-                if content_page.stopped:
-                    break
+                        source_lines = checked_lines(source.lines)
+
+                        if output_mode == "content":
+                            content_page.scan(display_path, source_lines, regex, context_before, context_after)
+                        else:
+                            for line in source_lines:
+                                if not line.searchable or regex.search(line.text) is None:
+                                    continue
+                                file_matches += 1
+                                if output_mode != "count":
+                                    break
+                    except (_SearchCancelledError, _SearchBudgetExceededError, MatchTooLargeError):
+                        raise
+                    except Exception as e:
+                        if not is_document:
+                            raise
+                        if not tree.is_directory:
+                            if isinstance(e, PdfPageRangeError):
+                                return ToolResult.error(
+                                    f"Error: Invalid PDF page range '{pages}': {e!s}."
+                                )
+                            return ToolResult.error(
+                                f"Error searching document {display_path}: {e!s}"
+                            )
+                        skipped_binary += 1
+                        if document_error is None:
+                            document_error = f"{display_path}: {e!s}"
+                        continue
+                    finally:
+                        if source is not None:
+                            source.close()
+                        # A document can fail after yielding matches. Keep the count
+                        # of those lines even though the failed file is not ranked.
+                        if file_matches and output_mode == "count":
+                            counts[display_path] += file_matches
+                    if file_matches:
+                        file_mtimes[display_path] = mtime
+                    if content_page.stopped:
+                        break
 
             no_matches = f"No matches found for pattern '{pattern}' in {path}"
             notes: list[str] = []
@@ -820,8 +838,9 @@ class GrepTool(_SearchTool):
                 if note:
                     notes.append(note)
             else:
-                ordered_files = sorted(
-                    file_mtimes, key=lambda name: (-file_mtimes.get(name, 0.0), name),
+                ordered_files = _ordered_prefix(
+                    file_mtimes, None if limit is None else offset + limit + 1,
+                    key=lambda name: (-file_mtimes[name], name),
                 )
                 entries = (
                     [f"{name}: {counts[name]}" for name in ordered_files]
@@ -840,9 +859,9 @@ class GrepTool(_SearchTool):
                 notes.append(f"(skipped {skipped_binary} binary/unreadable files)")
             if skipped_large:
                 notes.append(f"(skipped {skipped_large} large files)")
-            if document_errors:
-                notes.append(f"(first document error: {document_errors[0]})")
-            notes.extend(document_continuations[:10])
+            if document_error is not None:
+                notes.append(f"(first document error: {document_error})")
+            notes.extend(document_continuations)
             if output_mode == "count" and counts:
                 notes.append(
                     f"(total matches: {sum(counts.values())} in {len(counts)} files)"

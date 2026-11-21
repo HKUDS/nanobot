@@ -369,13 +369,6 @@ def test_build_skills_summary_keeps_absolute_roots_for_selected_project(tmp_path
     assert str(project.resolve()) not in summary
 
 
-def test_bundled_memory_skill_uses_agent_owned_path(tmp_path: Path) -> None:
-    memory = SkillsLoader(tmp_path).load_skill("memory")
-
-    assert memory is not None
-    assert "`History log` path from the system prompt" in memory
-
-
 def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"
@@ -676,6 +669,6 @@ def test_context_skills_observe_resolved_alias_and_share_discovery(tmp_path, mon
     with capture_sources() as sources:
         content = loader.load_skills_for_context(["legacy", "canonical"])
     assert content.count("# Instructions") == 2
-    assert [source.path for source in sources] == [path, path]
-    assert all(source.content == "# Instructions" for source in sources)
+    assert [source.path for source in sources.sources] == [path, path]
+    assert all(source.content == "# Instructions" for source in sources.sources)
     assert len(discoveries) == 1

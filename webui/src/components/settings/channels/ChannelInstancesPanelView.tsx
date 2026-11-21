@@ -23,7 +23,6 @@ import {
 } from "@/components/settings/channels/ChannelIdentity";
 import { Button } from "@/components/ui/button";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
-import { logoFallbackUrls } from "@/lib/provider-brand";
 import type {
   NanobotChannelInstanceInfo,
   NanobotFeatureInfo,
@@ -344,8 +343,8 @@ function ChannelInstanceAvatar({
 }) {
   const presentation = channelUiPresentation(feature.name, feature.webui);
   const [avatarFailed, setAvatarFailed] = useState(false);
-  const fallbackLogoUrls = useMemo(() => logoFallbackUrls(presentation?.logoUrl), [presentation?.logoUrl]);
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(fallbackLogoUrls);
+  const brandLogoUrl = presentation?.logoUrl;
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brandLogoUrl ? [brandLogoUrl] : undefined);
   const remoteAvatarUrl = !avatarFailed ? instance.avatar_url?.trim() : "";
   const imageUrl = remoteAvatarUrl || (showBrandLogos ? logoUrl : "");
   const Icon = presentation?.icon;

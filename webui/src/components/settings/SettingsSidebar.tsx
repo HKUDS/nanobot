@@ -29,6 +29,8 @@ import {
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 
+const SIDEBAR_ROW = "touch-target flex h-9 w-full items-center justify-start gap-2 rounded-xl px-2.5 text-left text-ui font-normal";
+
 const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fallback: string }> = [
   { key: "overview", icon: OverviewIcon, fallback: "Overview" },
   { key: "appearance", icon: AppearanceIcon, fallback: "Appearance" },
@@ -130,7 +132,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
                 aria-current={active ? "page" : undefined}
                 onClick={() => onSelectSection(key)}
                 className={cn(
-                  "touch-target flex h-9 w-full items-center gap-2 rounded-xl px-2.5 text-left text-ui",
+                  SIDEBAR_ROW,
                   SIDEBAR_SELECTION_ITEM_CLASS,
                   active
                     ? "text-sidebar-accent-foreground"
@@ -147,9 +149,9 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
         </SidebarSelectionHighlight>
       </nav>
 
-      <div className="pt-2 lg:mt-auto lg:pt-4">
+      <div className="mt-auto grid gap-1 pt-4">
         {onRestart ? (
-          <div>
+          <>
             {restartPending ? (
               <p id="settings-restart-status" role="status" className="sr-only">
                 {t("settings.status.savedRestartApply")}
@@ -161,7 +163,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
               onClick={onRestart}
               disabled={isRestarting}
               aria-describedby={restartPending ? "settings-restart-status" : undefined}
-              className={cn("h-9 w-full justify-start gap-2 rounded-control px-2.5 text-ui settings-hover",
+              className={cn(SIDEBAR_ROW, "settings-hover",
                 restartPending && !isRestarting
                   ? "settings-restart-pending text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300"
                   : "text-sidebar-content hover:text-foreground")}
@@ -170,20 +172,20 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
                 : <RestartIcon className="h-4 w-4" aria-hidden />}
               <span>{restartLabel}</span>
             </Button>
-          </div>
+          </>
         ) : null}
         {onLogout && !hostChromeInset ? (
           <Button
             type="button"
             variant="ghost"
             onClick={onLogout}
-            className="hidden h-9 w-full justify-start gap-2 rounded-control px-2.5 text-ui text-sidebar-content hover:bg-destructive/8 hover:text-destructive lg:flex"
+            className={cn(SIDEBAR_ROW, "text-sidebar-content hover:bg-destructive/8 hover:text-destructive")}
           >
             <LogOut className="h-4 w-4" aria-hidden />
             <span>{t("app.account.logout")}</span>
           </Button>
         ) : null}
-        {hostNavigation && <div className="mt-2 flex min-w-0"><HostSwitcher /></div>}
+        {hostNavigation && <HostSwitcher className={SIDEBAR_ROW} />}
       </div>
     </aside>
   );

@@ -7,7 +7,6 @@ import {
 } from "@/components/settings/system/AppsSettings";
 import type { SystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import {
-  fetchApiService,
   fetchAutomations,
   fetchNanobotFeatures,
 } from "@/lib/api";
@@ -28,9 +27,6 @@ export function useSystemSettingsEffects({
   pageVisible,
 }: SystemSettingsEffectsOptions) {
   const {
-    setApiService,
-    setApiServiceError,
-    setApiServiceLoading,
     setAutomations,
     setAutomationsError,
     setAutomationsLoading,
@@ -135,28 +131,6 @@ export function useSystemSettingsEffects({
       document.removeEventListener("visibilitychange", refreshOnFocus);
     };
   }, [activeSection, getToken, pageVisible]);
-
-  useEffect(() => {
-    if (activeSection !== "runtime") return;
-    let cancelled = false;
-    setApiServiceLoading(true);
-    fetchApiService(getToken())
-      .then((payload) => {
-        if (!cancelled) {
-          setApiService(payload);
-          setApiServiceError(null);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setApiServiceError((err as Error).message);
-      })
-      .finally(() => {
-        if (!cancelled) setApiServiceLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSection, getToken]);
 
   useEffect(() => {
     if (activeSection !== "apps" || !pageVisible) return;

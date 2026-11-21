@@ -47,7 +47,7 @@ Start with workspace restriction:
 - Use environment variables for provider keys, bot tokens, and mailbox passwords.
 - Use [separate instances and workspaces](../multiple-instances.md) for data that must not share memory. Project selection inside one instance does not isolate memory. Use separate OS accounts or containers for mutually untrusted users.
 - Prefer [pairing](../configuration.md#pairing) for DM-capable chat apps. Slack and Mattermost DMs default to open access: set `dm.policy` to `"allowlist"` to require approval. Configure group access separately; mention-only controls when the bot responds, not who is trusted.
-- Bind WebUI, WebSocket, and API services to localhost unless remote access is intentional. Share [WebUI access](../webui.md#sharing-access) only with trusted administrators; it has no per-user roles or private topic ownership.
+- Bind WebUI and WebSocket listeners to localhost unless remote access is intentional. Share [WebUI access](../webui.md#sharing-access) only with trusted administrators; it has no per-user roles or private topic ownership.
 
 ## Security notes
 

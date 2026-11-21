@@ -2,7 +2,7 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Generator
+from collections.abc import Collection, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -93,7 +93,9 @@ class SkillsLoader:
             entries.append({"name": name, "path": str(skill_file), "source": source})
         return entries
 
-    def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
+    def list_skills(
+        self, filter_unavailable: bool = True, *, exclude: Collection[str] = (),
+    ) -> list[dict[str, str]]:
         """
         List all available skills.
 
@@ -104,9 +106,9 @@ class SkillsLoader:
             List of skill info dicts with 'name', 'path', 'source'.
         """
         with self.snapshot():
-            return self._list_skills(filter_unavailable)
+            return self._list_skills(filter_unavailable, exclude)
 
-    def _list_skills(self, filter_unavailable: bool) -> list[dict[str, str]]:
+    def _list_skills(self, filter_unavailable: bool, exclude: Collection[str]) -> list[dict[str, str]]:
         snapshot = self._snapshot.get()
         if snapshot is not None and snapshot.entries is not None:
             skills = snapshot.entries
@@ -114,6 +116,8 @@ class SkillsLoader:
             skills = self._discover_skills()
             if snapshot is not None:
                 snapshot.entries = skills
+        if exclude:
+            skills = [skill for skill in skills if skill["name"] not in exclude]
         if filter_unavailable:
             return [skill for skill in skills if self._check_requirements(self._get_skill_meta(skill["name"]))]
         return skills
@@ -204,14 +208,14 @@ class SkillsLoader:
             ]
         return "\n\n---\n\n".join(parts)
 
-    def get_explicitly_invoked_skills(self, text: str) -> list[str]:
+    def get_explicitly_invoked_skills(self, text: str, *, exclude: Collection[str] = ()) -> list[str]:
         """Resolve ``$skill-name`` references to enabled, available skills."""
         references = list(_SKILL_REFERENCE.finditer(text))
         if not references:
             return []
         available = {
             entry["name"]
-            for entry in self.list_skills(filter_unavailable=True)
+            for entry in self.list_skills(filter_unavailable=True, exclude=exclude)
         }
         aliases = self._skill_aliases()
         invoked: list[str] = []
@@ -225,16 +229,20 @@ class SkillsLoader:
     def build_explicit_skill_runtime_context(
         self,
         text: str,
+        *,
+        exclude: Collection[str] = (),
     ) -> RuntimeContextBlock | None:
         """Load non-always skills explicitly invoked by the current message."""
         with self.snapshot():
-            return self._build_explicit_skill_runtime_context(text)
+            return self._build_explicit_skill_runtime_context(text, exclude)
 
-    def _build_explicit_skill_runtime_context(self, text: str) -> RuntimeContextBlock | None:
-        skill_names = self.get_explicitly_invoked_skills(text)
+    def _build_explicit_skill_runtime_context(
+        self, text: str, exclude: Collection[str],
+    ) -> RuntimeContextBlock | None:
+        skill_names = self.get_explicitly_invoked_skills(text, exclude=exclude)
         if not skill_names:
             return None
-        always_active = set(self.get_always_skills())
+        always_active = set(self.get_always_skills(exclude=exclude))
         skill_names = [name for name in skill_names if name not in always_active]
         content = self.load_skills_for_context(skill_names)
         if not content:
@@ -271,7 +279,7 @@ class SkillsLoader:
             return self._build_skills_summary(exclude, workspace=workspace)
 
     def _build_skills_summary(self, exclude: set[str] | None, *, workspace: Path | None) -> str:
-        all_skills = self.list_skills(filter_unavailable=True)
+        all_skills = self.list_skills(filter_unavailable=True, exclude=exclude or ())
         if not all_skills:
             return ""
 
@@ -285,11 +293,7 @@ class SkillsLoader:
             ("Built-in skills", "builtin", self.builtin_skills),
         )
         for label, source, root in groups:
-            entries = [
-                entry
-                for entry in all_skills
-                if entry["source"] == source and (not exclude or entry["name"] not in exclude)
-            ]
+            entries = [entry for entry in all_skills if entry["source"] == source]
             if not entries:
                 continue
 
@@ -396,15 +400,15 @@ class SkillsLoader:
         raw_meta = self.get_skill_metadata(name) or {}
         return self._parse_nanobot_metadata(raw_meta.get("metadata"))
 
-    def get_always_skills(self) -> list[str]:
+    def get_always_skills(self, *, exclude: Collection[str] = ()) -> list[str]:
         """Get skills marked as always=true that meet requirements."""
         with self.snapshot():
-            return self._get_always_skills()
+            return self._get_always_skills(exclude)
 
-    def _get_always_skills(self) -> list[str]:
+    def _get_always_skills(self, exclude: Collection[str]) -> list[str]:
         return [
             entry["name"]
-            for entry in self.list_skills(filter_unavailable=True)
+            for entry in self.list_skills(filter_unavailable=True, exclude=exclude)
             if (meta := self.get_skill_metadata(entry["name"]) or {})
             and (
                 self._parse_nanobot_metadata(meta.get("metadata")).get("always")

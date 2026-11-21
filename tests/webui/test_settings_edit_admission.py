@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +17,7 @@ from nanobot.providers.factory import load_provider_snapshot
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.webui import settings_api
 from nanobot.webui.http_utils import http_json_response
+from nanobot.webui.settings_contracts import MutationParams
 from nanobot.webui.settings_routes import WebUISettingsRouter
 from nanobot.webui.settings_services import WebUISettingsServices
 
@@ -96,12 +96,9 @@ async def test_model_save_commits_before_refreshing_next_session_admission(
         assert prior.context_window_tokens == cached_preset.context_window_tokens == 100_000
         assert (await admit("draft-only")).context_window_tokens == 100_000
 
-        path = "/api/settings/model-configurations/update"
-        request = SimpleNamespace(path=path, headers=Headers())
-        request._nanobot_webui_mutation_request = True
-        request._nanobot_webui_mutation_payload = draft
-        request._nanobot_trusted_proxy_authenticated = True
-        pending_save = asyncio.create_task(router.dispatch(None, request, path))
+        pending_save = asyncio.create_task(router.dispatch_mutation(
+            None, Headers(), "settings.model_configuration.update", MutationParams(draft),
+        ))
         assert await asyncio.to_thread(before_save.wait, 5)
         assert not pending_save.done()
         assert disk_window() == 100_000
@@ -117,7 +114,7 @@ async def test_model_save_commits_before_refreshing_next_session_admission(
 
         allow_return.set()
         response = await asyncio.wait_for(pending_save, 5)
-        assert response.status_code == 200, json.loads(response.body)
+        assert response.status_code == 200, response.message
         assert agent.runtime_resolver.runtime.context_window_tokens == 500_000
         next_runtime = await admit("after-success")
         next_preset = await admit("after-success-preset", explicit_preset=True)

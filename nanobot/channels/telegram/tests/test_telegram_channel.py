@@ -374,7 +374,6 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     assert builder.get_updates_request_value.inner is poll_req
     assert callable(app.updater.start_polling_kwargs["error_callback"])
     assert any(cmd.command == "status" for cmd in app.bot.commands)
-    assert any(cmd.command == "history" for cmd in app.bot.commands)
     assert any(cmd.command == "skill" for cmd in app.bot.commands)
     assert any(cmd.command == "dream" for cmd in app.bot.commands)
     assert any(cmd.command == "dream_log" for cmd in app.bot.commands)
@@ -2532,9 +2531,12 @@ async def test_forward_command_normalizes_telegram_safe_dream_aliases() -> None:
 
 def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
     pat = TelegramChannel.TELEGRAM_BUS_SLASH_COMMAND_RE
-    assert pat.fullmatch("/history")
-    assert pat.fullmatch("/history 5")
+    assert pat.fullmatch("/dream_log")
+    assert pat.fullmatch("/dream_log abc123")
     assert pat.fullmatch("/goal ship the feature")
+    assert pat.fullmatch("/cancel_goal")
+    assert pat.fullmatch("/cancel_goal@nanobot_bot")
+    assert any(command.command == "cancel_goal" for command in TelegramChannel.BOT_COMMANDS)
     assert pat.fullmatch("/trigger")
     assert pat.fullmatch("/trigger PR review")
     assert pat.fullmatch("/pairing list")
@@ -2580,6 +2582,7 @@ async def test_on_help_includes_restart_command() -> None:
     assert "/evaluator_prompt" in help_text
     assert "/compact" in help_text
     assert "/goal" in help_text
+    assert "/cancel_goal" in help_text
     assert "/trigger" in help_text
     assert "/pairing" in help_text
     assert "/model" in help_text

@@ -1,5 +1,5 @@
 import { SettingsPage } from "@/components/settings/SettingsPage";
-import type { SettingsExitGuard, SettingsSectionKey } from "@/components/settings/contracts";
+import type { SettingsExitGuard, SettingsFocusTarget, SettingsSectionKey } from "@/components/settings/contracts";
 import { useSettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import type { ThemePreference } from "@/hooks/useTheme";
@@ -11,6 +11,7 @@ interface SettingsViewProps {
   registerExitGuard?: (guard: SettingsExitGuard | null) => void;
   themePreference: ThemePreference;
   initialSection?: SettingsSectionKey;
+  focusTarget?: SettingsFocusTarget;
   initialSettings?: SettingsPayload | null;
   showSidebar?: boolean;
   mainNavigationExpanded?: boolean;
@@ -41,6 +42,7 @@ export function SettingsView({
   registerExitGuard,
   themePreference,
   initialSection = "overview",
+  focusTarget,
   initialSettings = null,
   showSidebar = true,
   mainNavigationExpanded = false,
@@ -74,6 +76,7 @@ export function SettingsView({
   return (
     <SettingsPage
       registerExitGuard={registerExitGuard}
+      focusTarget={focusTarget}
       controller={controller}
       themePreference={themePreference}
       showSidebar={showSidebar}

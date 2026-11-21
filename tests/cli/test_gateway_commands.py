@@ -337,7 +337,8 @@ def test_gateway_background_does_not_claim_a_foreground_gateway(tmp_path):
     assert result.exit_code == 1
     assert "cannot be" in result.stdout
     assert "detached in place" in result.stdout
-    assert "Stop it in its current terminal" in result.stdout
+    assert "service manager" in result.stdout
+    assert "nanobot gateway stop" in result.stdout
 
 
 def test_gateway_rejects_conflicting_modes(tmp_path):
@@ -522,7 +523,8 @@ def test_gateway_restart_explains_foreground_lifecycle(tmp_path):
     result = runner.invoke(app, ["gateway", "restart"])
 
     assert result.exit_code == 1
-    assert "attached to a foreground terminal" in result.stdout
+    assert "running in the foreground" in result.stdout
+    assert "service manager" in result.stdout
 
 
 def test_gateway_install_service_uses_service_installer(tmp_path):

@@ -165,5 +165,5 @@ def test_persisted_webui_session_prefix_has_one_production_owner() -> None:
 
 
 def test_runtime_exports_compatibility_protocol_helpers() -> None:
-    assert runtime._is_valid_chat_id("unified:default")  # pyright: ignore[reportPrivateUsage]
+    assert runtime._is_valid_chat_id("chat:branch-2")  # pyright: ignore[reportPrivateUsage]
     assert not runtime._is_valid_chat_id("../escape")  # pyright: ignore[reportPrivateUsage]

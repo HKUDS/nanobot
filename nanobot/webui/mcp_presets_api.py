@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Mapping, cast
 
+from loguru import logger
+
 from nanobot.agent.plugins import (
     AgentPlugin,
     discover_agent_plugins,
@@ -23,15 +25,17 @@ from nanobot.agent.tools.mcp_oauth import (
     mcp_oauth_has_credentials,
 )
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.apps.cli import CliAppManager
 from nanobot.apps.protocol import app_manifest, compact_dict
+from nanobot.config.errors import ConfigLoadError
 from nanobot.config.loader import load_config, resolve_config_env_vars, save_config
 from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.config.schema import MCPServerConfig
 from nanobot.utils.helpers import ensure_dir
 from nanobot.webui.mcp_presets import MCP_PRESETS, McpPreset, McpPresetField
-
-QueryParams = dict[str, list[str]]
+from nanobot.webui.settings_contracts import QueryParams, parameter_value
+from nanobot.webui.settings_contracts import query_first as _query_first
 
 if TYPE_CHECKING:
     from nanobot.webui.settings_services import WebUISettingsConfig
@@ -79,11 +83,6 @@ def _favicon_url(domain: str) -> str:
 
 
 
-def _query_first(query: QueryParams, key: str) -> str | None:
-    values = query.get(key)
-    return values[0] if values else None
-
-
 def _query_value(query: QueryParams, key: str) -> str | None:
     raw = _query_first(query, key)
     if raw is None:
@@ -114,8 +113,10 @@ def _known_preset_names() -> set[str]:
 
 def _known_mcp_names(config_path: Path | None = None) -> set[str]:
     names = _known_preset_names()
-    with suppress(Exception):
+    try:
         names.update(load_config(config_path).tools.mcp_servers)
+    except ConfigLoadError:
+        logger.debug("Could not load configured MCP server names; using built-in presets")
     return names
 
 
@@ -600,8 +601,9 @@ def mcp_presets_payload(
         if name not in known
     ]
     existing_names = {str(row["name"]) for row in (*preset_rows, *custom_rows)}
-    plugin_rows = [
-        _agent_plugin_payload(plugin)
+    managed_plugins = CliAppManager(workspace=config.workspace_path).managed_plugin_owners()
+    plugin_rows: list[dict[str, Any]] = [
+        _agent_plugin_payload(plugin) | {"managed_by_cli": managed_plugins.get(plugin.root)}
         for plugin in discover_agent_plugins(config.workspace_path)
         if f"plugin-{plugin.name}" not in existing_names
     ]
@@ -656,39 +658,36 @@ def _display_name_for(name: str, preset: McpPreset | None = None) -> str:
     return preset.display_name if preset is not None else name
 
 
-def _action_message(action: str, preset: McpPreset, *, ok: bool = True) -> dict[str, Any]:
-    verb = {
-        "enable": "Enabled",
-        "remove": "Removed",
-        "test": "Checked",
-    }.get(action, "Updated")
-    payload: dict[str, Any] = {
-        "ok": ok,
-        "message": f"{verb} MCP preset for {preset.display_name}.",
-    }
+def _action_message(action: Literal["enable", "remove"], preset: McpPreset) -> dict[str, Any]:
     if action == "enable":
-        payload["installed"] = True
-        payload["verification"] = ["config_present"]
-    elif action == "remove":
-        payload["removed"] = True
-        payload["verification"] = ["config_absent"]
-    return payload
+        return {
+            "ok": True,
+            "message": f"Enabled MCP preset for {preset.display_name}.",
+            "installed": True,
+            "verification": ["config_present"],
+        }
+    return {
+        "ok": True,
+        "message": f"Removed MCP preset for {preset.display_name}.",
+        "removed": True,
+        "verification": ["config_absent"],
+    }
 
 
-def _server_action_message(action: str, name: str, *, ok: bool = True) -> dict[str, Any]:
+def _server_action_message(
+    action: Literal["custom", "tools", "remove", "reconnect"], name: str,
+) -> dict[str, Any]:
     verb = {
         "custom": "Saved",
-        "import": "Imported",
-        "import-cursor": "Imported",
         "tools": "Updated tools for",
         "remove": "Removed",
         "reconnect": "Retried connection for",
-    }.get(action, "Updated")
+    }[action]
     payload: dict[str, Any] = {
-        "ok": ok,
+        "ok": True,
         "message": f"{verb} MCP server {name}.",
     }
-    if action in {"custom", "import", "import-cursor"}:
+    if action == "custom":
         payload["installed"] = True
         payload["verification"] = ["config_present"]
     elif action == "remove":
@@ -752,13 +751,17 @@ async def mcp_presets_test_action(
     preset = _preset_by_name_optional(name)
     display_name = _display_name_for(name, preset)
 
-    try:
-        config = resolve_config_env_vars(
+    def _load_resolved_config():
+        return resolve_config_env_vars(
             load_config(config_path) if config_path is not None else load_config(),
             config_path=config_path,
         )
+
+    try:
+        config = await asyncio.to_thread(_load_resolved_config)
     except ValueError as exc:
-        return mcp_presets_payload(
+        return await asyncio.to_thread(
+            mcp_presets_payload,
             last_action={
                 "ok": False,
                 "message": _scrub_test_error(str(exc)),
@@ -774,9 +777,16 @@ async def mcp_presets_test_action(
     if cfg is None:
         raise McpPresetError(f"{display_name} is not enabled", status=404)
 
-    status = _status_for(preset, cfg) if preset is not None else (
-        "missing_dependency" if cfg.command and not _command_available(cfg.command) else "configured"
-    )
+    def _preflight_status() -> tuple[str, bool]:
+        cmd_ok = True if not cfg.command else _command_available(cfg.command)
+        resolved = (
+            _status_for(preset, cfg)
+            if preset is not None
+            else ("missing_dependency" if not cmd_ok else "configured")
+        )
+        return resolved, cmd_ok
+
+    status, cmd_available = await asyncio.to_thread(_preflight_status)
     if status == "missing_credentials":
         last_action: dict[str, Any] = {
             "ok": False,
@@ -786,9 +796,11 @@ async def mcp_presets_test_action(
             "tool_names": [],
             "checked_at": _checked_at(),
         }
-        return mcp_presets_payload(last_action=last_action, config_path=config_path)
+        return await asyncio.to_thread(
+            mcp_presets_payload, last_action=last_action, config_path=config_path,
+        )
 
-    if cfg.command and not _command_available(cfg.command):
+    if cfg.command and not cmd_available:
         last_action = {
             "ok": False,
             "message": f"{display_name} requires '{cfg.command}' on PATH.",
@@ -797,7 +809,9 @@ async def mcp_presets_test_action(
             "tool_names": [],
             "checked_at": _checked_at(),
         }
-        return mcp_presets_payload(last_action=last_action, config_path=config_path)
+        return await asyncio.to_thread(
+            mcp_presets_payload, last_action=last_action, config_path=config_path,
+        )
 
     registry = ToolRegistry()
     stacks: dict[str, Any] = {}
@@ -859,15 +873,20 @@ async def mcp_presets_test_action(
 
     tool_names = last_action.get("tool_names", [])
     preview = {name: tool_names} if tool_names else None
-    return mcp_presets_payload(
+    return await asyncio.to_thread(
+        mcp_presets_payload,
         last_action=last_action,
         tool_preview=preview,
         config_path=config_path,
     )
 
 
-def _parse_json_value(raw: str | None, *, fallback: Any) -> Any:
-    if raw is None or not raw.strip():
+def _parse_json_value(raw: Any, *, fallback: Any) -> Any:
+    if raw is None:
+        return fallback
+    if not isinstance(raw, str):
+        return raw
+    if not raw.strip():
         return fallback
     try:
         return json.loads(raw)
@@ -875,10 +894,8 @@ def _parse_json_value(raw: str | None, *, fallback: Any) -> Any:
         raise McpPresetError(f"invalid JSON: {exc.msg}") from exc
 
 
-def _parse_string_list(raw: str | None) -> list[str]:
-    if raw is None or not raw.strip():
-        return []
-    parsed = _parse_json_value(raw, fallback=None)
+def _parse_string_list(raw: Any) -> list[str]:
+    parsed = _parse_json_value(raw, fallback=[])
     if isinstance(parsed, list):
         items = cast(list[object], parsed)
         if all(isinstance(item, str) for item in items):
@@ -888,7 +905,7 @@ def _parse_string_list(raw: str | None) -> list[str]:
     raise McpPresetError("expected a JSON string array")
 
 
-def _parse_string_map(raw: str | None) -> dict[str, str]:
+def _parse_string_map(raw: Any) -> dict[str, str]:
     parsed = _parse_json_value(raw, fallback={})
     if not isinstance(parsed, dict):
         raise McpPresetError("expected a JSON object")
@@ -901,8 +918,8 @@ def _parse_string_map(raw: str | None) -> dict[str, str]:
     return out
 
 
-def _parse_enabled_tools(raw: str | None) -> list[str]:
-    if raw is None or not raw.strip():
+def _parse_enabled_tools(raw: Any) -> list[str]:
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
         return ["*"]
     values = _parse_string_list(raw)
     if "*" in values:
@@ -964,22 +981,48 @@ def _validated_server_name(name: str) -> str:
     return name.strip().lower()
 
 
+def _build_mcp_server_config(
+    *,
+    transport_raw: str | None,
+    command: str,
+    url: str,
+    auth_raw: Any,
+    args: list[str],
+    env: dict[str, str],
+    cwd: str,
+    headers: dict[str, str],
+    use_proxy: bool,
+    tool_timeout: int,
+    enabled_tools: list[str],
+    stdio_error: str,
+    remote_error: str,
+) -> MCPServerConfig:
+    transport = _normalize_transport(transport_raw, command=command, url=url)
+    if transport == "stdio" and not command:
+        raise McpPresetError(stdio_error)
+    if transport in {"sse", "streamableHttp"} and not url:
+        raise McpPresetError(remote_error)
+    auth = _normalize_auth(auth_raw, transport=transport, url=url, headers=headers)
+    return MCPServerConfig(
+        type=transport,
+        auth=auth,
+        command=command if transport == "stdio" else "",
+        args=args,
+        env=env,
+        cwd=cwd if transport == "stdio" else "",
+        url=url if transport in {"sse", "streamableHttp"} else "",
+        headers=headers,
+        use_proxy=use_proxy,
+        tool_timeout=tool_timeout,
+        enabled_tools=enabled_tools,
+    )
+
+
 def _custom_server_from_query(query: QueryParams) -> tuple[str, MCPServerConfig]:
     name = _validated_server_name((_query_first(query, "name") or "").strip())
     command = (_query_first(query, "command") or "").strip()
     url = (_query_first(query, "url") or "").strip()
-    transport = _normalize_transport(_query_first(query, "transport"), command=command, url=url)
-    if transport == "stdio" and not command:
-        raise McpPresetError("stdio MCP servers require a command")
-    if transport in {"sse", "streamableHttp"} and not url:
-        raise McpPresetError("remote MCP servers require a URL")
-    headers = _parse_string_map(_query_first(query, "headers"))
-    auth = _normalize_auth(
-        _query_first(query, "auth"),
-        transport=transport,
-        url=url,
-        headers=headers,
-    )
+    headers = _parse_string_map(parameter_value(query, "headers"))
     raw_timeout = (_query_first(query, "tool_timeout") or "").strip()
     tool_timeout = _DEFAULT_CUSTOM_TIMEOUT
     if raw_timeout:
@@ -987,18 +1030,20 @@ def _custom_server_from_query(query: QueryParams) -> tuple[str, MCPServerConfig]
             tool_timeout = max(5, min(int(raw_timeout), 600))
         except ValueError as exc:
             raise McpPresetError("tool_timeout must be an integer") from exc
-    cfg = MCPServerConfig(
-        type=transport,
-        auth=auth,
-        command=command if transport == "stdio" else "",
-        args=_parse_string_list(_query_first(query, "args")),
-        env=_parse_string_map(_query_first(query, "env")),
-        cwd=(_query_first(query, "cwd") or "").strip() if transport == "stdio" else "",
-        url=url if transport in {"sse", "streamableHttp"} else "",
+    cfg = _build_mcp_server_config(
+        transport_raw=_query_first(query, "transport"),
+        command=command,
+        url=url,
+        auth_raw=_query_first(query, "auth"),
+        args=_parse_string_list(parameter_value(query, "args")),
+        env=_parse_string_map(parameter_value(query, "env")),
+        cwd=(_query_first(query, "cwd") or "").strip(),
         headers=headers,
         use_proxy=_proxy_enabled(query),
         tool_timeout=tool_timeout,
-        enabled_tools=_parse_enabled_tools(_query_first(query, "enabled_tools")),
+        enabled_tools=_parse_enabled_tools(parameter_value(query, "enabled_tools")),
+        stdio_error="stdio MCP servers require a command",
+        remote_error="remote MCP servers require a URL",
     )
     return name, cfg
 
@@ -1011,11 +1056,6 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
     command = str(server.get("command") or "").strip()
     url = str(server.get("url") or "").strip()
     transport_value = str(server.get("type", server.get("transport", "")) or "")
-    transport = _normalize_transport(transport_value, command=command, url=url)
-    if transport == "stdio" and not command:
-        raise McpPresetError(f"MCP server '{server_name}' stdio transport requires a command")
-    if transport in {"sse", "streamableHttp"} and not url:
-        raise McpPresetError(f"MCP server '{server_name}' remote transport requires a URL")
     args_value: object = server.get("args") or []
     env_value: object = server.get("env") or {}
     headers_value: object = server.get("headers") or {}
@@ -1045,34 +1085,31 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
     use_proxy = server.get("useProxy", server.get("use_proxy", False))
     if not isinstance(use_proxy, bool):
         raise McpPresetError(f"MCP server '{server_name}' useProxy must be a boolean")
-    auth = _normalize_auth(
-        server.get("auth"),
-        transport=transport,
-        url=url,
-        headers=typed_headers,
-    )
     if not isinstance(enabled_tools_value, list):
         enabled_tools_value = ["*"]
     else:
         enabled_tools = cast(list[object], enabled_tools_value)
         if not all(isinstance(item, str) for item in enabled_tools):
             enabled_tools_value = ["*"]
-    return server_name, MCPServerConfig(
-        type=transport,
-        auth=auth,
-        command=command if transport == "stdio" else "",
+    cfg = _build_mcp_server_config(
+        transport_raw=transport_value,
+        command=command,
+        url=url,
+        auth_raw=server.get("auth"),
         args=cast(list[str], args),
         env=cast(dict[str, str], env),
-        cwd=cwd if transport == "stdio" else "",
-        url=url if transport in {"sse", "streamableHttp"} else "",
+        cwd=cwd,
         headers=typed_headers,
         use_proxy=use_proxy,
         tool_timeout=timeout_int,
         enabled_tools=cast(list[str], enabled_tools_value),
+        stdio_error=f"MCP server '{server_name}' stdio transport requires a command",
+        remote_error=f"MCP server '{server_name}' remote transport requires a URL",
     )
+    return server_name, cfg
 
 
-def _import_mcp_servers(raw_json: str | None) -> dict[str, MCPServerConfig]:
+def _import_mcp_servers(raw_json: Any) -> dict[str, MCPServerConfig]:
     parsed = _parse_json_value(raw_json, fallback=None)
     if not isinstance(parsed, Mapping):
         raise McpPresetError("MCP config must be a JSON object")
@@ -1123,7 +1160,7 @@ def custom_mcp_action(
         return payload
 
     if action in {"import", "import-cursor"}:
-        servers = _import_mcp_servers(_query_first(query, "config"))
+        servers = _import_mcp_servers(parameter_value(query, "config"))
         for cfg in servers.values():
             _validate_proxy(cfg, config.network)
         delete_credentials = [
@@ -1150,7 +1187,7 @@ def custom_mcp_action(
         cfg = config.tools.mcp_servers.get(name)
         if cfg is None:
             raise McpPresetError("unknown MCP server", status=404)
-        cfg.enabled_tools = _parse_enabled_tools(_query_first(query, "enabled_tools"))
+        cfg.enabled_tools = _parse_enabled_tools(parameter_value(query, "enabled_tools"))
         config.tools.mcp_servers[name] = cfg
         save_config(config, config_path)
         payload = mcp_presets_payload(
@@ -1309,15 +1346,18 @@ async def mcp_presets_settings_action(
     """Run a WebUI MCP preset action and hot-reload the agent when config changes."""
     config_path = config.path if config is not None else None
     if action is None:
-        return mcp_presets_payload(
+        return await asyncio.to_thread(
+            mcp_presets_payload,
             runtime_status=mcp_runtime_status() if mcp_runtime_status is not None else None,
             config_path=config_path,
         )
     name = (_query_first(query, "name") or "").strip()
     if name.startswith("plugin-"):
-        plugin_config = load_config(config_path) if config_path is not None else load_config()
+        plugin_config = await asyncio.to_thread(
+            load_config if config_path is None else (lambda: load_config(config_path))
+        )
         plugin_name = name.removeprefix("plugin-")
-        plugins = discover_agent_plugins(plugin_config.workspace_path)
+        plugins = await asyncio.to_thread(discover_agent_plugins, plugin_config.workspace_path)
         plugin = next((item for item in plugins if item.name == plugin_name), None)
         if name not in plugin_config.tools.mcp_servers and plugin is not None:
             if action not in {"enable", "disable"}:
@@ -1329,7 +1369,8 @@ async def mcp_presets_settings_action(
                 action == "enable",
             )
             verb = "enabled" if action == "enable" else "disabled"
-            payload = mcp_presets_payload(
+            payload = await asyncio.to_thread(
+                mcp_presets_payload,
                 last_action={"ok": True, "message": f"{plugin.display_name} {verb}."},
                 config_path=config_path,
             )

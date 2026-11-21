@@ -54,6 +54,11 @@
     "model": "Modelo de ejemplo",
     "disabledModel": "Selector de modelo desactivado"
   },
+  "codexSpeed": {
+    "title": "Velocidad de Codex",
+    "description": "Elige Fast o Ultrarrápido. Vuelve a seleccionar el modo activo para desactivarlo.",
+    "options": "Muestra Ultrarrápido en los modelos compatibles."
+  },
   "segmented": {
     "title": "Selección segmentada",
     "description": "Un pequeño conjunto de opciones siempre visibles.",
@@ -100,6 +105,15 @@
     "confirm": "Confirmar eliminación",
     "removed": "Ejemplo eliminado.",
     "available": "Ejemplo disponible."
+  },
+  "toast": {
+    "title": "Avisos temporales",
+    "description": "Avisos breves de errores, acciones completadas y acciones que se pueden deshacer.",
+    "options": "Monta ToastProvider y usa useToast para mostrar un aviso. Una acción opcional da más tiempo para responder.",
+    "showError": "Mostrar error",
+    "error": "No se pudo guardar el ejemplo.",
+    "pending": "Se eliminará el ejemplo.",
+    "restored": "Ejemplo restaurado."
   },
   "sheet": {
     "title": "Paneles laterales",

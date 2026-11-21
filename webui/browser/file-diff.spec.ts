@@ -90,6 +90,31 @@ for (const dark of [false, true]) {
   }
 }
 
+test("a language without a built-in lexer receives its grammar in the diff worker", async ({ page }) => {
+  const worker = page.waitForEvent("worker");
+  await page.goto("/browser/fixture.html?case=file-diff&shiki");
+  await worker;
+  const config = page.getByRole("region", { name: "config.hjson", exact: true });
+  await expectTokenColor(config, "# shared settings", "--code-comment");
+  await expect(config.locator("[data-line][data-line-type=change-addition]")).toHaveText("host: localhost");
+});
+
+test("custom backgrounds remain visible through diff surfaces in both themes", async ({ page }) => {
+  await page.goto("/browser/fixture.html?case=file-diff");
+  const diff = page.getByRole("region", { name: "Status.tsx", exact: true }).getByTestId("file-edit-diff");
+  const context = diff.locator("[data-line][data-line-type=context]").first();
+  await expect(context).toBeVisible();
+  await page.evaluate(() => { document.documentElement.dataset.customBackground = ""; });
+  for (let i = 0; i < 2; i++) {
+    await expect(context).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(diff).toHaveCSS("backdrop-filter", "blur(12px)");
+    await expect(diff.locator("[data-line][data-line-type=change-addition]")).toContainText("ready");
+    await page.getByRole("button", { name: "Toggle theme" }).click();
+  }
+  await page.evaluate(() => { delete document.documentElement.dataset.customBackground; });
+  await expect(context).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+});
+
 test("large diffs retain bounded expansion, release and truncated-file actions", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -235,3 +260,20 @@ for (const [file, renderedIndex, sourceLine, reverse] of [["long.ts", 58, 59, fa
     await expect(line).toHaveCount(0);
   });
 }
+
+test("diff toggle stays quiet on Shift+click and Escape, then shows ring on keyboard Tab", async ({ page }) => {
+  await page.goto("/browser/fixture.html?case=file-diff");
+  const toggle = page.getByRole("region", { name: "long.ts", exact: true }).getByTestId("file-edit-diff-toggle");
+  await page.keyboard.down("Shift");
+  await toggle.click();
+  await page.keyboard.press("Escape");
+  await page.keyboard.up("Shift");
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toHaveCSS("outline-style", "none");
+  await expect(toggle).toHaveCSS("box-shadow", "none");
+
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(toggle).toBeFocused();
+  expect(await toggle.evaluate((node) => getComputedStyle(node).boxShadow)).not.toBe("none");
+});

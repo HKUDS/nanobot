@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.memory import _HISTORY_ENTRY_HARD_CAP, MemoryStore
+from nanobot.utils.gitstore import GitStore
+from nanobot.utils.helpers import sync_workspace_templates
 
 
 @pytest.fixture
@@ -87,14 +89,6 @@ class TestHistoryWithCursor:
         data = json.loads(content)
         assert data["cursor"] == cursor
         assert data["content"] == expected_content
-
-    def test_read_unprocessed_history(self, store):
-        store.append_history("event 1")
-        store.append_history("event 2")
-        store.append_history("event 3")
-        entries = store.read_unprocessed_history(since_cursor=1)
-        assert len(entries) == 2
-        assert entries[0]["cursor"] == 2
 
     def test_read_unprocessed_history_returns_all_when_cursor_zero(self, store):
         store.append_history("event 1")
@@ -187,21 +181,6 @@ class TestHistoryWithCursor:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert [entry["cursor"] for entry in entries] == list(range(21, 101))
 
-    def test_write_entries_uses_atomic_write(self, tmp_path):
-        store = MemoryStore(tmp_path)
-        store.append_history("event 1")
-        store.append_history("event 2")
-        store.append_history("event 3")
-        entries = store.read_unprocessed_history(since_cursor=0)
-
-        tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
-        assert not tmp_path_obj.exists()
-
-        store._write_entries(entries)
-
-        assert not tmp_path_obj.exists()
-        assert store.history_file.exists()
-
     def test_write_entries_cleans_up_tmp_on_exception(self, tmp_path, monkeypatch):
         store = MemoryStore(tmp_path)
         store.append_history("event 1")
@@ -291,18 +270,24 @@ class TestDreamCursor:
         store2 = MemoryStore(store.workspace)
         assert store2.get_last_dream_cursor() == 3
 
-    def test_git_restore_rolls_back_dream_cursor(self, tmp_path):
+    @pytest.mark.parametrize("existing_repo", [False, True], ids=["new-workspace", "existing-workspace"])
+    def test_git_restore_rolls_back_dream_cursor(self, tmp_path, existing_repo):
         store = MemoryStore(tmp_path)
         store.write_memory("before")
         store.set_last_dream_cursor(1)
-        assert store.git.init() is True
+        if existing_repo:
+            # Workspaces initialized before the fix ignore the runtime cursor.
+            old_git = GitStore(tmp_path, tracked_files=["memory/MEMORY.md"], tracked_dirs=["memory/wiki"])
+            assert old_git.init()
+            assert store.git.auto_commit("dream: save first cursor checkpoint")
+        else:
+            sync_workspace_templates(tmp_path, silent=True)
 
         store.write_memory("after")
         store.set_last_dream_cursor(2)
         dream_sha = store.git.auto_commit("dream: update")
         assert dream_sha is not None
 
-        store.write_memory("newer")
         store.set_last_dream_cursor(3)
 
         restore_sha = store.git.revert(dream_sha)

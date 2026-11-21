@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createPortal } from "react-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ComposerUsagePopover } from "@/components/thread/ComposerUsagePopover";
 import type { ContextSnapshot } from "@/lib/types";
 
@@ -35,6 +35,16 @@ describe("Context sidebar", () => {
     await waitFor(() => expect(screen.getByTestId("composer-context-usage")).toHaveFocus());
   });
 
+  it("closes the sidebar from its own control", async () => {
+    const user = userEvent.setup();
+    render(<ComposerUsagePopover context={null} rounds={[]} snapshots={[first]} />);
+    await user.click(screen.getByTestId("composer-context-usage"));
+    const sidebar = screen.getByRole("complementary", { name: "Context usage" });
+    await user.click(within(sidebar).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+    expect(screen.getByTestId("composer-context-usage")).toHaveFocus();
+  });
+
   it("mounts in the conversation's side slot and closes with Escape from its controls", async () => {
     const user = userEvent.setup();
     const host = document.createElement("section");
@@ -66,13 +76,19 @@ describe("Context sidebar", () => {
     expect(screen.getByRole("complementary")).toBe(sidebar);
     expect(within(sidebar).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
     expect(within(footer).getByTestId("composer-context-usage")).toHaveAttribute("aria-expanded", "true");
+    // happy-dom has no CSS timeline; model the real surface exit for this interruption.
+    let finishExit!: () => void;
+    const finished = new Promise<void>((resolve) => { finishExit = resolve; });
+    Object.defineProperty(sidebar, "getAnimations", { value: vi.fn(() => [{ finished }]) });
     await user.click(within(footer).getByTestId("composer-context-usage"));
-    expect(screen.getByRole("complementary")).toBe(sidebar);
+    expect(sidebar).toBeInTheDocument();
+    expect(sidebar).toHaveAttribute("inert");
     expect(sidebar.style.getPropertyValue("--file-preview-slot-width")).toBe("0px");
     // Reopening during exit retains the graph instead of remounting it.
     await user.click(within(footer).getByTestId("composer-context-usage"));
     expect(screen.getByRole("complementary")).toBe(sidebar);
     await user.click(within(footer).getByTestId("composer-context-usage"));
+    await act(async () => finishExit());
     await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
     view.unmount(); toolbar.remove(); footer.remove();
   });

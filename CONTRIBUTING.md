@@ -44,7 +44,7 @@ Collaborators can open PRs for:
 
 For riskier or larger changes, collaborators are encouraged to open a draft PR early after discussing the scope and approach in an issue.
 
-WebUI and remote-host interface changes must follow the [client/host compatibility review checklist](.agent/review-guide.md), including independent client/server upgrades, host isolation, and actionable update guidance.
+WebUI and remote-host interface changes must follow the [client/host compatibility review checklist](.agent/review-guide.md), including the same-version support policy, host isolation, and actionable update guidance.
 
 ### Starting Work
 

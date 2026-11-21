@@ -718,6 +718,7 @@ class OpenAICompatProvider(LLMProvider):
                 clean["tool_call_id"] = map_tool_result_id(clean["tool_call_id"])
             if (
                 force_string_content
+                and not self._contains_image_content(clean.get("content"))
                 and not (clean.get("role") == "assistant" and clean.get("tool_calls"))
             ):
                 clean["content"] = self._coerce_content_to_string(clean.get("content"))
@@ -1776,18 +1777,6 @@ class OpenAICompatProvider(LLMProvider):
             )
         except Exception as e:
             return self._handle_error(e, spec=self._spec, api_base=self.api_base)
-
-    async def _retry_without_images(
-        self,
-        call: Callable[..., Awaitable[LLMResponse]],
-        kw: dict[str, Any],
-        original_messages: list[dict[str, Any]],
-        response: LLMResponse,
-    ) -> LLMResponse:
-        # Neither a callback nor a cleanup failure indicates image incompatibility.
-        if response.error_kind in {"callback", "cleanup"}:
-            return response
-        return await super()._retry_without_images(call, kw, original_messages, response)
 
     def get_default_model(self) -> str:
         return self.default_model

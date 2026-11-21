@@ -18,6 +18,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useOverlayEscapeFocus } from "@/hooks/useOverlayEscapeFocus";
 import { currentLocale } from "@/i18n";
 import { fmtDateTime } from "@/lib/format-time";
 import type {
@@ -63,6 +64,7 @@ export function SessionInfoPopoverView({ jobs, loading, loadFailed, now, onActio
 }) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
+  const escapeFocus = useOverlayEscapeFocus();
   const [inspectedJob, setInspectedJob] = useState<SessionAutomationJob | null>(null);
   // Keep requested dialogs mounted through their close and focus-restoration lifecycle.
   const [dialogsRequested, setDialogsRequested] = useState(false);
@@ -85,6 +87,7 @@ export function SessionInfoPopoverView({ jobs, loading, loadFailed, now, onActio
     setDetailOpen(true);
   };
   const handOffDetail = (next: () => void) => {
+    setActionError(null);
     afterDetailClose.current = next;
     setDetailOpen(false);
   };
@@ -179,6 +182,7 @@ export function SessionInfoPopoverView({ jobs, loading, loadFailed, now, onActio
         <PopoverTrigger asChild>
           <Button
             ref={triggerRef}
+            {...escapeFocus.triggerProps}
             variant="ghost"
             size="icon"
             aria-label={t("thread.header.sessionInfo")}
@@ -194,8 +198,10 @@ export function SessionInfoPopoverView({ jobs, loading, loadFailed, now, onActio
           align="end"
           sideOffset={8}
           className="w-[min(23rem,calc(100vw-1.5rem))] overflow-hidden p-0"
+          onEscapeKeyDown={escapeFocus.contentProps.onEscapeKeyDown}
           onCloseAutoFocus={(event) => {
             if (detailOpen) event.preventDefault();
+            escapeFocus.contentProps.onCloseAutoFocus(event);
           }}
         >
           <div className="flex max-h-[min(var(--radix-popover-content-available-height),32rem)] flex-col">
@@ -244,8 +250,12 @@ export function SessionInfoPopoverView({ jobs, loading, loadFailed, now, onActio
           <AutomationEditDialog
             job={pendingEdit}
             saving={actionKey === `update:${pendingEdit?.id ?? ""}`}
+            error={pendingEdit ? actionError : null}
             onOpenChange={(nextOpen) => {
-              if (!nextOpen) setPendingEdit(null);
+              if (!nextOpen) {
+                setPendingEdit(null);
+                setActionError(null);
+              }
             }}
             onCancel={(job) => {
               setInspectedJob(job);
@@ -256,8 +266,12 @@ export function SessionInfoPopoverView({ jobs, loading, loadFailed, now, onActio
           <AutomationDeleteDialog
             job={pendingDelete}
             deleting={actionKey === `delete:${pendingDelete?.id ?? ""}`}
+            error={pendingDelete ? actionError : null}
             onOpenChange={(nextOpen) => {
-              if (!nextOpen) setPendingDelete(null);
+              if (!nextOpen) {
+                setPendingDelete(null);
+                setActionError(null);
+              }
             }}
             onConfirm={(job) => handleAction("delete", job)}
           />

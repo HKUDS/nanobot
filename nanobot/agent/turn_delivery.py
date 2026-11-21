@@ -24,16 +24,14 @@ from nanobot.events import (
     AgentEvent,
     ContextCompactionEvent,
     EventSink,
+    ResponseInputsEvent,
     ResponseSource,
     ResponseSourceEvent,
 )
 from nanobot.providers.base import LLMUsage
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
-from nanobot.session.keys import (
-    UNIFIED_SESSION_KEY,
-    is_internal_session,
-    last_channel_from_metadata,
-)
+from nanobot.session.keys import is_internal_session
+from nanobot.session.message_metadata import input_history_metadata
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import strip_think
 
@@ -110,7 +108,7 @@ class TurnDeliveryFactory:
         *,
         enable_stream: bool = False,
     ) -> TurnDelivery:
-        route = self._default_route(msg, session_key)
+        route = self.input_route(msg, session_key)
         if self.route_policy is not None:
             route = self.route_policy(msg, session_key, route)
             if not isinstance(cast(object, route), TurnRoute):
@@ -163,12 +161,8 @@ class TurnDeliveryFactory:
         else:
             # Older sessions have no route snapshot. Only direct clients have a
             # session key that is also an unambiguous delivery address.
-            route = (
-                last_channel_from_metadata(session_metadata)
-                if session_key == UNIFIED_SESSION_KEY
-                else tuple(session_key.split(":", 1))
-            )
-            if not route or len(route) != 2 or route[0] not in {"websocket", "cli"}:
+            route = session_key.split(":", 1)
+            if len(route) != 2 or route[0] not in {"websocket", "cli"}:
                 return EventSink()
             channel, chat_id = route
             metadata = {}
@@ -178,7 +172,8 @@ class TurnDeliveryFactory:
         return _bind_events(self.bus, TurnRoute(channel, chat_id, metadata), session_key)
 
     @staticmethod
-    def _default_route(msg: InboundMessage, session_key: str) -> TurnRoute:
+    def input_route(msg: InboundMessage, session_key: str) -> TurnRoute:
+        """Resolve the input's destination without acquiring a turn lifecycle owner."""
         if msg.channel != "system":
             return TurnRoute(
                 channel=msg.channel,
@@ -219,6 +214,7 @@ class TurnDelivery:
     _stop_reason: str | None = field(init=False, default=None)
     _failure_error_kind: str | None = field(init=False, default=None)
     _retry_status: RetryStatusEvent | None = field(init=False, default=None)
+    _response_input_ids: tuple[str, ...] | None = field(init=False, default=None)
     _response_source: ResponseSource | None = field(init=False, default=None)
     _response_source_seen: bool = field(init=False, default=False)
     _response_content: str | None = field(init=False, default=None)
@@ -227,8 +223,13 @@ class TurnDelivery:
 
     def __post_init__(self) -> None:
         self.run_id = uuid4().hex
+        input_id = input_history_metadata(self.input_message)["input_id"]
+        self._response_input_ids = (input_id,) if input_id else None
         self._routed_events = _bind_events(self.bus, self.route, self.session_key)
-        self.events = EventSink(self._publish_event, self._routed_events.accepts)
+        self.events = EventSink(
+            self._publish_event,
+            lambda event_type: event_type is ResponseInputsEvent or self._routed_events.accepts(event_type),
+        )
         self.delivery_message = dataclasses.replace(
             self.input_message,
             channel=self.route.channel,
@@ -376,6 +377,10 @@ class TurnDelivery:
                     **response.metadata,
                     "response_sources": [dataclasses.asdict(self._response_source)],
                 })
+            if self._response_input_ids is not None and (response.channel, response.chat_id) == (self.route.channel, self.route.chat_id):
+                response = dataclasses.replace(response, metadata={
+                    **response.metadata, "response_input_ids": list(self._response_input_ids),
+                })
             if response.channel != "websocket" or stop_reason != "error":
                 delivery = DeliveryRequest.from_context(
                     self.input_message.metadata, self.session_key,
@@ -460,6 +465,9 @@ class TurnDelivery:
         return f"{self._stream_base_id}:{self._stream_segment}"
 
     async def _publish_event(self, event: AgentEvent) -> None:
+        if isinstance(event, ResponseInputsEvent):
+            self._response_input_ids = event.input_ids
+            return
         if isinstance(event, ResponseSourceEvent):
             self._response_source_seen = True
             self._response_source = event.source
@@ -484,6 +492,8 @@ class TurnDelivery:
                     self._stream_sources.append(source)
             if self._routed_events.accepts(type(event)):
                 metadata = deepcopy(self.route.metadata)
+                if self._response_input_ids is not None:
+                    metadata["response_input_ids"] = list(self._response_input_ids)
                 if self._response_source_seen and self._routed_events.accepts(ResponseSourceEvent):
                     metadata["response_sources"] = (
                         [] if self._stream_source_unknown else

@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from nanobot.providers.base import GenerationSettings, LLMProvider
+from nanobot.providers.model_options import ModelOptions
 
 if TYPE_CHECKING:
     from nanobot.providers.factory import ProviderSnapshot
@@ -24,6 +25,15 @@ class LLMRuntime:
     context_window_tokens: int
     model_preset: str | None = None
     snapshot_signature: tuple[object, ...] | None = None
+    model_options: ModelOptions = ModelOptions()
+
+    def with_model_options(self, options: ModelOptions) -> LLMRuntime:
+        if options == self.model_options:
+            return self
+        return replace(
+            self.with_generation_overrides(reasoning_effort=options.reasoning_effort),
+            model_options=options,
+        )
 
     @classmethod
     def capture(

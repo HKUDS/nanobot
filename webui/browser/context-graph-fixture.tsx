@@ -4,8 +4,11 @@ import { ContextInspector } from "@/components/thread/ContextInspector";
 import { ComposerUsagePopover } from "@/components/thread/ComposerUsagePopover";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initializeI18n } from "@/i18n";
+import { installFocusModality } from "@/lib/focus-modality";
 import type { ContextSnapshot } from "@/lib/types";
 import "../src/globals.css";
+
+installFocusModality();
 
 const snapshots: ContextSnapshot[] = [
   { id: "first", contextWindowTokens: 10000, usage: { prompt_tokens: 1000 }, graph: {

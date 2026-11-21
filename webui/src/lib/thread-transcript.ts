@@ -7,6 +7,8 @@ import { persistedCanonicalRunState } from "./canonical-run-snapshot";
 import { copyThreadCheckpoint, createThreadCheckpoint, type ThreadCheckpoint } from "./thread-checkpoint";
 import { hasPendingAgentActivity } from "./activity-timeline";
 import { reconcileModelRequest } from "./model-request";
+import { joinThreadFragments } from "./thread-page-fragments";
+import { ThreadProjectionIndex } from "./thread-projection-index";
 import type { ThreadProjectionEvent, UIMessage, WebuiThreadPersistedPayload } from "./types";
 
 type Ranges = Array<[number, number]>;
@@ -19,7 +21,20 @@ interface TextSource {
   through: number;
   end: number | null;
   snapshot: boolean;
+  certified: boolean;
   members: Ranges;
+}
+interface LiveContribution {
+  event: ThreadProjectionEvent;
+  now: number;
+  revision: number;
+  startSeq?: number;
+  sideChannel?: boolean;
+}
+interface PendingFragmentGap {
+  turn: number;
+  oldEnd: number;
+  front: number;
 }
 interface Unit {
   rows: Set<string>;
@@ -63,13 +78,17 @@ export interface ThreadTranscriptSnapshot extends ThreadCheckpoint {
   knownTurns: Set<string>;
   paging: ThreadPaging;
   revision: number;
+  fragments: WebuiThreadPersistedPayload[];
+  live: LiveContribution[];
+  historyGeneration: string | null;
+  pendingFragmentGap: PendingFragmentGap | null;
+  withdrawnSources: Set<string>;
 }
 
 function addRange(ranges: Ranges, first: number, last = first): void {
   let start = first;
   let end = last;
-  let index = 0;
-  while (index < ranges.length && ranges[index][1] + 1 < start) index++;
+  let index = rangeAt(ranges, start - 1);
   const from = index;
   while (index < ranges.length && ranges[index][0] <= end + 1) {
     start = Math.min(start, ranges[index][0]);
@@ -78,8 +97,20 @@ function addRange(ranges: Ranges, first: number, last = first): void {
   }
   ranges.splice(from, index - from, [start, end]);
 }
+function rangeAt(ranges: Ranges, seq: number): number {
+  let low = 0;
+  let high = ranges.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (ranges[mid][1] < seq) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
 function contains(ranges: Ranges | undefined, seq: number): boolean {
-  return ranges?.some(([first, last]) => first <= seq && seq <= last) === true;
+  if (!ranges) return false;
+  const index = rangeAt(ranges, seq);
+  return index < ranges.length && ranges[index][0] <= seq;
 }
 function mergeMembers(target: Members, source: Members): void {
   for (const [turn, ranges] of source) {
@@ -90,6 +121,19 @@ function mergeMembers(target: Members, source: Members): void {
 }
 function copyMembers(value: Members): Members {
   return new Map(Array.from(value, ([key, ranges]) => [key, ranges.map(([a, b]) => [a, b])]));
+}
+function mergeCoveredMembers(target: Members, members: Members, coverage: Members): void {
+  for (const [turn, ranges] of members) {
+    const covered = coverage.get(turn) ?? [];
+    for (const [first, last] of ranges) {
+      for (let index = rangeAt(covered, first); index < covered.length && covered[index][0] <= last; index++) {
+        const [a, b] = covered[index];
+        const kept = target.get(turn) ?? [];
+        addRange(kept, Math.max(first, a), Math.min(last, b));
+        target.set(turn, kept);
+      }
+    }
+  }
 }
 function copyText(value: TextSource): TextSource {
   return { ...value, members: value.members.map(([a, b]) => [a, b]) };
@@ -111,12 +155,62 @@ function coversText(certificate: TextSource, text: TextSource): boolean {
   return certificate.snapshot && certificate.after !== null && sameWire(certificate, text)
     && text.members.every(([first, last]) => first > certificate.after! && last <= certificate.through);
 }
-function sourcesOverlap(candidate: Unit, retained: Unit): boolean {
-  if (Array.from(candidate.sources).some((key) => !key.startsWith("text:") && retained.sources.has(key))) return true;
-  return candidate.text.some((left) => retained.text.some((right) => sameWire(left, right)
-    && ((left.phase === "answer" && left.stream !== "")
-      // Ordered canonical ends identify reset buffers even when attachment missed a prior end.
-      || right.members.some(([first, last]) => last > (left.after ?? -1) && first <= (left.end ?? Infinity)))));
+function matchUnits(candidates: Set<Unit>, retained: Set<Unit>): {
+  byOld: Map<Unit, Set<Unit>>; byNew: Map<Unit, Set<Unit>>;
+} {
+  const sources = new Map<string, Unit>();
+  type Interval = { unit: Unit; start: number; end: number; maxEnd: number };
+  const wires = new Map<string, Interval[]>();
+  const wireKey = (text: TextSource) => JSON.stringify([text.turn, text.phase, text.stream]);
+  for (const unit of candidates) {
+    for (const source of unit.sources) if (!source.startsWith("text:")) sources.set(source, unit);
+    for (const text of unit.text) {
+      const key = wireKey(text);
+      const intervals = wires.get(key) ?? [];
+      const namedAnswer = text.phase === "answer" && text.stream !== "";
+      intervals.push({ unit, start: namedAnswer ? -Infinity : text.after ?? -1,
+        end: namedAnswer ? Infinity : text.end ?? Infinity, maxEnd: -Infinity });
+      wires.set(key, intervals);
+    }
+  }
+  for (const intervals of wires.values()) {
+    intervals.sort((a, b) => a.start - b.start);
+    let max = -Infinity;
+    for (const interval of intervals) interval.maxEnd = max = Math.max(max, interval.end);
+  }
+  const byOld = new Map<Unit, Set<Unit>>();
+  const byNew = new Map<Unit, Set<Unit>>();
+  for (const old of retained) {
+    const matches = new Set<Unit>();
+    for (const source of old.sources) {
+      const unit = sources.get(source);
+      if (unit) matches.add(unit);
+    }
+    for (const text of old.text) {
+      const intervals = wires.get(wireKey(text));
+      if (!intervals) continue;
+      for (const [first, last] of text.members) {
+        let low = 0;
+        let high = intervals.length;
+        while (low < high) {
+          const mid = (low + high) >>> 1;
+          if (intervals[mid].start < last) low = mid + 1;
+          else high = mid;
+        }
+        for (let i = low - 1; i >= 0 && intervals[i].maxEnd >= first; i--) {
+          if (intervals[i].end >= first) matches.add(intervals[i].unit);
+        }
+      }
+    }
+    if (!matches.size) continue;
+    byOld.set(old, matches);
+    for (const unit of matches) {
+      const previous = byNew.get(unit) ?? new Set<Unit>();
+      previous.add(old);
+      byNew.set(unit, previous);
+    }
+  }
+  return { byOld, byNew };
 }
 function unitPosition(unit: Unit | undefined, turn: string): number | null {
   if (!unit) return null;
@@ -127,7 +221,11 @@ function unitPosition(unit: Unit | undefined, turn: string): number | null {
   return positions.length ? Math.min(...positions) : null;
 }
 
-/** One received projection and accepted history frontier. HTTP replay is scratch only. */
+/** One received projection and accepted history frontier. HTTP replay is scratch only.
+ * Record ranges identify stored pages; text_from_seq identifies the live text a
+ * stored end replaces, scoped to its turn, phase and stream. Neither range
+ * implies that intervening tools or the rest of the turn have been loaded.
+ */
 export class ThreadTranscript {
   projection: ThreadProjectionState;
   sideChannelTurnIds = new Set<string>();
@@ -135,14 +233,25 @@ export class ThreadTranscript {
   private units = new Set<Unit>();
   private byRow = new Map<string, Unit>();
   private bySource = new Map<string, Unit>();
+  private projectionIndex = new ThreadProjectionIndex();
+  private historyReplay: { events: ThreadProjectionEvent[]; generation: string | null; owner: ThreadTranscript } | null = null;
   private installed: Members = new Map();
   private textCoverage: TextSource[] = [];
   private boundaries = new Map<string, number>();
   private knownTurns = new Set<string>();
+  private fragments: WebuiThreadPersistedPayload[] = [];
+  private live: LiveContribution[] = [];
+  private historyGeneration: string | null = null;
+  private pendingFragmentGap: PendingFragmentGap | null = null;
+  private withdrawnSources = new Set<string>();
+  fragmentCompletedTurnIds: string[] = [];
+  private readonly recordLiveContributions: boolean;
   private revision = 0;
   private order = 0;
 
-  constructor(messages: UIMessage[] = [], saved?: ThreadTranscriptSnapshot) {
+  constructor(messages: UIMessage[] = [], saved?: ThreadTranscriptSnapshot,
+    options: { recordLiveContributions?: boolean } = {}) {
+    this.recordLiveContributions = options.recordLiveContributions !== false;
     const checkpoint = saved ? copyThreadCheckpoint(saved) : createThreadCheckpoint(messages);
     this.projection = checkpoint.projection;
     this.sideChannelTurnIds = checkpoint.sideChannelTurnIds;
@@ -151,6 +260,11 @@ export class ThreadTranscript {
       this.textCoverage = saved.textCoverage.map(copyText);
       this.boundaries = new Map(saved.boundaries);
       this.knownTurns = new Set(saved.knownTurns);
+      this.fragments = [...saved.fragments];
+      this.live = this.recordLiveContributions ? [...saved.live] : [];
+      this.historyGeneration = saved.historyGeneration;
+      this.pendingFragmentGap = saved.pendingFragmentGap ? { ...saved.pendingFragmentGap } : null;
+      this.withdrawnSources = new Set(saved.withdrawnSources);
       this.paging = { ...saved.paging, loading: false, loadingOlder: false };
       this.revision = saved.revision;
       for (const unit of saved.units) this.installUnit({ ...unit, rows: new Set(unit.rows),
@@ -162,6 +276,7 @@ export class ThreadTranscript {
 
   get messages(): UIMessage[] { return this.projection.messages; }
   get modelRequests() { return this.projection.modelRequests; }
+  get hasPendingFragmentGap(): boolean { return this.pendingFragmentGap !== null; }
 
   private installUnit(unit: Unit): void {
     this.order = Math.max(this.order, unit.order + 1);
@@ -171,6 +286,7 @@ export class ThreadTranscript {
   }
 
   rejectTurn(turn: string): void {
+    this.live = this.live.filter((entry) => entry.event.turn_id !== turn);
     for (const unit of this.units) if (unit.members.has(turn) || unit.sources.has(`user:${turn}`)) {
       this.units.delete(unit);
       for (const id of unit.rows) this.byRow.delete(id);
@@ -217,7 +333,8 @@ export class ThreadTranscript {
       const phase = event.event.startsWith("reasoning") ? "reasoning" : "answer";
       const stream = event.stream_id ?? "";
       const boundaryKey = JSON.stringify([turn, phase, stream]);
-      let after = phase === "answer" && stream ? 0
+      let after = "text_from_seq" in event && event.text_from_seq !== undefined ? event.text_from_seq - 1
+        : phase === "answer" && stream ? 0
         : this.boundaries.get(boundaryKey) ?? (this.knownTurns.has(turn) ? 0 : null);
       if (after !== null && after >= seq) {
         after = this.knownTurns.has(turn) ? 0 : null;
@@ -233,6 +350,7 @@ export class ThreadTranscript {
       const text: TextSource = { turn, phase, stream, after, through: seq, end,
         snapshot: event.event.endsWith("end") && typeof event.text === "string"
           && (phase === "answer" || event.text.length > 0),
+        certified: "text_from_seq" in event && event.text_from_seq !== undefined,
         members: copyMembers(members).get(turn)! };
       return { source: `text:${textKey(text)}`, members, text };
     }
@@ -248,13 +366,20 @@ export class ThreadTranscript {
 
   project(event: ThreadProjectionEvent, options: {
     createId: () => string; now: number; persisted?: boolean; sideChannel?: boolean; startSeq?: number;
+    contributions?: ThreadProjectionEvent[]; sourceRevision?: number; mutableCollections?: boolean;
   }): UIMessage[] {
+    if (!options.persisted && event.event === "user_message" && !event.provenance?.session_message) {
+      event = { turn_seq: 0, ...event };
+    }
     // Telemetry never contributes body sources, memberships, or admission barriers.
     if (event.event === "model_request") {
       this.projection = projectThreadEvent(this.projection, event, options);
       return this.messages;
     }
-    if (!options.persisted && this.represented(event)) return this.messages;
+    const updatesInputMedia = event.event === "user_message" && !event.provenance?.session_message
+      && !!event.turn_id && !!event.media_urls?.length
+      && this.messages.some((message) => message.role === "user" && message.turnId === event.turn_id);
+    if (!options.persisted && !updatesInputMedia && this.represented(event)) return this.messages;
     if (!event.projection_id && (!event.turn_id || event.turn_seq === undefined)) {
       event = { ...event, projection_id: options.createId() };
     }
@@ -283,6 +408,10 @@ export class ThreadTranscript {
       const targets = projection.messages.filter((row) => destinations.has(this.byRow.get(row.id)!));
       const scratchState = { ...copyThreadCheckpoint(this, targets).projection,
         activeAssistantId: null, mergeReasoning: false, activitySegmentId: null, fileEditSegmentId: null };
+      // Sequence ordering proves this belongs before the installed completion,
+      // rather than a new execution that happens to reuse its transport id.
+      scratchState.closedTurnIds.delete(event.turn_id!);
+      scratchState.turnAliases.delete(event.turn_id!);
       const scratch = projectThreadEvent(scratchState, event, { ...options, effects });
       const updates = new Map(scratch.messages.map((row) => [row.id, row]));
       const targetIds = new Set(targets.map((row) => row.id));
@@ -302,11 +431,11 @@ export class ThreadTranscript {
       }
       const before = index < 0 ? lastInTurn + 1 : index;
       projection = { ...projection, messages: [...messages.slice(0, before), ...additions, ...messages.slice(before)],
-        closedAssistantIds: scratch.closedAssistantIds, closedAnswerStreamIds: scratch.closedAnswerStreamIds,
-        closedTurnIds: scratch.closedTurnIds };
+        closedAssistantIds: scratch.closedAssistantIds, closedAnswerStreamIds: scratch.closedAnswerStreamIds };
     } else {
-      projection = projectThreadEvent(projection, event, { ...options, effects });
+      projection = projectThreadEvent(projection, event, { ...options, effects, index: this.projectionIndex });
     }
+    if (event.event === "user_message" && projection.messages === this.messages) return this.messages;
     this.projection = projection;
     const connected = new Set<Unit>();
     const existing = this.bySource.get(source);
@@ -315,7 +444,8 @@ export class ThreadTranscript {
       const unit = this.byRow.get(id);
       if (unit) connected.add(unit);
     }
-    const revision = options.persisted ? 0 : ++this.revision;
+    const revision = options.persisted ? 0 : options.sourceRevision ?? ++this.revision;
+    this.revision = Math.max(this.revision, revision);
     const unit: Unit = { rows: new Set(), sources: new Set([source]), members,
       text: text ? [text] : [], introduced: revision, order: this.order++, received: revision };
     for (const previous of connected) {
@@ -329,7 +459,11 @@ export class ThreadTranscript {
           if (prior.end !== null) matching.end = Math.max(matching.end ?? 0, prior.end);
           for (const [first, last] of prior.members) addRange(matching.members, first, last);
           if (prior.snapshot) {
-            matching.through = matching.snapshot ? Math.max(matching.through, prior.through) : prior.through;
+            if (!matching.snapshot || prior.through > matching.through) {
+              matching.through = prior.through;
+              matching.after = prior.after;
+              matching.certified = prior.certified;
+            }
             matching.snapshot = true;
           } else if (!matching.snapshot) matching.through = Math.max(matching.through, prior.through);
         } else unit.text.push(copyText(prior));
@@ -348,6 +482,10 @@ export class ThreadTranscript {
       const key = JSON.stringify([text.turn, text.phase, text.stream]);
       this.boundaries.set(key, Math.max(text.end, this.boundaries.get(key) ?? 0));
     }
+    if (!options.persisted && this.recordLiveContributions) for (const contribution of options.contributions ?? [event]) {
+      this.live.push({ event: contribution, now: options.now, revision,
+        startSeq: contribution.turn_seq ?? options.startSeq, sideChannel: options.sideChannel });
+    }
     return this.messages;
   }
 
@@ -363,9 +501,10 @@ export class ThreadTranscript {
     if (unit.text.length === 0 && Array.from(unit.sources).every((source) => candidate.bySource.has(source))) return true;
     if (unit.members.size === 0) return false;
     const represented = copyMembers(candidate.installed);
-    for (const text of unit.text) {
-      if (Array.from(candidate.units).some((other) => other.text.some((certificate) => coversText(certificate, text)))) {
-        mergeMembers(represented, new Map([[text.turn, text.members]]));
+    for (const text of unit.text) for (const certificate of candidate.textCoverage) {
+      if (certificate.after !== null && sameWire(certificate, text)) {
+        mergeCoveredMembers(represented, new Map([[text.turn, text.members]]),
+          new Map([[text.turn, [[certificate.after + 1, certificate.through]]]]));
       }
     }
     return Array.from(unit.members).every(([turn, ranges]) => ranges.every(([first, last]) =>
@@ -373,60 +512,216 @@ export class ThreadTranscript {
 
   }
 
+  private stageFragment(joined: ReturnType<typeof joinThreadFragments>, read: ThreadRead,
+    gap: PendingFragmentGap | null): true {
+    const page = joined.body.page!;
+    this.fragments = joined.pages;
+    // The visible projection is retained until admission, including across cache restore.
+    for (const event of joined.withdrawn) this.withdrawnSources.add(this.describe(event).source);
+    this.pendingFragmentGap = gap;
+    this.historyGeneration = page.history_generation ?? this.historyGeneration;
+    this.paging = { ...this.paging, loading: false, loadingOlder: false, error: null, olderError: null,
+      beforeCursor: page.before_cursor ?? null, hasMoreBefore: page.has_more_before === true, truncated: true,
+      version: this.paging.version + (read.kind === "older" ? 0 : 1),
+      lineage: this.paging.lineage + (read.kind === "older" ? 0 : 1) };
+    return true;
+  }
+
+  private projectHistory(events: ThreadProjectionEvent[], generation: string | null): ThreadTranscript {
+    const previous = this.historyReplay;
+    const reuse = previous?.generation === generation && events.length >= previous.events.length
+      && previous.events.every((event, index) => event === events[index]
+        || JSON.stringify(event) === JSON.stringify(events[index]));
+    const candidate = new ThreadTranscript([], undefined, { recordLiveContributions: false });
+    if (reuse) {
+      const owner = previous.owner;
+      candidate.projection = copyThreadCheckpoint(owner).projection;
+      candidate.units = new Set(owner.units);
+      candidate.byRow = new Map(owner.byRow);
+      candidate.bySource = new Map(owner.bySource);
+      candidate.boundaries = new Map(owner.boundaries);
+      candidate.knownTurns = new Set(owner.knownTurns);
+      candidate.order = owner.order;
+    }
+    for (let index = reuse ? previous.events.length : 0; index < events.length; index++) {
+      candidate.project(events[index], { createId: () => `history-${index}`, now: 0, persisted: true, mutableCollections: true });
+    }
+    // Only canonical replay is reusable; live overlays and admission never enter this cache.
+    this.historyReplay = { events, generation, owner: candidate };
+    return candidate;
+  }
+
   accept(body: WebuiThreadPersistedPayload | null, read: ThreadRead): boolean {
+    this.fragmentCompletedTurnIds = [];
     if (read.kind === "older" && (read.lineage !== this.paging.lineage || read.before !== this.paging.beforeCursor)) return false;
+    // An initial network read may have started just before its cached seed was installed.
+    if (read.kind !== "older" && read.lineage !== this.paging.lineage
+      && !(read.kind === "initial" && read.lineage === 0 && this.paging.lineage === 1)) return false;
     if (read.kind === "older" && !body?.page) {
       this.finishRead(read, "Earlier history did not include a page cursor");
       return false;
     }
-    const candidate = new ThreadTranscript();
-    for (const [index, event] of (body?.events ?? []).entries()) candidate.project(event,
-      { createId: () => `history-${index}`, now: 0, persisted: true });
-    for (const unit of candidate.units) mergeMembers(candidate.installed, unit.members);
-    const overlaps = new Set(Array.from(this.units).filter((old) =>
-      Array.from(candidate.units).some((unit) => sourcesOverlap(unit, old))));
-    const firstOverlap = this.messages.findIndex((row) => overlaps.has(this.byRow.get(row.id)!));
-    const windowRows = new Set(this.messages.slice(Math.max(0, firstOverlap)).map((row) => row.id));
-    const received = Array.from(this.units).filter((unit) => unit.received > 0
-      && Array.from(unit.rows).some((id) => windowRows.has(id)));
+    if (read.kind === "older" && body?.page?.has_more_before === true
+      && (!body.page.before_cursor || body.page.before_cursor === read.before)) {
+      this.finishRead(read, "Earlier history cursor did not advance");
+      return false;
+    }
+    const generation = body?.page?.history_generation ?? null;
+    const replacedHistory = generation !== null && this.historyGeneration !== null
+      && generation !== this.historyGeneration;
+    if (replacedHistory && (read.kind === "older" || this.live.length > 0 || this.revision > read.revision)) {
+      this.finishRead(read, "History changed during loading");
+      return false;
+    }
+    const incoming = body?.page?.record_range;
+    const pending = this.pendingFragmentGap;
+    if (pending && (!incoming || incoming.turn !== pending.turn
+      || (read.kind === "older" && incoming.end !== pending.front))) {
+      this.finishRead(read, "Could not bridge the missing history records");
+      return false;
+    }
+    const prior = incoming && !replacedHistory ? this.fragments.filter((page) =>
+      (page.page?.history_generation ?? null) === generation && page.page?.record_range?.turn === incoming.turn) : [];
+    const priorEnd = prior.length ? Math.max(...prior.map((page) => page.page!.record_range!.end)) : null;
+    if (read.kind !== "older" && incoming && priorEnd !== null && incoming.end < priorEnd) {
+      this.finishRead(read, "History changed during loading");
+      return false;
+    }
+    const joined = incoming && body ? joinThreadFragments(replacedHistory ? [] : this.fragments, body) : null;
+    if (joined) body = joined.body;
+    const groupRange = joined?.body.page?.record_range;
+    const gap = pending ?? (read.kind !== "older" && incoming && priorEnd !== null && incoming.start > priorEnd
+      ? { turn: incoming.turn, oldEnd: priorEnd, front: incoming.start } : null);
+    const hasGap = !!gap && !!groupRange && groupRange.start > gap.oldEnd;
+    const replaceWindow = hasGap && !pending && this.live.length === 0
+      && Array.from(this.units).every((unit) => unit.received === 0);
+    if (hasGap && !replaceWindow && joined && groupRange && gap) {
+      const page = body!.page!;
+      if (!page.has_more_before || !page.before_cursor || page.before_cursor === read.before) {
+        this.finishRead(read, "Could not bridge the missing history records");
+        return false;
+      }
+      return this.stageFragment(joined, read, { ...gap, front: groupRange.start });
+    }
     const canonical = body ? persistedCanonicalRunState(body) : null;
     const completed = new Set(canonical?.completedTurnIds);
-    const protectedUnits = received.filter((unit) => !this.unitCovered(unit, candidate)
-      || (unit.text.length > 0 && (body?.page?.truncated_oversized_turn
-        || unit.text.some((text) => !completed.has(text.turn)))));
+    const completeSnapshot = !body?.page?.truncated_oversized_turn && (!joined || groupRange?.start === 0);
+    let candidate = this.projectHistory(body?.events ?? [], generation);
+    const durableText = new Map<string, TextSource>();
+    for (const unit of candidate.units) {
+      mergeMembers(candidate.installed, unit.members);
+      for (const text of unit.text) if (text.snapshot && text.after !== null
+        && (text.certified || (completeSnapshot && completed.has(text.turn)))) {
+        const previous = durableText.get(textKey(text));
+        if (!previous || text.through > previous.through) durableText.set(textKey(text), copyText(text));
+      }
+    }
+    const durableMembers = joined ? candidate.installed : null;
+    candidate.textCoverage = Array.from(durableText.values());
+    // Rebuild a fragment only when it has unpersisted contributions. Those
+    // events join the same projection as history, rather than a second overlay.
+    if (joined && body) {
+      const turns = new Set(body.events.map((event) => event.turn_id));
+      const remaining = this.live.filter(({ event }) => event.turn_id && event.turn_seq !== undefined
+        && turns.has(event.turn_id) && !candidate.represented(event));
+      if (remaining.length) {
+        const replay: Array<{ event: ThreadProjectionEvent; live?: LiveContribution }> = body.events.map((event) => ({ event }));
+        for (const entry of remaining) {
+          const { event } = entry;
+          let position = replay.findIndex((item) => item.event.turn_id === event.turn_id
+            && item.event.turn_seq !== undefined && item.event.turn_seq > event.turn_seq!);
+          if (position < 0) {
+            position = replay.findIndex((item) => item.event.event === "user_message"
+              && (this.bySource.get(this.describe(item.event).source)?.introduced ?? 0) > entry.revision);
+            if (position < 0) position = replay.length;
+          }
+          replay.splice(position, 0, { event, live: entry });
+        }
+        candidate = new ThreadTranscript();
+        for (const [index, item] of replay.entries()) candidate.project(item.event, item.live
+          ? { createId: () => `live-${item.live!.revision}-${index}`, now: item.live.now,
+              startSeq: item.live.startSeq, sideChannel: item.live.sideChannel, sourceRevision: item.live.revision }
+          : { createId: () => `history-${index}`, now: 0, persisted: true });
+        for (const unit of candidate.units) mergeMembers(candidate.installed, unit.members);
+        candidate.textCoverage = Array.from(durableText.values());
+      }
+    }
+    // Canonical recovery may replace an unfinished stream with a final message.
+    if (durableMembers && completeSnapshot) for (const event of body?.events ?? []) {
+      if (event.event !== "message" || event.kind !== undefined || !event.turn_id || !completed.has(event.turn_id)) continue;
+      const unit = candidate.bySource.get(this.describe(event).source);
+      if (unit) mergeMembers(durableMembers, unit.members);
+    }
+    // An unknown-left end may overwrite an unpersisted live buffer. Stage the
+    // fragment before admission, keeping the visible projection until its prefix arrives.
+    const overwritesLive = joined && candidate.live.some(({ event }) => {
+      if ((event.event !== "delta" && event.event !== "reasoning_delta") || !event.turn_id
+        || event.turn_seq === undefined || contains(durableMembers?.get(event.turn_id), event.turn_seq)) return false;
+      return body?.events.some((end) => {
+        if (end.turn_id !== event.turn_id || end.turn_seq === undefined || end.turn_seq <= event.turn_seq!) return false;
+        if (event.event === "delta" && end.event === "message" && end.kind === undefined) return true;
+        if (end.event !== "stream_end" && end.event !== "reasoning_end") return false;
+        return (end.stream_id ?? "") === (event.stream_id ?? "")
+          && ((event.event === "delta" && end.event === "stream_end" && typeof end.text === "string")
+            || (event.event === "reasoning_delta" && end.event === "reasoning_end" && !!end.text));
+      });
+    });
+    if (overwritesLive && joined && groupRange) {
+      return this.stageFragment(joined, read, groupRange.start > 0
+        ? { turn: groupRange.turn, oldEnd: 0, front: groupRange.start } : null);
+    }
+    const withdrawnSources = new Set([...this.withdrawnSources, ...(joined?.withdrawn ?? []).map((event) => this.describe(event).source)]);
+    const withdrawn = new Set(Array.from(withdrawnSources).flatMap((source) => {
+      const unit = this.bySource.get(source);
+      return unit ? [unit] : [];
+    }));
+    const matches = matchUnits(candidate.units, this.units);
+    const overlaps = new Set([...withdrawn, ...matches.byOld.keys()]);
+    const firstOverlap = this.messages.findIndex((row) => overlaps.has(this.byRow.get(row.id)!));
+    const windowRows = new Set(this.messages.slice(Math.max(0, firstOverlap)).map((row) => row.id));
+    const received = replacedHistory ? [] : Array.from(this.units).filter((unit) => unit.received > 0
+      && Array.from(unit.rows).some((id) => windowRows.has(id)));
+    const protectedUnits = received.filter((unit) => !this.unitCovered(unit, candidate));
     const newTail = read.empty && protectedUnits.length > 0
       && protectedUnits.every((unit) => unit.received > read.revision);
     const appendedInputs = this.messages.filter((row) => row.role === "user" && row.turnId
       && this.byRow.get(row.id)!.introduced > read.revision);
     const appendedTurns = new Set(appendedInputs.map((row) => row.turnId!));
     const appendedInputUnits = new Set(appendedInputs.map((row) => this.byRow.get(row.id)!));
-    const reset = read.kind === "latest" && overlaps.size === 0
+    const reset = replacedHistory || replaceWindow || (read.kind === "latest" && overlaps.size === 0
       && !body?.page?.truncated_oversized_turn
       && protectedUnits.every((unit) => unit.introduced > read.revision
         && (appendedInputUnits.has(unit) || (unit.members.size > 0
-          && Array.from(unit.members.keys()).every((turn) => appendedTurns.has(turn)))));
+          && Array.from(unit.members.keys()).every((turn) => appendedTurns.has(turn))))));
     if (read.kind !== "older" && this.messages.length > 0 && overlaps.size === 0 && !newTail && !reset) {
       this.finishRead(read);
       return false;
     }
     const held = new Set<Unit>();
-    for (const unit of candidate.units) {
-      if (protectedUnits.some((old) => sourcesOverlap(unit, old))) held.add(unit);
-      for (const old of protectedUnits) for (const turn of old.members.keys()) {
-        const at = unitPosition(unit, turn);
+    const protectedStarts = new Map<string, number>();
+    for (const old of protectedUnits) {
+      for (const unit of matches.byOld.get(old) ?? []) held.add(unit);
+      for (const turn of old.members.keys()) {
         const start = unitPosition(old, turn);
-        if (at !== null && start !== null && at >= start) held.add(unit);
+        if (start !== null) protectedStarts.set(turn, Math.min(start, protectedStarts.get(turn) ?? Infinity));
       }
+    }
+    for (const unit of candidate.units) for (const turn of unit.members.keys()) {
+      const start = protectedStarts.get(turn);
+      const at = start === undefined ? null : unitPosition(unit, turn);
+      if (at !== null && at >= start!) held.add(unit);
     }
     const rows = candidate.messages;
     let cut = rows.findIndex((row) => held.has(candidate.byRow.get(row.id)!));
     if (cut < 0) cut = rows.length;
+    const lastRow = new Map<Unit, number>();
+    rows.forEach((row, index) => lastRow.set(candidate.byRow.get(row.id)!, index));
     // A whole source can straddle several rows: never install only part of it.
     for (let changed = true; changed;) {
       changed = false;
       for (let index = 0; index < cut; index++) {
         const unit = candidate.byRow.get(rows[index].id)!;
-        if (rows.slice(cut).some((row) => unit.rows.has(row.id))) { cut = index; changed = true; break; }
+        if (lastRow.get(unit)! >= cut) { cut = index; changed = true; break; }
       }
     }
     const admittedRows = rows.slice(0, cut);
@@ -436,21 +731,17 @@ export class ThreadTranscript {
       if (unit.rows.size === 0 && unit.order < cutOrder && !held.has(unit)) admitted.add(unit);
     }
     if (read.kind === "older" && Array.from(candidate.units).some((unit) => !admitted.has(unit)
-      && !Array.from(this.units).some((old) => sourcesOverlap(unit, old)))) {
+      && !matches.byNew.has(unit))) {
       this.finishRead(read, "Could not place earlier history");
-      return false;
-    }
-    if (read.kind === "older" && body?.page?.has_more_before === true
-      && (!body.page.before_cursor || body.page.before_cursor === read.before)) {
-      this.finishRead(read, "Earlier history cursor did not advance");
       return false;
     }
     const fullyAdopt = protectedUnits.length === 0 && cut === rows.length
       && !body?.page?.truncated_oversized_turn
       && (this.messages.length === 0 || reset || overlaps.size > 0);
     const replaced = new Set<Unit>();
-    for (const old of this.units) if ((reset && !protectedUnits.includes(old)) || Array.from(admitted)
-      .some((unit) => sourcesOverlap(unit, old) && (old.received === 0 || this.unitCovered(old, candidate)))) replaced.add(old);
+    for (const old of this.units) if ((reset && !protectedUnits.includes(old))
+      || ((withdrawn.has(old) || Array.from(matches.byOld.get(old) ?? []).some((unit) => admitted.has(unit)))
+        && (old.received === 0 || this.unitCovered(old, candidate)))) replaced.add(old);
     const previousCount = this.messages.length;
     const firstReplaced = this.messages.findIndex((row) => replaced.has(this.byRow.get(row.id)!));
     const prefix = read.kind !== "older" && !reset && firstReplaced > 0
@@ -460,8 +751,8 @@ export class ThreadTranscript {
     if (keepSuffix) for (const [index, row] of this.messages.entries()) {
       const old = this.byRow.get(row.id)!;
       if (!replaced.has(old)) continue;
-      for (const unit of admitted) {
-        if (!anchors.has(unit) && sourcesOverlap(unit, old)) anchors.set(unit, index);
+      for (const unit of matches.byOld.get(old) ?? []) {
+        if (admitted.has(unit) && !anchors.has(unit)) anchors.set(unit, index);
       }
     }
     const segments = new Map<string, string>();
@@ -490,15 +781,26 @@ export class ThreadTranscript {
     for (const [turn, snapshot] of candidate.modelRequests) {
       modelRequests.set(turn, reconcileModelRequest(modelRequests.get(turn), snapshot));
     }
-    this.projection = fullyAdopt && read.kind !== "older"
+    const oldActive = this.projection.activeAssistantId;
+    const activeReplaced = !!joined && !!oldActive && replaced.has(this.byRow.get(oldActive)!);
+    const adoptProjection = (fullyAdopt || replacedHistory) && read.kind !== "older";
+    this.projection = adoptProjection
       ? { ...candidate.projection, messages: nextMessages, modelRequests,
           activitySegmentId: candidate.projection.activitySegmentId
             ? segments.get(candidate.projection.activitySegmentId) ?? null : null,
           fileEditSegmentId: candidate.projection.fileEditSegmentId
             ? segments.get(candidate.projection.fileEditSegmentId) ?? null : null,
-          closedTurnIds: new Set([...this.projection.closedTurnIds, ...candidate.projection.closedTurnIds]),
-          closedAnswerStreamIds: new Set([...this.projection.closedAnswerStreamIds, ...candidate.projection.closedAnswerStreamIds]) }
-      : { ...this.projection, messages: nextMessages, modelRequests };
+          closedTurnIds: new Set([...(replacedHistory ? [] : this.projection.closedTurnIds), ...candidate.projection.closedTurnIds]),
+          closedAnswerStreamIds: new Set([...(replacedHistory ? [] : this.projection.closedAnswerStreamIds), ...candidate.projection.closedAnswerStreamIds]) }
+      : { ...this.projection, messages: nextMessages, modelRequests,
+          ...(activeReplaced ? {
+            activeAssistantId: candidate.projection.activeAssistantId,
+            mergeReasoning: candidate.projection.mergeReasoning,
+            activitySegmentId: candidate.projection.activitySegmentId
+              ? segments.get(candidate.projection.activitySegmentId) ?? null : null,
+            fileEditSegmentId: candidate.projection.fileEditSegmentId
+              ? segments.get(candidate.projection.fileEditSegmentId) ?? null : null,
+          } : {}) };
     if (fullyAdopt && read.kind !== "older") {
       const retained = new Set(prefix.map((row) => row.id));
       for (const unit of this.units) if (!Array.from(unit.rows).some((id) => retained.has(id))) replaced.add(unit);
@@ -509,29 +811,37 @@ export class ThreadTranscript {
       for (const key of unit.sources) this.bySource.delete(key);
     }
     for (const unit of admitted) this.installUnit(unit);
+    this.withdrawnSources = new Set(Array.from(withdrawnSources).filter((source) => withdrawn.has(this.bySource.get(source)!)));
     const retainedMembers: Members = new Map();
     for (const unit of this.units) mergeMembers(retainedMembers, unit.members);
     const installed: Members = new Map();
-    for (const [turn, ranges] of this.installed) {
-      const kept: Ranges = [];
-      for (const [first, last] of ranges) for (const [a, b] of retainedMembers.get(turn) ?? []) {
-        if (first <= b && a <= last) addRange(kept, Math.max(first, a), Math.min(last, b));
-      }
-      if (kept.length) installed.set(turn, kept);
-    }
+    mergeCoveredMembers(installed, this.installed, retainedMembers);
     const certificates = new Map(this.textCoverage
       .filter((text) => this.bySource.has(`text:${textKey(text)}`))
       .map((text) => [textKey(text), text]));
     for (const unit of admitted) {
-      mergeMembers(installed, unit.members);
-      for (const text of unit.text) if (text.snapshot && text.after !== null) {
-        const previous = certificates.get(textKey(text));
-        if (!previous || text.through > previous.through) certificates.set(textKey(text), copyText(text));
+      if (durableMembers) mergeCoveredMembers(installed, unit.members, durableMembers);
+      else mergeMembers(installed, unit.members);
+      for (const text of unit.text) {
+        const evidence = durableText.get(textKey(text));
+        if (!evidence?.snapshot || evidence.after === null) continue;
+        const previous = certificates.get(textKey(evidence));
+        if (!previous || evidence.through > previous.through) certificates.set(textKey(evidence), copyText(evidence));
       }
     }
     this.installed = installed;
     this.textCoverage = Array.from(certificates.values());
-    if (fullyAdopt && read.kind !== "older") {
+    const confirmedInputs = new Set<string>();
+    for (const event of body?.events ?? []) {
+      if (event.event !== "user_message" || !admitted.has(candidate.bySource.get(candidate.describe(event).source)!)) continue;
+      if (event.input_id) confirmedInputs.add(`id:${event.input_id}`);
+      if (event.provenance?.session_message?.message_id) confirmedInputs.add(`message:${event.provenance.session_message.message_id}`);
+    }
+    this.live = this.live.filter(({ event }) => !(event.event === "user_message"
+      && ((event.input_id && confirmedInputs.has(`id:${event.input_id}`))
+        || (event.provenance?.session_message?.message_id && confirmedInputs.has(`message:${event.provenance.session_message.message_id}`))))
+      && !this.represented(event));
+    if (adoptProjection) {
       this.boundaries = new Map(candidate.boundaries);
       this.knownTurns = new Set(candidate.knownTurns);
     }
@@ -543,12 +853,16 @@ export class ThreadTranscript {
         this.boundaries.set(key, Math.max(end, this.boundaries.get(key) ?? 0));
       }
     }
+    this.projection.closedTurnIds = new Set(this.projection.closedTurnIds);
+    this.projection.closedAssistantIds = new Set(this.projection.closedAssistantIds);
+    this.projection.closedAnswerStreamIds = new Set(this.projection.closedAnswerStreamIds);
     for (const event of body?.events ?? []) {
       if (event.event === "turn_end" && event.turn_id && event.turn_seq !== undefined
         && contains(this.installed.get(event.turn_id), event.turn_seq)) this.projection.closedTurnIds.add(event.turn_id);
     }
+    const admittedRowIds = new Set(admittedRows.map((row) => row.id));
     for (const id of candidate.projection.closedAssistantIds) {
-      if (admittedRows.some((row) => row.id === id)) this.projection.closedAssistantIds.add(id);
+      if (admittedRowIds.has(id)) this.projection.closedAssistantIds.add(id);
     }
     const admittedStreams = new Set(admittedRows.filter((row) => row.streamId)
       .map((row) => JSON.stringify([row.turnId ?? "", row.streamId])));
@@ -593,6 +907,10 @@ export class ThreadTranscript {
     if (forkRows && boundary !== undefined) for (const [index, event] of (body?.events ?? []).slice(0, boundary).entries()) {
       forkRows.project(event, { createId: () => `boundary-${index}`, now: 0, persisted: true });
     }
+    if (reset) this.fragments = [];
+    if (joined) this.fragments = joined.pages;
+    if (pending && !hasGap) this.pendingFragmentGap = null;
+    if (generation !== null) this.historyGeneration = generation;
     this.paging = { ...this.paging, loading: false, loadingOlder: false, error: null,
       olderError: read.kind !== "older" && !reset
         && (preserveFrontier || this.paging.beforeCursor === page?.before_cursor) ? this.paging.olderError : null,
@@ -613,6 +931,7 @@ export class ThreadTranscript {
         activeTurnId: body?.active_turn_id ?? null,
       }),
     };
+    if (joined && admitted.size === candidate.units.size) this.fragmentCompletedTurnIds = [...completed];
     return true;
   }
 
@@ -627,11 +946,14 @@ export class ThreadTranscript {
     const scratch = new ThreadTranscript();
     events.forEach((event, index) => scratch.project(event,
       { createId: () => `detail:${ref}:${index}`, now: 0, persisted: true }));
-    const unit = this.byRow.get(target.id)!;
+    const previous = this.byRow.get(target.id)!;
+    const unit = { ...previous, rows: new Set(previous.rows) };
+    this.units.delete(previous);
     unit.rows.delete(target.id);
     this.byRow.delete(target.id);
     const replacements = scratch.messages.map((row) => ({ ...row, activitySegmentId: target.activitySegmentId }));
-    for (const row of replacements) { unit.rows.add(row.id); this.byRow.set(row.id, unit); }
+    for (const row of replacements) unit.rows.add(row.id);
+    this.installUnit(unit);
     this.projection = { ...this.projection, messages: this.messages.flatMap((row) => row === target ? replacements : [row]) };
   }
 
@@ -641,6 +963,9 @@ export class ThreadTranscript {
         members: copyMembers(unit.members), text: unit.text.map(copyText) })),
       installed: copyMembers(this.installed), textCoverage: this.textCoverage.map(copyText),
       boundaries: new Map(this.boundaries), knownTurns: new Set(this.knownTurns),
-      paging: { ...this.paging }, revision: this.revision };
+      paging: { ...this.paging }, revision: this.revision, fragments: [...this.fragments], live: [...this.live],
+      historyGeneration: this.historyGeneration,
+      pendingFragmentGap: this.pendingFragmentGap ? { ...this.pendingFragmentGap } : null,
+      withdrawnSources: new Set(this.withdrawnSources) };
   }
 }

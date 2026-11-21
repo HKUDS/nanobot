@@ -49,7 +49,10 @@ test("keyboard selection restores visible focus to the permission trigger", asyn
 test("Escape restores keyboard focus even after pointer entry", async ({ page }) => {
   const trigger = page.locator(".thread-composer-access");
   await trigger.click();
-  await expect(page.getByRole("menu")).toBeVisible();
+  const menu = page.getByRole("menu");
+  // Reduced motion can expose the surface before Radix finishes its focus/layer setup.
+  await expect(menu).toBeFocused();
+  await expect(menu).toHaveCSS("pointer-events", "auto");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(trigger).toHaveAccessibleName("Workspace access mode: Full Access");
@@ -67,7 +70,7 @@ test("pointer selection after keyboard entry does not restore keyboard focus", a
 test("pointer dismissal outside a keyboard-opened menu does not refocus the trigger", async ({ page }) => {
   const trigger = page.locator(".thread-composer-access");
   await openWithKeyboard(page, trigger);
-  const greeting = (await page.getByTestId("hero-greeting").boundingBox())!;
-  await page.mouse.click(greeting.x + 8, greeting.y + 8);
+  const mark = (await page.getByTestId("thread-welcome-mark").boundingBox())!;
+  await page.mouse.click(mark.x + 8, mark.y + 8);
   await expectPointerDismissal(page, trigger);
 });

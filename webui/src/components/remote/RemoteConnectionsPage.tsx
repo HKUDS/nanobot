@@ -8,9 +8,11 @@ import { Input } from "@/components/ui/input";
 import { DisclosureContent } from "@/components/ui/disclosure";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useToast } from "@/components/ui/toast";
 import { useClient } from "@/providers/ClientProvider";
 import { groupRemoteProfiles, isCompatibilityError, remoteAction, type RemoteInspection, type RemoteProfile } from "@/lib/remote-instances";
 import { cn } from "@/lib/utils";
+import { hasOpenDialogSurface } from "@/lib/dom-overlays";
 import { parseSSHAddress } from "@/lib/ssh-address";
 import { clearPairReturn, readPairReturn, subscribePairReturn } from "@/lib/remote-pair-return";
 import { useRemoteConnections } from "./remote-context";
@@ -34,6 +36,7 @@ export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChro
   const { t } = useTranslation();
   const { client } = useClient();
   const connections = useRemoteConnections();
+  const showToast = useToast();
   const [form, setForm] = useState(emptyProfile);
   const [editorOpen, setEditorOpen] = useState(false);
   const returnedPair = useSyncExternalStore(subscribePairReturn, readPairReturn);
@@ -71,6 +74,9 @@ export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChro
   const nameId = useId();
   const nameInput = useRef<HTMLInputElement>(null);
   const refresh = connections?.refresh;
+  const watchDirectory = connections?.watchDirectory;
+  const visible = connections?.localActive || connections?.managing;
+  useEffect(() => { if (visible) return watchDirectory?.(); }, [visible, watchDirectory]);
   const page = useRef<HTMLDivElement>(null);
   useEffect(() => { if (connections?.managing) page.current?.focus({ preventScroll: true }); }, [connections?.managing]);
 
@@ -187,6 +193,15 @@ export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChro
           if (wanted(attempt)) setFingerprint({ id, ...result, inspect });
         } catch (scanError) { if (wanted(attempt)) showError(scanError); }
       } else {
+        // Opening an alias of the local gateway needs no recovery. A dialog
+        // (including the pairing popup) can hide the shell's toast viewport.
+        if (reason instanceof Error && reason.message === "same_instance" && showToast
+          && !editorOpen && !fingerprint && !detailsOpen && page.current
+          && !page.current.closest("[hidden], [inert], [aria-hidden='true']")
+          && !hasOpenDialogSurface()) {
+          showToast({ message: t("remote.errors.same_instance"), tone: "error", dedupeKey: "remote-same-instance" });
+          return;
+        }
         if (!editorOpen) {
           const profile = directory?.profiles.find((item) => item.id === id);
           if (profile && !profile.paired) {
@@ -261,7 +276,7 @@ export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChro
     finally { if (mounted.current) setBusy(""); }
   };
   const pageError = error || (directoryError ? t("remote.errors.directory_unavailable") : "");
-  const nanobotError = /^(config_|runtime_user_|webui_|remote_auth_|remote_unreachable|incompatible_gateway|public_ws_|python_|probe_failed)/.test(errorCode);
+  const nanobotError = /^(config_|runtime_user_|webui_|remote_auth_|remote_unreachable|incompatible_gateway|python_|probe_failed)/.test(errorCode);
   const locationStep = !!inspection || manualLocation || nanobotError;
   const openingProfile = !editorOpen && !fingerprint && !removing && !disconnecting
     ? directory?.profiles.find((profile) => profile.id === busy) : null;

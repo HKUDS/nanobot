@@ -6,7 +6,6 @@ import re
 import shutil
 import time
 from contextlib import suppress
-from datetime import datetime
 from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
@@ -351,11 +350,6 @@ def build_image_content_blocks(
     ]
 
 
-def timestamp() -> str:
-    """Current ISO timestamp."""
-    return datetime.now().isoformat()
-
-
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
@@ -371,24 +365,6 @@ def safe_filename(name: str) -> str:
 def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:
     """Build an image placeholder string."""
     return f"[image: {path}]" if path else empty
-
-
-def content_with_media_breadcrumbs(
-    role: str | None,
-    content: Any,
-    media: Any,
-) -> Any:
-    """Append persisted user-media breadcrumbs to plain-text content."""
-    if role != "user" or not isinstance(content, str) or not isinstance(media, list):
-        return content
-    breadcrumbs = "\n".join(
-        image_placeholder_text(path)
-        for path in cast(list[object], media)
-        if isinstance(path, str) and path
-    )
-    if not breadcrumbs:
-        return content
-    return f"{content}\n{breadcrumbs}" if content else breadcrumbs
 
 
 def truncate_text(text: str, max_chars: int) -> str:
@@ -910,15 +886,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     try:
         from nanobot.utils.gitstore import GitStore
 
-        gs = GitStore(
-            workspace,
-            tracked_files=[
-                "SOUL.md",
-                "USER.md",
-                "memory/MEMORY.md",
-            ],
-        )
-        gs.init()
+        GitStore.for_memory(workspace).init()
     except Exception:
         logger.exception("Failed to initialize git store for {}", workspace)
 

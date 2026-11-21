@@ -8,16 +8,18 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { RecoveryState } from "@/lib/types";
-import { resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
+import { isImageRequestFailure, resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 
 interface RecoveryNoticeProps {
   state: RecoveryState;
   onContinue: () => Promise<void>;
   onDismiss: () => Promise<void>;
   onOpenSettings?: () => void;
+  onInspectImagePreset?: () => void;
+  imageInputBlocked?: boolean;
 }
 
-export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings }: RecoveryNoticeProps) {
+export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings, onInspectImagePreset, imageInputBlocked }: RecoveryNoticeProps) {
   const { t } = useTranslation();
   const [pending, setPending] = useState<"continue" | "dismiss" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +40,8 @@ export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings }:
   const modelFailure = state.reason === "model_request_failed"
     ? resolveModelRequestFailureCopy({ errorKind: state.failure_error_kind }, t)
     : null;
+  const imageFailure = modelFailure !== null && isImageRequestFailure(state.failure_error_kind);
+  const openSettings = imageFailure ? onInspectImagePreset : onOpenSettings;
   const title = modelFailure?.title ?? (state.status === "failed"
     ? t("recovery.failed", { defaultValue: "Task recovery failed" })
     : t("recovery.interrupted", { defaultValue: "Task interrupted" }));
@@ -45,7 +49,7 @@ export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings }:
     ? t("recovery.failedHelp", {
         defaultValue: "The saved task could not be restored safely. Review it before continuing.",
       })
-    : modelFailure && state.reply_preserved === true
+    : modelFailure && !imageFailure && state.reply_preserved === true
       ? t("recovery.replyPreserved", { defaultValue: "Reply saved. You can continue." })
       : modelFailure?.body ?? t("recovery.review", { defaultValue: "Review the task before continuing. Tools will not be replayed automatically." });
   const run = (action: "continue" | "dismiss") => {
@@ -74,9 +78,9 @@ export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings }:
         <p className="font-medium">
           {title}
         </p>
-        {modelFailure && onOpenSettings ? (
-          <Button variant="link" size="sm" className="h-auto px-0 py-1" onClick={onOpenSettings}>
-            {t("thread.composer.reauthSettings")}
+        {modelFailure && openSettings ? (
+          <Button variant="link" size="sm" className="h-auto px-0 py-1" onClick={openSettings}>
+            {t(imageFailure ? "settings.models.viewPreset" : "thread.composer.reauthSettings")}
           </Button>
         ) : null}
         <p className={cn(
@@ -97,7 +101,7 @@ export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings }:
           <X className="mr-1 h-3.5 w-3.5" aria-hidden />
           {t("recovery.dismiss", { defaultValue: "Dismiss" })}
         </Button>
-        {!contextUnavailable ? (
+        {!contextUnavailable && !(state.failure_error_kind === "unsupported_image" && imageInputBlocked) ? (
           <Button
             type="button"
             size="sm"

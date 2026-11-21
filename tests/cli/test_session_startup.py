@@ -21,7 +21,6 @@ def isolate_config_path(monkeypatch: pytest.MonkeyPatch) -> None:
         ["agent", "--message", "hello"],
         ["gateway", "--foreground"],
         ["gateway", "--background"],
-        ["serve"],
         ["webui", "--yes", "--no-open"],
     ],
 )

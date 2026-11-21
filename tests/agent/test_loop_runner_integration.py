@@ -335,16 +335,13 @@ async def test_non_goal_direct_turn_cannot_reuse_prior_goal_command(tmp_path):
     ])
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
                      builtin_assembly=install_goal)
-    session = loop.sessions.get_or_create("api:default")
+    session = loop.sessions.get_or_create("cli:direct")
     session.add_message("user", "/goal old completed request")
     session.add_message("assistant", "The old request is complete.")
 
     result = await loop.process_direct(
         "Handle this as an ordinary one-time task.",
         session_key=session.key,
-        channel="api",
-        chat_id="default",
-        persist_user_message=False,
     )
 
     assert result is not None

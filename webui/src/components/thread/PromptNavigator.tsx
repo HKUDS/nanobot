@@ -14,6 +14,7 @@ import {
 import { fmtDateTime } from "@/lib/format-time";
 import type { UIMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { hasOpenDialogSurface } from "@/lib/dom-overlays";
 
 interface PromptNavigatorProps {
   messages: UIMessage[];
@@ -39,12 +40,13 @@ export function PromptNavigator({
   const [highlighted, setHighlighted] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
       if (!shortcutEnabled || !prompts.length || event.defaultPrevented || event.repeat || event.isComposing
         || event.altKey || event.shiftKey || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "f") return;
-      if (!open && (triggerRef.current?.closest("[hidden], [aria-hidden=true]") || document.querySelector("[role=dialog][data-state=open]"))) return;
+      if (!open && (triggerRef.current?.closest("[hidden], [aria-hidden=true]") || hasOpenDialogSurface())) return;
       event.preventDefault();
       setListTop(0); setOpen(true);
       inputRef.current?.focus(); inputRef.current?.select();
@@ -93,8 +95,16 @@ export function PromptNavigator({
         <DialogContent
           showCloseButton={false}
           aria-describedby={undefined}
-          onOpenAutoFocus={(event) => { event.preventDefault(); inputRef.current?.focus(); }}
-          onCloseAutoFocus={(event) => { event.preventDefault(); triggerRef.current?.focus(); }}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            inputRef.current?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const target = openerRef.current?.isConnected ? openerRef.current : triggerRef.current;
+            target?.focus({ preventScroll: true });
+          }}
           className="session-search-dialog flex max-h-[min(40rem,100%)] w-[calc(100vw-2rem)] max-w-[42rem] flex-col gap-0 overflow-hidden p-0"
         >
             <DialogTitle className="sr-only">

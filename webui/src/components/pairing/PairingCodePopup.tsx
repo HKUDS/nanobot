@@ -6,7 +6,7 @@ import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Button } from "@/components/ui/button";
 import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
-import { logoFallbackUrls } from "@/lib/provider-brand";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import type { PairingRequestInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +28,7 @@ export function PairingCodePopup({
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const attemptedCode = useRef<string | null>(null);
+  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("dialog");
   const normalizedCode = normalizePairingCode(value);
   const matchedRequest = useMemo(
     () => requests.find((request) => request.code === normalizedCode) ?? null,
@@ -75,6 +76,7 @@ export function PairingCodePopup({
 
   return (
     <div
+      ref={surfaceRef}
       role="dialog"
       aria-live="polite"
       aria-label={t("app.pairing.title", { defaultValue: "Pair a chat user" })}
@@ -190,11 +192,8 @@ function PairingChannelBadge({ channel }: { channel: string }) {
   const presentation = pairingChannelPresentation(channel);
   const initials = presentation.initials;
   const color = presentation.color;
-  const logoUrls = useMemo(
-    () => logoFallbackUrls(presentation?.logoUrl),
-    [presentation?.logoUrl],
-  );
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
+  const brandLogoUrl = presentation.logoUrl;
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brandLogoUrl ? [brandLogoUrl] : undefined);
 
   return (
     <div

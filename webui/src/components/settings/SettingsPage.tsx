@@ -2,14 +2,16 @@ import { ChevronLeft } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogLayoutContext, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import type { SettingsExitGuard } from "@/components/settings/contracts";
-import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
+import { imageInputPresetFromFocus, type SettingsExitGuard, type SettingsFocusTarget } from "@/components/settings/contracts";
+import { isAppsSection, isCapabilitySection, type AppsSectionKey, type SettingsSectionKey } from "@/components/settings/contracts";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
 import type { EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { SharedProxySetupDialog } from "@/components/settings/shared/SharedProxySetupDialog";
 import { SettingsSectionSkeleton } from "@/components/settings/shared/SettingsSectionSkeleton";
 
-import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
+import { SkillsCatalogPage, useSkillsCatalogSearch } from "@/components/settings/SkillsCatalogSettings";
+import { CatalogSearch } from "@/components/settings/shared/CatalogToolbar";
 import { ImageGenerationSettings } from "@/components/settings/capabilities/ImageGenerationSettings";
 import { AdvancedSettings } from "@/components/settings/capabilities/SecuritySettings";
 import { TranscriptionSettings } from "@/components/settings/capabilities/TranscriptionSettings";
@@ -25,6 +27,7 @@ import {
 } from "@/components/settings/models/ProviderSettings";
 import { providerFormFromRow } from "@/components/settings/models/providerForm";
 import { AboutSettings, AppearanceSettings, OverviewSettings } from "@/components/settings/overview/OverviewSettings";
+import { TokenUsageOverview } from "@/components/settings/TokenUsageOverview";
 import { NotificationSettings } from "@/components/settings/notifications/NotificationSettings";
 import { SettingsSidebar, standaloneSectionTitle } from "@/components/settings/SettingsSidebar";
 import {
@@ -34,7 +37,7 @@ import {
   SettingsSectionTitle,
   RestartRequiredNotice,
 } from "@/components/settings/shared/SettingsControls";
-import { AppsCatalogSettings } from "@/components/settings/system/AppsSettings";
+import { AppsCatalogPage } from "@/components/settings/system/AppsSettings";
 import {
   AutomationDeleteDialog,
   AutomationEditDialog,
@@ -43,6 +46,7 @@ import {
 import { ChannelsSettings } from "@/components/settings/system/ChannelsSettings";
 import { RUNTIME_CONFIG_FIELDS, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfigSettings";
+import { useClient } from "@/providers/ClientProvider";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
@@ -52,6 +56,7 @@ import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
   registerExitGuard?: (guard: SettingsExitGuard | null) => void;
+  focusTarget?: SettingsFocusTarget;
   controller: SettingsController;
   themePreference: ThemePreference;
   showSidebar: boolean;
@@ -76,6 +81,7 @@ interface SettingsPageProps {
 
 export function SettingsPage({
   registerExitGuard,
+  focusTarget,
   controller,
   themePreference,
   showSidebar,
@@ -92,8 +98,11 @@ export function SettingsPage({
   isRestarting,
   hostChromeInset,
 }: SettingsPageProps) {
+  const { client, webuiCapabilities } = useClient();
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
   const [mcpSetupName, setMcpSetupName] = useState<string | null>(null);
+  const [channelsQuery, setChannelsQuery] = useState("");
+  const skillsSearch = useSkillsCatalogSearch();
   const presetDeletedCallback = useRef<(() => void) | null>(null);
   const [providerPanel, setProviderPanel] = useState<ProviderSettingsEntry | null>(null);
   const [proxySetupOpen, setProxySetupOpen] = useState(false);
@@ -193,7 +202,9 @@ export function SettingsPage({
     : controllerPendingRestartSections;
 
   const runtimeConfiguration = (page: RuntimeConfigPage) => settings && (
-    <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState}
+    <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState} client={client}
+      focusTarget={page === "advanced" ? focusTarget : undefined}
+      sandboxSupported={webuiCapabilities.includes("webui.sandbox-settings.v1")}
       onRestart={showSidebar ? undefined : restartViaSettingsSurface} isRestarting={restartInProgress}
       remoteBrowserAccess={remoteBrowserAccess}>
       {page === "advanced" ? (
@@ -264,6 +275,7 @@ export function SettingsPage({
             settings={settings}
             showBrandLogos={localPrefs.brandLogos}
             onSelectSection={selectSection}
+            usageCard={<TokenUsageOverview initialUsage={settings.usage} timeZone={settings.agent.timezone} />}
           />
         );
       case "about":
@@ -279,6 +291,7 @@ export function SettingsPage({
               form={modelState.form}
               setForm={modelState.setForm}
               editingPresetName={modelState.modelPresetEditingName}
+              imageInputPreset={imageInputPresetFromFocus(focusTarget)}
               presetNameError={modelState.modelPresetNameError}
               error={error}
               settings={settings}
@@ -320,6 +333,7 @@ export function SettingsPage({
               }}
               onDeleteConfiguration={(preset, onDeleted) => {
                 presetDeletedCallback.current = onDeleted;
+                modelState.setModelPresetDeleteError(null);
                 modelState.setModelPresetPendingDelete(preset);
               }}
             />
@@ -461,15 +475,10 @@ export function SettingsPage({
               onRestart={showSidebar ? undefined : restartViaSettingsSurface}
               isRestarting={restartInProgress}
               requiresRestartPending={pendingRestartSections.runtime}
-              apiService={systemState.apiService}
-              apiServiceLoading={systemState.apiServiceLoading}
-              apiServiceAction={systemState.apiServiceAction}
-              apiServiceError={systemState.apiServiceError}
               langfuseFeature={featureCatalog.find((feature) => feature.name === "langfuse")}
               capabilitiesLoading={systemState.nanobotFeaturesLoading}
               capabilityAction={systemState.nanobotFeatureAction}
               capabilityError={systemState.nanobotFeaturesError}
-              onApiServiceAction={systemActions.handleApiServiceAction}
               onInstallCapability={(name) => void systemActions.installCapabilities([name])}
             />
           </div>
@@ -491,10 +500,10 @@ export function SettingsPage({
       case "channels":
         return (
           <ChannelsSettings
+            query={channelsQuery}
             onBeforeCloseChange={registerChannelCompletion}
             onConfigureMcp={(name) => {
               setMcpSetupName(name);
-              systemState.setAppsKindFilter("mcp");
               systemState.setAppsQuery(name);
               selectSection("apps");
             }}
@@ -517,8 +526,7 @@ export function SettingsPage({
         );
       case "apps":
         return (
-          <div className="settings-stack">
-            <AppsCatalogSettings
+            <AppsCatalogPage
               onConfigureProxy={configureProxy}
               setupName={mcpSetupName}
               onSetupOpened={() => setMcpSetupName(null)}
@@ -527,7 +535,6 @@ export function SettingsPage({
               cliAppsLoading={systemState.cliAppsLoading}
               mcpPresetsLoading={systemState.mcpPresetsLoading}
               query={systemState.appsQuery}
-              filter={systemState.appsKindFilter}
               cliActionKey={systemState.cliAppsAction}
               mcpActionKey={systemState.mcpPresetAction}
               mcpOAuthFlow={systemState.mcpOAuthFlow}
@@ -546,7 +553,6 @@ export function SettingsPage({
               showBrandLogos={localPrefs.brandLogos}
               requiresRestartPending={pendingRestartSections.runtime}
               onQueryChange={systemState.setAppsQuery}
-              onFilterChange={systemState.setAppsKindFilter}
               onCliAction={systemActions.handleCliAppAction}
               onMcpAction={systemActions.handleMcpPresetAction}
               onMcpOAuthConnect={systemActions.handleMcpOAuthConnect}
@@ -581,7 +587,6 @@ export function SettingsPage({
               onRestart={restartViaSettingsSurface}
               isRestarting={restartInProgress}
             />
-          </div>
         );
       case "automations":
         return (
@@ -601,9 +606,13 @@ export function SettingsPage({
               onAction={systemActions.handleAutomationAction}
               onRequestEdit={(job) => {
                 setAutomationDetailReturn(null);
+                systemState.setAutomationDialogError(null);
                 systemState.setAutomationPendingEdit(job);
               }}
-              onRequestDelete={systemState.setAutomationPendingDelete}
+              onRequestDelete={(job) => {
+                systemState.setAutomationDialogError(null);
+                systemState.setAutomationPendingDelete(job);
+              }}
               onChangeChat={systemActions.handleAutomationChat}
               onManageModels={() => selectSection("models")}
               returnToDetailJob={automationDetailReturn}
@@ -612,12 +621,24 @@ export function SettingsPage({
           </div>
         );
       case "skills":
-        return <SkillsCatalogSettings skills={skills} loading={skillsLoading} error={skillsError} />;
+        return <SkillsCatalogPage skills={skills} loading={skillsLoading} error={skillsError} searchState={skillsSearch} />;
       default:
         return renderSettingsSection(section, embedded);
     }
   };
   // Appearance reads only browser-local preferences, not the gateway settings snapshot.
+  const appsSection = isAppsSection(activeSection);
+  const catalogSearch = activeSection === "skills" ? skillsSearch.search
+    : activeSection === "channels" ? {
+      type: "search",
+      value: channelsQuery,
+      onChange: (event: React.ChangeEvent<HTMLInputElement>) => setChannelsQuery(event.target.value),
+      placeholder: t("settings.channels.search"),
+    } : activeSection === "apps" ? {
+      value: systemState.appsQuery,
+      onChange: (event: React.ChangeEvent<HTMLInputElement>) => systemState.setAppsQuery(event.target.value),
+      placeholder: t("settings.apps.searchPlaceholder"),
+    } : null;
   const localSection = activeSection === "appearance";
   const sectionReady = localSection || settings !== null || activeSection === "skills" || activeSection === "apps"
     || activeSection === "channels" || activeSection === "automations";
@@ -654,6 +675,7 @@ export function SettingsPage({
       <ModelPresetDeleteDialog
         preset={modelState.modelPresetPendingDelete}
         deleting={modelState.saving}
+        error={modelState.modelPresetPendingDelete ? modelState.modelPresetDeleteError : null}
         onOpenChange={(open) => {
           if (!open) {
             modelState.setModelPresetPendingDelete(null);
@@ -713,6 +735,7 @@ export function SettingsPage({
       <AutomationDeleteDialog
         job={systemState.automationPendingDelete}
         deleting={systemState.automationAction === `delete:${systemState.automationPendingDelete?.id ?? ""}`}
+        error={systemState.automationPendingDelete ? systemState.automationDialogError : null}
         onOpenChange={(open) => {
           if (!open) systemState.setAutomationPendingDelete(null);
         }}
@@ -722,6 +745,7 @@ export function SettingsPage({
       <AutomationEditDialog
         job={systemState.automationPendingEdit}
         saving={systemState.automationAction === `update:${systemState.automationPendingEdit?.id ?? ""}`}
+        error={systemState.automationPendingEdit ? systemState.automationDialogError : null}
         onOpenChange={(open) => {
           if (!open) systemState.setAutomationPendingEdit(null);
         }}
@@ -731,12 +755,12 @@ export function SettingsPage({
 
       <div
         className={cn(
-          "min-w-0 flex-1 bg-settings-canvas [scrollbar-gutter:stable]",
-          "overflow-y-auto",
+          "min-w-0 flex-1 overflow-y-auto bg-settings-canvas [scrollbar-gutter:stable]",
+          !showSidebar && (appsSection || activeSection === "automations") && "sm:[scrollbar-gutter:stable_both-edges]",
         )}
       >
         <div
-          key={activeSection}
+          key={appsSection ? "apps" : activeSection}
           data-testid="settings-section-transition"
           ref={setDialogLayoutAnchor}
           data-settings-section={activeSection}
@@ -747,7 +771,6 @@ export function SettingsPage({
             "settings-grid",
             activeSection === "about" && "flex min-h-full flex-col",
             !showSidebar && "settings-feature-page",
-            !showSidebar && activeSection === "automations" && "settings-automations-grid",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
@@ -762,7 +785,7 @@ export function SettingsPage({
                 {t("settings.backToChat")}
               </button>
               {activeSection !== "automations" ? <h1 className="text-[24px] font-normal leading-tight tracking-normal text-foreground sm:text-[28px]">
-                {t(`settings.nav.${activeSection}`, {
+                {t(`settings.nav.${appsSection ? "apps" : activeSection}`, {
                   defaultValue: standaloneSectionTitle(activeSection),
                 })}
               </h1> : null}
@@ -770,7 +793,8 @@ export function SettingsPage({
           ) : null}
 
           {loading && !sectionReady ? (
-            <SettingsSectionSkeleton section={activeSection} showRestart={!showSidebar} />
+            <SettingsSectionSkeleton section={activeSection} showRestart={!showSidebar}
+              sandboxSupported={webuiCapabilities.includes("webui.sandbox-settings.v1")} />
           ) : error && !sectionReady ? (
             <SettingsGroup>
               <SettingsRow title={t("settings.status.loadError")}>
@@ -780,17 +804,31 @@ export function SettingsPage({
           ) : sectionReady ? (
             <div
               className={cn(
-                "settings-stack",
+                appsSection ? "apps-catalog-layout" : "settings-stack",
                 activeSection === "about" && "flex flex-1 flex-col",
-                activeSection === "channels" &&
-                  "flex min-h-0 flex-1 flex-col xl:overflow-hidden",
               )}
             >
               {error && (!localSection || settings !== null) ? (
-                <div className="rounded-floating border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
+                <div className="col-span-full rounded-floating border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
                   {error}
                 </div>
               ) : null}
+              {appsSection && !showSidebar ? (
+                <SegmentedControl<AppsSectionKey>
+                  value={activeSection}
+                  onChange={selectSection}
+                  ariaLabel={t("settings.nav.apps")}
+                  className="catalog-tabs min-h-9 shrink-0 rounded-control"
+                  itemClassName="min-h-7 rounded-compact px-3 py-0"
+                  indicatorClassName="rounded-compact"
+                  options={[
+                    { value: "apps", label: t("settings.apps.featured") },
+                    { value: "skills", label: t("settings.nav.skills") },
+                    { value: "channels", label: t("settings.nav.channels") },
+                  ]}
+                />
+              ) : null}
+              {catalogSearch && <CatalogSearch {...catalogSearch} />}
               {renderSection(isCapabilitySection(activeSection) ? "capabilities" : activeSection)}
             </div>
           ) : null}

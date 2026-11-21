@@ -19,7 +19,6 @@ def initialize_config(path: Path) -> None:
             return
 
         web_token = os.environ.get("NANOBOT_WEB_TOKEN") or secrets.token_hex(16)
-        api_key = os.environ.get("NANOBOT_API_KEY") or secrets.token_hex(16)
         websocket = WebSocketConfig(
             enabled=True, host="0.0.0.0", token_issue_secret=web_token,
             websocket_requires_token=True,
@@ -27,12 +26,10 @@ def initialize_config(path: Path) -> None:
         config = Config.model_validate({
             "gateway": {"host": "0.0.0.0"},
             "channels": {"websocket": websocket.model_dump(by_alias=True)},
-            "api": {"host": "0.0.0.0", "api_key": api_key},
         })
         save_config(config, path)
         print(f"[entrypoint] initialized {path}")
         print(f"[entrypoint] WebUI: http://localhost:8765 — password: {web_token}")
-        print(f"[entrypoint] OpenAI-compatible API key: {api_key}")
 
 
 if __name__ == "__main__":

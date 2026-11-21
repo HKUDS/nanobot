@@ -7,11 +7,6 @@ import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { isActiveSubagentTask, type ObservedSubagentTask } from "@/lib/subagent-tasks";
 import type { UIMessage } from "@/lib/types";
 
-export function useHasSubagentResults(): boolean {
-  const context = useSubagentTasks();
-  return context?.tasks.some((task) => !isActiveSubagentTask(task)) ?? false;
-}
-
 /** Exact initiating prompts win; replayed IDs fall back to the turn's first user message. */
 function groupResults(messages: UIMessage[], tasks: ObservedSubagentTask[]) {
   const promptsById = new Map<string, UIMessage>();
@@ -25,20 +20,16 @@ function groupResults(messages: UIMessage[], tasks: ObservedSubagentTask[]) {
   }
 
   const byMessage = new Map<string, ObservedSubagentTask[]>();
-  const unlinked: ObservedSubagentTask[] = [];
   for (const task of tasks) {
     if (isActiveSubagentTask(task)) continue;
     const prompt = (task.origin_message_id ? promptsById.get(task.origin_message_id) : undefined)
       ?? (task.origin_turn_id ? firstPromptByTurn.get(task.origin_turn_id) : undefined);
-    if (!prompt) {
-      unlinked.push(task);
-      continue;
-    }
+    if (!prompt) continue;
     const group = byMessage.get(prompt.id) ?? [];
     group.push(task);
     byMessage.set(prompt.id, group);
   }
-  return { byMessage, unlinked };
+  return byMessage;
 }
 
 export function SubagentThreadMessages(props: ComponentProps<typeof ThreadMessages>) {
@@ -65,13 +56,8 @@ export function SubagentThreadMessages(props: ComponentProps<typeof ThreadMessag
   };
 
   return <ThreadMessages {...props}
-    beforeMessages={groups.unlinked.length ? <>
-      {props.beforeMessages}
-      <SubagentResults tasks={groups.unlinked} unlinked expanded={expanded(groups.unlinked)}
-        onToggle={() => toggle(groups.unlinked)} />
-    </> : props.beforeMessages}
     afterUserMessage={(message) => {
-      const results = groups.byMessage.get(message.id);
+      const results = groups.get(message.id);
       return <>
         {props.afterUserMessage?.(message)}
         {results ? <SubagentResults tasks={results} expanded={expanded(results)}
@@ -80,9 +66,8 @@ export function SubagentThreadMessages(props: ComponentProps<typeof ThreadMessag
     }} />;
 }
 
-function SubagentResults({ tasks, unlinked = false, expanded, onToggle }: {
+function SubagentResults({ tasks, expanded, onToggle }: {
   tasks: ObservedSubagentTask[];
-  unlinked?: boolean;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -90,13 +75,13 @@ function SubagentResults({ tasks, unlinked = false, expanded, onToggle }: {
   const rowsId = useId();
   const completed = tasks.filter((task) => task.state === "done").length;
   const attention = tasks.filter((task) => task.state === "error" || task.state === "incomplete" || task.state === "interrupted").length;
-  const title = t(unlinked ? "thread.subagents.otherWorkTitle" : "thread.subagents.workTitle");
+  const title = t("thread.subagents.workTitle");
   const summary = completed === tasks.length
     ? t("thread.subagents.completed", { count: completed })
     : t("thread.subagents.finished", { count: tasks.length });
 
   return <section data-subagent-results aria-label={title}
-    className={`thread-message-row mt-2 grid grid-cols-[1rem_minmax(0,1fr)_minmax(6rem,max-content)_3rem] items-center gap-x-2.5 ${unlinked ? "mb-5" : ""}`}>
+    className="thread-message-row mt-2 grid grid-cols-[1rem_minmax(0,1fr)_minmax(6rem,max-content)_3rem] items-center gap-x-2.5">
     <button type="button" data-thread-disclosure data-subagent-results-summary aria-expanded={expanded} aria-controls={rowsId}
       onClick={onToggle}
       className="col-span-full grid min-h-11 w-full min-w-0 grid-cols-subgrid items-center gap-y-0.5 rounded-control py-2 text-left text-[13px] leading-5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:min-h-9 sm:py-1.5">
@@ -109,7 +94,6 @@ function SubagentResults({ tasks, unlinked = false, expanded, onToggle }: {
       <ChevronRight className={`col-start-4 row-start-1 h-3.5 w-3.5 shrink-0 justify-self-end transition-transform motion-reduce:transition-none ${expanded ? "rotate-90" : ""}`} aria-hidden />
     </button>
     <div id={rowsId} hidden={!expanded} className={`col-span-full grid-cols-subgrid pb-1 ${expanded ? "grid" : "hidden"}`}>
-      {unlinked ? <p className="col-span-full py-2 text-xs text-muted-foreground">{t("thread.subagents.unlinkedHelp")}</p> : null}
       <ol className="col-span-full grid grid-cols-subgrid">
         {tasks.map((task) => <li key={task.task_id} className="col-span-full grid min-w-0 grid-cols-subgrid">
           <SubagentTaskButton task={task} surface="archive" />

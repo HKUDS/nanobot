@@ -1,3 +1,8 @@
+:root.dark .star-prompt-dialog {
+  background-color: hsl(220 16% 17%);
+  border-color: hsl(220 14% 28%);
+}
+
 .star-prompt-decoration {
   position: absolute;
   top: -12px;

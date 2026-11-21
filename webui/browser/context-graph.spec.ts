@@ -53,6 +53,15 @@ test("graph keyboard controls, pointer hit targets, pixels and replay agree", as
   await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
 });
 
+test("closes the context sidebar from its own control", async ({ page }) => {
+  await page.goto("/browser/context-graph.html?single&drawer");
+  await page.getByTestId("composer-context-usage").click();
+  const sidebar = page.getByTestId("context-sidebar");
+  await expect(sidebar).toBeVisible();
+  await sidebar.getByRole("button", { name: "Close" }).click();
+  await expect(sidebar).toHaveCount(0);
+});
+
 test.describe("touch graph", () => {
   test.use({ viewport: { width: 390, height: 740 }, hasTouch: true });
   test("recovers batched drawer visibility, replays and opens a file by touch", async ({ page }) => {
@@ -165,7 +174,8 @@ test("500 reduced-motion nodes settle over multiple frames and are all painted",
     }).observe({ entryTypes: ["longtask"] });
   });
   await page.goto("/browser/context-graph.html");
-  await expect(page.getByRole("button", { name: "a.md", exact: true })).toBeAttached();
+  // Start timing the update after the initial two-node graph has painted.
+  await expect.poll(() => page.evaluate(() => window.graphDrawTrace.arcs)).toBe(2);
   await page.evaluate(() => { window.graphDrawTrace = { arcs: 0, frames: 0, maxTask: 0, start: performance.now() }; });
   await page.getByRole("button", { name: "Load 500 nodes" }).click();
   await expect(page.getByRole("button", { name: /^file-\d+\.md$/ })).toHaveCount(500);

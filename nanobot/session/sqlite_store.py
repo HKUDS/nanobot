@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 import threading
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from concurrent.futures import CancelledError
 from contextlib import contextmanager, suppress
 from datetime import datetime
@@ -24,12 +24,28 @@ from nanobot.session.manager import (
     message_preview_text,
     metadata_title,
 )
+from nanobot.session.model_selection import SESSION_MODEL_KEYS, SessionModelPreset
 from nanobot.session.summary import is_summary_checkpoint
-from nanobot.session.types import PARENT_SESSION_KEY
+from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
 
 _CHECKPOINT = "runtime_checkpoint"
 _INPUTS = ("pending_user_followups",)
 _T = TypeVar("_T")
+
+# The expression below defines the v6 partial index and must stay stable for upgrades.
+_SUBAGENT_ORIGIN = "origin_turn_id"
+_SUBAGENT_PARENT = f"json_extract(metadata, '$.{PARENT_SESSION_KEY}')"
+_SUBAGENT_ORIGIN_FILTER = (
+    f"json_extract(metadata, '$.{SESSION_TYPE_KEY}')='subagent' "
+    f"AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text' "
+    f"AND json_type(metadata, '$.subagent_task.{_SUBAGENT_ORIGIN}')='text'"
+)
+
+# Field names above are fixed by the schema; all caller-supplied values are bound.
+_SUBAGENT_METADATA_QUERY = f"""SELECT key, created_at, updated_at, metadata FROM sessions
+    WHERE {_SUBAGENT_ORIGIN_FILTER}
+    AND {_SUBAGENT_PARENT}=?
+    AND json_extract(metadata, '$.subagent_task.{_SUBAGENT_ORIGIN}') IN (SELECT value FROM json_each(?))"""
 
 
 def _encode(value: object) -> str:
@@ -117,9 +133,22 @@ def _create_schema_v4(db: sqlite3.Connection) -> None:
     db.execute("ALTER TABLE session_archives_v4 RENAME TO session_archives")
 
 
+def _create_schema_v5(db: sqlite3.Connection) -> None:
+    db.execute("""CREATE UNIQUE INDEX history_input_identity ON history_entries (
+        session_key, json_extract(record, '$.content.input_id')
+    ) WHERE kind='input'""")
+
+
+def _create_schema_v6(db: sqlite3.Connection) -> None:
+    db.execute(f"""CREATE INDEX sessions_subagent_{_SUBAGENT_ORIGIN} ON sessions (
+        {_SUBAGENT_PARENT}, json_extract(metadata, '$.subagent_task.{_SUBAGENT_ORIGIN}')
+    ) WHERE {_SUBAGENT_ORIGIN_FILTER}""")
+
+
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
 _SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
-    _create_schema_v1, _create_schema_v2, _create_schema_v3, _create_schema_v4,
+    _create_schema_v1, _create_schema_v2, _create_schema_v3, _create_schema_v4, _create_schema_v5,
+    _create_schema_v6,
 )
 
 
@@ -445,6 +474,24 @@ class SqliteSessionStore:
             self._write_metadata(db, key, {**payload["metadata"], **updates})
             return True
 
+    def rename_model_preset(self, old_name: str, new_name: str) -> list[str]:
+        changed: list[str] = []
+        with self.transaction():
+            for row in self.list_metadata():
+                metadata = row["metadata"]
+                try:
+                    selection = SessionModelPreset.from_metadata(metadata)
+                except ValueError:
+                    continue
+                if selection.base_preset != old_name:
+                    continue
+                for key in SESSION_MODEL_KEYS:
+                    metadata.pop(key, None)
+                metadata.update(SessionModelPreset(new_name, selection.overrides).metadata_update())
+                self.replace_metadata(row["key"], metadata)
+                changed.append(row["key"])
+        return changed
+
     def replace_metadata(
         self, key: str, metadata: dict[str, Any], *, updated_at: datetime | None = None,
     ) -> None:
@@ -466,6 +513,45 @@ class SqliteSessionStore:
                 return None
             return {"key": key, "created_at": row[0], "updated_at": row[1],
                     "metadata": self._metadata(db, key, row[2])}
+
+    def recovery_candidates(self, key_prefix: str) -> list[tuple[str, bool]]:
+        """Return (key, unfinished display tail) in the same order as list_sessions.
+
+        The turn and entry primary keys locate the last ordinal and its last
+        decisive fact. Fork/telemetry facts do not settle activity. As in the
+        transcript reader, an incomplete marker *anywhere in that ordinal*
+        takes precedence, including on imported records. The append cursor's
+        `completed` flag alone cannot answer either question.
+        """
+        with self.transaction(write=False) as db:
+            rows = db.execute("""
+                WITH scan AS (
+                    SELECT s.key, s.updated_at, s.rowid AS tie,
+                           json_type(s.metadata, '$.pending_user_turn')='true'
+                           OR (json_extract(s.metadata, '$.webui_recovery.status')
+                                   IN ('resuming', 'awaiting_user', 'failed')
+                               AND json_type(s.metadata, '$.webui_recovery.recovery_id')='text')
+                           OR EXISTS (SELECT 1 FROM checkpoints WHERE session_key=s.key)
+                           OR EXISTS (SELECT 1 FROM pending_inputs WHERE session_key=s.key
+                                      AND kind='pending_user_followups') AS journaled,
+                           (SELECT CASE WHEN
+                                (SELECT e.kind NOT IN ('input', 'answer', 'completion')
+                                 FROM history_entries e WHERE e.session_key=t.session_key
+                                 AND e.turn_ordinal=t.ordinal
+                                 AND e.kind NOT IN ('fork_boundary', 'compaction', 'model_request')
+                                 ORDER BY e.position DESC LIMIT 1)
+                                THEN 1 ELSE EXISTS (
+                                    SELECT 1 FROM history_entries e WHERE e.session_key=t.session_key
+                                    AND e.turn_ordinal=t.ordinal
+                                    AND json_type(e.record, '$.content.transcript_incomplete')='true'
+                                ) END
+                            FROM history_turns t WHERE t.session_key=s.key
+                            ORDER BY t.ordinal DESC LIMIT 1) AS unfinished
+                    FROM sessions s WHERE s.key GLOB ?
+                )
+                SELECT key, unfinished FROM scan WHERE journaled OR unfinished ORDER BY updated_at DESC, tie
+            """, (f"{key_prefix}*",))
+            return [(key, bool(unfinished)) for key, unfinished in rows]
 
     def read_history_header(self, key: str) -> SessionHistoryPayload | None:
         """Read search identity and metadata without runtime checkpoints or inputs."""
@@ -589,7 +675,15 @@ class SqliteSessionStore:
             ).fetchone()
             ordinal, position = (int(tail[0]), int(tail[1])) if tail is not None else (0, 0)
             completed = tail is not None and bool(tail[2])
+            appended = False
             for kind, created_at_ms, record, preview in encoded:
+                if kind is HistoryKind.INPUT and db.execute(
+                    """SELECT 1 FROM history_entries WHERE session_key=? AND kind='input'
+                       AND json_extract(record, '$.content.input_id')=json_extract(?, '$.content.input_id')""",
+                    (key, record),
+                ).fetchone() is not None:
+                    continue
+                appended = True
                 if completed:
                     ordinal, position = ordinal + 1, 0
                 if position == 0:
@@ -612,7 +706,7 @@ class SqliteSessionStore:
                     db.execute(f"UPDATE history_heads SET {field}=? WHERE session_key=? AND {field}=''", (preview, key))
                 db.execute("UPDATE history_heads SET updated_at_ms=max(updated_at_ms, ?) WHERE session_key=?",
                            (created_at_ms, key))
-            if encoded:
+            if appended:
                 db.execute("UPDATE history_heads SET revision=revision+1 WHERE session_key=?", (key,))
         return errors
 
@@ -701,6 +795,14 @@ class SqliteSessionStore:
                 (parent_key,),
             )]
 
+    def typed_session_headers(self, session_type: str) -> list[tuple[str, dict[str, Any]]]:
+        """Read just this owner's metadata, without rehydrating messages, checkpoints or inputs."""
+        with self.transaction(write=False) as db:
+            return [(key, _object(metadata)) for key, metadata in db.execute(
+                f"""SELECT key, metadata FROM sessions WHERE json_extract(metadata, '$.{SESSION_TYPE_KEY}')=?
+                    ORDER BY updated_at DESC, rowid""", (session_type,),
+            )]
+
     def list_child_session_metadata(self, parent_key: str) -> list[SessionMetadataPayload]:
         """Read child headers from one snapshot, excluding checkpoints and pending inputs."""
         with self.transaction(write=False) as db:
@@ -712,6 +814,36 @@ class SqliteSessionStore:
                             AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text'
                             ORDER BY updated_at DESC""",
                         (parent_key,),
+                    )]
+
+    def list_subagent_session_metadata(
+        self, parent_key: str, *, turn_ids: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read only subagent headers attributed to the requested parent turns."""
+        turns = [value for value in turn_ids if value]
+        if not turns:
+            return []
+        with self.transaction(write=False) as db:
+            return [{"key": row[0], "created_at": row[1], "updated_at": row[2],
+                     "metadata": _object(row[3])}
+                    for row in db.execute(_SUBAGENT_METADATA_QUERY, (parent_key, _encode(turns)))]
+
+    def read_child_session_metadata(
+        self, parent_key: str, child_keys: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read named child headers in one query, excluding checkpoints and pending inputs."""
+        keys = [key for key in child_keys if key]
+        if not keys:
+            return []
+        with self.transaction(write=False) as db:
+            return [{"key": row[0], "created_at": row[1], "updated_at": row[2],
+                     "metadata": _object(row[3])}
+                    for row in db.execute(
+                        f"""SELECT key, created_at, updated_at, metadata FROM sessions
+                            WHERE key IN (SELECT value FROM json_each(?))
+                            AND json_extract(metadata, '$.{PARENT_SESSION_KEY}')=?
+                            AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text'""",
+                        (_encode(keys), parent_key),
                     )]
 
     def list_metadata(self) -> list[dict[str, Any]]:

@@ -1,12 +1,17 @@
 import json
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from websockets.asyncio.server import ServerConnection
 
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketConfig
+from nanobot.session.webui_turns import (
+    clear_websocket_turns,
+    register_queued_websocket_turn_if_idle,
+    websocket_turn_wall_started_at,
+)
 from nanobot.webui.gateway_services import build_gateway_services
 from nanobot.webui.outbound_delivery import WebUIOutboundDelivery
 
@@ -52,8 +57,7 @@ def _delivery(history, tmp_path) -> tuple[WebUIOutboundDelivery, _RecordingTrans
 async def test_subscribe_hydration_is_quiet_when_no_turn_active(history, tmp_path):
     outbound, transport = _delivery(history, tmp_path)
 
-    with patch("nanobot.webui.session_projection.websocket_turn_wall_started_at", return_value=None):
-        await outbound.hydrate("test-chat")
+    await outbound.hydrate("hydrate-idle-chat")
 
     assert transport.frames == []
 
@@ -62,22 +66,19 @@ async def test_subscribe_hydration_is_quiet_when_no_turn_active(history, tmp_pat
 async def test_subscribe_hydration_pushes_running_when_turn_active(history, tmp_path):
     outbound, transport = _delivery(history, tmp_path)
 
-    with (
-        patch(
-            "nanobot.webui.session_projection.websocket_turn_wall_started_at",
-            return_value=1234567890.0,
-        ),
-        patch(
-            "nanobot.webui.session_projection.websocket_turn_id",
-            return_value="turn-active",
-        ),
-    ):
-        await outbound.hydrate("test-chat")
+    chat_id = "hydrate-running-chat"
+    assert register_queued_websocket_turn_if_idle(chat_id, "turn-active") is not None
+    try:
+        started_at = websocket_turn_wall_started_at(chat_id)
+        assert started_at is not None
+        await outbound.hydrate(chat_id)
+    finally:
+        clear_websocket_turns(chat_id)
 
     assert transport.frames == [{
         "event": "goal_status",
-        "chat_id": "test-chat",
+        "chat_id": chat_id,
         "status": "running",
-        "started_at": 1234567890.0,
+        "started_at": started_at,
         "turn_id": "turn-active",
     }]

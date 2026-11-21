@@ -18,6 +18,7 @@ from nanobot.session.recovery import (
     pending_followups,
     restore_runtime_checkpoint,
 )
+from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
 from nanobot.webui.recovery import RecoveryCoordinator
 
 
@@ -148,7 +149,8 @@ async def test_recovered_input_keeps_admission_identity_and_timestamp(tmp_path):
 
 
 @pytest.mark.parametrize("interrupt", [False, True], ids=["completed", "checkpoint-recovery"])
-async def test_injected_inputs_keep_their_own_identity_through_runner_and_commit(tmp_path, monkeypatch, interrupt):
+@pytest.mark.parametrize("cross_session", [False, True])
+async def test_injected_inputs_keep_their_own_identity_through_runner_and_commit(tmp_path, monkeypatch, interrupt, cross_session):
     import asyncio
 
     provider = MagicMock(aclose=AsyncMock())
@@ -173,12 +175,19 @@ async def test_injected_inputs_keep_their_own_identity_through_runner_and_commit
         draft = await loop.sessions.state.get("websocket:chat")
         draft.add_message(
             "user", "intentionally identical text", **{INBOUND_META_TURN_ID: "initial-input"},
-            timestamp="2026-10-18T19:00:00",
+            timestamp="2026-10-18T19:00:00", input_id="user:initial-input",
         )
         await loop.sessions.state.prepare_input(draft)
         queue = asyncio.Queue()
         for turn_id in ("first-input", "second-input"):
             message = _input("intentionally identical text", turn_id)
+            if cross_session:
+                message.channel, message.input_role = "system", "user"
+                message.chat_id = message.session_key_override = draft.key
+                message.metadata = {SESSION_MESSAGE_METADATA_KEY: {
+                    "message_id": turn_id, "created_at_ms": 1, "expect_reply": False,
+                    "source_handle": "luma", "source_session_key": "websocket:source", "target_session_key": draft.key,
+                }}
             identifier = await loop.sessions.state.queue_followup(draft.key, message)
             message.metadata[PENDING_FOLLOWUP_ID_KEY] = identifier
             queue.put_nowait(message)
@@ -218,7 +227,14 @@ async def test_injected_inputs_keep_their_own_identity_through_runner_and_commit
         stored = await reopened.state.get(draft.key)
         inputs = [row for row in stored.messages if row.get("role") == "user"]
         assert [public_history_message(row)["content"] for row in inputs] == ["intentionally identical text"] * 3
-        assert [row[INBOUND_META_TURN_ID] for row in inputs] == ["initial-input", "first-input", "second-input"]
+        if cross_session:
+            assert [row["session_message"]["message_id"] for row in inputs[1:]] == ["first-input", "second-input"]
+        else:
+            assert [row[INBOUND_META_TURN_ID] for row in inputs] == ["initial-input", "first-input", "second-input"]
+        prefix = "session-message" if cross_session else "user"
+        input_ids = ["user:initial-input", f"{prefix}:first-input", f"{prefix}:second-input"]
+        assert [row["input_id"] for row in inputs] == input_ids
+        assert stored.messages[-1]["response_input_ids"] == input_ids
         assert [row["timestamp"] for row in inputs] == ["2026-10-18T19:00:00"] * 3
         assert pending_followups(stored) == []
         assert bus.inbound.empty()

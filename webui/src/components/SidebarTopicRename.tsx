@@ -97,7 +97,7 @@ export function SidebarTopicRename({ title, onSave, onClose }: SidebarTopicRenam
         </button>
         <button
           type="button"
-          aria-label={t("deleteConfirm.cancel")}
+          aria-label={t("common.cancel")}
           disabled={saving}
           onClick={onClose}
           className="touch-target inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground disabled:opacity-40"

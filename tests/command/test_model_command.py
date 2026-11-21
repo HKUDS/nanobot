@@ -19,7 +19,7 @@ from nanobot.goal.command import cmd_goal, register_goal_command
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
-    model_preset_from_metadata,
+    SessionModelPreset,
 )
 
 
@@ -73,7 +73,7 @@ def _ctx_session(loop: AgentLoop, raw: str, args: str = "") -> CommandContext:
 
 def _saved_model_preset(loop: AgentLoop, session_key: str = "cli:direct") -> str | None:
     session = loop.sessions.get_or_create(session_key)
-    return model_preset_from_metadata(session.metadata)
+    return SessionModelPreset.from_metadata(session.metadata).base_preset
 
 
 @pytest.mark.asyncio
@@ -391,5 +391,9 @@ def test_goal_command_in_help_and_palette() -> None:
     }
     commands = [item["command"] for item in palette]
     goal_index = commands.index("/goal")
-    assert commands[goal_index - 1:goal_index + 2] == ["/history", "/goal", "/trigger"]
+    assert commands[goal_index - 1:goal_index + 3] == ["/model", "/goal", "/cancel_goal", "/trigger"]
+    cancel = next(item for item in palette if item["command"] == "/cancel_goal")
+    assert cancel["lifecycle"] == "side_channel"
+    assert cancel["accepts_args"] is False
     assert "/goal <goal>" in build_help_text()
+    assert "/cancel_goal" in build_help_text()

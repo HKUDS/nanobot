@@ -69,7 +69,7 @@ nanobot webui --dev
 
 The command safely prepares the local WebSocket channel, starts both the gateway and Vite, and opens `http://127.0.0.1:5173`. Vite proxies HTTP requests to the gateway and applies frontend changes with HMR; the application WebSocket connects directly to the gateway. Ctrl+C stops Vite and releases this gateway client. An on-demand gateway stops when its last interactive client exits; a persistent gateway keeps running.
 
-Use `--no-open` to skip opening a browser. `--dev` is foreground-only and cannot be combined with `--background`.
+Use `--no-open` to skip opening a browser. `--dev-port 5174` selects a different Vite port when running multiple development instances; each instance also needs its own config, workspace, WebUI port, and gateway port. `--dev` is foreground-only and cannot be combined with `--background`.
 
 ## Manual development setup
 
@@ -139,6 +139,14 @@ bun run build
 ```
 
 `lint` runs ESLint; `typecheck` checks application and unit-test TypeScript, including channel-owned frontend code and tests; `test` runs Vitest; `test:browser` typechecks and runs Chromium tests with the real components and stylesheet to check tall-dialog reachability and completed-history motion without a gateway; `build` checks production TypeScript and produces the production bundle. Keep tests near the changed behavior and exercise settings save/reload in the browser. Browser-only preferences stay in the frontend; persistent configuration and security policy belong to the Python gateway. When changing that boundary, also run the relevant Python tests from [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+### CI shards
+
+CI runs the full selected suite. Static checks, production build, full unit coverage, and four browser shards run independently; every lane must pass. Unit coverage uses the original full-suite configuration and thresholds. Browser shards verify their executed test identities against full discovery. Test isolation, real browser motion, timeouts, and zero retries are unchanged.
+
+To reproduce the coverage gate, run `bun run test:coverage` from `webui/`. For a browser shard, run `bun run typecheck:browser` and then `bun run test:browser:shard --shard=1/4` (repeat with indices 2–4 for the full suite). Use separate checkouts and `NANOBOT_BROWSER_TEST_PORT` values when running browser shards concurrently: each invocation owns its Vite server and clears the browser output directory. JSON results, coverage summaries, and browser failure details are uploaded as CI artifacts.
+
+`test-timings.json` contains per-file browser millisecond weights and their source run. It affects balancing, not selection: every newly discovered test is included even before it has a timing. When refreshing the weights from CI's browser JSON artifacts, sum result durations per file and update the source run and commit together. The ordinary unsharded commands above remain available for local development.
 
 ## Acknowledgements
 

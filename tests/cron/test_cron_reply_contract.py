@@ -18,6 +18,21 @@ from nanobot.session.manager import SessionManager
 
 
 @pytest.mark.asyncio
+async def test_bound_job_runs_with_its_saved_session_key(tmp_path):
+    cron = CronService(tmp_path / "jobs.json")
+    job = cron.add_job(
+        "Reminder", CronSchedule(kind="every", every_ms=86_400_000), "Take a break",
+        session_key="unified:default", origin_channel="telegram", origin_chat_id="old",
+    )
+    agent = MagicMock(submit_cron_turn=AsyncMock(return_value=None))
+
+    await run_bound_cron_job(job, agent=agent, cron=cron)
+    message = agent.submit_cron_turn.await_args.args[0]
+    assert message.session_key == "unified:default"
+    assert (message.channel, message.chat_id) == ("telegram", "old")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("delivery", ["reply", "legacy_message", "broadcast"])
 async def test_moved_cron_keeps_reply_send_and_prompt_prefix_contract(tmp_path, monkeypatch, delivery):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")

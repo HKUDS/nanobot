@@ -17,7 +17,6 @@ from nanobot.agent.tools.schema import (
 from nanobot.cron.service import CronService
 from nanobot.cron.session_turns import is_bound_cron_job, is_cron_turn
 from nanobot.cron.types import CronJob, CronJobState, CronSchedule
-from nanobot.session.keys import UNIFIED_SESSION_KEY
 
 _CRON_PARAMETERS = tool_parameters_schema(
     action=StringSchema(
@@ -81,11 +80,7 @@ class CronTool(Tool):
         ctx = current_request_context()
         if ctx is None:
             return "", "", "", {}
-        raw_key = f"{ctx.channel}:{ctx.chat_id}" if ctx.channel and ctx.chat_id else ""
-        session_key = (
-            raw_key if ctx.session_key == UNIFIED_SESSION_KEY else (ctx.session_key or "")
-        )
-        return session_key, ctx.channel or "", ctx.chat_id or "", dict(ctx.metadata or {})
+        return ctx.session_key or "", ctx.channel or "", ctx.chat_id or "", dict(ctx.metadata or {})
 
     @staticmethod
     def _validate_timezone(tz: str) -> str | None:
@@ -121,6 +116,8 @@ class CronTool(Tool):
 
     def validate_params(self, params: dict[str, Any]) -> list[str]:
         errors = super().validate_params(params)
+        if errors:
+            return errors
         action = params.get("action")
         if action == "add" and not str(params.get("message") or "").strip():
             errors.append("message is required when action='add'")
@@ -352,7 +349,7 @@ class CronTool(Tool):
             return f"No recorded runs for job {job_id}."
         lines = [f"Recent runs for '{job.name}' (id: {job.id}), newest first:"]
         display_tz = self._display_timezone(job.schedule)
-        for run in reversed(job.state.run_history[-limit:]):
+        for run in reversed(job.state.run_history[-int(limit):]):
             timestamp = self._format_timestamp(run.run_at_ms, display_tz)
             lines.append(f"- {timestamp} — {run.status} ({run.duration_ms}ms)")
             if run.error:

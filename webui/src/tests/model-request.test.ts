@@ -257,3 +257,21 @@ it.each(["failed", "cancelled", "completed"] as const)("does not borrow previous
   expect(frames[0].usage).toEqual(usage(1));
   expect(frames[1].usage).toBeUndefined();
 });
+
+
+it.each([false, true])("shows the active system graph immediately after compaction (persisted=%s)", (persisted) => {
+  const transcript = new ThreadTranscript();
+  const oldGraph = { nodes: [{ path: "/before.py", name: "before.py", state: "loaded" as const, tokens: 50 }], edges: [] };
+  const systemGraph = { nodes: [{ path: "/SOUL.md", name: "SOUL.md", state: "loaded" as const, tokens: 40 }], edges: [] };
+  project(transcript, request(1, { request_id: "active", context_graph: oldGraph }), persisted);
+  const event = parseWebuiThreadPayload({ schemaVersion: 3, projection: "events", events: [{ ...envelope,
+    event: "context_compaction", compaction_id: "boundary", phase: "succeeded", turn_seq: 2, context_graph: systemGraph,
+  }] }).events[0];
+  project(transcript, event, persisted);
+  expect(composerContextSnapshots(transcript.messages, transcript.modelRequests)).toEqual([
+    { id: "compaction-boundary", graph: systemGraph },
+  ]);
+  project(transcript, request(3, { request_id: "active", phase: "completed", context_graph: systemGraph }), persisted);
+  expect(composerContextSnapshots(transcript.messages, transcript.modelRequests).map((snapshot) => snapshot.graph))
+    .toEqual([systemGraph, systemGraph]);
+});

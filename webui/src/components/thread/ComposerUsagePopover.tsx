@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -30,6 +30,7 @@ export function ComposerUsagePopover({
   showLabel = false,
   compactLabel = false,
   sidebarHost,
+  sidebarRef,
   sessionKey,
   children,
   open: controlledOpen,
@@ -42,6 +43,7 @@ export function ComposerUsagePopover({
   showLabel?: boolean;
   compactLabel?: boolean;
   sidebarHost?: HTMLElement | null;
+  sidebarRef?: Ref<HTMLElement>;
   sessionKey?: string | null;
   children?: (renderControl: ComposerUsageControl | undefined) => ReactNode;
   open?: boolean;
@@ -176,7 +178,7 @@ export function ComposerUsagePopover({
   };
 
   const inspector = <ContextInspector key={sessionKey} sidebar expandable={!narrow} context={context} rounds={rounds} snapshots={snapshots}
-    onOpenFile={onOpenFile ? (path) => { setOpen(false); onOpenFile(path); } : undefined} />;
+    onClose={narrow ? undefined : close} onOpenFile={onOpenFile ? (path) => { setOpen(false); onOpenFile(path); } : undefined} />;
   const onPanelKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); close(); }
   };
@@ -196,7 +198,7 @@ export function ComposerUsagePopover({
         <DialogTitle className="sr-only">{t("thread.composer.context.panelTitle")}</DialogTitle>
         {inspector}
       </DialogContent>
-    </Dialog> : createPortal(<SidebarPanel open={open} width={420} floating={!sidebarHost} id={panelId}
+    </Dialog> : createPortal(<SidebarPanel ref={sidebarRef} open={open} width={420} floating={!sidebarHost} id={panelId}
       aria-label={t("thread.composer.context.panelTitle")} data-testid="context-sidebar" onKeyDown={onPanelKeyDown}>
       {inspector}
     </SidebarPanel>, sidebarHost ?? document.body))}

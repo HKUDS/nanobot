@@ -1,3 +1,6 @@
+@import "./components/content-column.css";
+@import "./components/settings/shared/catalog-layout.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -19,7 +22,7 @@
 }
 
 .thread-composer-stack {
-  --composer-content-width: 49.5rem;
+  --composer-content-width: var(--content-column-width);
 }
 .thread-composer-stack.is-hero {
   --composer-content-width: 58rem;
@@ -81,6 +84,11 @@
   inherits: false;
   initial-value: transparent;
 }
+@property --pending-edge-progress {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: -20%;
+}
 
 /* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
 @layer base {
@@ -133,7 +141,6 @@
     --radius-prominent: 1.75rem;
     --radius-pill: 9999px;
     --corner-shape: superellipse(1.5);
-    --content-column-width: 49.5rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-content: 240 3% 30%;
@@ -225,6 +232,11 @@
 @layer base {
   * {
     @apply border-border;
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring) / 0.55);
+    outline-offset: 2px;
   }
 
   *,
@@ -339,36 +351,6 @@
     position: relative;
     isolation: isolate;
     overflow: hidden;
-  }
-
-  .kv-cache-not-reused {
-    background: hsl(var(--usage-token) / 0.84);
-  }
-
-  .kv-cache-reused {
-    background-color: hsl(var(--usage-token) / 0.1);
-    background-image: repeating-linear-gradient(
-      135deg,
-      hsl(var(--usage-token) / 0.46) 0,
-      hsl(var(--usage-token) / 0.46) 1px,
-      transparent 1px,
-      transparent 4px
-    );
-  }
-
-  .dark .kv-cache-not-reused {
-    background: hsl(var(--usage-token) / 0.92);
-  }
-
-  .dark .kv-cache-reused {
-    background-color: hsl(var(--usage-token) / 0.15);
-    background-image: repeating-linear-gradient(
-      135deg,
-      hsl(var(--usage-token) / 0.58) 0,
-      hsl(var(--usage-token) / 0.58) 1px,
-      transparent 1px,
-      transparent 4px
-    );
   }
 
   .composer-model-badge::before {
@@ -759,39 +741,6 @@
   .composer-status-strip[data-state="enter"] {
     animation: composer-status-strip-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
-  .composer-status-drawer {
-    --composer-status-drawer-duration: 220ms;
-    --composer-status-drawer-easing: ease-out;
-
-    display: grid;
-    grid-template-rows: 0fr;
-    pointer-events: none;
-    transition:
-      grid-template-rows var(--composer-status-drawer-duration)
-        var(--composer-status-drawer-easing);
-  }
-  .composer-status-drawer[data-state="open"] {
-    grid-template-rows: 1fr;
-    pointer-events: auto;
-  }
-  .composer-status-drawer-clip {
-    min-height: 0;
-    overflow: hidden;
-  }
-  .composer-status-drawer-content {
-    opacity: 0;
-    transform: translateY(8px);
-    transform-origin: bottom center;
-    transition:
-      opacity var(--composer-status-drawer-duration)
-        var(--composer-status-drawer-easing),
-      transform var(--composer-status-drawer-duration)
-        var(--composer-status-drawer-easing);
-  }
-  .composer-status-drawer[data-state="open"] .composer-status-drawer-content {
-    opacity: 1;
-    transform: translateY(0);
-  }
   .inline-disclosure {
     --inline-disclosure-duration: 220ms;
 
@@ -812,8 +761,18 @@
     overflow: hidden;
   }
   @media (prefers-reduced-motion: no-preference) {
-    .expandable-text {
+    .expandable-text,
+    .user-message-collapsible-body {
       transition: height 240ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .user-message-toggle-bar {
+      transition: bottom 240ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .user-message-stack {
+      transition: height 240ms cubic-bezier(0.4, 0, 0.2, 1), opacity 180ms ease-out;
+    }
+    .user-message-stack-sheet {
+      transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 180ms ease-out;
     }
     .inline-disclosure {
       transition:
@@ -836,13 +795,6 @@
     }
     .composer-status-strip[data-state] {
       animation: none;
-    }
-    .composer-status-drawer {
-      transition-duration: 0.01ms;
-    }
-    .composer-status-drawer-content {
-      transform: none;
-      transition-duration: 120ms, 0.01ms;
     }
     .thread-layout {
       transition-duration: 0.01ms;
@@ -957,6 +909,43 @@
     background: transparent;
   }
 
+  /* Keep the native drag target wider than the visible thumb. */
+  @media (forced-colors: none) {
+    @supports selector(::-webkit-scrollbar) {
+      html:not(.native-host) .inset-scrollbar {
+        scrollbar-width: auto;
+        scrollbar-color: auto;
+      }
+      html:not(.native-host) .inset-scrollbar::-webkit-scrollbar {
+        width: 14px;
+      }
+      html:not(.native-host) .inset-scrollbar::-webkit-scrollbar-button {
+        display: none;
+      }
+      html:not(.native-host) .inset-scrollbar::-webkit-scrollbar-track {
+        margin-block: 6px;
+        background: transparent;
+      }
+      html:not(.native-host) .inset-scrollbar::-webkit-scrollbar-thumb {
+        min-height: 28px;
+        border-inline: 4px solid transparent;
+        border-inline-end-width: 6px;
+        border-radius: 999px;
+        background: var(--scrollbar-thumb) padding-box;
+      }
+      html:not(.native-host) .inset-scrollbar::-webkit-scrollbar-thumb:hover,
+      html:not(.native-host) .inset-scrollbar::-webkit-scrollbar-thumb:active {
+        background-color: var(--scrollbar-thumb-hover);
+      }
+    }
+  }
+  @media (forced-colors: active) {
+    html:not(.native-host) .inset-scrollbar {
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+    }
+  }
+
   /*
    * Mobile responsive safety net — keep the chat viewport + composer inside a
    * narrow viewport (see #4693). These are containment rules: long markdown
@@ -979,6 +968,16 @@
   .markdown-content code {
     overflow-wrap: anywhere;
     word-wrap: break-word;
+  }
+
+  .markdown-content > p code.markdown-inline-code,
+  .markdown-content > p code.markdown-wide-inline-code {
+    white-space: break-spaces;
+  }
+
+  .markdown-content > p code.markdown-wide-inline-code {
+    display: inline;
+    overflow: visible;
   }
 
   .markdown-content pre,
@@ -1059,10 +1058,10 @@
 
 [data-context-block-active] .message-block-menu-trigger,
 [data-message-context-menu-open] .message-block-menu-trigger,
-.message-block-menu-trigger:focus-visible,
+:where(:root:not([data-focus-modality="pointer"])) .message-block-menu-trigger:focus-visible,
 [data-context-block-active] .message-block-hover-time,
 [data-message-context-menu-open] .message-block-hover-time,
-.message-block-hover-time:focus-visible {
+:where(:root:not([data-focus-modality="pointer"])) .message-block-hover-time:focus-visible {
   pointer-events: auto;
   opacity: 1;
 }
@@ -1228,8 +1227,260 @@
 .user-message-surface,
 .side-panel-surface {
   --composer-shadow-color: 240 10% 16%;
-  --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
+  --surface-depth-shadow: 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
+  --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), var(--surface-depth-shadow);
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+
+.user-message-surface-dashed,
+.user-message-surface[data-pending-edge="sealing"] {
+  --tw-shadow: var(--surface-depth-shadow);
+}
+
+.user-message-collapsible {
+  padding-bottom: 2.5rem;
+}
+
+.user-message-collapsible-masked {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 2.75rem), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 2.75rem), transparent 100%);
+}
+
+[data-user-text-bubble][data-user-message-collapsed="true"] {
+  --user-message-stack-height: 10px;
+}
+
+.user-message-toggle-bar {
+  bottom: var(--user-message-stack-height, 0px);
+}
+
+.user-message-stack {
+  --composer-shadow-color: 240 10% 16%;
+  height: 10px;
+  overflow: visible;
+  opacity: 1;
+}
+
+.dark .user-message-stack {
+  --composer-shadow-color: 240 12% 3%;
+}
+
+.user-message-stack[data-state="hidden"] {
+  height: 0;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.user-message-stack-sheet {
+  display: block;
+  height: 5px;
+  border-inline: 1px solid hsl(var(--border) / 0.82);
+  border-bottom: 1px solid hsl(var(--border) / 0.82);
+  background-color: hsl(var(--secondary) / 0.62);
+  box-shadow: 0 2px 6px -2px hsl(var(--composer-shadow-color) / 0.1);
+}
+
+.dark .user-message-stack-sheet {
+  border-color: hsl(var(--border) / 0.92);
+}
+
+.user-message-stack-sheet-first {
+  margin-inline: 1rem;
+  border-bottom-left-radius: 0.625rem;
+  border-bottom-right-radius: 0.625rem;
+}
+
+.user-message-stack-sheet-second {
+  margin-inline: 2rem;
+  border-bottom-left-radius: 0.5rem;
+  border-bottom-right-radius: 0.5rem;
+  border-color: hsl(var(--border) / 0.62);
+  background-color: hsl(var(--secondary) / 0.42);
+  box-shadow: 0 2px 6px -2px hsl(var(--composer-shadow-color) / 0.08);
+}
+
+.dark .user-message-stack-sheet-second {
+  border-color: hsl(var(--border) / 0.68);
+}
+
+.user-message-stack[data-state="hidden"] .user-message-stack-sheet {
+  transform: translateY(-5px);
+}
+
+.user-message-stack[data-temporary="true"] .user-message-stack-sheet {
+  background-color: transparent;
+  border-style: dashed;
+  border-color: hsl(var(--muted-foreground) / 0.34);
+}
+
+.user-message-stack[data-temporary="true"] .user-message-stack-sheet-second {
+  border-color: hsl(var(--muted-foreground) / 0.22);
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-user-text-bubble][data-user-message-collapsed="true"]:has([data-user-message-toggle]:hover) .user-message-stack-sheet-first {
+    transform: translateY(1px);
+  }
+  [data-user-text-bubble][data-user-message-collapsed="true"]:has([data-user-message-toggle]:hover) .user-message-stack-sheet-second {
+    transform: translateY(2px);
+  }
+}
+
+@media (pointer: coarse) {
+  .user-message-collapsible {
+    padding-bottom: 3.25rem;
+  }
+}
+
+.pending-edge-overlay {
+  --pending-edge-progress: -20%;
+  --pending-edge-solid-color: hsl(var(--border) / 0.75);
+  --pending-edge-sheen-color: hsl(var(--foreground) / 0.34);
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: inherit;
+  corner-shape: inherit;
+}
+
+.dark .pending-edge-overlay {
+  --pending-edge-sheen-color: hsl(var(--foreground) / 0.42);
+}
+
+.pending-edge-overlay[data-solid-tone="card"] {
+  --pending-edge-solid-color: hsl(var(--border) / 0.70);
+}
+
+.pending-edge-overlay[data-solid-tone="media"] {
+  --pending-edge-solid-color: hsl(var(--border) / 0.60);
+}
+
+.pending-edge-overlay[data-pending-edge-overlay="sealing"] {
+  animation: pending-edge-seal 460ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.pending-edge-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  corner-shape: inherit;
+}
+
+.pending-edge-layer-dashed {
+  border: 1px dashed hsl(var(--muted-foreground) / 0.30);
+}
+
+.pending-edge-overlay[data-pending-edge-overlay="pending"] .pending-edge-layer-dashed {
+  border-color: hsl(var(--muted-foreground) / 0.58);
+  animation: pending-edge-breathe 2s ease-in-out infinite;
+}
+
+.dark .pending-edge-overlay[data-pending-edge-overlay="pending"] .pending-edge-layer-dashed {
+  border-color: hsl(var(--muted-foreground) / 0.62);
+}
+
+.pending-edge-overlay[data-pending-edge-overlay="sealing"] .pending-edge-layer-dashed {
+  -webkit-mask-image: linear-gradient(
+    105deg,
+    transparent 0%,
+    transparent calc(var(--pending-edge-progress) - 8%),
+    #000 calc(var(--pending-edge-progress) + 8%),
+    #000 100%
+  );
+  mask-image: linear-gradient(
+    105deg,
+    transparent 0%,
+    transparent calc(var(--pending-edge-progress) - 8%),
+    #000 calc(var(--pending-edge-progress) + 8%),
+    #000 100%
+  );
+}
+
+.pending-edge-layer-solid {
+  border: 1px solid var(--pending-edge-solid-color);
+  -webkit-mask-image: linear-gradient(
+    105deg,
+    #000 0%,
+    #000 calc(var(--pending-edge-progress) - 8%),
+    transparent calc(var(--pending-edge-progress) + 8%),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    105deg,
+    #000 0%,
+    #000 calc(var(--pending-edge-progress) - 8%),
+    transparent calc(var(--pending-edge-progress) + 8%),
+    transparent 100%
+  );
+}
+
+.pending-edge-layer-sheen {
+  border: 1px solid var(--pending-edge-sheen-color);
+  -webkit-mask-image: linear-gradient(
+    105deg,
+    transparent calc(var(--pending-edge-progress) - 18%),
+    #000 var(--pending-edge-progress),
+    transparent calc(var(--pending-edge-progress) + 18%)
+  );
+  mask-image: linear-gradient(
+    105deg,
+    transparent calc(var(--pending-edge-progress) - 18%),
+    #000 var(--pending-edge-progress),
+    transparent calc(var(--pending-edge-progress) + 18%)
+  );
+  animation: pending-edge-sheen-opacity 460ms ease-out forwards;
+}
+
+@keyframes pending-edge-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes pending-edge-seal {
+  from {
+    --pending-edge-progress: -20%;
+  }
+  to {
+    --pending-edge-progress: 120%;
+  }
+}
+
+@keyframes pending-edge-sheen-opacity {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  78% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes pending-edge-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes pending-edge-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .thread-composer-surface {
@@ -1247,12 +1498,58 @@
 
 @media (prefers-reduced-motion: reduce) {
   .thread-composer-surface { transition: var(--theme-paint-transition, none); }
+  .pending-edge-overlay[data-pending-edge-overlay="pending"] .pending-edge-layer-dashed {
+    border-color: hsl(var(--muted-foreground) / 0.30);
+    animation: none;
+  }
+  .pending-edge-overlay[data-pending-edge-overlay="sealing"] { animation: none; }
+  .pending-edge-overlay[data-pending-edge-overlay="sealing"] .pending-edge-layer-dashed {
+    -webkit-mask-image: none;
+    mask-image: none;
+    animation: pending-edge-fade-out 160ms ease-out forwards;
+  }
+  .pending-edge-layer-solid {
+    -webkit-mask-image: none;
+    mask-image: none;
+    animation: pending-edge-fade-in 160ms ease-out forwards;
+  }
+  .pending-edge-layer-sheen { display: none; }
 }
 
 @media (forced-colors: active) {
   .thread-composer-surface, .context-inspector-surface, .user-message-surface, .side-panel-surface { outline: 1px solid CanvasText; }
+  .user-message-surface-dashed { outline-style: dashed; }
+  .user-message-collapsible-masked {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  [data-user-message-toggle] {
+    border: 1px solid ButtonBorder;
+  }
+  .user-message-stack-sheet {
+    border-color: CanvasText;
+  }
+  .pending-edge-overlay { display: none; }
+  :has(> .pending-edge-overlay[data-solid-tone="card"][data-pending-edge-overlay="pending"]) {
+    border-color: CanvasText;
+    border-style: dashed;
+  }
+  .pending-edge-overlay[data-solid-tone="media"][data-pending-edge-overlay="pending"] {
+    display: block;
+    & .pending-edge-layer-dashed {
+      border-color: CanvasText;
+      animation: none;
+    }
+  }
   .thread-composer-surface:focus-within { outline: 2px solid Highlight; }
-  [data-keyboard-focus] { outline: 2px solid Highlight; outline-offset: -2px; }
+}
+
+:root[data-focus-modality="pointer"] :focus-visible:not(
+  textarea,
+  [contenteditable],
+  input:not([type="button"], [type="submit"], [type="reset"], [type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="image"])
+) {
+  outline: none;
 }
 
 .thread-composer-footer-actions {
@@ -1465,7 +1762,7 @@
 }
 
 @media (forced-colors: active) {
-  [data-workbench-move-handle]:focus-visible {
+  :where(:root:not([data-focus-modality="pointer"])) [data-workbench-move-handle]:focus-visible {
     outline: 2px solid CanvasText;
     outline-offset: 2px;
   }
@@ -1498,8 +1795,10 @@
     --settings-margin: 0.75rem;
     max-inline-size: calc(var(--content-column-width) + 2 * var(--settings-margin));
   }
-  .settings-grid.settings-feature-page.settings-automations-grid {
-    max-inline-size: calc(60rem + 2 * var(--settings-margin));
+  .catalog-section {
+    display: grid;
+    min-inline-size: 0;
+    gap: var(--settings-module-gap, 20px);
   }
   .automations-page {
     --settings-inset: 1rem;
@@ -1525,6 +1824,7 @@
   }
   .automation-create-composer .thread-composer-collapsible-layout {
     padding-block-start: 0;
+    padding-inline: 0;
   }
   /* Match the main sidebar's lg visibility; its collapsed rail has no labels. */
   @media (min-width: 1024px) {
@@ -1546,6 +1846,20 @@
   }
   .thread-composer-collapsible-layout {
     container: composer-layout / inline-size;
+  }
+  .thread-composer-input[data-expandable] {
+    --composer-edit-room: max(6rem, calc(var(--app-viewport-height, 100dvh) - 11rem));
+    --composer-input-limit: min(260px, calc(var(--composer-edit-room) * 0.7));
+  }
+  .thread-composer-input[data-expanded] {
+    --composer-input-limit: min(38rem, var(--composer-edit-room));
+  }
+  .thread-composer-input:is([data-overflowing], [data-expanded]) {
+    margin-block: 0.375rem;
+  }
+  .thread-composer-input > textarea {
+    max-height: var(--composer-input-limit, 260px);
+    overflow-y: auto;
   }
   /* A wrapped placeholder must not resize the empty composer. */
   .thread-composer-input textarea:placeholder-shown {
@@ -1608,35 +1922,6 @@
         transition: flex-grow 220ms ease-out;
       }
     }
-  }
-  .automation-calendar-grid { display: none; }
-  .automation-calendar-agenda { display: block; }
-  @container automations (min-width: 44rem) {
-    .automation-calendar-grid { display: block; }
-    .automation-calendar-agenda { display: none; }
-    .automation-calendar-weekdays {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-    }
-    .automation-calendar-weekdays > div {
-      padding: 8px 10px;
-      color: hsl(var(--muted-foreground));
-      font-size: 10px;
-      line-height: 16px;
-      text-align: end;
-    }
-    .automation-calendar-month {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-    }
-    .automation-calendar-day {
-      min-block-size: 112px;
-      min-inline-size: 0;
-      border-inline-end: 1px solid hsl(var(--border) / 0.55);
-      border-block-end: 1px solid hsl(var(--border) / 0.55);
-    }
-    .automation-calendar-day:nth-child(7n) { border-inline-end: 0; }
-    .automation-calendar-day:nth-last-child(-n + 7) { border-block-end: 0; }
   }
   .settings-stack > :not([hidden]) ~ :not([hidden]) {
     margin-block-start: var(--settings-module-gap, 20px);
@@ -1903,4 +2188,62 @@
   height: 26px;
   box-sizing: border-box;
   white-space: nowrap;
+}
+
+/* The image is shared by the whole window; foreground surfaces stay translucent. */
+html[data-custom-background] {
+  --custom-background-tint: 0.88;
+  --custom-background-blur: 5px;
+}
+html[data-custom-background] body {
+  background: var(--custom-background-image) center / cover fixed no-repeat;
+}
+html[data-custom-background] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: hsl(var(--background) / var(--custom-background-tint));
+  backdrop-filter: blur(var(--custom-background-blur));
+  pointer-events: none;
+}
+/* Match the class without expanding this rule into Tailwind's @apply bg-background. */
+html[data-custom-background] [data-theme-surface][class~="bg-background"],
+html[data-custom-background] .bg-sidebar,
+html[data-custom-background] .bg-settings-canvas {
+  background-color: transparent;
+}
+html[data-custom-background] .thread-composer-dock {
+  background: transparent;
+}
+html[data-custom-background] .markdown-inline-code {
+  background-color: hsl(var(--muted) / 0.45);
+}
+html[data-custom-background] .thread-history-status {
+  --thread-history-background: hsl(var(--background) / 0.65);
+}
+html[data-custom-background] .file-edit-diff-surface {
+  background-color: hsl(var(--background) / 0.78);
+  backdrop-filter: blur(12px);
+}
+html[data-custom-background] .nanobot-file-diff {
+  --code-background: transparent;
+}
+html[data-custom-background] .bg-settings-surface,
+html[data-custom-background] .thread-composer-surface,
+html[data-custom-background] .user-message-surface,
+html[data-custom-background] .context-inspector-surface,
+html[data-custom-background] .side-panel-surface {
+  background-color: hsl(var(--settings-surface) / 0.78);
+  backdrop-filter: blur(12px);
+}
+html[data-custom-background] .user-message-stack:not([data-temporary="true"]) .user-message-stack-sheet-first {
+  background-color: hsl(var(--settings-surface) / 0.56);
+  backdrop-filter: blur(10px);
+}
+html[data-custom-background] .user-message-stack:not([data-temporary="true"]) .user-message-stack-sheet-second {
+  background-color: hsl(var(--settings-surface) / 0.38);
+  backdrop-filter: blur(10px);
+}
+html[data-custom-background] aside.bg-settings-surface {
+  background-color: hsl(var(--settings-surface) / 0.65);
 }

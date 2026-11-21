@@ -826,3 +826,277 @@ async def test_context_observer_orders_reads_requests_and_compaction(history, tm
     await channel.send(await message(ModelRequestEvent("reset", "run", 4, "started")))
     requests = [row for row in history.read(f"websocket:{chat}") if row["event"] == "model_request"]
     assert requests[-1]["context_graph"] == {"nodes": [], "edges": []}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["local", "native", "response"])
+async def test_compaction_keeps_system_sources_in_new_graph(history, tmp_path, mode) -> None:
+    from functools import partial
+
+    from nanobot.agent.context import ContextBuilder, TranscriptInput
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.bus.outbound_events import ProgressEvent
+    from nanobot.events import EventSink, ModelRequestEvent
+    from nanobot.providers.base import GenerationSettings, LLMResponse
+    from nanobot.providers.compaction import NativeCompaction, ProviderCompactionEvents
+    from nanobot.providers.openai_responses.state import (
+        attach_responses_state,
+        build_responses_compaction_state,
+    )
+    from nanobot.utils.llm_runtime import LLMRuntime
+    from nanobot.webui.context_observer import ContextGraphObserver
+    from nanobot.webui.context_source_hook import ContextSourceHook
+
+    workspace = tmp_path / "prompt-workspace"
+    workspace.mkdir()
+    soul = workspace / "SOUL.md"
+    soul.write_text("Be precise. [Old](old.md)" if mode == "local" else "Be precise. [Guide](guide.md)", encoding="utf-8")
+    skill = workspace / "skills" / "review" / "SKILL.md"
+    if mode == "local":
+        skill.parent.mkdir(parents=True)
+        skill.write_text("---\nname: review\ndescription: Review changes.\n---\n\n# Review workflow", encoding="utf-8")
+    channel = _channel(history.sessions)
+    chat = "compacted-graph"
+    metadata = await history.metadata(chat, {"webui_turn_id": "turn"})
+    connection = _RecordingConnection()
+    channel._attach(cast(Any, connection), chat)
+
+    async def send(event):
+        await channel.send(OutboundMessage("websocket", chat, "", metadata=metadata, event=event))
+
+    def read_event(name, call_id):
+        return ProgressEvent(tool_events=[{
+            "name": "read_file", "phase": "end", "call_id": call_id,
+            "arguments": {"path": str(workspace / name)}, "result": "1| content",
+        }])
+
+    async def provider_call(**kwargs):
+        assert "Be precise" in kwargs["messages"][0]["content"]
+        response = LLMResponse(content="done")
+        if mode == "native":
+            compaction = ProviderCompactionEvents(kwargs["provider_context"].events)
+            event_id = await compaction.start("provider_native")
+            state = build_responses_compaction_state(provider="codex", model="test", output_items=[
+                {"type": "compaction", "encrypted_content": "synthetic"},
+            ])
+            assert state is not None
+            await compaction.accept(NativeCompaction(state, state, event_id), commit=None)
+            response.provider_compaction_applied = True
+            response.provider_compaction_state = state
+            response.provider_compaction_scope = "prior_context"
+            response.provider_compaction_event_id = event_id
+            async with asyncio.timeout(2):
+                while True:
+                    frame = json.loads(await connection.sent.get())
+                    if frame.get("event") == "context_compaction" and frame.get("phase") == "succeeded":
+                        break
+            graph = frame["context_graph"]
+            assert {"SOUL.md", "guide.md"} <= {node["name"] for node in graph["nodes"]}
+            assert "before.py" not in {node["name"] for node in graph["nodes"]}
+            replay = history.build(f"websocket:{chat}", include_model_requests=True)
+            boundary = next(row for row in replay["events"] if row.get("event") == "context_compaction")
+            assert boundary["context_graph"] == graph
+            observer = ContextGraphObserver(history.sessions)
+            assert await observer.snapshot(chat, metadata, persistent=True) == graph
+        elif mode == "local":
+            assert "Summary of earlier work" in kwargs["messages"][0]["content"]
+        else:
+            attach_responses_state(response, provider="codex", model="test", input_items=[], output_items=[
+                {"type": "compaction", "encrypted_content": "synthetic"},
+            ])
+        return response
+
+    provider = MagicMock()
+    provider.chat_stream_with_retry = provider_call
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    events = EventSink(send)
+
+    async def consolidate_history(_messages, _summary):
+        soul.write_text("Be precise. [Guide](guide.md)", encoding="utf-8")
+        return "Summary of earlier work"
+
+    try:
+        await send(read_event("before.py", "before"))
+        result = await AgentRunner().run(AgentRunSpec(
+            initial_messages=None, tools=tools,
+            runtime=LLMRuntime(provider=provider, model="test", generation=GenerationSettings(max_tokens=1000),
+                               context_window_tokens=8192 if mode == "local" else 128000),
+            max_iterations=2, max_tool_result_chars=10000, workspace=workspace,
+            transcript_input=TranscriptInput(
+                history=[{"role": "user", "content": "previous work " * 12000}] if mode == "local" else [],
+                current_message="hello $review" if mode == "local" else "hello",
+            ),
+            transcript_builder=partial(ContextBuilder(workspace).build_transcript, channel="websocket"),
+            consolidate_history=consolidate_history, hook=ContextSourceHook(events), events=events,
+        ))
+        assert result.final_content == "done"
+        records = history.read(f"websocket:{chat}")
+        boundary = next(row for row in records if row.get("event") == "context_compaction" and row.get("phase") == "succeeded")
+        if mode != "local":
+            started = next(row for row in records if row.get("event") == "model_request" and row.get("phase") == "started")
+            assert "before.py" in {node["name"] for node in started["context_graph"]["nodes"]}
+        boundary_names = {node["name"] for node in boundary["context_graph"]["nodes"]}
+        assert {"SOUL.md", "guide.md"} <= boundary_names
+        assert "before.py" not in boundary_names
+        assert "old.md" not in boundary_names
+        completed = next(row for row in records if row.get("event") == "model_request" and row.get("phase") == "completed")
+        names = {node["name"] for node in completed["context_graph"]["nodes"]}
+        assert {"SOUL.md", "guide.md"} <= names
+        if mode == "local":
+            boundary_skill = next(node for node in boundary["context_graph"]["nodes"] if node["path"] == str(skill))
+            request_skill = next(node for node in completed["context_graph"]["nodes"] if node["path"] == str(skill))
+            assert boundary_skill["state"] == "discovered"
+            assert request_skill["state"] == "loaded"
+        assert {"source": str(soul), "target": str(workspace / "guide.md")} in completed["context_graph"]["edges"]
+        if mode == "response":
+            assert records.index(completed) < records.index(boundary)
+        else:
+            assert records.index(boundary) < records.index(completed)
+            assert "before.py" not in names
+        assert "old.md" not in names
+
+        await send(read_event("after.py", "after"))
+        request = ModelRequestEvent("next", "run-next", 1, "started")
+        restored_channel = _channel(history.sessions)
+        await restored_channel.send(OutboundMessage("websocket", chat, "", metadata=metadata, event=request))
+        records = history.read(f"websocket:{chat}")
+        latest = next(row for row in reversed(records) if row.get("event") == "model_request")
+        names = {node["name"] for node in latest["context_graph"]["nodes"]}
+        assert {"SOUL.md", "guide.md", "after.py"} <= names
+        assert "before.py" not in names
+    finally:
+        await channel._cleanup_connection(cast(Any, connection))
+
+
+@pytest.mark.asyncio
+async def test_local_compaction_publishes_rebuilt_system_graph_before_next_request(history, tmp_path, monkeypatch) -> None:
+    from functools import partial
+
+    from nanobot.agent.context import ContextBuilder, TranscriptInput
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.events import EventSink
+    from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
+    from nanobot.utils.llm_runtime import LLMRuntime
+    from nanobot.webui.context_source_hook import ContextSourceHook
+
+    workspace = tmp_path / "prompt-workspace"
+    workspace.mkdir()
+    soul = workspace / "SOUL.md"
+    soul.write_text("[Old](old.md)", encoding="utf-8")
+    channel = _channel(history.sessions)
+    chat = "rebuilt-prompt"
+    metadata = await history.metadata(chat, {"webui_turn_id": "turn"})
+
+    async def send(event):
+        await channel.send(OutboundMessage("websocket", chat, "", metadata=metadata, event=event))
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = False
+    provider.supports_pre_request_compaction.return_value = False
+    prompts = []
+
+    async def provider_call(**kwargs):
+        prompts.append(kwargs["messages"][0]["content"])
+        if len(prompts) == 1:
+            return LLMResponse(content=None, tool_calls=[ToolCallRequest(id="edit", name="edit_file", arguments={})])
+        return LLMResponse(content="done")
+
+    provider.chat_stream_with_retry = provider_call
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    async def edit_file(*_args, **_kwargs):
+        soul.write_text("[New](new.md)", encoding="utf-8")
+        return "updated"
+
+    tools.execute = AsyncMock(side_effect=edit_file)
+
+    def estimate(_provider, _model, messages, _tools):
+        has_tool_result = any(message.get("role") == "tool" and message.get("content") == "updated" for message in messages)
+        has_summary = any(message.get("role") == "system" and "Summary after compaction" in message.get("content", "") for message in messages)
+        return (600 if has_tool_result and not has_summary else 100, "test-counter")
+
+    monkeypatch.setattr("nanobot.agent.context_governance.estimate_prompt_tokens_chain", estimate)
+    events = EventSink(send)
+    result = await AgentRunner().run(AgentRunSpec(
+        initial_messages=None, tools=tools,
+        runtime=LLMRuntime(provider=provider, model="test", generation=GenerationSettings(max_tokens=100),
+                           context_window_tokens=1624),
+        max_iterations=2, max_tool_result_chars=10000, workspace=workspace,
+        transcript_input=TranscriptInput(history=[], current_message="update the prompt"),
+        transcript_builder=partial(ContextBuilder(workspace).build_transcript, channel="websocket"),
+        consolidate_history=AsyncMock(return_value="Summary after compaction"),
+        hook=ContextSourceHook(events), events=events,
+    ))
+    assert result.final_content == "done"
+    assert "[Old](old.md)" in prompts[0]
+    assert "[New](new.md)" in prompts[1]
+    records = history.read(f"websocket:{chat}")
+    boundary = next(row for row in records if row.get("event") == "context_compaction" and row.get("phase") == "succeeded")
+    request = next(row for row in reversed(records) if row.get("event") == "model_request" and row.get("phase") == "started")
+    assert boundary["context_graph"] == request["context_graph"]
+    names = {node["name"] for node in boundary["context_graph"]["nodes"]}
+    assert "new.md" in names and "old.md" not in names
+    replay = history.build(f"websocket:{chat}", include_model_requests=True)
+    replay_boundary = next(row for row in replay["events"] if row.get("event") == "context_compaction")
+    assert replay_boundary["context_graph"] == boundary["context_graph"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batched", [False, True])
+@pytest.mark.parametrize("request_after_read", [False, True])
+async def test_next_turn_replaces_restored_system_sources_without_losing_reads(history, tmp_path, request_after_read, batched) -> None:
+    from nanobot.bus.outbound_events import ProgressEvent, TurnEndEvent
+    from nanobot.context_sources import PromptSource, PromptSourcesEvent
+    from nanobot.events import AgentEvent, ContextCompactionEvent, ModelRequestEvent
+    from nanobot.file_references import source_receipt
+
+    channel = _channel(history.sessions)
+    chat = "restored-prompt"
+    first = await history.metadata(chat, {"webui_turn_id": "first"})
+    second = await history.metadata(chat, {"webui_turn_id": "second"})
+    soul = tmp_path / "SOUL.md"
+    old_prompt, new_prompt, read_content = "[Old](old.md)", "[New](new.md)", "[Post](post.md)"
+
+    async def send(event, metadata):
+        await channel.send(OutboundMessage("websocket", chat, "", metadata=metadata, event=event))
+
+    def read(path, content, call_id):
+        return ProgressEvent(tool_events=[{
+            "name": "read_file", "phase": "end", "call_id": call_id,
+            "arguments": {"path": str(path)}, "result": f"1| {content}",
+        }])
+
+    async def send_events(events, metadata):
+        messages = [OutboundMessage("websocket", chat, "", metadata=metadata, event=event) for event in events]
+        if batched:
+            await channel.send_batch(messages)
+        else:
+            for message in messages:
+                await channel.send(message)
+
+    await send(PromptSourcesEvent((), (PromptSource(soul, old_prompt),)), first)
+    await send_events([
+        ModelRequestEvent("first", "run-first", 1, "started"),
+        read(tmp_path / "before.py", "old read", "before"),
+    ], first)
+    await send(ContextCompactionEvent("compact", "succeeded"), first)
+    events: list[AgentEvent] = [read(soul, read_content, "after")]
+    if request_after_read:
+        events.append(ModelRequestEvent("after", "run-first", 2, "started"))
+    await send_events(events, first)
+    await send(TurnEndEvent(), first)
+
+    await send(PromptSourcesEvent((), (PromptSource(soul, new_prompt),)), second)
+    await send(ModelRequestEvent("second", "run-second", 1, "started"), second)
+    records = history.read(f"websocket:{chat}")
+    graph = next(row["context_graph"] for row in reversed(records) if row.get("event") == "model_request")
+    nodes = {node["name"]: node for node in graph["nodes"]}
+    assert {"SOUL.md", "new.md", "post.md"} <= nodes.keys()
+    assert "old.md" not in nodes and "before.py" not in nodes
+    assert nodes["SOUL.md"]["tokens"] == (
+        source_receipt(soul, new_prompt)["tokens"] + source_receipt(soul, read_content)["tokens"]
+    )
+    assert {"source": str(soul), "target": str(tmp_path / "new.md")} in graph["edges"]
+    assert {"source": str(soul), "target": str(tmp_path / "post.md")} in graph["edges"]

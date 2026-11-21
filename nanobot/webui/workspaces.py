@@ -24,7 +24,7 @@ from nanobot.security.workspace_access import (
     default_workspace_scope,
     validate_workspace_scope_payload,
 )
-from nanobot.session.webui_turns import websocket_turn_wall_started_at
+from nanobot.session.webui_turns import latest_live_websocket_turn
 from nanobot.webui.session_identity import webui_session_key
 
 if TYPE_CHECKING:
@@ -491,12 +491,11 @@ class WebUIWorkspaceController:
         chat_id: str,
         scope: WorkspaceScope,
         *,
-        session_key: str | None = None,
         expected_generation: str | None = None,
     ) -> tuple[str | None, bool]:
         async with self._scope_lock(chat_id):
             return await self._persist_scope(
-                session_key or webui_session_key(chat_id), scope, expected_generation,
+                webui_session_key(chat_id), scope, expected_generation,
             )
 
     async def _persist_scope(
@@ -517,7 +516,7 @@ class WebUIWorkspaceController:
 
     async def rollback_scope_admission(
         self,
-        session_key: str,
+        chat_id: str,
         generation: str | None,
         *,
         created: bool,
@@ -526,14 +525,14 @@ class WebUIWorkspaceController:
         if not created or generation is None or self._sessions is None:
             return
         await self._sessions.state.delete(
-            session_key,
+            webui_session_key(chat_id),
             expected_generation=generation,
         )
 
     async def stage_scope(self, chat_id: str, scope: WorkspaceScope) -> WorkspaceScope:
         """Keep a new chat's scope transient until its first accepted message."""
         async with self._scope_lock(chat_id):
-            if websocket_turn_wall_started_at(chat_id) is not None:
+            if latest_live_websocket_turn(chat_id) is not None:
                 raise WorkspaceScopeError("chat_running", status=409)
             session_key = webui_session_key(chat_id)
             if (

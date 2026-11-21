@@ -1,298 +1,238 @@
-import { useEffect, useState } from "react";
+import type { ReactElement } from "react";
 import { createRoot } from "react-dom/client";
-import { createPortal } from "react-dom";
-import { MessageBubble } from "@/components/MessageBubble";
-import { AppsCatalogSettings, DEFAULT_CUSTOM_MCP_FORM } from "@/components/settings/system/AppsSettings";
-import { ThreadMessages } from "@/components/thread/ThreadMessages";
-import { ThreadViewport } from "@/components/thread/ThreadViewport";
-import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
-import { usePromptHistory } from "@/hooks/usePromptHistory";
-import { ClientProvider } from "@/providers/ClientProvider";
-import { NanobotClient } from "@/lib/nanobot-client";
-import { fetchWebuiThread } from "@/lib/api";
-import { projectThreadEvents } from "@/lib/thread-event-projection";
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
-import { SettingsIcon } from "@/components/icons/product-icons";
 import { initializeI18n, setAppLanguage } from "@/i18n";
-import { normalizeLocale } from "@/i18n/config";
-import type { McpPresetInfo, UIMessage } from "@/lib/types";
-import { SkeletonFixture } from "./skeleton-fixture";
-import { installToolsCatalogPreviewApi, ToolsCatalogFixture } from "./tools-catalog-fixture";
-import { installSkeletonPreviewApi, SkeletonAdditionsFixture } from "./skeleton-additions-fixture";
-import { NewChatSkeletonFixture } from "./new-chat-skeleton-fixture";
+import { LOCALE_STORAGE_KEY, normalizeLocale } from "@/i18n/config";
+import { installFocusModality } from "@/lib/focus-modality";
 import "../src/globals.css";
-import { DiagramFixture } from "./diagram-fixture";
-import { TypographyFixture } from "./typography-fixture";
-import { CodeWrappingFixture } from "./code-wrapping-fixture";
-import { InlineReferencesFixture } from "./inline-references-fixture";
-import { HistoryBoundaryFixture } from "./history-boundary-fixture";
-import { ChatFailureFixture } from "./chat-failure-fixture";
-import { ThreadLoadingFixture } from "./thread-loading-fixture";
-import { AnswerOrderFixture } from "./answer-order-fixture";
-import { SidebarActivityFixture } from "./sidebar-activity-fixture";
-import { ActivityLogosFixture } from "./activity-logos-fixture";
-import { HistoryHydrationFixture } from "./history-hydration-fixture";
-import { IdleCompactionFixture, installIdleCompactionApi } from "./idle-compaction-fixture";
-import { FileEditPathFixture } from "./file-edit-path-fixture";
-import { FileDiffFixture } from "./file-diff-fixture";
-import { CodeHighlightingFixture } from "./code-highlighting-fixture";
-import { QueuedGuidanceFixture } from "./queued-guidance-fixture";
-import { WorkspaceAlignmentFixture } from "./workspace-alignment-fixture";
-import { ComposerActionFixture } from "./composer-action-fixture";
-import { MobileChatLayoutFixture } from "./mobile-chat-layout-fixture";
-import { ThemeToggleFixture } from "./theme-toggle-fixture";
-import { DisplayMathFixture } from "./display-math-fixture";
-import { AttachmentLayoutFixture } from "./attachment-layout-fixture";
-import { LoadedSessionSearchFixture } from "./loaded-session-search-fixture";
-import { AppearanceFixture } from "./appearance-fixture";
-import { installSubagentDockApi, SubagentDockFixture } from "./subagent-dock-fixture";
 
-const history: UIMessage[] = [
-  { id: "question", role: "user", content: "Earlier question", createdAt: 1_700_000_000_000 },
-  { id: "answer", role: "assistant", content: "Earlier answer", createdAt: 1_700_000_001_000 },
-];
-const trace: UIMessage = {
-  id: "trace", role: "tool", kind: "trace", content: "Earlier tool call", createdAt: 1_700_000_002_000,
-};
-
-function HistoryFixture() {
-  const [open, setOpen] = useState(false);
-  return <main>
-    <button onClick={() => setOpen(!open)}>{open ? "Close history" : "Reopen history"}</button>
-    <section aria-label="Persisted history">
-      {open && <>
-        <ThreadMessages messages={history} isStreaming={false} />
-        <MessageBubble message={trace} />
-      </>}
-    </section>
-  </main>;
-}
-
-function TallDialogFixture({ placement }: { placement: "center" | "bottom" }) {
-  return <main aria-label="Background content" style={{ height: 240, overflowY: "auto" }}>
-    <div style={{ minHeight: 1800 }}><Dialog>
-      <DialogTrigger asChild><button>Open tall dialog</button></DialogTrigger>
-      <DialogContent placement={placement}>
-        <DialogTitle>Tall dialog</DialogTitle>
-        <DialogDescription>All controls must remain reachable in a short viewport.</DialogDescription>
-        {Array.from({ length: 30 }, (_, index) => <label key={index}>
-          Field {index + 1}<input aria-label={`Field ${index + 1}`} style={{ display: "block", height: 40 }} />
-        </label>)}
-        <DialogClose asChild><button>Save tall dialog</button></DialogClose>
-      </DialogContent>
-    </Dialog></div>
-  </main>;
-}
-
-function SessionMessagesFixture() {
-  const messages: UIMessage[] = [
-    { id: "own-input", role: "user", content: "Please review the update.", createdAt: 1 },
-    {
-      id: "session-message:short", role: "user", content: "Looks good.", createdAt: 2,
-      sessionMessage: { message_id: "short", session: { id: "handle_0123456789abcdef0123456789abcdef", name: "mira" } },
-    },
-    {
-      id: "session-message:long", role: "user", createdAt: 3,
-      content: "**Review notes**\n\n- Keep the layout left-aligned.\n- Preserve Markdown and links.\n\n```ts\nconst message = \"" + "long-path/".repeat(30) + "\";\n```\n\n[Release notes](https://example.com/release-notes)",
-      sessionMessage: { message_id: "long", session: { id: "handle_fedcba9876543210fedcba9876543210", name: "nori" } },
-    },
-    { id: "reply", role: "assistant", content: "Thanks, I will keep those details.", createdAt: 4 },
-  ];
-  return <main className="mx-auto max-w-3xl px-6 py-8" aria-label="Session messages">
-    <ThreadMessages messages={messages} isStreaming={false} />
-  </main>;
-}
+installFocusModality();
 
 const parameters = new URLSearchParams(location.search);
-const railClient = new NanobotClient({ url: "ws://127.0.0.1:8765", reconnect: false });
-const railHistory: UIMessage[] = Array.from({ length: 5 }, (_, index) => [
-  { id: `u${1995 + index}`, role: "user" as const, content: `Question ${1995 + index}`, createdAt: index + 1 },
-  { id: `a${1995 + index}`, role: "assistant" as const, content: "A synthetic answer.\n\n".repeat(8), createdAt: index + 1 },
-]).flat();
-function RailFixture() {
-  const [messages, setMessages] = useState(parameters.has("real") ? [] : railHistory);
-  const [version, setVersion] = useState(1);
-  const [streaming, setStreaming] = useState(false);
-  useEffect(() => {
-    if (!parameters.has("real")) return;
-    const controller = new AbortController();
-    void fetchWebuiThread("fixture", "websocket:rail", { limit: 40, signal: controller.signal }).then((page) => {
-      if (page && !controller.signal.aborted) setMessages(projectThreadEvents(page.events));
-    });
-    return () => controller.abort();
-  }, []);
-  useEffect(() => {
-    if (!streaming) return;
-    let count = 0;
-    const user: UIMessage = { id: "stream-user", role: "user", content: "Streaming question", createdAt: Date.now() };
-    const timer = window.setInterval(() => {
-      count++;
-      setMessages((current) => [...current.filter((message) => message.id !== "stream-user" && message.id !== "stream-answer"), user,
-        { id: "stream-answer", role: "assistant", content: "Streaming text. ".repeat(count), createdAt: user.createdAt + 1, isStreaming: count < 120 }]);
-      if (count === 120) setStreaming(false);
-    }, 16);
-    return () => window.clearInterval(timer);
-  }, [streaming]);
-  const navigation = usePromptHistory(messages.length ? "websocket:rail" : null, version, messages);
-  const composer = <div style={{ height: parameters.has("tall-composer") ? 240 : 100, border: "1px solid #ddd", borderRadius: 20, padding: 20 }}>Message nanobot</div>;
-  const viewport = (external: boolean, navigationFrame?: HTMLElement | null) => <ThreadViewport
-    messages={messages} isStreaming={streaming} conversationKey="websocket:rail"
-    navigation={parameters.has("short") ? undefined : navigation}
-    navigationFrame={navigationFrame} composer={external ? null : composer} />;
-  return <main style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-    {parameters.has("real") && <div>
-      <button onClick={() => setVersion((value) => value + 1)}>Refresh index</button>
-      <button onClick={() => setStreaming(true)} disabled={streaming}>{streaming ? "Streaming" : "Simulate stream"}</button>
-    </div>}
-    {parameters.has("workbench") ? <PaneWorkbench
-      panes={[{ key: "rail", title: "Rail conversation" }]} activePaneKey="rail" layout="columns" showLayoutControl={false}
-      onActivatePane={() => {}} onAddPane={() => {}} onLayoutChange={() => {}} onPaneOrderChange={() => {}}
-      renderPane={(_pane, context) => <>
-        {viewport(context.composerPortalTarget !== undefined, context.navigationFrame)}
-        {context.composerPortalTarget && createPortal(composer, context.composerPortalTarget)}
-      </>}
-    /> : viewport(false)}
-  </main>;
+const fixtureCase = parameters.get("case");
+const historyPreview = parameters.get("preview");
+
+async function withClient(fixture: ReactElement, webuiCapabilities?: string[]) {
+  const [{ ClientProvider }, { NanobotClient }] = await Promise.all([
+    import("@/providers/ClientProvider"),
+    import("@/lib/nanobot-client"),
+  ]);
+  const client = new NanobotClient({ url: "ws://127.0.0.1:8765", reconnect: false });
+  return <ClientProvider client={client} token="fixture" webuiCapabilities={webuiCapabilities}>{fixture}</ClientProvider>;
 }
-const unbrandedPlugin: McpPresetInfo = {
-  name: "plugin-nanobot-workflows", display_name: "Nanobot Workflows", category: "Workflow",
-  description: "Engineering workflows", docs_url: "", requires: "Project files", note: "", connection_summary: "",
-  transport: "stdio", install_supported: false, installed: true, configured: true,
-  enabled: true, available: true, status: "enabled", required_fields: [], source: "agent-plugin",
-};
-function AppsFixture() {
-  const noop = () => {};
-  const managing = parameters.has("manage");
-  const connectionLayout = parameters.has("connection-layout");
-  const [connecting, setConnecting] = useState(false);
-  const [actions, setActions] = useState<unknown[]>([]);
-  const presets: McpPresetInfo[] = connectionLayout ? [
-    {
-      name: "linear", display_name: "Linear", category: "productivity", description: "Manage issues and projects",
-      docs_url: "", transport: "streamableHttp", auth: "oauth", requires: "Linear account", note: "",
-      install_supported: true, installed: parameters.has("runtime"), configured: parameters.has("runtime"),
-      available: true, status: parameters.has("runtime") ? "configured" : "not_installed",
-      required_fields: [], connection_summary: "", source: "preset",
-      brand_color: "#5E6AD2", runtime_status: parameters.has("runtime") ? "connecting" : undefined,
-    },
-    ...["Notion", "GitHub", "Xmind"].map((name): McpPresetInfo => ({
-      name: name.toLowerCase(), display_name: name, category: "productivity", description: `Connect your ${name} workspace`,
-      docs_url: "", transport: "streamableHttp", auth: "oauth", requires: "", note: "",
-      install_supported: true, installed: false, configured: false, available: true,
-      status: "not_installed", required_fields: [], connection_summary: "", source: "preset",
-    })),
-  ] : managing ? [{
-    name: "design", display_name: "Design MCP", category: "design", description: "Read design context",
-    docs_url: "", transport: "streamableHttp", auth: "oauth", requires: "", note: "",
-    install_supported: true, installed: false, configured: false, available: true,
-    status: "not_installed", required_fields: [], connection_summary: "https://design.example/mcp", source: "preset",
-  }] : [
-    unbrandedPlugin,
-    { ...unbrandedPlugin, name: "test-mcp", display_name: "Test MCP", source: "builtin", logo_url: "/missing-app-icon.svg" },
-    { ...unbrandedPlugin, name: "brand-example", display_name: "Brand Example", source: "builtin", brand_color: "#5E6AD2" },
-  ];
-  return <main className="mx-auto max-w-4xl p-6" style={connectionLayout ? { maxWidth: 800 } : undefined}><AppsCatalogSettings
-    cliApps={{ apps: [], installed_count: 0 }}
-    mcpPresets={{ presets, installed_count: connectionLayout ? Number(parameters.has("runtime")) : managing ? 0 : 3 }}
-    cliAppsLoading={false} mcpPresetsLoading={false} query="" filter={managing || connectionLayout ? "mcp" : "ready"}
-    cliActionKey={null} mcpActionKey={null}
-    mcpOAuthFlow={connecting ? { flow_id: "fixture", name: "linear", status: "authorization_required", expires_in: 300 } : null}
-    mcpOAuthPopupBlocked={false}
-    mcpOAuthCallbackUrl="" mcpOAuthCompleting={false} mcpOAuthCallbackError={null}
-    cliMessage={null} cliError={null} cliFocusName={null} mcpMessage={null} mcpError={null}
-    mcpFieldValues={{}} customMcpForm={DEFAULT_CUSTOM_MCP_FORM} mcpConfigImport=""
-    showBrandLogos={parameters.get("logos") !== "hidden"} requiresRestartPending={false}
-    onQueryChange={noop} onFilterChange={noop} onCliAction={noop}
-    onMcpAction={(action, name, values) => setActions((prev) => [...prev, { action, name, values }])}
-    onMcpOAuthConnect={(name, reset, values) => {
-      setActions((prev) => [...prev, { action: "oauth", name, reset, values }]);
-      if (connectionLayout) setConnecting(true);
-    }}
-    onMcpOAuthCancel={() => setConnecting(false)} onMcpOAuthOpen={noop}
-    onMcpOAuthCallbackUrlChange={noop} onMcpOAuthComplete={noop} onDismissStatus={noop}
-    onBackToChat={noop} onMcpFieldChange={noop} onCustomMcpFormChange={noop}
-    onMcpConfigImportChange={noop} onSaveCustomMcp={noop} onImportMcpConfig={noop}
-    onMcpToolsChange={noop}
-  />{managing && <output data-testid="mcp-actions">{JSON.stringify(actions)}</output>}</main>;
+
+// Load and install only the selected scene's mocks before i18n and React mount.
+async function loadFixture() {
+  switch (fixtureCase) {
+    case "model-options": {
+      const { ModelOptionsFixture, installModelOptionsPreviewApi } = await import("./model-options-fixture");
+      installModelOptionsPreviewApi();
+      return <ModelOptionsFixture />;
+    }
+    case "toast": {
+      const { ToastFixture } = await import("./toast-fixture");
+      return <ToastFixture parameters={parameters} />;
+    }
+    case "session-transition": {
+      const { installSessionTransitionPreviewApi, SessionTransitionFixture } = await import("./session-transition-fixture");
+      if (parameters.has("preview")) installSessionTransitionPreviewApi();
+      if (parameters.has("narrow")) {
+        const widePreview = new URL(location.href);
+        widePreview.searchParams.delete("narrow");
+        return <iframe title="Narrow goal preview" src={widePreview.href} style={{ display: "block", margin: "0 auto", height: "100dvh", width: "100%", maxWidth: 390, border: 0 }} />;
+      }
+      return <SessionTransitionFixture />;
+    }
+    case "continuity": {
+      const { ContinuityFixture } = await import("./continuity-fixture");
+      return <ContinuityFixture />;
+    }
+    case "appearance": {
+      const { AppearanceFixture } = await import("./appearance-fixture");
+      return <AppearanceFixture />;
+    }
+    case "loaded-session-search": {
+      const { LoadedSessionSearchFixture } = await import("./loaded-session-search-fixture");
+      return <LoadedSessionSearchFixture />;
+    }
+    case "subagent-dock": {
+      const { installSubagentDockApi, SubagentDockFixture } = await import("./subagent-dock-fixture");
+      installSubagentDockApi();
+      return <SubagentDockFixture parameters={parameters} />;
+    }
+    case "attachments": {
+      const { AttachmentLayoutFixture } = await import("./attachment-layout-fixture");
+      return <AttachmentLayoutFixture />;
+    }
+    case "theme-toggle": {
+      const { ThemeToggleFixture } = await import("./theme-toggle-fixture");
+      return withClient(<ThemeToggleFixture />);
+    }
+    case "mobile-chat-layout": {
+      const { MobileChatLayoutFixture } = await import("./mobile-chat-layout-fixture");
+      return withClient(<MobileChatLayoutFixture parameters={parameters} />);
+    }
+    case "long-user-message": {
+      const { LongUserMessageFixture } = await import("./long-user-message-fixture");
+      return withClient(<LongUserMessageFixture parameters={parameters} />);
+    }
+    case "composer-action": {
+      const { ComposerActionFixture, installMissingMicrophonePreview } = await import("./composer-action-fixture");
+      if (parameters.get("voiceError") === "noDevice") installMissingMicrophonePreview();
+      return <ComposerActionFixture parameters={parameters} />;
+    }
+    case "workspace-alignment": {
+      const { WorkspaceAlignmentFixture } = await import("./workspace-alignment-fixture");
+      return <WorkspaceAlignmentFixture parameters={parameters} />;
+    }
+    case "queued-guidance": {
+      const { QueuedGuidanceFixture } = await import("./queued-guidance-fixture");
+      return <QueuedGuidanceFixture />;
+    }
+    case "code-highlighting": {
+      const { CodeHighlightingFixture } = await import("./code-highlighting-fixture");
+      return <CodeHighlightingFixture />;
+    }
+    case "file-diff": {
+      const { FileDiffFixture } = await import("./file-diff-fixture");
+      return <FileDiffFixture shiki={parameters.has("shiki")} />;
+    }
+    case "file-edit-path": {
+      const { FileEditPathFixture } = await import("./file-edit-path-fixture");
+      return <FileEditPathFixture />;
+    }
+    case "answer-order": {
+      const { AnswerOrderFixture } = await import("./answer-order-fixture");
+      return <AnswerOrderFixture />;
+    }
+    case "activity-logos": {
+      const { ActivityLogosFixture } = await import("./activity-logos-fixture");
+      return <ActivityLogosFixture parameters={parameters} />;
+    }
+    case "activity-wheel": {
+      const { ActivityWheelFixture } = await import("./activity-wheel-fixture");
+      return <ActivityWheelFixture />;
+    }
+    case "exec-session": {
+      const { ExecSessionFixture } = await import("./exec-session-fixture");
+      return <ExecSessionFixture />;
+    }
+    case "sidebar-activity": {
+      const { SidebarActivityFixture } = await import("./sidebar-activity-fixture");
+      return <SidebarActivityFixture />;
+    }
+    case "chat-failure": {
+      const { ChatFailureFixture } = await import("./chat-failure-fixture");
+      return <ChatFailureFixture parameters={parameters} />;
+    }
+    case "display-math": {
+      const { DisplayMathFixture } = await import("./display-math-fixture");
+      return <DisplayMathFixture />;
+    }
+    case "markdown-dollar-refs": {
+      const { MarkdownDollarRefsFixture } = await import("./markdown-dollar-refs-fixture");
+      return <MarkdownDollarRefsFixture />;
+    }
+    case "code-wrapping": {
+      const { CodeWrappingFixture } = await import("./code-wrapping-fixture");
+      return <CodeWrappingFixture />;
+    }
+    case "typography": {
+      const { TypographyFixture } = await import("./typography-fixture");
+      return withClient(<TypographyFixture />);
+    }
+    case "inline-references": {
+      const { InlineReferencesFixture } = await import("./inline-references-fixture");
+      return withClient(<InlineReferencesFixture />);
+    }
+    case "inline-file-reference": {
+      const { InlineFileReferenceFixture } = await import("./inline-file-reference-fixture");
+      return <InlineFileReferenceFixture />;
+    }
+    case "idle-compaction": {
+      const { IdleCompactionFixture, installIdleCompactionApi } = await import("./idle-compaction-fixture");
+      installIdleCompactionApi();
+      return <IdleCompactionFixture />;
+    }
+    case "history-hydration": {
+      const { HistoryHydrationFixture } = await import("./history-hydration-fixture");
+      return <HistoryHydrationFixture />;
+    }
+    case "history-boundary": {
+      const { HistoryBoundaryFixture } = await import("./history-boundary-fixture");
+      if (historyPreview === "slow" || historyPreview === "fast" || historyPreview === "pages" || historyPreview === "error") {
+        const { installHistoryBoundaryPreviewApi } = await import("./history-boundary-preview");
+        installHistoryBoundaryPreviewApi(historyPreview);
+      }
+      return withClient(<HistoryBoundaryFixture local={parameters.has("local")} navigate={parameters.has("navigate")} tasks={parameters.has("tasks")} />, ["webui.prompt-navigation.v1"]);
+    }
+    case "diagrams": {
+      const { DiagramFixture } = await import("./diagram-fixture");
+      return <DiagramFixture parameters={parameters} />;
+    }
+    case "thread-loading": {
+      const { ThreadLoadingFixture } = await import("./thread-loading-fixture");
+      return withClient(<ThreadLoadingFixture />);
+    }
+    case "new-chat-skeleton": {
+      const { NewChatSkeletonFixture } = await import("./new-chat-skeleton-fixture");
+      return withClient(<NewChatSkeletonFixture />);
+    }
+    case "skeleton-additions": {
+      const { installSkeletonPreviewApi, SkeletonAdditionsFixture } = await import("./skeleton-additions-fixture");
+      installSkeletonPreviewApi();
+      return withClient(<SkeletonAdditionsFixture />, parameters.has("sandboxSettings") ? ["webui.sandbox-settings.v1"] : []);
+    }
+    case "skeleton": {
+      const { SkeletonFixture } = await import("./skeleton-fixture");
+      return withClient(<SkeletonFixture surface={parameters.get("surface") ?? "skills"} loading={parameters.has("loading")} />);
+    }
+    case "tools-catalog": {
+      const { installToolsCatalogPreviewApi, ToolsCatalogFixture } = await import("./tools-catalog-fixture");
+      installToolsCatalogPreviewApi();
+      return withClient(<ToolsCatalogFixture />);
+    }
+    case "apps": {
+      const { AppsFixture } = await import("./apps-fixture");
+      return withClient(<AppsFixture />);
+    }
+    case "rail": {
+      const { RailFixture } = await import("./rail-fixture");
+      return withClient(<RailFixture />, ["webui.prompt-navigation.v1"]);
+    }
+    case "settings-icon": {
+      const [{ Button }, { SettingsIcon }] = await Promise.all([
+        import("@/components/ui/button"),
+        import("@/components/icons/product-icons"),
+      ]);
+      return <Button variant="icon" size="icon" aria-label="Settings"><SettingsIcon className="h-4 w-4" /></Button>;
+    }
+    case "session-messages": {
+      const { SessionMessagesFixture } = await import("./history-fixture");
+      return <SessionMessagesFixture />;
+    }
+    case "history": {
+      const { HistoryFixture } = await import("./history-fixture");
+      return <HistoryFixture />;
+    }
+    default: {
+      const { TallDialogFixture } = await import("./tall-dialog-fixture");
+      return <TallDialogFixture placement={parameters.get("placement") === "bottom" ? "bottom" : "center"} />;
+    }
+  }
 }
-if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi();
-if (parameters.get("case") === "tools-catalog") installToolsCatalogPreviewApi();
-if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
-if (parameters.get("case") === "subagent-dock") installSubagentDockApi();
+
+const fixture = await loadFixture();
 await initializeI18n();
-if (parameters.get("case") === "appearance" && parameters.has("lang")) {
+if (fixtureCase === "activity-wheel") await setAppLanguage("zh-CN");
+if (fixtureCase === "toast" && parameters.has("lang")) {
+  const previous = localStorage.getItem(LOCALE_STORAGE_KEY);
+  await setAppLanguage(normalizeLocale(parameters.get("lang")));
+  if (previous === null) localStorage.removeItem(LOCALE_STORAGE_KEY);
+  else localStorage.setItem(LOCALE_STORAGE_KEY, previous);
+}
+if ((["appearance", "long-user-message", "session-transition", "tools-catalog"].includes(fixtureCase ?? "") || historyPreview) && parameters.has("lang")) {
   await setAppLanguage(normalizeLocale(parameters.get("lang")));
 }
-createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "appearance"
-    ? <AppearanceFixture />
-    : parameters.get("case") === "loaded-session-search"
-    ? <LoadedSessionSearchFixture />
-    : parameters.get("case") === "subagent-dock"
-    ? <SubagentDockFixture parameters={parameters} />
-    : parameters.get("case") === "attachments"
-    ? <AttachmentLayoutFixture />
-    : parameters.get("case") === "theme-toggle"
-    ? <ClientProvider client={railClient} token="fixture"><ThemeToggleFixture /></ClientProvider>
-    : parameters.get("case") === "mobile-chat-layout"
-    ? <ClientProvider client={railClient} token="fixture"><MobileChatLayoutFixture parameters={parameters} /></ClientProvider>
-    : parameters.get("case") === "composer-action"
-    ? <ComposerActionFixture parameters={parameters} />
-    : parameters.get("case") === "workspace-alignment"
-    ? <WorkspaceAlignmentFixture parameters={parameters} />
-    : parameters.get("case") === "queued-guidance"
-    ? <QueuedGuidanceFixture />
-    : parameters.get("case") === "code-highlighting"
-    ? <CodeHighlightingFixture />
-    : parameters.get("case") === "file-diff"
-    ? <FileDiffFixture />
-    : parameters.get("case") === "file-edit-path"
-    ? <FileEditPathFixture />
-    : parameters.get("case") === "answer-order"
-    ? <AnswerOrderFixture />
-    : parameters.get("case") === "activity-logos"
-    ? <ActivityLogosFixture parameters={parameters} />
-    : parameters.get("case") === "sidebar-activity"
-    ? <SidebarActivityFixture />
-    : parameters.get("case") === "chat-failure"
-    ? <ChatFailureFixture parameters={parameters} />
-    : parameters.get("case") === "display-math"
-    ? <DisplayMathFixture />
-    : parameters.get("case") === "code-wrapping"
-    ? <CodeWrappingFixture />
-    : parameters.get("case") === "typography"
-    ? <ClientProvider client={railClient} token="fixture"><TypographyFixture /></ClientProvider>
-    : parameters.get("case") === "inline-references"
-    ? <ClientProvider client={railClient} token="fixture"><InlineReferencesFixture /></ClientProvider>
-    : parameters.get("case") === "idle-compaction"
-    ? <IdleCompactionFixture />
-    : parameters.get("case") === "history-hydration"
-    ? <HistoryHydrationFixture />
-    : parameters.get("case") === "history-boundary"
-    ? <ClientProvider client={railClient} token="fixture" webuiCapabilities={["webui.prompt-navigation.v1"]}><HistoryBoundaryFixture local={parameters.has("local")} navigate={parameters.has("navigate")} tasks={parameters.has("tasks")} /></ClientProvider>
-    : parameters.get("case") === "diagrams"
-    ? <DiagramFixture parameters={parameters} />
-    : parameters.get("case") === "thread-loading"
-    ? <ClientProvider client={railClient} token="fixture"><ThreadLoadingFixture /></ClientProvider>
-    : parameters.get("case") === "new-chat-skeleton"
-    ? <ClientProvider client={railClient} token="fixture"><NewChatSkeletonFixture /></ClientProvider>
-    : parameters.get("case") === "skeleton-additions"
-    ? <ClientProvider client={railClient} token="fixture"><SkeletonAdditionsFixture /></ClientProvider>
-    : parameters.get("case") === "skeleton"
-    ? <ClientProvider client={railClient} token="fixture"><SkeletonFixture surface={parameters.get("surface") ?? "skills"} loading={parameters.has("loading")} /></ClientProvider>
-    : parameters.get("case") === "tools-catalog"
-    ? <ClientProvider client={railClient} token="fixture"><ToolsCatalogFixture /></ClientProvider>
-    : parameters.get("case") === "apps"
-    ? <ClientProvider client={railClient} token="fixture"><AppsFixture /></ClientProvider>
-    : parameters.get("case") === "rail"
-    ? <ClientProvider client={railClient} token="fixture" webuiCapabilities={["webui.prompt-navigation.v1"]}><RailFixture /></ClientProvider>
-    : parameters.get("case") === "settings-icon"
-    ? <Button variant="icon" size="icon" aria-label="Settings"><SettingsIcon className="h-4 w-4" /></Button>
-    : parameters.get("case") === "session-messages"
-    ? <SessionMessagesFixture />
-    : parameters.get("case") === "history"
-    ? <HistoryFixture />
-    : <TallDialogFixture placement={parameters.get("placement") === "bottom" ? "bottom" : "center"} />}
-</TooltipProvider>);
+createRoot(document.getElementById("root")!).render(<TooltipProvider>{fixture}</TooltipProvider>);

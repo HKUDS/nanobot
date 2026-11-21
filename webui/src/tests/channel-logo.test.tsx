@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { channelUiPresentation, registeredChannelUiContributions } from "@/channel-plugins/registry";
 import { ChannelLogo } from "@/components/settings/channels/ChannelIdentity";
 import { __clearLogoFallbackCacheForTests } from "@/hooks/useLogoFallback";
-import { logoFallbackUrls } from "@/lib/provider-brand";
 import type { NanobotFeatureInfo } from "@/lib/types";
 
 function feature(name: string): NanobotFeatureInfo {
@@ -31,11 +30,11 @@ describe("channel logos", () => {
   beforeEach(__clearLogoFallbackCacheForTests);
   afterEach(cleanup);
 
-  const remoteChannels = registeredChannelUiContributions()
+  const channelsWithBrandMarks = registeredChannelUiContributions()
     .filter(({ contribution }) => contribution.presentation.logoUrl)
     .map(({ channel }) => channel);
 
-  it.each(remoteChannels)("keeps %s in one stable tile while loading", (channel) => {
+  it.each(channelsWithBrandMarks)("loads the bundled %s mark in one stable tile", (channel) => {
     const { container } = render(<ChannelLogo feature={feature(channel)} showBrandLogos />);
     const icon = container.firstElementChild!;
     const image = icon.querySelector("img")!;
@@ -45,6 +44,7 @@ describe("channel logos", () => {
     expectFootprint(icon);
     expect(icon).toHaveClass("bg-muted");
     expect(fallback).toHaveClass("opacity-100");
+    expect(presentation.logoUrl).toMatch(/^\/brand\//);
     expect(image).toHaveAttribute("src", presentation.logoUrl);
     expect(image).toHaveAttribute("alt", "");
     expect(image).toHaveAttribute("referrerpolicy", "no-referrer");
@@ -58,54 +58,47 @@ describe("channel logos", () => {
     for (const className of ["invert", "grayscale", "object-cover"]) {
       expect(image).not.toHaveClass(className);
     }
-    expect(icon).toHaveClass(presentation.logoLayout === "tile" ? "bg-transparent" : "bg-white");
-    expect(image).toHaveClass(...(presentation.logoLayout === "tile" ? ["h-8", "w-8"] : ["h-6", "w-6"]));
+    expect(icon).toHaveClass("bg-white");
+    expect(image).toHaveClass("h-6", "w-6");
   });
 
-  it.each(["linear", "feishu", "lark"])("insets unknown %s fallback assets instead of stretching them", (channel) => {
-    const { container } = render(<ChannelLogo feature={feature(channel)} showBrandLogos />);
+  it.each(["dingtalk", "feishu", "lark", "mochat", "msteams", "napcat", "slack", "wecom"])(
+    "shows %s initials without an external image when there is no bundled mark",
+    (channel) => {
+      const { container } = render(<ChannelLogo feature={feature(channel)} showBrandLogos />);
+      const icon = container.firstElementChild!;
+      expectFootprint(icon);
+      expect(icon).toHaveTextContent(channelUiPresentation(channel)!.initials!);
+      expect(icon.querySelector("img")).toBeNull();
+    },
+  );
+
+  it("keeps QQ readable when its bundled SVG fails, without requesting another image", () => {
+    const { container } = render(<ChannelLogo feature={feature("qq")} showBrandLogos />);
     const icon = container.firstElementChild!;
     const image = icon.querySelector("img")!;
-    fireEvent.load(image);
-    expect(icon).toHaveClass("bg-transparent");
-    expect(image).toHaveClass("h-8", "w-8");
-
+    expect(image).toHaveAttribute("src", "/brand/channels/qq.svg");
     fireEvent.error(image);
-    expect(icon).toHaveClass("bg-muted");
-    expect(image).toHaveClass("h-6", "w-6", "opacity-0");
-    fireEvent.load(image);
-    expect(icon).toHaveClass("bg-white");
+    expect(container.firstElementChild).toBe(icon);
     expectFootprint(icon);
-  });
-
-  it("falls back to initials after all remote sources fail without changing size", () => {
-    const { container } = render(<ChannelLogo feature={feature("slack")} showBrandLogos />);
-    const icon = container.firstElementChild!;
-    for (const url of logoFallbackUrls(channelUiPresentation("slack")!.logoUrl)) {
-      const image = icon.querySelector("img")!;
-      expect(image).toHaveAttribute("src", url);
-      fireEvent.error(image);
-      expect(container.firstElementChild).toBe(icon);
-      expectFootprint(icon);
-      expect(icon).toHaveClass("bg-muted");
-      expect(icon.querySelector("span")).toHaveClass("opacity-100");
-    }
+    expect(icon).toHaveClass("bg-muted");
+    expect(icon.querySelector("span")).toHaveClass("opacity-100");
+    expect(icon).toHaveTextContent("QQ");
     expect(icon.querySelector("img")).toBeNull();
-    expect(icon).toHaveTextContent(channelUiPresentation("slack")!.initials!);
   });
 
   it("respects the brand logo preference even for cached images", () => {
-    const { container, rerender } = render(<ChannelLogo feature={feature("slack")} showBrandLogos />);
+    const { container, rerender } = render(<ChannelLogo feature={feature("linear")} showBrandLogos />);
     const icon = container.firstElementChild!;
     fireEvent.load(icon.querySelector("img")!);
 
-    rerender(<ChannelLogo feature={feature("slack")} showBrandLogos={false} />);
+    rerender(<ChannelLogo feature={feature("linear")} showBrandLogos={false} />);
     expectFootprint(icon);
     expect(icon.querySelector("img")).toBeNull();
     expect(icon).toHaveClass("bg-muted");
     expect(icon.querySelector("span")).toHaveClass("opacity-100");
 
-    rerender(<ChannelLogo feature={feature("slack")} showBrandLogos />);
+    rerender(<ChannelLogo feature={feature("linear")} showBrandLogos />);
     expect(icon.querySelector("img")).toHaveClass("opacity-100");
     expect(icon).toHaveClass("bg-white");
   });
@@ -116,16 +109,6 @@ describe("channel logos", () => {
     expect(container.querySelector("svg.lucide-mail")).not.toBeNull();
     expect(container.querySelector("img")).toBeNull();
     expect(channelUiPresentation("email")?.logoUrl).toBeUndefined();
-  });
-
-  it("falls back to QQ's official favicon rather than its CDN's identity", () => {
-    const { container } = render(<ChannelLogo feature={feature("qq")} showBrandLogos />);
-    const image = container.querySelector("img")!;
-    expect(image).toHaveAttribute("src", channelUiPresentation("qq")!.logoUrl);
-    fireEvent.error(image);
-    expect(image).toHaveAttribute("src", "https://im.qq.com/favicon.ico");
-    fireEvent.load(image);
-    expect(container.firstElementChild).toHaveClass("bg-white");
   });
 
   it("keeps the local nanobot mark and unknown channel initials readable", () => {

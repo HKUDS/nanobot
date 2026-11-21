@@ -18,13 +18,12 @@ class ContextSourceHook(AgentHook):
         return False
 
     async def before_model_request(self) -> None:
-        sources = tuple(self._sources)
-        self._sources.clear()
-        if sources:
-            await self._events.emit(PromptSourcesEvent(sources))
+        event = self._sources.drain()
+        if event.sources or event.system_sources is not None:
+            await self._events.emit(event)
 
     async def on_finally(self, context: AgentRunHookContext) -> None:
-        self._sources.clear()
+        self._sources.drain()
         self._capture.__exit__(None, None, None)
 
 

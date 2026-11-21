@@ -672,7 +672,6 @@ describe("Automation task list and detail sheet", () => {
     expect(header).toHaveClass("bg-foreground/[0.025]");
     expect(header).not.toHaveClass("border-b");
     expect(header?.querySelector(".automation-calendar-weekdays")).toBeInTheDocument();
-    expect(calendar.querySelector(".automation-meta-row")).toBeNull();
     expect(calendar.querySelector(":scope > details")).toBeNull();
     expect(screen.queryByRole("button", { name: /Paused backlog review/ })).not.toBeInTheDocument();
     expect(calendar).not.toHaveTextContent("·");

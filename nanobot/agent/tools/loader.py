@@ -177,9 +177,6 @@ class _LegacyErrorPrefixTool(Tool):
         if callable(set_context):
             set_context(ctx)
 
-    def cast_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._wrapped.cast_params(params)
-
     def validate_params(self, params: dict[str, Any]) -> list[str]:
         return self._wrapped.validate_params(params)
 

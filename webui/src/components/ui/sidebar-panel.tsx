@@ -1,5 +1,4 @@
 import { createContext, forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode } from "react";
-import { useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 
 interface SidebarPanelProps extends HTMLAttributes<HTMLElement> {
@@ -18,13 +17,25 @@ export const SidebarPanel = forwardRef<HTMLElement, SidebarPanelProps>(function 
   open = true, isClosing, ...props
 }, ref) {
   const [present, setPresent] = useState(open);
-  const reducedMotion = useReducedMotion();
+  const panel = useRef<HTMLElement | null>(null);
+  const setPanel = useCallback((node: HTMLElement | null) => {
+    panel.current = node;
+    if (typeof ref === "function") ref(node);
+    else if (ref) ref.current = node;
+  }, [ref]);
   useEffect(() => {
     if (open) { setPresent(true); return; }
-    const timer = window.setTimeout(() => setPresent(false), reducedMotion ? 0 : 300);
-    return () => window.clearTimeout(timer);
-  }, [open, reducedMotion]);
-  return open || present ? <SidebarPanelContent {...props} ref={ref} isClosing={isClosing || !open} /> : null;
+    // Only the slot and its surface own the exit. Descendant activity may loop forever.
+    const animations = [panel.current, panel.current?.firstElementChild]
+      .flatMap((element) => element?.getAnimations?.() ?? []);
+    if (!animations.length) { setPresent(false); return; }
+    let cancelled = false;
+    void Promise.allSettled(animations.map((animation) => animation.finished)).then(() => {
+      if (!cancelled) setPresent(false);
+    });
+    return () => { cancelled = true; };
+  }, [open]);
+  return open || present ? <SidebarPanelContent {...props} ref={setPanel} isClosing={isClosing || !open} /> : null;
 });
 
 /** Shared nonmodal side slot. Contents keep their final width while the slot opens. */
@@ -46,13 +57,15 @@ const SidebarPanelContent = forwardRef<HTMLElement, SidebarPanelProps>(function 
     return () => cancelAnimationFrame(frame);
   }, []);
   return <aside {...props} ref={setPanel} data-closing={isClosing || undefined}
+    aria-hidden={isClosing ? true : props["aria-hidden"]}
+    {...(isClosing ? { inert: "" } : {})}
     style={{
       "--file-preview-width": `${width}px`,
       "--file-preview-slot-width": isClosing ? "0px" : !entered ? "var(--sidebar-enter-width, 0px)" : `${width}px`,
       "--file-preview-mobile-width": isClosing ? "0px" : !entered ? "var(--sidebar-enter-mobile-width, 0px)" : "100%",
       ...style,
     } as CSSProperties}
-    className={cn("file-preview-pane z-30 min-h-0 w-[var(--file-preview-mobile-width)] overflow-hidden duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+    className={cn("file-preview-pane z-30 min-h-0 w-[var(--file-preview-mobile-width)] overflow-hidden duration-300 [transition-timing-function:cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
       entered ? "transition-[width]" : "transition-none",
       floating ? "fixed inset-y-2 right-2 max-w-[420px]" : "absolute inset-y-0 right-0", isClosing && "pointer-events-none", className)}>
     <div className={cn("file-preview-content absolute inset-y-2 right-2 flex min-h-0 w-[calc(100cqw-1rem)] flex-col pb-[env(safe-area-inset-bottom)] transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",

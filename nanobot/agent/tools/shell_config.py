@@ -19,6 +19,7 @@ class ExecToolConfig(Base):
     path_prepend: str = ""
     path_append: str = ""
     sandbox: str = ""
+    sandbox_launcher: str = ""
     sandbox_ro_binds: list[str] = Field(default_factory=list)
     sandbox_rw_binds: list[str] = Field(default_factory=list)
     allowed_env_keys: list[str] = Field(default_factory=list)

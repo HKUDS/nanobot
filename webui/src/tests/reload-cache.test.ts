@@ -43,6 +43,7 @@ describe("tab reload cache", () => {
     const body = parseWebuiThreadPayload({ schemaVersion: 3, sessionKey: "websocket:growing", revision: "growing-50",
       projection: "events", active_turn_id: null, page: { before_cursor: "older", has_more_before: true },
       events: [{ event: "context_compaction", chat_id: "growing", compaction_id: "checkpoint", phase: "succeeded",
+        ...(format === "inline" ? { context_graph: structuredClone(graphs[0]) } : { context_graph_ref: "0" }),
         context_snapshot: { estimated_tokens: 100, context_window_tokens: 100000,
           ...(format === "inline" ? { graph: structuredClone(graphs[0]) } : { graph_ref: "0" }) } }, ...events],
       ...(format === "references" ? { context_graphs: table, context_graph_nodes: nodes, context_graph_edges: edges } : {}),

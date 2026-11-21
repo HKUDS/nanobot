@@ -18,11 +18,11 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
-from urllib.parse import quote, unquote, urlsplit, urlunsplit
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
+from urllib.parse import parse_qs, unquote, urlsplit, urlunsplit
 
 from loguru import logger
-from websockets.datastructures import Headers
+from websockets.datastructures import Headers, MultipleValuesError
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
@@ -30,9 +30,6 @@ from nanobot.agent.subagent import SubagentControlError
 from nanobot.agent.subagent_status import SubagentSessionError
 from nanobot.command.application import builtin_command_palette
 from nanobot.context_graph import ContextGraph
-from nanobot.cron.binding import CronBindingError, binding_revision
-from nanobot.cron.session_turns import is_bound_cron_job
-from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.security.workspace_access import WorkspaceScope, WorkspaceScopeError
 from nanobot.session.display_history import HistoryReader
@@ -41,9 +38,7 @@ from nanobot.session.session_handles import (
     SessionHandle,
     SessionHandleResolver,
 )
-from nanobot.triggers.local_types import LocalTrigger
-from nanobot.webui.automation_chats import AutomationChat, automation_chats
-from nanobot.webui.automation_results import cron_run_response, trigger_run_response
+from nanobot.webui.automation_routes import WebUIAutomationRoutes
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_preview_availability_payload,
@@ -59,6 +54,7 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.http_utils import (
     combined_list_header as _combined_list_header,
 )
+from nanobot.webui.http_utils import etag_matches as _etag_matches
 from nanobot.webui.http_utils import (
     host_for_url as _host_for_url,
 )
@@ -98,13 +94,9 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.ingress_policy import WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
+from nanobot.webui.mutation import MutationResult
 from nanobot.webui.recovery import RecoveryActionError
-from nanobot.webui.session_automations import (
-    all_automations_payload,
-    serialize_automation_jobs,
-    session_automation_jobs,
-    session_automations_payload,
-)
+from nanobot.webui.session_automations import serialize_automation_jobs
 from nanobot.webui.session_context import session_context_payload
 from nanobot.webui.session_identity import is_webui_session_key
 from nanobot.webui.session_list_index import (
@@ -112,6 +104,8 @@ from nanobot.webui.session_list_index import (
     indexed_workspace_scope,
     list_webui_sessions,
 )
+from nanobot.webui.settings_contracts import MutationParams
+from nanobot.webui.settings_contracts import query_first as _mutation_text
 from nanobot.webui.sidebar_state import (
     WebUISidebarState,
     ensure_webui_archives_imported,
@@ -142,20 +136,11 @@ from nanobot.webui.workspace_browser import browse_workspace_directories
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
-_WEBUI_MUTATION_PAYLOAD_ATTR = "_nanobot_webui_mutation_payload"
-_WEBUI_MUTATION_REQUEST_ATTR = "_nanobot_webui_mutation_request"
 _NO_STORE_HEADERS = [("Cache-Control", "no-store")]
 
 
 def _quoted_etag(revision: str) -> str:
     return f'"{revision}"'
-
-
-def _etag_matches(value: str, etag: str) -> bool:
-    return any(
-        candidate.strip().removeprefix("W/") in {"*", etag}
-        for candidate in value.split(",")
-    )
 
 
 @dataclass(slots=True)
@@ -200,60 +185,8 @@ _WEBUI_MUTATION_PATHS = {
     "recovery.continue": "/api/webui/recovery/continue",
     "recovery.dismiss": "/api/webui/recovery/dismiss",
     "subagent.cancel": "/api/webui/subagents/cancel",
-    "settings.agent.update": "/api/settings/update",
-    "settings.model_configuration.create": "/api/settings/model-configurations/create",
-    "settings.model_configuration.update": "/api/settings/model-configurations/update",
-    "settings.model_configuration.delete": "/api/settings/model-configurations/delete",
-    "settings.model_configuration.migrate": "/api/settings/model-configurations/migrate",
-    "settings.model_call_order.update": "/api/settings/model-call-order/update",
-    "settings.provider.update": "/api/settings/provider/update",
-    "settings.provider.create": "/api/settings/provider/create",
-    "settings.provider.oauth_login": "/api/settings/provider/oauth-login",
-    "settings.provider.oauth_complete": "/api/settings/provider/oauth-login/complete",
-    "settings.provider.oauth_logout": "/api/settings/provider/oauth-logout",
-    "settings.web_search.update": "/api/settings/web-search/update",
-    "settings.api_service.start": "/api/settings/api-service/start",
-    "settings.api_service.stop": "/api/settings/api-service/stop",
-    "settings.image_generation.update": "/api/settings/image-generation/update",
-    "settings.transcription.update": "/api/settings/transcription/update",
-    "settings.runtime_config.update": "/api/settings/runtime-config/update",
-    "settings.network_safety.update": "/api/settings/network-safety/update",
-    "settings.cli_app.install": "/api/settings/cli-apps/install",
-    "settings.cli_app.update": "/api/settings/cli-apps/update",
-    "settings.cli_app.uninstall": "/api/settings/cli-apps/uninstall",
-    "settings.cli_app.test": "/api/settings/cli-apps/test",
-    "settings.feature.enable": "/api/settings/nanobot-features/enable",
-    "settings.feature.disable": "/api/settings/nanobot-features/disable",
-    "settings.nanobot.update.channel": "/api/settings/nanobot-update/channel",
-    "settings.nanobot.update.plan": "/api/settings/nanobot-update/plan/create",
-    "settings.nanobot.update.prepare": "/api/settings/nanobot-update/job/prepare",
-    "settings.nanobot.update.settle": "/api/settings/nanobot-update/job/settle",
-    "settings.nanobot.update.execute": "/api/settings/nanobot-update/job/execute",
-    "settings.nanobot.update.retry": "/api/settings/nanobot-update/job/retry",
-    "settings.channel.validate": "/api/settings/channels/validate",
-    "settings.channel.configure": "/api/settings/channels/configure",
-    "settings.pairing.approve": "/api/settings/pairing/approve",
-    "settings.pairing.deny": "/api/settings/pairing/deny",
-    "settings.mcp.enable": "/api/settings/mcp-presets/enable",
-    "settings.mcp.disable": "/api/settings/mcp-presets/disable",
-    "settings.mcp.remove": "/api/settings/mcp-presets/remove",
-    "settings.mcp.test": "/api/settings/mcp-presets/test",
-    "settings.mcp.reconnect": "/api/settings/mcp-presets/reconnect",
-    "settings.mcp.proxy": "/api/settings/mcp-presets/proxy",
-    "settings.mcp.custom": "/api/settings/mcp-presets/custom",
-    "settings.mcp.import": "/api/settings/mcp-presets/import",
-    "settings.mcp.import_cursor": "/api/settings/mcp-presets/import-cursor",
-    "settings.mcp.tools": "/api/settings/mcp-presets/tools",
-    "settings.mcp.oauth_start": "/api/settings/mcp-oauth/start",
-    "settings.mcp.oauth_complete": "/api/settings/mcp-oauth/complete",
-    "settings.mcp.oauth_cancel": "/api/settings/mcp-oauth/cancel",
 }
-
-_WEBUI_CHANNEL_CONNECT_ACTIONS = {
-    "settings.channel.connect.start": "start",
-    "settings.channel.connect.poll": "poll",
-    "settings.channel.connect.cancel": "cancel",
-}
+_WEBUI_STATIC_MUTATION_PATHS = frozenset(_WEBUI_MUTATION_PATHS.values())
 
 # Fix for #5190: On Windows, mimetypes.guess_type() reads the registry key
 # HKEY_CLASSES_ROOT\.js\Content Type, which is commonly set to 'text/plain'
@@ -283,43 +216,28 @@ if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketConfig
-    from nanobot.cron.service import CronService
-    from nanobot.triggers.local_store import LocalTriggerStore
     from nanobot.webui.settings_services import WebUISettingsServices
+
+_API_KEY_RE = re.compile(r"^[A-Za-z0-9_:.-]{1,128}$")
+_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
+_SESSION_PROMPTS_RE = re.compile(r"/api/sessions/([^/]+)/webui-thread/prompts")
+_SESSION_TRACE_DETAIL_RE = re.compile(r"^/api/sessions/([^/]+)/webui-thread/trace-detail$")
+_SESSION_WEBUI_THREAD_RE = re.compile(r"^/api/sessions/([^/]+)/webui-thread$")
+_SESSION_CONTEXT_RE = re.compile(r"^/api/sessions/([^/]+)/context$")
+_SESSION_FILE_PREVIEW_RE = re.compile(r"^/api/sessions/([^/]+)/file-preview$")
+_SESSION_AUTOMATIONS_RE = re.compile(r"^/api/sessions/([^/]+)/automations$")
+_SESSION_SUBAGENT_THREAD_RE = re.compile(r"/api/sessions/([^/]+)/subagents/([^/]+)/webui-thread")
+_SESSION_SUBAGENTS_RE = re.compile(r"/api/sessions/([^/]+)/subagents")
+_SESSION_DELETE_RE = re.compile(r"^/api/sessions/([^/]+)/delete$")
+_MEDIA_ROUTE_RE = re.compile(r"^/api/media/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)$")
+_SKILL_DETAIL_RE = re.compile(r"^/api/webui/skills/([^/]+)$")
+
 
 def _decode_api_key(raw_key: str) -> str | None:
     key = unquote(raw_key)
-    _api_key_re = re.compile(r"^[A-Za-z0-9_:.-]{1,128}$")
-    if _api_key_re.match(key) is None:
+    if _API_KEY_RE.match(key) is None:
         return None
     return key
-
-
-def _mutation_payload(request: WsRequest) -> dict[str, Any] | None:
-    payload = getattr(request, _WEBUI_MUTATION_PAYLOAD_ATTR, None)
-    if not isinstance(payload, dict):
-        return None
-    return cast(dict[str, Any], payload)
-
-
-def _request_query(request: WsRequest) -> dict[str, list[str]]:
-    payload = _mutation_payload(request)
-    if payload is None:
-        return _parse_query(request.path)
-    query: dict[str, list[str]] = {}
-    for key, value in payload.items():
-        if not key:
-            continue
-        if isinstance(value, bool):
-            text = "true" if value else "false"
-        elif value is None:
-            text = ""
-        elif isinstance(value, (dict, list)):
-            text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-        else:
-            text = str(value)
-        query[key] = [text]
-    return query
 
 
 def _default_model_name_from_config(config_path: Path | None = None) -> str | None:
@@ -353,7 +271,7 @@ _ProjectionResult = TypeVar("_ProjectionResult", covariant=True)
 
 
 class _HistoryProjection(Protocol[_ProjectionResult]):
-    def __call__(self, request: WsRequest, key: str, *, history: HistoryReader) -> _ProjectionResult: ...
+    def __call__(self, request: WsRequest, key: str, /, *, history: HistoryReader) -> _ProjectionResult: ...
 
 
 @dataclass
@@ -427,10 +345,7 @@ class GatewayHTTPHandler:
         settings: WebUISettingsServices,
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
-        cron_service: CronService | None = None,
-        local_trigger_store: LocalTriggerStore | None = None,
-        cron_pending_job_ids: Callable[[str], set[str]] | None = None,
-        local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
+        automation_routes: WebUIAutomationRoutes,
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
@@ -469,11 +384,7 @@ class GatewayHTTPHandler:
         self.subagent_manager = subagent_manager
         self.discard_session = discard_session
         self._skill_install_lock = asyncio.Lock()
-        self.cron_service = cron_service
-        self.local_trigger_store = local_trigger_store
-        self.cron_pending_job_ids = cron_pending_job_ids
-        self.channel_runtime_status = channel_runtime_status
-        self.local_trigger_pending_ids = local_trigger_pending_ids
+        self.automation_routes = automation_routes
         self._log = log
         self._runtime_surface = runtime_surface
 
@@ -536,85 +447,56 @@ class GatewayHTTPHandler:
         connection: Any,
         action: str,
         payload: dict[str, Any],
-    ) -> Response:
-        """Run one explicitly allowlisted mutation for an authenticated WebUI socket."""
-        path = self._webui_mutation_path(action, payload)
-        if isinstance(path, Response):
-            return path
-
-        source_request = getattr(connection, "request", None)
-        source_headers = getattr(source_request, "headers", None)
-        if source_headers is None:
-            headers = Headers()
-        else:
-            try:
-                headers = Headers(source_headers.raw_items())
-            except (AttributeError, TypeError):
-                try:
-                    headers = Headers(source_headers)
-                except TypeError:
-                    headers = Headers()
-        request = WsRequest(path, headers)
-        setattr(request, "_nanobot_trusted_proxy_authenticated", True)
-        setattr(request, _WEBUI_MUTATION_REQUEST_ATTR, True)
-        setattr(request, _WEBUI_MUTATION_PAYLOAD_ATTR, dict(payload))
+    ) -> MutationResult:
+        """Run an allowlisted action from the authenticated WebUI command router."""
+        headers = getattr(getattr(connection, "request", None), "headers", None) or Headers()
+        params = MutationParams(payload)
         try:
-            # WebUI mutation tasks already survive a disconnected browser. Keep
-            # their async/threaded writes busy until that operation really ends.
+            # The operation outlives its socket; hold admission until the write ends.
             with self.bus.admission.activity():
-                response = await self._dispatch_resolved(connection, request, path)
+                if action.startswith("settings."):
+                    return await self.settings_routes.dispatch_mutation(connection, headers, action, params)
+                if action == "session.delete":
+                    key = payload.get("key")
+                    if not isinstance(key, str) or not key.strip():
+                        return MutationResult.failure(400, "missing session key")
+                    return await self._handle_session_delete(key, params)
+                if action in _WEBUI_MUTATION_PATHS:
+                    kind, _, operation = action.partition(".")
+                    if kind == "remote":
+                        return await self._mutate_remote_instances(connection, headers, operation, payload)
+                    if kind == "automation":
+                        return await self.automation_routes.mutate(params, operation.replace("_", "-"))
+                    if kind == "recovery":
+                        return await self._mutate_recovery(operation, payload)
+                    if action == "subagent.cancel":
+                        return await self._handle_subagent_cancel(payload)
+                    if action == "sidebar.update":
+                        return await self._handle_webui_sidebar_state_update(payload)
+                    if action == "workspace.favorite":
+                        return await asyncio.to_thread(self._handle_workspace_favorite, payload)
+                    if action == "workspace.resolve_project":
+                        return await asyncio.to_thread(self._handle_workspace_resolve_project, payload)
+                    if action == "skill.install":
+                        return await self._handle_webui_skill_install(connection, headers, params)
+                    if action == "skill.update":
+                        return await self._handle_webui_skill_update(params)
+                    if action == "skill.delete":
+                        return await self._handle_webui_skill_delete(connection, headers, params)
+                    if kind == "star_prompt" and (operation == "claim" or operation == "dismiss"):
+                        return await self._mutate_star_prompt(operation)
         except RuntimeMaintenanceError:
-            return _http_error(503, "Gateway update is being verified. Retry shortly.")
-        if isinstance(response, Response):
-            return response
-        return _http_error(404, "WebUI mutation action not found")
+            return MutationResult.failure(503, "Gateway update is being verified. Retry shortly.")
+        return MutationResult.failure(404, "unknown WebUI mutation action")
 
     def _is_webui_mutation_path(self, path: str) -> bool:
         if path.startswith("/api/remote-instances/"):
             return True
         if self.settings_routes.is_mutation_path(path):
             return True
-        if re.match(r"^/api/sessions/[^/]+/delete$", path):
+        if _SESSION_DELETE_RE.match(path):
             return True
-        if re.match(r"^/api/webui/automations/(enable|disable|delete|run|update|change-chat)$", path):
-            return True
-        if path in {"/api/webui/recovery/continue", "/api/webui/recovery/dismiss"}:
-            return True
-        return path in {
-            "/api/webui/skills/install",
-            "/api/webui/skills/update",
-            "/api/webui/skills/delete",
-            "/api/webui/star-prompt/claim",
-            "/api/webui/star-prompt/dismiss",
-            "/api/webui/sidebar-state/update",
-            "/api/workspaces/resolve-project",
-            "/api/workspaces/favorite",
-            "/api/webui/subagents/cancel",
-        }
-
-    @staticmethod
-    def _webui_mutation_path(
-        action: str,
-        payload: dict[str, Any],
-    ) -> str | Response:
-        path = _WEBUI_MUTATION_PATHS.get(action)
-        if path is not None:
-            return path
-        if action == "session.delete":
-            key = payload.get("key")
-            if not isinstance(key, str) or not key.strip():
-                return _http_error(400, "missing session key")
-            return f"/api/sessions/{quote(key, safe='')}/delete"
-        connect_action = _WEBUI_CHANNEL_CONNECT_ACTIONS.get(action)
-        if connect_action is not None:
-            channel = payload.get("channel")
-            if not isinstance(channel, str) or re.fullmatch(
-                r"[A-Za-z0-9_-]{1,64}",
-                channel,
-            ) is None:
-                return _http_error(400, "invalid channel name")
-            return f"/api/settings/channels/{channel}/connect/{connect_action}"
-        return _http_error(404, "unknown WebUI mutation action")
+        return path in _WEBUI_STATIC_MUTATION_PATHS
 
     async def _dispatch_resolved(
         self,
@@ -622,38 +504,52 @@ class GatewayHTTPHandler:
         request: WsRequest,
         got: str,
     ) -> Any | None:
-        if got == "/api/remote-instances" or got.startswith("/api/remote-instances/"):
-            return await self._dispatch_remote_instances(connection, request, got)
+        if got == "/api/settings/background-style":
+            if not self.check_api_token(request):
+                return _http_error(401, "Unauthorized")
+            from nanobot.webui.background import load_background_style
+
+            directory = self.settings.config.path.parent / "webui"
+            style = await asyncio.to_thread(load_background_style, directory)
+            return _http_json_response(
+                style, extra_headers=_NO_STORE_HEADERS,
+            )
+        if got == "/api/settings/background":
+            if not self.check_api_token(request):
+                return _http_error(401, "Unauthorized")
+            path = self.settings.config.path.parent / "webui" / "background.png"
+            try:
+                body = await asyncio.to_thread(path.read_bytes)
+            except FileNotFoundError:
+                return _http_error(404, "Background not found")
+            return _http_response(body, content_type="image/png", extra_headers=[
+                ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"),
+            ])
+        if got == "/api/remote-instances":
+            return await self._read_remote_instances(connection, request)
         if self.config.token_issue_path:
             issue_expected = _normalize_config_path(self.config.token_issue_path)
             if got == issue_expected:
                 return self._handle_token_issue(connection, request)
 
         if got == "/webui/bootstrap":
-            return self._handle_bootstrap(connection, request)
+            return await self._handle_bootstrap(connection, request)
         if got == "/webui/terminal":
-            return self._handle_bootstrap(connection, request, terminal_probe=True)
+            return await self._handle_bootstrap(connection, request, terminal_probe=True)
 
         response = await self.settings_routes.dispatch(connection, request, got)
         if response is not None:
             return response
 
-        response = await self._dispatch_recovery_route(request, got)
-        if response is not None:
-            return response
-
-        if got == "/api/webui/subagents/cancel":
-            return await self._handle_subagent_cancel(request)
-
         response = await self._dispatch_session_routes(request, got)
         if response is not None:
             return response
 
-        response = self._dispatch_media_routes(request, got)
+        response = await self._dispatch_media_routes(request, got)
         if response is not None:
             return response
 
-        response = await self._dispatch_automation_routes(request, got)
+        response = await self.automation_routes.dispatch_read(request, got, self.check_api_token)
         if response is not None:
             return response
 
@@ -666,7 +562,8 @@ class GatewayHTTPHandler:
             return _http_error(404, "API route not found")
 
         if self.static_dist_path is not None:
-            response = self._serve_static(
+            response = await asyncio.to_thread(
+                self._serve_static,
                 got,
                 accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
             )
@@ -675,37 +572,59 @@ class GatewayHTTPHandler:
 
         return connection.respond(404, "Not Found")
 
-    async def _dispatch_remote_instances(
-        self, connection: Any, request: WsRequest, path: str,
-    ) -> Response:
+    def _allow_remote_instances(self, connection: Any, headers: Any) -> bool:
+        # A public/reverse-proxied WebUI must not gain access to host SSH credentials.
+        if not (_is_loopback_host(self.config.host)
+                and _is_local_browser_request(connection, headers)):
+            return False
+        try:
+            origin = headers.get("Origin", "")
+            return isinstance(origin, str) and (
+                not origin or _is_loopback_host(urlsplit(origin).hostname or "")
+            )
+        except (MultipleValuesError, ValueError):
+            return False
+
+    async def _read_remote_instances(self, connection: Any, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if not self._allow_remote_instances(connection, request.headers):
+            return _http_error(403, "remote_connections_local_only")
+        parsed = urlsplit(request.path)
+        try:
+            if parsed.fragment or len(parsed.query) > 4096:
+                raise ValueError
+            query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True, max_num_fields=20)
+            if query.keys() - {"check"} or any(
+                _UUID_RE.fullmatch(key) is None for key in query.get("check", [])
+            ):
+                raise ValueError
+        except ValueError:
+            return _http_error(400, "invalid_health_check")
+        check = {key.lower() for key in query.get("check", [])}
+        try:
+            result = await self.remote_instances.health(check) if check else self.remote_instances.snapshot()
+        except OSError:
+            return _http_error(500, "local_io_error")
+        return _http_json_response(result, extra_headers=_NO_STORE_HEADERS)
+
+    async def _mutate_remote_instances(
+        self, connection: Any, headers: Any, action: str, payload: dict[str, Any],
+    ) -> MutationResult:
         from pydantic import ValidationError
 
         from nanobot.webui.remote_ssh import RemoteError
 
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        # A public/reverse-proxied WebUI must never gain access to this machine's
-        # SSH agent, private keys or network.
-        if not (_is_loopback_host(self.config.host)
-                and _is_local_browser_request(connection, request.headers)):
-            return _http_error(403, "remote_connections_local_only")
-        origin = request.headers.get("Origin", "")
-        if origin and not _is_loopback_host(urlsplit(origin).hostname or ""):
-            return _http_error(403, "remote_connections_local_only")
+        if not self._allow_remote_instances(connection, headers):
+            return MutationResult.failure(403, "remote_connections_local_only")
         try:
-            if path == "/api/remote-instances":
-                return _http_json_response(await self.remote_instances.health(), extra_headers=_NO_STORE_HEADERS)
-            if not getattr(request, _WEBUI_MUTATION_REQUEST_ATTR, False):
-                return _http_error(405, "WebSocket required")
-            payload = getattr(request, _WEBUI_MUTATION_PAYLOAD_ATTR, {})
-            result = await self.remote_instances.action(path.rsplit("/", 1)[-1], payload)
-            return _http_json_response(result, extra_headers=_NO_STORE_HEADERS)
+            return MutationResult.success(await self.remote_instances.action(action, payload))
         except RemoteError as exc:
-            return _http_error(400, str(exc))
+            return MutationResult.failure(400, str(exc))
         except ValidationError:
-            return _http_error(400, "invalid_profile")
+            return MutationResult.failure(400, "invalid_profile")
         except OSError:
-            return _http_error(500, "local_io_error")
+            return MutationResult.failure(500, "local_io_error")
 
     def _log_slow_http(self, path: str, response: Any | None, started: float) -> None:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -751,7 +670,7 @@ class GatewayHTTPHandler:
         )
 
 
-    def _handle_bootstrap(
+    async def _handle_bootstrap(
         self, connection: Any, request: Any, *, terminal_probe: bool = False,
     ) -> Response:
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
@@ -776,16 +695,18 @@ class GatewayHTTPHandler:
             return _http_json_response(terminal, extra_headers=_NO_STORE_HEADERS)
 
         if is_proxy_authenticated:
+            model_name = await asyncio.to_thread(
+                _resolve_bootstrap_model_name,
+                self.runtime_model_name,
+                self.settings.config.path,
+            )
             payload = {
                 "ws_path": _normalize_config_path(self.config.path),
-                "ws_url": self._bootstrap_ws_url(request),
+                "ws_url": self._bootstrap_ws_url(request.headers),
                 "limits": self.ingress.bootstrap_limits(
                     max_frame_bytes=self.config.max_message_bytes,
                 ),
-                "model_name": _resolve_bootstrap_model_name(
-                    self.runtime_model_name,
-                    self.settings.config.path,
-                ),
+                "model_name": model_name,
                 "runtime_surface": self._runtime_surface,
                 "runtime_capabilities": self._capabilities,
                 "terminal": terminal,
@@ -807,8 +728,13 @@ class GatewayHTTPHandler:
             else None
         )
 
-        ws_url = self._bootstrap_ws_url(request)
+        ws_url = self._bootstrap_ws_url(request.headers)
         expected_path = _normalize_config_path(self.config.path)
+        model_name = await asyncio.to_thread(
+            _resolve_bootstrap_model_name,
+            self.runtime_model_name,
+            self.settings.config.path,
+        )
         payload = {
             "token": token,
             "terminal": terminal,
@@ -818,10 +744,7 @@ class GatewayHTTPHandler:
             "limits": self.ingress.bootstrap_limits(
                 max_frame_bytes=self.config.max_message_bytes,
             ),
-            "model_name": _resolve_bootstrap_model_name(
-                self.runtime_model_name,
-                self.settings.config.path,
-            ),
+            "model_name": model_name,
             "runtime_surface": self._runtime_surface,
             "runtime_capabilities": self._capabilities,
         }
@@ -829,8 +752,7 @@ class GatewayHTTPHandler:
             payload["api_token"] = api_token
         return _http_json_response(payload, extra_headers=_NO_STORE_HEADERS)
 
-    def _bootstrap_ws_url(self, request: Any) -> str:
-        headers = getattr(request, "headers", {}) or {}
+    def _bootstrap_ws_url(self, headers: Any) -> str:
         if self.config.public_ws_url:
             return self.config.public_ws_url
         host = _safe_host_header(_case_insensitive_header(headers, "Host"))
@@ -843,112 +765,111 @@ class GatewayHTTPHandler:
         expected_path = _normalize_config_path(self.config.path)
         return f"{scheme}://{host}{expected_path}"
 
-    def _mcp_oauth_redirect_uri(self, request: WsRequest) -> str:
+    def _mcp_oauth_redirect_uri(self, headers: Any) -> str:
         from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
 
-        public_ws_url = urlsplit(self._bootstrap_ws_url(request))
+        public_ws_url = urlsplit(self._bootstrap_ws_url(headers))
         scheme = "https" if public_ws_url.scheme == "wss" else "http"
         return urlunsplit((scheme, public_ws_url.netloc, MCP_OAUTH_CALLBACK_PATH, "", ""))
 
 
+    def _authorize_websocket_session(self, request: WsRequest, raw_key: str) -> str | Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded_key = _decode_api_key(raw_key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        return decoded_key
+
     async def _dispatch_session_routes(self, request: WsRequest, got: str) -> Response | None:
-        m = re.fullmatch(r"/api/sessions/([^/]+)/webui-thread/prompts", got)
+        m = _SESSION_PROMPTS_RE.fullmatch(got)
         if m:
             return await self._project_session_history(request, m.group(1), self._handle_prompt_index_get)
 
-        m = re.match(r"^/api/sessions/([^/]+)/webui-thread/trace-detail$", got)
+        m = _SESSION_TRACE_DETAIL_RE.match(got)
         if m:
             return await self._project_session_history(request, m.group(1), self._handle_webui_trace_detail_get)
 
-        m = re.match(r"^/api/sessions/([^/]+)/webui-thread$", got)
+        m = _SESSION_WEBUI_THREAD_RE.match(got)
         if m:
             return await self._handle_webui_thread_get_async(request, m.group(1))
 
-        m = re.match(r"^/api/sessions/([^/]+)/context$", got)
+        m = _SESSION_CONTEXT_RE.match(got)
         if m:
             return await self._handle_session_context_get(request, m.group(1))
 
-        m = re.match(r"^/api/sessions/([^/]+)/file-preview$", got)
+        m = _SESSION_FILE_PREVIEW_RE.match(got)
         if m:
-            return self._handle_file_preview(request, m.group(1))
+            return await asyncio.to_thread(self._handle_file_preview, request, m.group(1))
 
-        m = re.match(r"^/api/sessions/([^/]+)/automations$", got)
+        m = _SESSION_AUTOMATIONS_RE.match(got)
         if m:
             return self._handle_session_automations(request, m.group(1))
 
-        m = re.fullmatch(r"/api/sessions/([^/]+)/subagents/([^/]+)/webui-thread", got)
+        m = _SESSION_SUBAGENT_THREAD_RE.fullmatch(got)
         if m:
             return await asyncio.to_thread(self._handle_subagent_thread_get, request, m.group(1), m.group(2))
 
-        m = re.fullmatch(r"/api/sessions/([^/]+)/subagents", got)
+        m = _SESSION_SUBAGENTS_RE.fullmatch(got)
         if m:
             return await self._handle_subagents_get(request, m.group(1))
 
-        m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
-        if m:
-            return await self._handle_session_delete(request, m.group(1))
-
         return None
 
-    async def _dispatch_recovery_route(
-        self,
-        request: WsRequest,
-        path: str,
-    ) -> Response | None:
-        match = re.fullmatch(r"/api/webui/recovery/(continue|dismiss)", path)
-        if match is None:
-            return None
-        if not getattr(request, _WEBUI_MUTATION_REQUEST_ATTR, False):
-            return _http_error(405, "WebUI recovery actions require an authenticated WebSocket")
+    async def _mutate_recovery(self, action: str, payload: dict[str, Any]) -> MutationResult:
         if self.recovery_action is None:
-            return _http_error(503, "WebUI recovery is unavailable")
-        payload = _mutation_payload(request)
-        if payload is None:
-            return _http_error(400, "invalid recovery payload")
+            return MutationResult.failure(503, "WebUI recovery is unavailable")
         try:
-            result = await self.recovery_action(match.group(1), payload)
+            result = await self.recovery_action(action, payload)
         except RecoveryActionError as exc:
-            return _http_error(exc.status, str(exc))
-        return _http_json_response(result)
+            return MutationResult.failure(exc.status, str(exc))
+        return MutationResult.success(result)
 
     async def _handle_subagents_get(self, request: WsRequest, key: str) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        session_key = _decode_api_key(key)
-        if session_key is None:
-            return _http_error(400, "invalid session key")
-        if not is_webui_session_key(session_key):
-            return _http_error(404, "session not found")
+        session_key = self._authorize_websocket_session(request, key)
+        if isinstance(session_key, Response):
+            return session_key
         if self.subagent_manager is None:
             return _http_error(503, "subagent manager unavailable")
+        query = _parse_query(request.path)
+        scope = query.get("scope")
+        if scope is not None and scope != ["window"]:
+            return _http_error(400, "invalid task scope")
+        turns = query.get("turn_id", [])
+        tracked = query.get("track", [])
+        if scope == ["window"] and (len(turns) + len(tracked) > 512
+                or any(not value or len(value) > 512 for value in (*turns, *tracked))):
+            return _http_error(400, "invalid task window")
         try:
-            statuses = await self.subagent_manager.read_statuses_for_session(session_key)
+            if scope == ["window"]:
+                statuses = await self.subagent_manager.read_statuses_for_session(
+                    session_key, turns=turns, tracked=tracked,
+                )
+            else:
+                statuses = await self.subagent_manager.read_statuses_for_session(session_key)
         except (OSError, SubagentSessionError):
             return _http_error(503, "task history unavailable")
         return _http_json_response({
             "tasks": [status.as_dict() for status in statuses.values()],
         }, extra_headers=_NO_STORE_HEADERS)
 
-    async def _handle_subagent_cancel(self, request: WsRequest) -> Response:
-        if not getattr(request, _WEBUI_MUTATION_REQUEST_ATTR, False):
-            return _http_error(405, "Subagent cancellation requires an authenticated WebSocket")
+    async def _handle_subagent_cancel(self, payload: dict[str, Any]) -> MutationResult:
         if self.subagent_manager is None:
-            return _http_error(503, "subagent manager unavailable")
-        payload = _mutation_payload(request)
-        if payload is None:
-            return _http_error(400, "invalid subagent cancellation payload")
+            return MutationResult.failure(503, "subagent manager unavailable")
         session_key, task_id = payload.get("session_key"), payload.get("task_id")
         if not isinstance(session_key, str) or not is_webui_session_key(session_key):
-            return _http_error(400, "invalid session key")
+            return MutationResult.failure(400, "invalid session key")
         if not isinstance(task_id, str) or not task_id.strip():
-            return _http_error(400, "missing task id")
+            return MutationResult.failure(400, "missing task id")
         try:
             status = await self.subagent_manager.cancel(task_id, session_key)
         except SubagentControlError:
-            return _http_error(404, "task unavailable")
+            return MutationResult.failure(404, "task unavailable")
         except (OSError, SubagentSessionError):
-            return _http_error(503, "task history unavailable")
-        return _http_json_response(status.as_dict(), extra_headers=_NO_STORE_HEADERS)
+            return MutationResult.failure(503, "task history unavailable")
+        return MutationResult.success(status.as_dict())
 
     def _handle_subagent_thread_get(self, request: WsRequest, key: str, task_id: str) -> Response:
         if not self.check_api_token(request):
@@ -981,13 +902,9 @@ class GatewayHTTPHandler:
         return _http_json_response(data, extra_headers=_NO_STORE_HEADERS)
 
     async def _handle_session_context_get(self, request: WsRequest, key: str) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        decoded_key = _decode_api_key(key)
-        if decoded_key is None:
-            return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
+        decoded_key = self._authorize_websocket_session(request, key)
+        if isinstance(decoded_key, Response):
+            return decoded_key
         if self.session_manager is None:
             return _http_error(503, "session manager unavailable")
         session = await asyncio.to_thread(
@@ -1038,7 +955,7 @@ class GatewayHTTPHandler:
         stored_sessions: list[dict[str, Any]],
     ) -> dict[str, Any]:
         assert self.session_manager is not None
-        from nanobot.session.webui_turns import websocket_turn_wall_started_at
+        from nanobot.session.webui_turns import latest_live_websocket_turn
 
         sessions = list_webui_sessions(self.session_manager, stored_sessions)
         cleaned: list[dict[str, Any]] = []
@@ -1058,9 +975,9 @@ class GatewayHTTPHandler:
             if row.get("recovery_state") is None:
                 row.pop("recovery_state", None)
             chat_id = key.split(":", 1)[1]
-            started_at = websocket_turn_wall_started_at(chat_id)
-            if started_at is not None:
-                row["run_started_at"] = started_at
+            turn = latest_live_websocket_turn(chat_id)
+            if turn is not None:
+                row["run_started_at"] = turn[0]
             if default_scope is None:
                 default_scope = self.workspaces.default_scope()
             scope_present, raw_scope = indexed_workspace_scope(s)
@@ -1101,29 +1018,18 @@ class GatewayHTTPHandler:
     async def _project_session_history(
         self, request: WsRequest, key: str, project: _HistoryProjection[_ProjectionResult],
     ) -> _ProjectionResult | Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        decoded = _decode_api_key(key)
-        if decoded is None:
-            return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded):
-            return _http_error(404, "session not found")
+        decoded = self._authorize_websocket_session(request, key)
+        if isinstance(decoded, Response):
+            return decoded
         if self.session_manager is None:
             return _http_error(503, "session manager unavailable")
         return await self.session_manager.state.project_history(
-            decoded, lambda history: project(request, key, history=history),
+            decoded, lambda history: project(request, decoded, history=history),
         )
 
-    def _handle_prompt_index_get(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response:
+    def _handle_prompt_index_get(self, request: WsRequest, decoded_key: str, *, history: HistoryReader) -> Response:
         from nanobot.webui.transcript import prompt_index_response, prompt_index_revision
 
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        decoded_key = _decode_api_key(key)
-        if decoded_key is None:
-            return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
         revision = prompt_index_revision(decoded_key, self._read_session_version(decoded_key), history=history)
         etag = _quoted_etag(revision) if revision else None
         if etag and _etag_matches(_case_insensitive_header(request.headers, "If-None-Match"), etag):
@@ -1226,18 +1132,11 @@ class GatewayHTTPHandler:
     def _handle_webui_thread_get(
         self,
         request: WsRequest,
-        key: str,
+        decoded_key: str,
         *,
         history: HistoryReader,
         diagnostics: _WebUIThreadDiagnostics | None = None,
     ) -> Response | _PreparedThreadResponse:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        decoded_key = _decode_api_key(key)
-        if decoded_key is None:
-            return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
         if diagnostics is not None:
             diagnostics.session_hash = hashlib.sha256(decoded_key.encode("utf-8")).hexdigest()[:12]
         scope = self.workspaces.scope_for_session_key(decoded_key)
@@ -1332,14 +1231,7 @@ class GatewayHTTPHandler:
             data=data, headers=response_headers,
         )
 
-    def _handle_webui_trace_detail_get(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        decoded_key = _decode_api_key(key)
-        if decoded_key is None:
-            return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
+    def _handle_webui_trace_detail_get(self, request: WsRequest, decoded_key: str, *, history: HistoryReader) -> Response:
         detail_ref = _query_first(_parse_query(request.path), "ref")
         if not detail_ref:
             return _http_error(400, "missing trace detail ref")
@@ -1353,13 +1245,9 @@ class GatewayHTTPHandler:
         )
 
     def _handle_file_preview(self, request: WsRequest, key: str) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        decoded_key = _decode_api_key(key)
-        if decoded_key is None:
-            return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
+        decoded_key = self._authorize_websocket_session(request, key)
+        if isinstance(decoded_key, Response):
+            return decoded_key
         query = _parse_query(request.path)
         path = _query_first(query, "path")
         is_probe = _query_first(query, "probe") == "1"
@@ -1379,43 +1267,23 @@ class GatewayHTTPHandler:
         return _http_json_response(payload, extra_headers=_NO_STORE_HEADERS)
 
     def _handle_session_automations(self, request: WsRequest, key: str) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        decoded_key = _decode_api_key(key)
-        if decoded_key is None:
-            return _http_error(400, "invalid session key")
-        if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
-        pending_job_ids = self._pending_automation_ids_for_session(decoded_key)
-        return _http_json_response(
-            session_automations_payload(
-                self.cron_service,
-                decoded_key,
-                local_trigger_store=self.local_trigger_store,
-                session_manager=self.session_manager,
-                pending_job_ids=pending_job_ids,
-            )
-        )
+        decoded_key = self._authorize_websocket_session(request, key)
+        if isinstance(decoded_key, Response):
+            return decoded_key
+        return _http_json_response(self.automation_routes.session_payload(decoded_key))
 
-    async def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
+    async def _handle_session_delete(self, key: str, params: MutationParams) -> MutationResult:
         if self.session_manager is None:
-            return _http_error(503, "session manager unavailable")
-        decoded_key = _decode_api_key(key)
-        if decoded_key is None:
-            return _http_error(400, "invalid session key")
+            return MutationResult.failure(503, "session manager unavailable")
+        decoded_key = key
+        if _API_KEY_RE.fullmatch(decoded_key) is None:
+            return MutationResult.failure(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
-            return _http_error(404, "session not found")
-        query = _request_query(request)
-        delete_automations = (_query_first(query, "delete_automations") or "").lower()
-        automation_jobs = session_automation_jobs(
-            self.cron_service,
-            decoded_key,
-            local_trigger_store=self.local_trigger_store,
-        )
+            return MutationResult.failure(404, "session not found")
+        delete_automations = (_mutation_text(params, "delete_automations") or "").lower()
+        automation_jobs = self.automation_routes.session_jobs(decoded_key)
         if automation_jobs and delete_automations not in {"1", "true", "yes"}:
-            return _http_json_response(
+            return MutationResult.success(
                 {
                     "deleted": False,
                     "blocked_by_automations": True,
@@ -1423,288 +1291,20 @@ class GatewayHTTPHandler:
                 }
             )
         await ensure_webui_archives_imported(self.session_manager.state)
-        if automation_jobs:
-            for job in automation_jobs:
-                if isinstance(job, LocalTrigger):
-                    if self.local_trigger_store is not None:
-                        await asyncio.to_thread(self.local_trigger_store.delete, job.id)
-                elif self.cron_service is not None:
-                    self.cron_service.remove_job(job.id)
+        await self.automation_routes.remove_session_jobs(automation_jobs)
         draft_deleted = self.workspaces.discard_draft_scope(decoded_key)
         if self.discard_session is not None:
             await self.discard_session(decoded_key)
         elif self.subagent_manager is not None:
             await self.subagent_manager.cancel_by_session(decoded_key)
         session_deleted = await self.session_manager.state.delete(decoded_key)
-        return _http_json_response({"deleted": bool(draft_deleted or session_deleted)})
+        return MutationResult.success({"deleted": bool(draft_deleted or session_deleted)})
 
 
-    async def _dispatch_automation_routes(
-        self,
-        request: WsRequest,
-        got: str,
-    ) -> Response | None:
-        if got == "/api/webui/automations":
-            return self._handle_webui_automations(request)
-        if got == "/api/webui/automations/result":
-            return await self._handle_webui_automation_result(request)
-        if got == "/api/webui/automations/chats":
-            return await self._handle_webui_automation_chats(request)
-        m = re.match(r"^/api/webui/automations/(enable|disable|delete|run|update|change-chat)$", got)
+    async def _dispatch_media_routes(self, request: WsRequest, got: str) -> Response | None:
+        m = _MEDIA_ROUTE_RE.match(got)
         if m:
-            return await self._handle_webui_automation_action(request, m.group(1))
-        return None
-
-    def _pending_cron_job_ids_for_all(self) -> set[str]:
-        if self.cron_service is None or self.cron_pending_job_ids is None:
-            return set()
-        pending: set[str] = set()
-        for job in self.cron_service.list_jobs(include_disabled=True):
-            session_key = job.payload.session_key
-            if not session_key and job.payload.origin_channel and job.payload.origin_chat_id:
-                session_key = f"{job.payload.origin_channel}:{job.payload.origin_chat_id}"
-            if session_key:
-                pending.update(self.cron_pending_job_ids(session_key))
-        return pending
-
-    def _pending_local_trigger_ids_for_all(self) -> set[str]:
-        if self.local_trigger_store is None or self.local_trigger_pending_ids is None:
-            return set()
-        pending: set[str] = set()
-        for trigger in self.local_trigger_store.list_triggers(include_disabled=True):
-            session_key = trigger.session_key
-            if not session_key and trigger.channel and trigger.chat_id:
-                session_key = f"{trigger.channel}:{trigger.chat_id}"
-            if session_key:
-                pending.update(self.local_trigger_pending_ids(session_key))
-        return pending
-
-    def _pending_automation_ids_for_session(self, session_key: str) -> set[str]:
-        pending: set[str] = set()
-        if self.cron_pending_job_ids is not None:
-            pending.update(self.cron_pending_job_ids(session_key))
-        if self.local_trigger_pending_ids is not None:
-            pending.update(self.local_trigger_pending_ids(session_key))
-        return pending
-
-    def _handle_webui_automations(self, request: WsRequest) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        pending_job_ids = self._pending_cron_job_ids_for_all()
-        pending_job_ids.update(self._pending_local_trigger_ids_for_all())
-        return _http_json_response(
-            all_automations_payload(
-                self.cron_service,
-                local_trigger_store=self.local_trigger_store,
-                session_manager=self.session_manager,
-                pending_job_ids=pending_job_ids,
-            )
-        )
-
-    async def _automation_chats(self, job: CronJob) -> list[AutomationChat]:
-        if self.session_manager is None:
-            return []
-        return await automation_chats(
-            job, self.session_manager, self.workspaces,
-            self.channel_runtime_status() if self.channel_runtime_status else {},
-        )
-
-    async def _handle_webui_automation_chats(self, request: WsRequest) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        job_id = _query_first(_request_query(request), "id") or ""
-        job = self.cron_service.get_job(job_id) if self.cron_service else None
-        if job is None or not is_bound_cron_job(job):
-            return _http_error(404, "automation has no movable chat")
-        chats = await self._automation_chats(job)
-        current = next((chat for chat in chats
-                        if chat.binding.session_key == job.payload.session_key), None)
-        return _http_json_response({
-            "revision": binding_revision(job),
-            "current": current.public_payload() if current else None,
-            "chats": [chat.public_payload() for chat in chats],
-        })
-
-    async def _handle_webui_automation_result(self, request: WsRequest) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        query = _request_query(request)
-        job_id = (_query_first(query, "id") or "").strip()
-        try:
-            run_at_ms = int(_query_first(query, "run_at_ms") or "")
-        except ValueError:
-            return _http_error(400, "invalid run timestamp")
-        if not job_id or run_at_ms < 0:
-            return _http_error(400, "invalid automation run")
-        kind = _query_first(query, "kind") or "cron"
-        try:
-            if kind == "local_trigger":
-                trigger = self.local_trigger_store.get(job_id) if self.local_trigger_store else None
-                if trigger is None or self.local_trigger_store is None:
-                    return _http_error(404, "automation not found")
-                deliveries = [item for item in trigger.run_history if item.run_at_ms == run_at_ms]
-                if len(deliveries) != 1:
-                    return _http_error(404, "run not found")
-                response = await asyncio.to_thread(
-                    trigger_run_response, self.local_trigger_store.runs_dir, trigger, deliveries[0],
-                )
-            elif kind == "cron":
-                job = self.cron_service.get_job(job_id) if self.cron_service else None
-                if job is None or self.cron_service is None:
-                    return _http_error(404, "automation not found")
-                if job.payload.kind == "system_event":
-                    return _http_error(403, "system automation is protected")
-                runs = [item for item in job.state.run_history if item.run_at_ms == run_at_ms]
-                if len(runs) != 1:
-                    return _http_error(404, "run not found")
-                response = await asyncio.to_thread(
-                    cron_run_response, self.cron_service.store_path.parent / "runs", job, runs[0],
-                )
-            else:
-                return _http_error(400, "invalid automation kind")
-        except OSError:
-            self._log.exception("Could not read automation run result")
-            return _http_error(500, "Could not read run result")
-        return _http_json_response({"response": response})
-
-    async def _handle_webui_automation_action(
-        self,
-        request: WsRequest,
-        action: str,
-    ) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        if self.cron_service is None and self.local_trigger_store is None:
-            return _http_error(503, "automation service unavailable")
-
-        query = _request_query(request)
-        job_id = (_query_first(query, "id") or _query_first(query, "job_id") or "").strip()
-        if not job_id:
-            return _http_error(400, "missing automation id")
-        trigger = self.local_trigger_store.get(job_id) if self.local_trigger_store else None
-        if trigger is not None:
-            return self._handle_local_trigger_action(request, action, trigger)
-
-        if self.cron_service is None:
-            return _http_error(404, "automation not found")
-        job = self.cron_service.get_job(job_id)
-        if job is None:
-            return _http_error(404, "automation not found")
-        if job.payload.kind == "system_event":
-            return _http_error(403, "system automation is protected")
-        if action in {"enable", "run"} and not is_bound_cron_job(job):
-            return _http_error(409, "automation has no linked chat")
-
-        if action == "enable":
-            if self.cron_service.enable_job(job_id, enabled=True) is None:
-                return _http_error(404, "automation not found")
-        elif action == "disable":
-            if self.cron_service.enable_job(job_id, enabled=False) is None:
-                return _http_error(404, "automation not found")
-        elif action == "delete":
-            result = self.cron_service.remove_job(job_id)
-            if result == "not_found":
-                return _http_error(404, "automation not found")
-            if result == "protected":
-                return _http_error(403, "system automation is protected")
-        elif action == "run":
-            if not job.enabled:
-                return _http_error(409, "automation is disabled")
-            task = asyncio.create_task(self.cron_service.run_job(job_id, force=False))
-            task.add_done_callback(self._log_automation_run_result)
-        elif action == "change-chat":
-            values = _automation_values_from_request(request)
-            if (not isinstance(values, dict)
-                    or set(values) != {"target_id", "revision", "message"}
-                    or not all(isinstance(v, str) for v in values.values())):
-                return _http_error(400, "invalid automation chat payload")
-            if job.id in self._pending_cron_job_ids_for_all():
-                return _http_error(409, "automation_chat_busy")
-            target = next((chat for chat in await self._automation_chats(job)
-                           if chat.id == values["target_id"]), None)
-            if target is None or not target.available:
-                return _http_error(409, "automation_chat_unavailable")
-            if target.binding.session_key == job.payload.session_key:
-                return _http_error(400, "choose a different chat")
-            try:
-                self.cron_service.change_binding(
-                    job_id, revision=values["revision"], binding=target.binding,
-                    message=values["message"],
-                )
-            except CronBindingError as exc:
-                return _http_error(409, f"automation_chat_{exc.reason}")
-            except OSError:
-                logger.exception("WebUI automation chat save failed")
-                return _http_error(500, "could not save the chat; try again")
-        elif action == "update":
-            values = _automation_values_from_request(request)
-            if values is None:
-                return _http_error(400, "invalid automation update payload")
-            parsed = _parse_automation_update(values, current_job=job)
-            if isinstance(parsed, str):
-                return _http_error(400, parsed)
-            try:
-                result = self.cron_service.update_job(job_id, **parsed)
-            except ValueError as exc:
-                return _http_error(400, str(exc))
-            if result == "not_found":
-                return _http_error(404, "automation not found")
-            if result == "protected":
-                return _http_error(403, "system automation is protected")
-        else:
-            return _http_error(404, "unknown automation action")
-
-        return self._handle_webui_automations(request)
-
-    def _handle_local_trigger_action(
-        self,
-        request: WsRequest,
-        action: str,
-        trigger: LocalTrigger,
-    ) -> Response:
-        if self.local_trigger_store is None:
-            return _http_error(503, "trigger service unavailable")
-        if action == "enable":
-            if self.local_trigger_store.enable(trigger.id, enabled=True) is None:
-                return _http_error(404, "automation not found")
-        elif action == "disable":
-            if self.local_trigger_store.enable(trigger.id, enabled=False) is None:
-                return _http_error(404, "automation not found")
-        elif action == "delete":
-            if not self.local_trigger_store.delete(trigger.id):
-                return _http_error(404, "automation not found")
-        elif action == "run":
-            return _http_error(409, "local trigger requires a CLI message")
-        elif action == "update":
-            values = _automation_values_from_request(request)
-            if values is None:
-                return _http_error(400, "invalid automation update payload")
-            parsed = _parse_local_trigger_update(values)
-            if isinstance(parsed, str):
-                return _http_error(400, parsed)
-            if parsed:
-                if self.local_trigger_store.update(trigger.id, **parsed) is None:
-                    return _http_error(404, "automation not found")
-        else:
-            return _http_error(404, "unknown automation action")
-
-        return self._handle_webui_automations(request)
-
-    @staticmethod
-    def _log_automation_run_result(task: asyncio.Task[bool]) -> None:
-        try:
-            ran = task.result()
-        except Exception:
-            logger.exception("WebUI automation run-now task failed")
-            return
-        if not ran:
-            logger.warning("WebUI automation run-now task did not execute")
-
-
-    def _dispatch_media_routes(self, request: WsRequest, got: str) -> Response | None:
-        m = re.match(r"^/api/media/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)$", got)
-        if m:
-            return self._handle_media_fetch(m.group(1), m.group(2), request)
+            return await asyncio.to_thread(self._handle_media_fetch, m.group(1), m.group(2), request)
         return None
 
     def _handle_media_fetch(
@@ -1725,44 +1325,23 @@ class GatewayHTTPHandler:
             return await self._handle_sessions_list(request)
         if got == "/api/commands":
             return self._handle_commands(request)
-        if got == "/api/workspaces/favorite":
-            return self._handle_workspace_favorite(connection, request)
-        if got == "/api/workspaces/resolve-project":
-            return await self._handle_workspace_resolve_project(connection, request)
         if got == "/api/workspaces/directories":
             return await self._handle_workspace_directories(connection, request)
         if got == "/api/workspaces":
-            return self._handle_workspaces(connection, request)
+            return await asyncio.to_thread(self._handle_workspaces, connection, request)
         if got == "/api/webui/skills/search":
             return await self._handle_webui_skills_search(request)
         if got == "/api/webui/skills/trending":
             return await self._handle_webui_skills_trending(request)
         if got == "/api/webui/skills/trends":
             return await self._handle_webui_skill_trends(request)
-        if got == "/api/webui/skills/install":
-            return await self._handle_webui_skill_install(connection, request)
-        if got == "/api/webui/skills/update":
-            return await self._handle_webui_skill_update(request)
-        if got == "/api/webui/skills/delete":
-            return await self._handle_webui_skill_delete(connection, request)
         if got == "/api/webui/skills":
             return await self._handle_webui_skills(request)
-        m = re.match(r"^/api/webui/skills/([^/]+)$", got)
+        m = _SKILL_DETAIL_RE.match(got)
         if m:
             return await self._handle_webui_skill_detail(request, m.group(1))
-        if got in {"/api/webui/star-prompt/claim", "/api/webui/star-prompt/dismiss"}:
-            if not self.check_api_token(request):
-                return _http_error(401, "Unauthorized")
-            try:
-                show = update_star_prompt("claim" if got.endswith("/claim") else "dismiss")
-            except (OSError, ValueError, TimeoutError):
-                self._log.exception("failed to persist star invitation state")
-                return _http_error(500, "failed to save reminder preference")
-            return _http_json_response({"show": show})
         if got == "/api/webui/sidebar-state":
             return await self._handle_webui_sidebar_state(request)
-        if got == "/api/webui/sidebar-state/update":
-            return await self._handle_webui_sidebar_state_update(request)
         return None
 
     def _handle_commands(self, request: WsRequest) -> Response:
@@ -1779,27 +1358,21 @@ class GatewayHTTPHandler:
             )
         )
 
-    def _handle_workspace_favorite(self, connection: Any, request: WsRequest) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        payload = _mutation_payload(request) or {}
+    def _handle_workspace_favorite(self, payload: dict[str, Any]) -> MutationResult:
         try:
             favorites = self.workspaces.set_favorite_project(payload.get("path"), payload.get("pinned"))
         except WorkspaceScopeError as exc:
-            return _http_error(exc.status, exc.message)
+            return MutationResult.failure(exc.status, exc.message)
         except OSError:
-            return _http_error(500, "could not save favorite folders")
-        return _http_json_response({"favorite_projects": favorites})
+            return MutationResult.failure(500, "could not save favorite folders")
+        return MutationResult.success({"favorite_projects": favorites})
 
-    async def _handle_workspace_resolve_project(self, connection: Any, request: WsRequest) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        payload = _mutation_payload(request) or {}
+    def _handle_workspace_resolve_project(self, payload: dict[str, Any]) -> MutationResult:
         try:
             project = self.workspaces.resolve_project(payload.get("path"))
         except WorkspaceScopeError as exc:
-            return _http_error(exc.status, exc.message)
-        return _http_json_response(project)
+            return MutationResult.failure(exc.status, exc.message)
+        return MutationResult.success(project)
 
     async def _handle_workspace_directories(self, connection: Any, request: WsRequest) -> Response:
         if not self.check_api_token(request):
@@ -1879,20 +1452,18 @@ class GatewayHTTPHandler:
     async def _handle_webui_skill_install(
         self,
         connection: Any,
-        request: WsRequest,
-    ) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        if not self._allow_webui_package_install(connection, request):
-            return _http_error(403, "remote skill installation is disabled")
+        headers: Any,
+        params: MutationParams,
+    ) -> MutationResult:
+        if not await asyncio.to_thread(self._allow_webui_package_install, connection, headers):
+            return MutationResult.failure(403, "remote skill installation is disabled")
         if self._skill_install_lock.locked():
-            return _http_error(409, "another skill installation is already in progress")
+            return MutationResult.failure(409, "another skill installation is already in progress")
 
-        query = _request_query(request)
-        provider = _query_first(query, "provider") or "skills_sh"
-        source = _query_first(query, "source") or ""
-        skill_id = _query_first(query, "skill") or ""
-        version = _query_first(query, "version") or ""
+        provider = _mutation_text(params, "provider") or "skills_sh"
+        source = _mutation_text(params, "source") or ""
+        skill_id = _mutation_text(params, "skill") or ""
+        version = _mutation_text(params, "version") or ""
         async with self._skill_install_lock:
             try:
                 action = await install_marketplace_skill(
@@ -1903,17 +1474,17 @@ class GatewayHTTPHandler:
                     version=version,
                 )
             except SkillsMarketplaceError as exc:
-                return _http_error(exc.status, exc.message)
+                return MutationResult.failure(exc.status, exc.message)
             except Exception:
                 self._log.exception("skill installation failed")
-                return _http_error(500, "skill installation failed")
-        return _http_json_response({
+                return MutationResult.failure(500, "skill installation failed")
+        return MutationResult.success({
             **(await self._load_webui_skills()),
             "last_action": action,
         })
 
-    def _allow_webui_package_install(self, connection: Any, request: WsRequest) -> bool:
-        if _is_local_browser_request(connection, request.headers):
+    def _allow_webui_package_install(self, connection: Any, headers: Any) -> bool:
+        if _is_local_browser_request(connection, headers):
             return True
         try:
             return bool(
@@ -1923,28 +1494,26 @@ class GatewayHTTPHandler:
             self._log.exception("failed to load remote package install policy")
             return False
 
-    async def _handle_webui_skill_update(self, request: WsRequest) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        query = _request_query(request)
-        name = _query_first(query, "name") or ""
-        raw_enabled = (_query_first(query, "enabled") or "").lower()
+    async def _handle_webui_skill_update(self, params: MutationParams) -> MutationResult:
+        name = _mutation_text(params, "name") or ""
+        raw_enabled = (_mutation_text(params, "enabled") or "").lower()
         if raw_enabled not in {"true", "false"}:
-            return _http_error(400, "enabled must be true or false")
+            return MutationResult.failure(400, "enabled must be true or false")
         try:
-            action = self.settings.config.run_serialized(
+            action = await asyncio.to_thread(
+                self.settings.config.run_serialized,
                 lambda config_path: set_webui_skill_enabled(
                     self.skills_workspace_path,
                     name,
                     enabled=raw_enabled == "true",
                     disabled_skills=self.disabled_skills,
                     config_path=config_path,
-                )
+                ),
             )
         except SkillManagementError as exc:
-            return _http_error(exc.status, exc.message)
+            return MutationResult.failure(exc.status, exc.message)
         self._apply_skill_state()
-        return _http_json_response({
+        return MutationResult.success({
             **(await self._load_webui_skills()),
             "last_action": action,
         })
@@ -1952,26 +1521,26 @@ class GatewayHTTPHandler:
     async def _handle_webui_skill_delete(
         self,
         connection: Any,
-        request: WsRequest,
-    ) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        if not _is_local_browser_request(connection, request.headers):
-            return _http_error(403, "remote skill deletion is disabled")
-        name = _query_first(_request_query(request), "name") or ""
+        headers: Any,
+        params: MutationParams,
+    ) -> MutationResult:
+        if not _is_local_browser_request(connection, headers):
+            return MutationResult.failure(403, "remote skill deletion is disabled")
+        name = _mutation_text(params, "name") or ""
         try:
-            action = self.settings.config.run_serialized(
+            action = await asyncio.to_thread(
+                self.settings.config.run_serialized,
                 lambda config_path: delete_webui_skill(
                     self.skills_workspace_path,
                     name,
                     disabled_skills=self.disabled_skills,
                     config_path=config_path,
-                )
+                ),
             )
         except SkillManagementError as exc:
-            return _http_error(exc.status, exc.message)
+            return MutationResult.failure(exc.status, exc.message)
         self._apply_skill_state()
-        return _http_json_response({
+        return MutationResult.success({
             **(await self._load_webui_skills()),
             "last_action": action,
         })
@@ -2008,24 +1577,29 @@ class GatewayHTTPHandler:
             return _http_error(500, "failed to read sidebar state")
         return _http_json_response(state)
 
-    async def _handle_webui_sidebar_state_update(self, request: WsRequest) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        payload = _mutation_payload(request)
-        state_value = payload.get("state") if payload is not None else None
+    async def _handle_webui_sidebar_state_update(self, payload: dict[str, Any]) -> MutationResult:
+        state_value = payload.get("state")
         if state_value is None:
-            return _http_error(400, "missing state")
+            return MutationResult.failure(400, "missing state")
         if not isinstance(state_value, dict):
-            return _http_error(400, "state must be an object")
+            return MutationResult.failure(400, "state must be an object")
         try:
             state = await self.sidebar_state.write(cast(dict[str, Any], state_value))
         except ValueError as e:
-            return _http_error(400, str(e))
+            return MutationResult.failure(400, str(e))
         except OSError:
             self._log.exception("failed to write webui sidebar state")
-            return _http_error(500, "failed to write sidebar state")
-        return _http_json_response(state)
+            return MutationResult.failure(500, "failed to write sidebar state")
+        return MutationResult.success(state)
 
+
+    async def _mutate_star_prompt(self, action: Literal["claim", "dismiss"]) -> MutationResult:
+        try:
+            show = await asyncio.to_thread(update_star_prompt, action)
+        except (OSError, ValueError, TimeoutError):
+            self._log.exception("failed to persist star invitation state")
+            return MutationResult.failure(500, "failed to save reminder preference")
+        return MutationResult.success({"show": show})
 
     def _serve_static(
         self,
@@ -2083,142 +1657,6 @@ class GatewayHTTPHandler:
             content_type=ctype,
             extra_headers=[("Cache-Control", cache), *extra_headers],
         )
-
-
-def _automation_values_from_request(request: WsRequest) -> dict[str, Any] | None:
-    payload = _mutation_payload(request)
-    if payload is None or "values" not in payload:
-        return {}
-    values = payload.get("values")
-    return cast(dict[str, Any], values) if isinstance(values, dict) else None
-
-
-def _parse_automation_update(
-    values: dict[str, Any],
-    *,
-    current_job: CronJob | None = None,
-) -> dict[str, Any] | str:
-    update: dict[str, Any] = {}
-    if "name" in values:
-        raw_name = values.get("name")
-        if not isinstance(raw_name, str):
-            return "name must be a string"
-        name = raw_name.strip()
-        if not name:
-            return "name cannot be empty"
-        update["name"] = name
-    if "message" in values:
-        raw_message = values.get("message")
-        if not isinstance(raw_message, str):
-            return "message must be a string"
-        message = raw_message.strip()
-        if not message:
-            return "message cannot be empty"
-        update["message"] = message
-    if "schedule" in values:
-        raw_schedule = values.get("schedule")
-        if not isinstance(raw_schedule, dict):
-            return "schedule must be an object"
-        parsed_schedule = _parse_automation_schedule(cast(dict[str, Any], raw_schedule))
-        if isinstance(parsed_schedule, str):
-            return parsed_schedule
-        if current_job is not None and _schedule_matches_job(parsed_schedule, current_job):
-            return update
-        schedule_error = _validate_automation_schedule(parsed_schedule)
-        if schedule_error:
-            return schedule_error
-        update["schedule"] = parsed_schedule
-        update["delete_after_run"] = parsed_schedule.kind == "at"
-    return update
-
-
-def _parse_local_trigger_update(values: dict[str, Any]) -> dict[str, Any] | str:
-    update: dict[str, Any] = {}
-    if "name" in values:
-        raw_name = values.get("name")
-        if not isinstance(raw_name, str):
-            return "name must be a string"
-        name = raw_name.strip()
-        if not name:
-            return "name cannot be empty"
-        update["name"] = name
-    forbidden = [key for key in ("message", "schedule") if key in values]
-    if forbidden:
-        return "local trigger updates only support name"
-    return update
-
-
-def _parse_automation_schedule(values: dict[str, Any]) -> CronSchedule | str:
-    raw_kind = values.get("kind")
-    if not isinstance(raw_kind, str):
-        return "schedule kind must be a string"
-    kind = raw_kind.strip()
-    if kind == "every":
-        every_ms = _positive_int(values.get("every_ms"))
-        if every_ms is None:
-            return "every schedule requires positive every_ms"
-        return CronSchedule(kind="every", every_ms=every_ms)
-    if kind == "cron":
-        raw_expr = values.get("expr")
-        if not isinstance(raw_expr, str):
-            return "cron schedule requires expr"
-        expr = raw_expr.strip()
-        if not expr:
-            return "cron schedule requires expr"
-        raw_tz = values.get("tz")
-        if raw_tz is not None and not isinstance(raw_tz, str):
-            return "cron schedule timezone must be a string"
-        tz = raw_tz.strip() if isinstance(raw_tz, str) else ""
-        return CronSchedule(kind="cron", expr=expr, tz=tz or None)
-    if kind == "at":
-        at_ms = _positive_int(values.get("at_ms"))
-        if at_ms is None:
-            return "one-time schedule requires positive at_ms"
-        return CronSchedule(kind="at", at_ms=at_ms)
-    return "unknown schedule kind"
-
-
-def _schedule_matches_job(schedule: CronSchedule, job: CronJob) -> bool:
-    current = job.schedule
-    if schedule.kind != current.kind:
-        return False
-    if schedule.kind == "at":
-        return schedule.at_ms == current.at_ms
-    if schedule.kind == "every":
-        return schedule.every_ms == current.every_ms
-    if schedule.kind == "cron":
-        return (schedule.expr or "") == (current.expr or "") and (
-            schedule.tz or None
-        ) == (current.tz or None)
-    return False
-
-
-def _validate_automation_schedule(schedule: CronSchedule) -> str | None:
-    if schedule.kind == "at":
-        if not schedule.at_ms or schedule.at_ms <= int(time.time() * 1000):
-            return "one-time schedule must be in the future"
-        return None
-    if schedule.kind != "cron":
-        return None
-
-    try:
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-
-        from croniter import croniter
-
-        tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
-        base = datetime.now(tz=tz)
-        croniter(cast(str, schedule.expr), base).get_next(datetime)
-    except Exception:
-        return "cron schedule is invalid"
-    return None
-
-
-def _positive_int(value: Any) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        return None
-    return value if value > 0 else None
 
 
 def _is_websocket_channel_session_key(key: str) -> bool:

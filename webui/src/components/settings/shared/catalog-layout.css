@@ -1,0 +1,62 @@
+/* Shared with the document's first paint; keep catalog geometry independent of loaded data. */
+.apps-catalog-layout, .catalog-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-inline-size: 0;
+}
+.apps-catalog-layout > .catalog-section,
+.apps-catalog-layout > .catalog-section > .catalog-toolbar { display: contents; }
+.apps-catalog-layout { reading-flow: grid-rows; }
+.apps-catalog-layout > .catalog-tabs { justify-self: start; }
+.apps-catalog-layout > .catalog-search { order: 1; }
+.apps-catalog-layout > .catalog-section > :not(.catalog-toolbar),
+.apps-catalog-layout > .catalog-body {
+  grid-column: 1 / -1;
+  order: 2;
+  min-inline-size: 0;
+  margin-block-start: 8px;
+}
+.catalog-search { position: relative; grid-column: 1 / -1; min-inline-size: 0; }
+.catalog-controls, .catalog-choices, .catalog-toggle {
+  display: flex;
+  align-items: center;
+  min-block-size: 36px;
+  min-inline-size: 0;
+}
+.catalog-controls { justify-self: end; justify-content: flex-end; gap: 12px; inline-size: 100%; }
+.catalog-choices { flex-wrap: wrap; gap: 2px; }
+.catalog-toggle { flex: none; gap: 8px; padding-inline-end: 4px; }
+@container (min-width: 24rem) {
+  .catalog-controls:not(.startup-controls) .catalog-choices + .catalog-choices { position: relative; }
+  .catalog-controls:not(.startup-controls) .catalog-choices + .catalog-choices::before {
+    content: "";
+    position: absolute;
+    inset-inline-start: -6px;
+    inset-block-start: 10px;
+    block-size: 16px;
+    border-inline-start: 1px solid hsl(var(--border));
+    pointer-events: none;
+  }
+}
+@container (width < 40rem) {
+  .apps-catalog-layout, .catalog-toolbar { gap: 8px; }
+  .apps-catalog-layout > .catalog-tabs { inline-size: 100%; }
+  .catalog-tabs > button { flex: 1 1 auto; }
+  .catalog-controls > :last-child { margin-inline-start: auto; }
+}
+@container (width < 24rem) {
+  .catalog-tabs > button {
+    padding-inline: 0.25rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+  }
+  .catalog-controls { flex-direction: column; align-items: start; gap: 4px; }
+  .catalog-controls > :last-child { align-self: end; }
+}
+@container (min-width: 40rem) {
+  .apps-catalog-layout { grid-template-columns: minmax(0, 1fr) 24.5rem; }
+  .apps-catalog-layout .catalog-controls { grid-column: 2; }
+}

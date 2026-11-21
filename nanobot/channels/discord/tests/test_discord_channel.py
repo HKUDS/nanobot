@@ -1180,7 +1180,7 @@ async def test_slash_new_is_blocked_for_disallowed_user() -> None:
     assert handled == []
 
 
-@pytest.mark.parametrize("slash_name", ["stop", "restart", "status", "history", "model"])
+@pytest.mark.parametrize("slash_name", ["stop", "cancel_goal", "restart", "status", "model"])
 @pytest.mark.asyncio
 async def test_slash_commands_forward_via_handle_message(slash_name: str) -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
@@ -1850,6 +1850,6 @@ async def test_reset_discards_in_flight_compaction_notices() -> None:
     owner, client = _client_with_channel(target)
     await client.send_outbound(_compaction_message("Compressing context…", "started"))
 
-    await owner._reset_runtime_state(close_client=False)
+    await owner._reset_runtime_state()
 
     assert owner._compaction_notices == {}

@@ -34,7 +34,6 @@ from nanobot.channels.contracts import (
     resolve_channel_action_target,
 )
 from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
-from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
 from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.security.workspace_policy import resolve_allowed_path
@@ -174,14 +173,10 @@ class ChannelManager:
         self,
         name: str,
         *,
-        config: Config | None = None,
+        default_enabled: bool,
         default_sections: dict[str, Any] | None = None,
-        default_enabled: bool | None = None,
     ) -> Any:
-        config = config or self.config
-        section = getattr(config.channels, name, None)
-        if default_enabled is None:
-            default_enabled = channel_default_enabled(name)
+        section = getattr(self.config.channels, name, None)
         if section is not None or not default_enabled:
             return section
         if default_sections is None:
@@ -216,7 +211,6 @@ class ChannelManager:
                 static_dist_path=static_path,
                 workspace_path=workspace,
                 default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
-                unified_session=self.config.agents.defaults.unified_session,
                 config_path=self._config_path,
                 disabled_skills=set(self.config.agents.defaults.disabled_skills),
                 runtime_model_name=self._webui_runtime_model_name,

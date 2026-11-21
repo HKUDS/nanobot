@@ -569,13 +569,14 @@ describe("Settings capabilities", () => {
     requestMutationMock.mockResolvedValueOnce(saved);
     let refreshParent!: (snapshot: SettingsPayload) => void;
     let parentSnapshot: SettingsPayload = payload;
+    const client = { requestMutation: requestMutationMock, status: "open",
+      onStatus: (handler: (status: "open") => void) => { handler("open"); return () => {}; },
+    } as never;
     function Parent() {
       const [snapshot, setSnapshot] = useState<SettingsPayload>(payload);
       parentSnapshot = snapshot;
       refreshParent = setSnapshot;
-      return <ClientProvider client={{ requestMutation: requestMutationMock, status: "open",
-        onStatus: (handler: (status: "open") => void) => { handler("open"); return () => {}; },
-      } as never} token="tok">
+      return <ClientProvider client={client} token="tok">
         <SettingsView themePreference="light" initialSection="voice" initialSettings={snapshot}
           onSettingsChange={setSnapshot} onNativeEngineRestart={restart}
           onChangeTheme={() => {}} onBackToChat={() => {}} onModelNameChange={() => {}} />

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
 import httpx
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.base import Schema, Tool, ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.network import NetworkConfig
@@ -714,6 +714,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_def.name}")
         self._description = tool_def.description or tool_def.name
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
+        self._input_schema = raw_schema
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
         # Replay is opt-in through explicit server declarations, not inferred
@@ -739,6 +740,10 @@ class MCPToolWrapper(_MCPWrapperBase):
     @property
     def parameters(self) -> dict[str, Any]:
         return self._parameters
+
+    def validate_params(self, params: dict[str, Any]) -> list[str]:
+        # Provider adaptations are not the server's validation contract.
+        return Schema.validate_json_schema_value(params, self._input_schema)
 
     async def execute(self, **kwargs: Any) -> str:
         result = await self._request_with_recovery(

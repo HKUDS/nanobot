@@ -4,7 +4,10 @@ import { useTranslation } from "react-i18next";
 
 import { floatingItemClassName, floatingItemFocusClassName, floatingSurfaceClassName, floatingSurfaceMotionClassName } from "@/components/ui/floating-surface";
 import { useFloatingPortal } from "@/components/ui/floating-portal";
+import { useToast } from "@/components/ui/toast";
 import { copyTextToClipboard } from "@/lib/clipboard";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
+import { markKeyboardFocus } from "@/lib/focus-modality";
 import type { FileReferenceMetadata, FilePreviewPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -33,12 +36,14 @@ export function FileActions({
 }) {
   const context = useContext(FileActionsContext);
   const { t } = useTranslation();
+  const showToast = useToast();
   const [open, setOpen] = useState(false);
   const [resolved, setResolved] = useState<FileReferenceMetadata | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
   const resolveMetadata = context?.resolveMetadata;
   const portal = useFloatingPortal();
+  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("overlay");
   const point = useRef({ x: 0, y: 0 });
   const anchor = useRef({ getBoundingClientRect: () => new DOMRect(point.current.x, point.current.y, 0, 0) });
   const opener = useRef<HTMLElement | null>(null);
@@ -71,8 +76,14 @@ export function FileActions({
     const success = await copyTextToClipboard(value);
     // A dismissed/reopened menu or another reference owns its own feedback.
     if (generation !== copyGeneration.current) return;
-    setCopyStatus(success ? "copied" : "failed");
-    if (success) changeOpen(false);
+    if (showToast) {
+      showToast({ message: t(success ? "fileActions.copied" : "fileActions.failed"), tone: success ? "success" : "error",
+        dedupeKey: success ? "copied" : "copy-failed" });
+    } else {
+      setCopyStatus(success ? "copied" : "failed");
+    }
+    // A modal menu hides the rest of the app, including the toast, from assistive technology.
+    if (success || showToast) changeOpen(false);
   };
   const openMenu = (target: EventTarget, x: number, y: number) => {
     point.current = { x, y };
@@ -94,6 +105,7 @@ export function FileActions({
         }}
         onKeyDown={(event) => {
           if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+            markKeyboardFocus(event.currentTarget.ownerDocument);
             event.preventDefault();
             event.stopPropagation();
             const bounds = event.currentTarget.getBoundingClientRect();
@@ -104,9 +116,9 @@ export function FileActions({
         {children}
       </span>
       <Menu.Portal container={portal ?? undefined}>
-        <Menu.Content aria-label={t("fileActions.menu", { name: path.split(/[\\/]/).pop() || path })}
+        <Menu.Content ref={surfaceRef} aria-label={t("fileActions.menu", { name: path.split(/[\\/]/).pop() || path })}
           align="start" sideOffset={4} collisionPadding={12}
-          className={cn(floatingSurfaceClassName, floatingSurfaceMotionClassName, "min-w-40 rounded-control p-1 [&_[role=menuitem]]:py-1.5")}
+          className={cn(floatingSurfaceClassName, floatingSurfaceMotionClassName, "min-w-40 origin-[var(--radix-popper-transform-origin)] rounded-control p-1 [&_[role=menuitem]]:py-1.5")}
           onClick={(event) => event.stopPropagation()}
           onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
           onInteractOutside={() => { interactedOutside.current = true; }}
@@ -114,6 +126,8 @@ export function FileActions({
             event.preventDefault();
             if (!interactedOutside.current) opener.current?.focus();
           }}>
+          {/* Track the click point even when collision handling shifts the menu; render no visible arrow. */}
+          <Menu.Arrow width={0} height={0} aria-hidden />
           <Menu.Item className={itemClassName} disabled={!resolved} onSelect={(event) => {
             event.preventDefault();
             if (resolved) void copy(resolved.path);

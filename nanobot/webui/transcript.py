@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
 import json
 import re
@@ -11,7 +9,6 @@ import time
 import uuid
 from bisect import bisect_left
 from collections import OrderedDict
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, NotRequired, Sequence, TypedDict, cast
@@ -32,21 +29,53 @@ from nanobot.session.history_graph import (
     decode_graph,
     decode_snapshot,
     graph_decoding,
-    graph_size_adjustment,
 )
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.message_content import message_text
+from nanobot.session.session_messages import (
+    session_message_envelope,
+    session_message_public_metadata,
+)
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.webui.history import (
     fact_from_record,
     initialize_history,
     record_from_fact,
-    turn_records,
+    turn_record_page,
 )
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 from nanobot.webui.outbound_wire import project_tool_events
-from nanobot.webui.session_identity import webui_chat_id, webui_session_key
+from nanobot.webui.session_identity import webui_session_key
+from nanobot.webui.transcript_replay import (
+    WEBUI_REPLAY_IDENTITY_KEY,
+    compact_completed_stream_deltas,
+    encode_page_cursor,
+    ensure_replay_identities,
+    parse_replay_identity,
+    projection_event_id,
+    read_trace_turn,
+    select_transcript_page,
+    split_transcript_turns,
+)
+from nanobot.webui.transcript_replay import (
+    TranscriptReplayStats as TranscriptReplayStats,
+)
+from nanobot.webui.transcript_replay import (
+    compact_legacy_records as compact_legacy_records,
+)
+from nanobot.webui.transcript_replay import (
+    decode_transcript_cursor as decode_transcript_cursor,
+)
+from nanobot.webui.transcript_trace import (
+    TraceProjection,
+    index_trace_projection,
+    parse_trace_detail_ref,
+)
+from nanobot.webui.transcript_trace import (
+    tool_trace_lines_from_events as tool_trace_lines_from_events,
+)
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
 WEBUI_FORK_MARKER_EVENT = "fork_marker"
@@ -57,12 +86,6 @@ _MAX_TRANSCRIPT_PAGE_RECORDS = 4_000
 _MAX_TRANSCRIPT_PAGE_BYTES = 20 * 1024 * 1024
 _MAX_INLINE_TRACE_DETAIL_BYTES = 32 * 1024
 _WEBUI_TURN_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-_WEBUI_REPLAY_IDENTITY_KEY = "_webui_replay_identity"
-_WEBUI_PROJECTION_RECEIPTS_KEY = "_webui_projection_receipts"
-_WEBUI_TRACE_DETAIL_UNSAFE_KEY = "_webui_trace_detail_unsafe"
-_WEBUI_TRACE_DETAIL_REF_RE = re.compile(
-    r"^(?P<turn>\d{1,12})\.(?P<message>history-[0-9a-f]{20})$"
-)
 _MARKDOWN_LOCAL_IMAGE_RE = re.compile(
     r"!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(\s+(?:\"[^\"]*\"|'[^']*'))?\)"
 )
@@ -193,267 +216,16 @@ def webui_transcript_revision(
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:32]
 
 
-class _TranscriptTurnRef(NamedTuple):
-    ordinal: int
-    records: list[dict[str, Any]]
-    trace_details_safe: bool = True
-
-
 class _SessionBackfillTurn(NamedTuple):
     user_event: dict[str, Any]
     assistant_signature: tuple[str, ...]
     assistant_records: tuple[dict[str, Any], ...]
 
 
-class _ProjectionReceipt(TypedDict):
-    turn_id: str
-    ranges: list[list[int]]
-
-
-class _DeferredTraceGroup(NamedTuple):
-    start: int
-    stop: int
-    detail_bytes: int
-    trace_count: int
-
-
-@dataclass(slots=True)
-class TranscriptReplayStats:
-    """Bounded, non-sensitive diagnostics for one history replay."""
-
-    effective_limit: int = 0
-    source_bytes: int = 0
-    parsed_records: int = 0
-    selected_bytes: int = 0
-    selected_records: int = 0
-    compacted_delta_records: int = 0
-    replay_ms: int = 0
-    capped_by_bytes: bool = False
-    capped_by_records: bool = False
-    truncated_oversized_turn: bool = False
-
-
-def _record_json_line(record: dict[str, Any]) -> str:
-    return json.dumps(record, ensure_ascii=False, separators=(",", ":"))
-
-
-def _records_bytes(records: list[dict[str, Any]]) -> int:
-    total = 0
-    for record in records:
-        total += len(_record_json_line(record).encode("utf-8")) + graph_size_adjustment(record) + 1
-    return total
-
-
-def _stream_key(record: dict[str, Any], stream: str) -> tuple[str, str, str]:
-    raw_turn_id = record.get("turn_id")
-    turn_id = raw_turn_id if isinstance(raw_turn_id, str) else ""
-    raw_phase = record.get("turn_phase")
-    phase = raw_phase if isinstance(raw_phase, str) and raw_phase else stream
-    raw_stream_id = record.get("stream_id")
-    stream_id = raw_stream_id if isinstance(raw_stream_id, str) else ""
-    return turn_id, phase, stream_id
-
-
-def _projection_receipts(records: Sequence[Mapping[str, Any]]) -> list[_ProjectionReceipt]:
-    members: dict[str, set[int]] = {}
-    for record in records:
-        turn_id, sequence = record.get("turn_id"), record.get("turn_seq")
-        if (
-            isinstance(turn_id, str) and turn_id
-            and isinstance(sequence, int) and not isinstance(sequence, bool) and sequence >= 0
-        ):
-            members.setdefault(turn_id, set()).add(sequence)
-    receipts: list[_ProjectionReceipt] = []
-    for turn_id, sequences in members.items():
-        ranges: list[list[int]] = []
-        for sequence in sorted(sequences):
-            if ranges and ranges[-1][1] + 1 == sequence:
-                ranges[-1][1] = sequence
-            else:
-                ranges.append([sequence, sequence])
-        receipts.append({"turn_id": turn_id, "ranges": ranges})
-    return receipts
-
-
-def _compact_completed_stream_deltas(
-    turn: list[dict[str, Any]],
-    *,
-    include_projection_receipts: bool = False,
-) -> tuple[list[dict[str, Any]], int]:
-    if not turn or turn[-1].get("event") != "turn_end":
-        return turn, 0
-
-    pending: dict[tuple[str, str, str], list[tuple[int, dict[str, Any]]]] = {}
-    dropped_indexes: set[int] = set()
-    replacements: dict[int, dict[str, Any]] = {}
-    for index, record in enumerate(turn):
-        event = record.get("event")
-        if event in {"delta", "reasoning_delta"}:
-            stream = "answer" if event == "delta" else "reasoning"
-            pending.setdefault(_stream_key(record, stream), []).append((index, record))
-            continue
-        if event not in {"stream_end", "reasoning_end"}:
-            continue
-        stream = "answer" if event == "stream_end" else "reasoning"
-        chunks = pending.pop(_stream_key(record, stream), [])
-        if not chunks:
-            continue
-        completed = dict(record)
-        text = completed.get("text")
-        if not isinstance(text, str) or not text:
-            completed["text"] = "".join(
-                str(chunk.get("text") or "") for _, chunk in chunks
-            )
-        if include_projection_receipts:
-            receipts = _projection_receipts([*(chunk for _, chunk in chunks), record])
-            if receipts:
-                completed[_WEBUI_PROJECTION_RECEIPTS_KEY] = receipts
-        replacements[index] = completed
-        dropped_indexes.update(chunk_index for chunk_index, _ in chunks)
-
-    if not dropped_indexes:
-        return turn, 0
-    return [
-        replacements.get(index, record)
-        for index, record in enumerate(turn)
-        if index not in dropped_indexes
-    ], len(dropped_indexes)
-
-
-def _compact_completed_turns(
-    turns: list[list[dict[str, Any]]],
-) -> tuple[list[list[dict[str, Any]]], int]:
-    compacted: list[list[dict[str, Any]]] = []
-    dropped = 0
-    for turn in turns:
-        next_turn, turn_dropped = _compact_completed_stream_deltas(turn)
-        compacted.append(next_turn)
-        dropped += turn_dropped
-    return compacted, dropped
-
-
-
-
-def compact_legacy_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    turns, _ = _compact_completed_turns(_split_transcript_turns(records))
-    return [record for turn in turns for record in turn]
-
-
-def _records_with_replay_identity(
-    records: list[dict[str, Any]],
-    *,
-    turn_ordinal: int,
-    trace_details_safe: bool = True,
-) -> list[dict[str, Any]]:
-    return [
-        {
-            **record,
-            _WEBUI_REPLAY_IDENTITY_KEY: record.get(_WEBUI_REPLAY_IDENTITY_KEY, f"turn:{turn_ordinal}:record:{record_index}"),
-            **({_WEBUI_TRACE_DETAIL_UNSAFE_KEY: True} if not trace_details_safe else {}),
-        }
-        for record_index, record in enumerate(records)
-    ]
-
-
-def _encode_page_cursor(before_turn_ordinal: int) -> str:
-    raw = json.dumps(
-        {"before_turn": before_turn_ordinal},
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-
-def decode_transcript_cursor(value: str | None) -> int | None:
-    if not value:
-        return None
-    try:
-        padded = value + "=" * (-len(value) % 4)
-        data = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
-    except (binascii.Error, json.JSONDecodeError, UnicodeDecodeError, ValueError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    cursor_data = cast(dict[str, Any], data)
-    before_turn = cursor_data.get("before_turn")
-    if (
-        isinstance(before_turn, bool)
-        or not isinstance(before_turn, int)
-        or before_turn < 0
-    ):
-        return None
-    return before_turn
-
-
 def _coerce_page_limit(limit: int | None) -> int:
     if limit is None:
         return _DEFAULT_TRANSCRIPT_PAGE_LIMIT
     return max(1, min(_MAX_TRANSCRIPT_PAGE_LIMIT, int(limit)))
-
-
-def _transcript_turn_at_ordinal(
-    ordinal: int, *, history: HistoryReader,
-) -> list[dict[str, Any]] | None:
-    return turn_records(history, ordinal) or None
-
-
-def _select_transcript_page(
-    *, history: HistoryReader, limit: int | None,
-    before: str | None, after: str | None = None, stats: TranscriptReplayStats | None = None,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    stats = stats or TranscriptReplayStats()
-    page_limit = _coerce_page_limit(limit)
-    stats.effective_limit = page_limit
-    total_turns = history.turn_count
-    before_ordinal = decode_transcript_cursor(before)
-    upper = total_turns if before_ordinal is None else min(before_ordinal, total_turns)
-    after_ordinal = decode_transcript_cursor(after)
-    selected: list[_TranscriptTurnRef] = []
-    event_count = record_count = byte_count = 0
-    for ref in history.turns(before=upper, after=after_ordinal or 0, reverse=after_ordinal is None):
-        exceeds_records = record_count + ref.record_count > _MAX_TRANSCRIPT_PAGE_RECORDS
-        exceeds_bytes = byte_count + ref.byte_count > _MAX_TRANSCRIPT_PAGE_BYTES
-        stats.capped_by_records |= exceeds_records
-        stats.capped_by_bytes |= exceeds_bytes
-        if selected and (exceeds_records or exceeds_bytes):
-            break
-        safe = not (exceeds_records or exceeds_bytes)
-        turn = turn_records(
-            history, ref.ordinal,
-            max_records=None if safe else _MAX_TRANSCRIPT_PAGE_RECORDS,
-            max_bytes=None if safe else _MAX_TRANSCRIPT_PAGE_BYTES,
-        )
-        stats.parsed_records += len(turn)
-        stats.source_bytes += ref.byte_count if safe else _records_bytes(turn)
-        turn, dropped = _compact_completed_stream_deltas(turn, include_projection_receipts=True)
-        stats.compacted_delta_records += dropped
-        if not safe:
-            stats.truncated_oversized_turn = True
-        selected.append(_TranscriptTurnRef(ref.ordinal, turn, safe))
-        record_count += len(turn)
-        byte_count += _records_bytes(turn)
-        event_count += _client_projection_page_event_count(turn)
-        if event_count >= page_limit:
-            break
-    chronological = selected if after_ordinal is not None else list(reversed(selected))
-    records = [record for ref in chronological for record in _records_with_replay_identity(
-        ref.records, turn_ordinal=ref.ordinal, trace_details_safe=ref.trace_details_safe,
-    )]
-    stats.selected_records, stats.selected_bytes = len(records), byte_count
-    if not chronological:
-        return [], {"before_cursor": None, "has_more_before": False, "after_cursor": None,
-                    "has_more_after": False, "loaded_event_count": 0, "user_message_offset": 0}
-    first, last = chronological[0].ordinal, chronological[-1].ordinal
-    page: dict[str, Any] = {
-        "before_cursor": _encode_page_cursor(first) if first else None,
-        "has_more_before": first > 0,
-        "after_cursor": _encode_page_cursor(last + 1) if last + 1 < total_turns else None,
-        "has_more_after": last + 1 < total_turns, "loaded_event_count": 0,
-        "user_message_offset": history.user_count_before(first),
-    }
-    if stats.truncated_oversized_turn:
-        page["truncated_oversized_turn"] = True
-    return records, page
 
 
 def read_transcript_lines(session_key: str, *, history: HistoryReader) -> list[dict[str, Any]]:
@@ -485,21 +257,6 @@ def append_transcript_object(
 ) -> None:
     """Offline import/fixture helper; runtime writes through the async recorder."""
     sessions.append_history(session_key, [fact_from_record(_record_for_append(obj))])
-
-
-async def append_session_message_input(
-    session_key: str, *, sessions: SessionManager, content: str, created_at_ms: int,
-    session_message: Mapping[str, Any],
-) -> None:
-    chat_id = _chat_id_from_session_key(session_key)
-    if chat_id is None:
-        return
-    event = build_user_transcript_event(chat_id, content)
-    if event is None:
-        return
-    event.update(created_at_ms=created_at_ms, session_message=dict(session_message))
-    await sessions.state.append_history(session_key, [fact_from_record(event)],
-                                         expected_generation=None)
 
 
 def normalize_webui_turn_id(value: Any) -> str:
@@ -549,6 +306,10 @@ class WebUITranscriptRecorder:
             event["source"] = source
         if include_source and metadata is not None and "response_sources" in metadata:
             event["response_sources"] = _response_sources(metadata["response_sources"])
+        if event.get("event") == "user" and (turn_id := (metadata or {}).get(WEBUI_TURN_METADATA_KEY)):
+            event["input_id"] = f"user:{turn_id}"
+        if include_source and metadata is not None and "response_input_ids" in metadata:
+            event["response_input_ids"] = list(metadata["response_input_ids"])
         self._annotate_turn(chat_id, event, metadata, phase)
 
     async def prepare_and_append(
@@ -578,7 +339,10 @@ class WebUITranscriptRecorder:
         mcp_presets: list[dict[str, Any]] | None = None,
         session_mentions: Sequence[Mapping[str, Any]] | None = None,
     ) -> bool:
-        if text.strip() == "/stop" and not media_paths:
+        envelope = session_message_envelope(metadata)
+        if envelope is not None and envelope["target_session_key"] != webui_session_key(chat_id):
+            envelope = None
+        if text.strip() == "/stop" and not media_paths and envelope is None:
             return False
         event = build_user_transcript_event(
             chat_id,
@@ -591,6 +355,12 @@ class WebUITranscriptRecorder:
         )
         if event is None:
             return False
+        if envelope is not None:
+            event.update(
+                created_at_ms=envelope["created_at_ms"],
+                session_message=session_message_public_metadata(envelope),
+                input_id=f"session-message:{envelope['message_id']}",
+            )
         return await self.prepare_and_append(chat_id, event, metadata=metadata, phase="user")
 
     async def append(
@@ -646,13 +416,6 @@ class WebUITranscriptRecorder:
         event.update(turn_id=turn_id, turn_phase=phase, turn_seq=self._next_turn_seq(chat_id, turn_id))
         if phase == "complete":
             self._turn_sequences.pop((chat_id, turn_id), None)
-
-
-def _chat_id_from_session_key(session_key: str) -> str | None:
-    chat_id = webui_chat_id(session_key)
-    if chat_id is None:
-        return None
-    return chat_id.strip() or None
 
 
 def normalize_session_mentions_metadata(raw: object) -> list[dict[str, str]]:
@@ -801,8 +564,7 @@ def _session_user_event(
     message = public_history_message(message)
     if _is_legacy_raw_subagent_result(message):
         return None
-    content = message.get("content")
-    text = content if isinstance(content, str) else ""
+    text = message_text(message.get("content"))
     media = message.get("media")
     cli_apps = message.get("cli_apps")
     mcp_presets = message.get("mcp_presets")
@@ -832,13 +594,15 @@ def _session_user_event(
     provenance = normalize_session_message_ui_metadata(message.get("session_message"))
     if provenance:
         event["session_message"] = provenance
+    if isinstance(message_id := message.get("input_id"), str) and message_id:
+        event["input_id"] = message_id
     input_id = message.get(INBOUND_META_TURN_ID)
     if isinstance(input_id, str) and _WEBUI_TURN_ID_RE.fullmatch(input_id):
         event["turn_id"] = input_id
         event["turn_phase"] = "user"
-        event[_WEBUI_REPLAY_IDENTITY_KEY] = f"input:{session_key}:{input_id}"
+        event[WEBUI_REPLAY_IDENTITY_KEY] = f"input:{session_key}:{input_id}"
     elif canonical_position is not None:
-        event[_WEBUI_REPLAY_IDENTITY_KEY] = f"canonical:{session_key}:message:{canonical_position}"
+        event[WEBUI_REPLAY_IDENTITY_KEY] = f"canonical:{session_key}:message:{canonical_position}"
     return event
 
 
@@ -868,6 +632,8 @@ def _session_assistant_event(
     }
     if media_paths:
         event["media"] = media_paths
+    if "response_input_ids" in message:
+        event["response_input_ids"] = message["response_input_ids"]
     latency_ms = message.get("latency_ms")
     if isinstance(latency_ms, int | float) and latency_ms >= 0:
         event["latency_ms"] = int(latency_ms)
@@ -890,7 +656,7 @@ def _session_backfill_turns(
     assistant_records: list[dict[str, Any]] = []
 
     def flush() -> None:
-        if current_user is None or not assistant_records:
+        if current_user is None:
             return
         signature = tuple(
             text
@@ -918,75 +684,6 @@ def _session_backfill_turns(
                 assistant_records.append(record)
     flush()
     return turns
-
-
-def _split_transcript_turns(lines: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-    turns: list[list[dict[str, Any]]] = []
-    current: list[dict[str, Any]] = []
-    for rec in lines:
-        current.append(rec)
-        if rec.get("event") == "turn_end":
-            turns.append(current)
-            current = []
-    if current:
-        turns.append(current)
-    return turns
-
-
-def _stable_record_digest(record: dict[str, Any]) -> str:
-    persisted = {
-        key: value
-        for key, value in record.items()
-        if key != _WEBUI_REPLAY_IDENTITY_KEY
-    }
-    raw = json.dumps(
-        persisted,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-        default=str,
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-
-
-def _ensure_replay_identities(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    annotated: list[dict[str, Any]] = []
-    for fallback_turn_index, turn in enumerate(_split_transcript_turns(lines)):
-        anchor = next(
-            (
-                value
-                for record in turn
-                if isinstance(
-                    value := record.get(_WEBUI_REPLAY_IDENTITY_KEY),
-                    str,
-                )
-                and value
-            ),
-            None,
-        )
-        if anchor and ":record:" in anchor:
-            turn_identity = anchor.rsplit(":record:", 1)[0]
-        else:
-            turn_digest = hashlib.sha256(
-                "\n".join(_stable_record_digest(record) for record in turn).encode("ascii")
-            ).hexdigest()[:16]
-            turn_identity = f"legacy:{fallback_turn_index}:{turn_digest}"
-        synthetic_occurrences: dict[str, int] = {}
-        for record in turn:
-            identity = record.get(_WEBUI_REPLAY_IDENTITY_KEY)
-            if isinstance(identity, str) and identity:
-                annotated.append(record)
-                continue
-            digest = _stable_record_digest(record)
-            occurrence = synthetic_occurrences.get(digest, 0)
-            synthetic_occurrences[digest] = occurrence + 1
-            annotated.append({
-                **record,
-                _WEBUI_REPLAY_IDENTITY_KEY: (
-                    f"{turn_identity}:synthetic:{digest}:{occurrence}"
-                ),
-            })
-    return annotated
 
 
 def _transcript_turn_signature(records: list[dict[str, Any]]) -> tuple[str, ...]:
@@ -1035,17 +732,19 @@ def _user_recovery_signature(event: dict[str, Any]) -> str:
     return json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def _find_unique_session_turn_by_user(
+def _find_recoverable_session_turn(
     session_turns: list[_SessionBackfillTurn],
-    user_event: dict[str, Any],
+    user_events: list[dict[str, Any]],
 ) -> _SessionBackfillTurn | None:
-    signature = _user_recovery_signature(user_event)
+    if len(user_events) != 1:
+        return None
+    signature = _user_recovery_signature(user_events[0])
     matches = [
         turn
         for turn in session_turns
         if _user_recovery_signature(turn.user_event) == signature
     ]
-    return matches[0] if len(matches) == 1 else None
+    return matches[0] if len(matches) == 1 and matches[0].assistant_records else None
 
 
 def _is_recoverable_answer_record(record: dict[str, Any]) -> bool:
@@ -1067,12 +766,35 @@ def _needs_incomplete_turn_recovery(lines: list[dict[str, Any]]) -> bool:
     )
 
 
+def _recover_incomplete_fragment(
+    lines: list[dict[str, Any]], session_turn: _SessionBackfillTurn, *, terminal: bool,
+) -> list[dict[str, Any]]:
+    retained = [record for record in lines if not _is_recoverable_answer_record(record)]
+    if not terminal:
+        return retained
+    turn_end = retained.pop()
+    stable_end_ms = _valid_created_at_ms(turn_end.get("created_at_ms"))
+    turn_id = turn_end.get("turn_id")
+    for index, source in enumerate(session_turn.assistant_records):
+        answer = dict(source)
+        if isinstance(turn_id, str) and turn_id:
+            answer["turn_id"] = turn_id
+            answer["turn_phase"] = "answer"
+        if stable_end_ms is not None:
+            answer["created_at_ms"] = max(0, stable_end_ms - len(session_turn.assistant_records) + index)
+        retained.append(answer)
+    completed_end = dict(turn_end)
+    completed_end.pop(WEBUI_TRANSCRIPT_INCOMPLETE_KEY, None)
+    retained.append(completed_end)
+    return retained
+
+
 def _recover_incomplete_turns(
     lines: list[dict[str, Any]],
     session_turns: list[_SessionBackfillTurn],
 ) -> list[dict[str, Any]]:
     recovered: list[dict[str, Any]] = []
-    for turn in _split_transcript_turns(lines):
+    for turn in split_transcript_turns(lines):
         turn_end = turn[-1] if turn else None
         if (
             not isinstance(turn_end, dict)
@@ -1083,48 +805,31 @@ def _recover_incomplete_turns(
             continue
 
         user_events = [record for record in turn if record.get("event") == "user"]
-        if len(user_events) != 1:
-            recovered.extend(turn)
-            continue
-        session_turn = _find_unique_session_turn_by_user(session_turns, user_events[0])
-        if session_turn is None or not session_turn.assistant_records:
+        session_turn = _find_recoverable_session_turn(session_turns, user_events)
+        if session_turn is None:
             recovered.extend(turn)
             continue
 
-        stable_end_ms = _valid_created_at_ms(turn_end.get("created_at_ms"))
-        turn_id = turn_end.get("turn_id")
-        answer_records: list[dict[str, Any]] = []
-        for index, source in enumerate(session_turn.assistant_records):
-            answer = dict(source)
-            if isinstance(turn_id, str) and turn_id:
-                answer["turn_id"] = turn_id
-                answer["turn_phase"] = "answer"
-            if stable_end_ms is not None:
-                answer["created_at_ms"] = max(
-                    0,
-                    stable_end_ms - len(session_turn.assistant_records) + index,
-                )
-            answer_records.append(answer)
-
-        # Session history is the durable source of the completed answer. Keep
-        # traces/reasoning/file edits, but replace any partial answer fragments.
-        recovered.extend(
-            record
-            for record in turn[:-1]
-            if not _is_recoverable_answer_record(record)
-        )
-        recovered.extend(answer_records)
-        completed_end = dict(turn_end)
-        completed_end.pop(WEBUI_TRANSCRIPT_INCOMPLETE_KEY, None)
-        recovered.append(completed_end)
+        recovered.extend(_recover_incomplete_fragment(turn, session_turn, terminal=True))
     return recovered
 
 
-def _needs_user_event_backfill(lines: list[dict[str, Any]]) -> bool:
-    return any(
-        not any(record.get("event") == "user" for record in turn)
+def _needs_user_event_backfill(
+    lines: list[dict[str, Any]], history: HistoryReader, *, legacy: bool = True,
+) -> bool:
+    # A request start identifies response targets, but is not persisted answer evidence.
+    display_lines = [record for record in lines if record.get("event") != "model_request"]
+    referenced_inputs = {
+        input_id
+        for record in display_lines
+        if isinstance(references := record.get("response_input_ids"), list)
+        for input_id in cast(list[object], references)
+        if isinstance(input_id, str) and input_id
+    }
+    return any(not history.has_input(input_id) for input_id in referenced_inputs) or legacy and any(
+        not any(record.get("event") == "user" or isinstance(record.get("response_input_ids"), list) for record in turn)
         and _transcript_turn_signature(turn)
-        for turn in _split_transcript_turns(lines)
+        for turn in split_transcript_turns(display_lines)
     )
 
 
@@ -1132,54 +837,23 @@ def _with_backfilled_user(
     records: list[dict[str, Any]],
     user_event: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    input_id = user_event.get("input_id")
+    legacy = not any("response_input_ids" in record for record in records)
     for index, rec in enumerate(records):
-        if rec.get("event") in _TURN_DISPLAY_EVENTS:
+        if (
+            input_id and input_id in rec.get("response_input_ids", [])
+            or (not input_id or legacy) and rec.get("event") in _TURN_DISPLAY_EVENTS
+        ):
+            if input_id:
+                references = rec.get("response_input_ids")
+                if isinstance(references, list):
+                    references = cast(list[object], references)
+                    following = {value for value in references[references.index(input_id) + 1:]
+                                 if isinstance(value, str)}
+                    index = next((i for i, prior in enumerate(records[:index])
+                                  if prior.get("event") == "user" and prior.get("input_id") in following), index)
             return [*records[:index], dict(user_event), *records[index:]]
     return records
-
-
-def _format_tool_call_trace(call: Any) -> str | None:
-    if not call or not isinstance(call, dict):
-        return None
-    call_data = cast(dict[str, Any], call)
-    fn = call_data.get("function")
-    function_data = cast(dict[str, Any], fn) if isinstance(fn, dict) else None
-    name = function_data.get("name") if function_data is not None else None
-    if not isinstance(name, str) or not name:
-        raw_name = call_data.get("name")
-        name = raw_name if isinstance(raw_name, str) else ""
-    if not name:
-        return None
-    args = (
-        function_data.get("arguments") if function_data is not None else None
-    ) or call_data.get("arguments")
-    if isinstance(args, str) and args.strip():
-        return f"{name}({args})"
-    if args and isinstance(args, dict):
-        return f"{name}({json.dumps(args, ensure_ascii=False)})"
-    return f"{name}()"
-
-
-def tool_trace_lines_from_events(events: Any) -> list[str]:
-    if not isinstance(events, list):
-        return []
-    lines: list[str] = []
-    seen: set[str] = set()
-    for event in cast(list[Any], events):
-        if not event or not isinstance(event, dict):
-            continue
-        tool_event = cast(dict[str, Any], event)
-        if tool_event.get("phase") not in {"start", "end", "error"}:
-            continue
-        call_id = tool_event.get("call_id")
-        if isinstance(call_id, str) and call_id:
-            if call_id in seen:
-                continue
-            seen.add(call_id)
-        t = _format_tool_call_trace(tool_event)
-        if t:
-            lines.append(t)
-    return lines
 
 
 def _normalize_tool_events(events: Any) -> list[dict[str, Any]]:
@@ -1220,30 +894,6 @@ def _media_from_signed_urls(value: Any) -> list[dict[str, Any]]:
                 },
             )
     return media
-
-
-def _trace_detail_ref(message_id: str, record: Mapping[str, Any]) -> str | None:
-    if record.get(_WEBUI_TRACE_DETAIL_UNSAFE_KEY) is True:
-        return None
-    identity = record.get(_WEBUI_REPLAY_IDENTITY_KEY)
-    if not isinstance(identity, str):
-        return None
-    match = re.match(r"^turn:(\d+):record:", identity)
-    return f"{match.group(1)}.{message_id}" if match else None
-
-
-def _truncate_utf8(value: str, max_bytes: int) -> str:
-    encoded = value.encode("utf-8")
-    if len(encoded) <= max_bytes:
-        return value
-    return encoded[: max_bytes - 3].decode("utf-8", errors="ignore") + "…"
-
-
-def _trace_summary(line: str) -> str:
-    if len(line.encode("utf-8")) <= 512:
-        return line
-    match = re.match(r"^([A-Za-z0-9_.-]+)\(", line.strip())
-    return f"{_truncate_utf8(match.group(1), 240)}(…)" if match else _truncate_utf8(line, 240)
 
 
 def has_pending_tool_calls(
@@ -1292,14 +942,7 @@ def has_pending_tool_calls(
             "file_edit",
         }:
             return True
-        if ev in {WEBUI_FORK_MARKER_EVENT}:
-            continue
     return False
-
-
-def has_unfinished_transcript_tail(session_key: str, *, history: HistoryReader) -> bool:
-    count = history.turn_count
-    return bool(count and has_pending_tool_calls(turn_records(history, count - 1)))
 
 
 def completed_turn_ids(lines: list[dict[str, Any]]) -> list[str]:
@@ -1326,42 +969,18 @@ def build_webui_trace_detail_response(
     *, history: HistoryReader,
 ) -> dict[str, Any] | None:
     """Resolve one deferred activity group as canonical projection events."""
-    match = _WEBUI_TRACE_DETAIL_REF_RE.fullmatch(detail_ref)
-    if match is None:
+    identity = parse_trace_detail_ref(detail_ref)
+    if identity is None:
         return None
-    ordinal = int(match.group("turn"))
-    message_id = match.group("message")
-    turn = _transcript_turn_at_ordinal(ordinal, history=history)
+    ordinal, message_id = identity
+    turn = read_trace_turn(
+        ordinal, history=history,
+        max_records=_MAX_TRANSCRIPT_PAGE_RECORDS, max_bytes=_MAX_TRANSCRIPT_PAGE_BYTES,
+    )
     if turn is None:
         return None
-    turn, _ = _compact_completed_stream_deltas(turn, include_projection_receipts=True)
-    lines = _records_with_replay_identity(turn, turn_ordinal=ordinal)
-    for group in _client_projection_deferred_trace_groups(lines).values():
-        first = lines[group.start]
-        if _client_projection_event_id(first) != message_id:
-            continue
-        events = [
-            event
-            for record in lines[group.start:group.stop]
-            if record.get("event") != "model_request" and (
-                event := _client_projection_event(
-                    record,
-                    augment_user_media=None,
-                    augment_assistant_media=None,
-                    augment_assistant_text=None,
-                )
-            ) is not None
-        ]
-        return {"message_id": message_id, "events": events}
-    return None
-
-
-def _client_projection_event_id(record: Mapping[str, Any]) -> str:
-    identity = record.get(_WEBUI_REPLAY_IDENTITY_KEY)
-    if not isinstance(identity, str) or not identity:
-        identity = _stable_record_digest(dict(record))
-    digest = hashlib.sha256(f"event\0{identity}".encode("utf-8")).hexdigest()[:20]
-    return f"history-{digest}"
+    lines, _ = compact_completed_stream_deltas(turn)
+    return _index_trace_projection(lines).detail(message_id)
 
 
 def _client_projection_turn_fields(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -1383,15 +1002,14 @@ def _client_projection_turn_fields(record: Mapping[str, Any]) -> dict[str, Any]:
 def _client_projection_common_fields(record: dict[str, Any]) -> dict[str, Any]:
     fields: dict[str, Any] = {
         "chat_id": str(record.get("chat_id") or ""),
-        "projection_id": _client_projection_event_id(record),
+        "projection_id": projection_event_id(record),
         **_client_projection_turn_fields(record),
     }
     created_at_ms = _valid_created_at_ms(record.get("created_at_ms"))
     if created_at_ms is not None:
         fields["created_at_ms"] = created_at_ms
-    receipts = record.get(_WEBUI_PROJECTION_RECEIPTS_KEY)
-    if receipts:
-        fields["projection_receipts"] = receipts
+    if isinstance(input_id := record.get("input_id"), str):
+        fields["input_id"] = input_id
     return fields
 
 
@@ -1410,6 +1028,28 @@ def _client_projection_source(record: dict[str, Any]) -> dict[str, Any] | None:
     return projected
 
 
+def _augment_projected_message(
+    record: dict[str, Any], projected: dict[str, Any], *,
+    augment_media: Callable[[list[str]], list[dict[str, Any]]] | None,
+    augment_text: Callable[[str], str] | None,
+    cached: bool = False,
+) -> None:
+    if augment_text is not None and projected.get("render_as") != "text":
+        projected["text"] = augment_text(projected["text"])
+    if augment_media is not None and isinstance(raw_media := record.get("media"), list):
+        paths = [path for path in cast(list[object], raw_media) if isinstance(path, str) and path]
+        if paths:
+            # When re-signing local paths, do not fall back to stale signed URLs.
+            media = augment_media(paths)
+            if media:
+                projected["media_urls"] = media
+            else:
+                projected.pop("media_urls", None)
+            return
+    if not cached and (media := _media_from_signed_urls(record.get("media_urls"))):
+        projected["media_urls"] = media
+
+
 def _client_projection_event(
     record: dict[str, Any],
     *,
@@ -1419,8 +1059,11 @@ def _client_projection_event(
 ) -> dict[str, Any] | None:
     event = record.get("event")
     common = _client_projection_common_fields(record)
-    if event in {"delta", "stream_end", "message"} and "response_sources" in record:
-        common["response_sources"] = _response_sources(record["response_sources"])
+    if event in {"delta", "stream_end", "message"}:
+        if "response_sources" in record:
+            common["response_sources"] = _response_sources(record["response_sources"])
+        if "response_input_ids" in record:
+            common["response_input_ids"] = record["response_input_ids"]
     if event == "user":
         projected: dict[str, Any] = {
             "event": "user_message",
@@ -1461,6 +1104,8 @@ def _client_projection_event(
 
     if event in {"delta", "stream_end", "reasoning_delta", "reasoning_end"}:
         projected = {"event": event, **common}
+        if record.get("text_from_seq") is not None:
+            projected["text_from_seq"] = record["text_from_seq"]
         stream_id = record.get("stream_id")
         if isinstance(stream_id, str) and stream_id:
             projected["stream_id"] = stream_id
@@ -1483,9 +1128,9 @@ def _client_projection_event(
         text = record.get("text")
         content = text if isinstance(text, str) else ""
         render_as_text = record.get("render_as") == "text"
-        if not render_as_text and augment_assistant_text is not None:
-            content = augment_assistant_text(content)
         projected = {"event": "message", **common, "text": content}
+        if record.get("side_channel") is True:
+            projected["side_channel"] = True
         if render_as_text:
             projected["render_as"] = "text"
         kind = record.get("kind")
@@ -1494,21 +1139,9 @@ def _client_projection_event(
         tool_events = _normalize_tool_events(record.get("tool_events"))
         if tool_events:
             projected["tool_events"] = tool_events
-        raw_media = record.get("media")
-        media_paths = [
-            path
-            for path in cast(list[Any], raw_media)
-            if isinstance(path, str) and path
-        ] if isinstance(raw_media, list) else []
-        media = (
-            augment_assistant_media(media_paths)
-            if media_paths and augment_assistant_media is not None
-            else []
+        _augment_projected_message(
+            record, projected, augment_media=augment_assistant_media, augment_text=augment_assistant_text,
         )
-        if not media and (not media_paths or augment_assistant_media is None):
-            media = _media_from_signed_urls(record.get("media_urls"))
-        if media:
-            projected["media_urls"] = media
         latency_ms = record.get("latency_ms")
         if isinstance(latency_ms, int | float) and latency_ms >= 0:
             projected["latency_ms"] = int(latency_ms)
@@ -1542,6 +1175,8 @@ def _client_projection_event(
             "compaction_id": compaction_id,
             "phase": phase,
         }
+        if (graph := decode_graph(record.get("context_graph"))) is not None:
+            projected["context_graph"] = graph
         if (snapshot := decode_snapshot(record.get("context_snapshot"))) is not None:
             projected["context_snapshot"] = snapshot
         reason = record.get("reason")
@@ -1562,6 +1197,10 @@ def _client_projection_event(
             ):
                 return None
             projected.update(request_id=request_id, run_id=run_id, sequence=sequence, phase=phase)
+            if phase == "started" and isinstance(references := record.get("response_input_ids"), list):
+                input_ids = [value for value in cast(list[object], references) if isinstance(value, str) and value]
+                if input_ids:
+                    projected["response_input_ids"] = input_ids
             if "request_usage" in record:
                 projected["request_usage"] = _sanitize_turn_usage(record["request_usage"]) or None
             if (graph := decode_graph(record.get("context_graph"))) is not None:
@@ -1595,78 +1234,14 @@ def _client_projection_event(
     return None
 
 
-def _client_projection_deferred_trace_groups(
-    lines: list[dict[str, Any]],
-) -> dict[int, _DeferredTraceGroup]:
-    groups: dict[int, _DeferredTraceGroup] = {}
-    start: int | None = None
-    detail_bytes = 0
-    trace_count = 0
-
-    def flush(stop: int) -> None:
-        nonlocal start, detail_bytes, trace_count
-        if (
-            start is not None
-            and detail_bytes > _MAX_INLINE_TRACE_DETAIL_BYTES
-        ):
-            groups[start] = _DeferredTraceGroup(
-                start=start,
-                stop=stop,
-                detail_bytes=detail_bytes,
-                trace_count=max(1, trace_count),
-            )
-        start = None
-        detail_bytes = 0
-        trace_count = 0
-
-    for index, record in enumerate(lines):
-        # Usage belongs to the turn, not the activity body. It must not split
-        # one deferred tool group into many eagerly loaded fragments.
-        if record.get("event") == "model_request":
-            continue
-        is_activity = (
-            record.get("event") == "message"
-            and record.get("kind") in {"tool_hint", "progress"}
-        )
-        if not is_activity:
-            flush(index)
-            continue
-        event = _client_projection_event(
-            record,
-            augment_user_media=None,
-            augment_assistant_media=None,
-            augment_assistant_text=None,
-        )
-        if event is None:
-            flush(index)
-            continue
-        if start is None:
-            start = index
-        detail_bytes += len(_record_json_line(event).encode("utf-8"))
-        tool_events = _normalize_tool_events(record.get("tool_events"))
-        traces = tool_trace_lines_from_events(tool_events)
-        if traces:
-            trace_count += len(traces)
-        elif not tool_events and isinstance(record.get("text"), str) and record["text"]:
-            trace_count += 1
-    flush(len(lines))
-    return groups
+def _project_trace_event(record: dict[str, Any]) -> dict[str, Any] | None:
+    return _client_projection_event(
+        record, augment_user_media=None, augment_assistant_media=None, augment_assistant_text=None,
+    )
 
 
-def _client_projection_page_event_count(turn: list[dict[str, Any]]) -> int:
-    supported = {
-        "user",
-        "delta",
-        "stream_end",
-        "reasoning_delta",
-        "reasoning_end",
-        "message",
-        "file_edit",
-        "context_compaction",
-        "model_request",
-        "turn_end",
-    }
-    return max(1, sum(record.get("event") in supported for record in turn))
+def _index_trace_projection(lines: list[dict[str, Any]]) -> TraceProjection:
+    return index_trace_projection(lines, _project_trace_event, max_inline_bytes=_MAX_INLINE_TRACE_DETAIL_BYTES)
 
 
 def _client_projection_events(
@@ -1675,10 +1250,11 @@ def _client_projection_events(
     augment_user_media: Callable[[list[str], list[str]], list[dict[str, Any]]] | None,
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None,
     augment_assistant_text: Callable[[str], str] | None,
+    defer_traces: bool = True,
 ) -> tuple[list[dict[str, Any]], int | None]:
     events: list[dict[str, Any]] = []
     fork_boundary_event_index: int | None = None
-    deferred_groups = _client_projection_deferred_trace_groups(lines)
+    traces = _index_trace_projection(lines) if defer_traces else None
     deferred_until = 0
     for index, record in enumerate(lines):
         if index < deferred_until and record.get("event") != "model_request":
@@ -1687,39 +1263,24 @@ def _client_projection_events(
             if fork_boundary_event_index is None:
                 fork_boundary_event_index = len(events)
             continue
-        event = _client_projection_event(
-            record,
-            augment_user_media=augment_user_media,
-            augment_assistant_media=augment_assistant_media,
-            augment_assistant_text=augment_assistant_text,
-        )
+        cached = traces.events.get(index) if traces is not None else None
+        if cached is not None:
+            event = cached
+            _augment_projected_message(
+                record, event, augment_media=augment_assistant_media,
+                augment_text=augment_assistant_text, cached=True,
+            )
+        else:
+            event = _client_projection_event(
+                record,
+                augment_user_media=augment_user_media,
+                augment_assistant_media=augment_assistant_media,
+                augment_assistant_text=augment_assistant_text,
+            )
         if event is None:
             continue
-        group = deferred_groups.get(index)
-        if group is not None:
-            detail_ref = _trace_detail_ref(_client_projection_event_id(record), record)
-            last_text = next(
-                (
-                    text
-                    for grouped in reversed(lines[group.start:group.stop])
-                    if isinstance((text := grouped.get("text")), str) and text
-                ),
-                "",
-            )
-            event["text"] = _trace_summary(last_text)
-            event.pop("tool_events", None)
-            receipts = _projection_receipts([
-                grouped for grouped in lines[group.start:group.stop]
-                if grouped.get("event") != "model_request"
-            ])
-            if receipts:
-                event["projection_receipts"] = receipts
-            if detail_ref is not None:
-                event["trace_detail"] = {
-                    "ref": detail_ref,
-                    "bytes": group.detail_bytes,
-                    "traceCount": group.trace_count,
-                }
+        if traces is not None and (group := traces.groups.get(index)) is not None:
+            traces.summarize(lines, group, event)
             deferred_until = group.stop
         events.append(event)
     return events, fork_boundary_event_index
@@ -1779,13 +1340,13 @@ def build_session_thread_response(
                     "activity" if record["event"] == "file_edit" or record.get("kind") in {"progress", "tool_hint"}
                     else "answer",
                 "created_at_ms": created_at_ms,
-                _WEBUI_REPLAY_IDENTITY_KEY: f"session:{session.key}:{index}:{offset}",
+                WEBUI_REPLAY_IDENTITY_KEY: f"session:{session.key}:{index}:{offset}",
             })
             rows.append(record)
     if not active and rows:
         rows.append({"event": "turn_end", "chat_id": chat_id,
                      "turn_id": turn_id, "latency_ms": latency_ms,
-                     _WEBUI_REPLAY_IDENTITY_KEY: f"session:{session.key}:end"})
+                     WEBUI_REPLAY_IDENTITY_KEY: f"session:{session.key}:end"})
     events = [event for record in rows if (event := _client_projection_event(
         record, augment_user_media=augment_user_media, augment_assistant_media=augment_assistant_media,
         augment_assistant_text=augment_assistant_text,
@@ -1818,9 +1379,11 @@ def build_webui_thread_response(
 ) -> dict[str, Any] | None:
     """Return canonical events, hiding additive request events from old clients."""
     replay_stats = stats or TranscriptReplayStats()
-    lines, page = _select_transcript_page(
+    lines, page = select_transcript_page(
         history=history,
-        limit=limit,
+        page_limit=_coerce_page_limit(limit),
+        max_records=_MAX_TRANSCRIPT_PAGE_RECORDS,
+        max_bytes=_MAX_TRANSCRIPT_PAGE_BYTES,
         before=before,
         after=after,
         stats=replay_stats,
@@ -1837,20 +1400,64 @@ def build_webui_thread_response(
             session_turns = _session_backfill_turns(session_key, session_messages or [])
         return session_turns
 
-    if _needs_user_event_backfill(lines):
+    record_range = page.get("record_range")
+    fragment = record_range is not None
+    ref = next(history.turns(after=record_range["turn"], before=record_range["turn"] + 1), None) if record_range else None
+    needs_backfill = (
+        history.has_missing_input_references(ref.ordinal)
+        or (ref.user_count == 0 and record_range["start"] == 0 and history.has_navigation_answer(ref.ordinal))
+    ) if ref is not None and record_range is not None else _needs_user_event_backfill(lines, history, legacy=not fragment)
+    backfill_plan: dict[int, list[tuple[int, dict[str, Any]]]] = {}
+    if needs_backfill:
         view, _ = _prompt_view_snapshot(
             session_key, history=history, session_turns_loader=load_session_turns,
             session_version_loader=session_version_loader,
         )
+        backfill_plan = view.backfill_plan
         recovered_lines: list[dict[str, Any]] = []
-        selected_turns = _split_transcript_turns(lines)
-        for turn in selected_turns:
-            # Page selection assigns this absolute identity before any recovery.
-            ordinal = int(turn[0][_WEBUI_REPLAY_IDENTITY_KEY].split(":")[1])
-            user = view.backfilled_users.get(ordinal)
-            recovered_lines.extend(_with_backfilled_user(turn, user) if user is not None else turn)
+        for turn in split_transcript_turns(lines):
+            first_identity = parse_replay_identity(turn[0].get(WEBUI_REPLAY_IDENTITY_KEY))
+            if first_identity is None:
+                recovered_lines.extend(turn)
+                continue
+            ordinal = first_identity[0]
+            for anchor, user in backfill_plan.get(ordinal, []):
+                if record_range is not None and not record_range["start"] <= anchor < record_range["end"]:
+                    continue
+                index = next((i for i, record in enumerate(turn)
+                              if (parsed := parse_replay_identity(record.get(WEBUI_REPLAY_IDENTITY_KEY))) is not None
+                              and parsed[0] == ordinal
+                              and parsed[1] >= anchor), len(turn))
+                turn.insert(index, dict(user))
+            recovered_lines.extend(turn)
         lines = recovered_lines
-    if _needs_incomplete_turn_recovery(lines):
+    if record_range is not None:
+        if ref is not None and ref.user_count == 1:
+            ordinal = ref.ordinal
+            terminal = record_range["end"] == ref.record_count
+            if terminal:
+                incomplete = bool(lines and lines[-1].get("event") == "turn_end"
+                                  and lines[-1].get(WEBUI_TRANSCRIPT_INCOMPLETE_KEY) is True)
+            else:
+                incomplete = history.incomplete_completion_marker(ordinal, ref.record_count - 1)
+            if incomplete and (position := history.unique_user_position(ordinal)) is not None:
+                identity = f"turn:{ordinal}:record:{position}"
+                user = next((record for record in lines if record.get(WEBUI_REPLAY_IDENTITY_KEY) == identity), None)
+                if user is None:
+                    records, _, _, _ = turn_record_page(
+                        history, ordinal, start=position, end=position + 1, reverse=False,
+                        max_records=1, max_bytes=_MAX_TRANSCRIPT_PAGE_BYTES, allow_oversized=True,
+                    )
+                    if records:
+                        user = records[0]
+                if user is not None:
+                    users = [user, *(item for _, item in backfill_plan.get(ordinal, []))]
+                    session_turn = _find_recoverable_session_turn(load_session_turns(), users)
+                    if session_turn is not None:
+                        lines = _recover_incomplete_fragment(lines, session_turn, terminal=terminal)
+                        if terminal:
+                            page["recovered_answers"] = True
+    elif _needs_incomplete_turn_recovery(lines):
         lines = _recover_incomplete_turns(lines, load_session_turns())
     bang_inputs = {
         record.get("turn_id") for record in lines
@@ -1863,7 +1470,7 @@ def build_webui_thread_response(
         and record.get("render_as") != "text" and record.get("turn_id") in bang_inputs
         and isinstance(record.get("turn_id"), str)
     }
-    if legacy_shell_candidates:
+    if legacy_shell_candidates and not fragment:
         if session_messages is None and session_messages_loader is not None:
             session_messages = session_messages_loader()
         shell_turns = {
@@ -1877,7 +1484,7 @@ def build_webui_thread_response(
             and record.get("turn_id") in shell_turns else record
             for record in lines
         ]
-    lines = _ensure_replay_identities(lines)
+    lines = ensure_replay_identities(lines)
     payload: dict[str, Any] = {
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,
         "sessionKey": session_key,
@@ -1898,10 +1505,10 @@ def build_webui_thread_response(
         augment_user_media=augment_user_media,
         augment_assistant_media=augment_assistant_media,
         augment_assistant_text=augment_assistant_text,
+        defer_traces=not fragment,
     )
     if not include_model_requests:
-        # Select pages and stable identities before capability filtering, so an
-        # older client's cursors still navigate the same durable transcript.
+        # Select pages and stable identities before filtering request telemetry.
         if fork_boundary_event_index is not None:
             fork_boundary_event_index = sum(
                 event["event"] != "model_request" for event in events[:fork_boundary_event_index]
@@ -1918,6 +1525,7 @@ def build_webui_thread_response(
 
 
 class PromptSummary(TypedDict):
+    inputId: str
     id: str
     preview: str
     answerPreview: str
@@ -1931,16 +1539,20 @@ class _BackfillCandidate(NamedTuple):
     signature: str
     answer_preview: str
     has_user: bool
+    input_ids: tuple[str, ...] | None
 
 
 class _ChunkPromptView(NamedTuple):
     prompts: tuple[PromptSummary, ...]
     candidates: tuple[_BackfillCandidate, ...]
+    input_ids: frozenset[str]
+    answers: dict[str, str]
+    turns: dict[int, list[dict[str, Any]]]
 
 
 class _PromptView(NamedTuple):
     prompts: tuple[PromptSummary, ...]
-    backfilled_users: dict[int, dict[str, Any]]
+    backfill_plan: dict[int, list[tuple[int, dict[str, Any]]]]
     needs_canonical: bool
 
 
@@ -1955,13 +1567,16 @@ def prompt_index_revision(session_key: str, session_version: tuple[str, int] | N
     return webui_transcript_revision(session_key, history=history, variant={"session_version": session_version})
 
 
-def _prompt_summary(record: dict[str, Any], ordinal: int, answer: str) -> PromptSummary:
+def _prompt_summary(
+    record: dict[str, Any], ordinal: int, answer: str, position: int = 0,
+) -> PromptSummary:
     return {
-        "id": _client_projection_event_id(record),
+        "id": projection_event_id(record),
+        "inputId": str(record.get("input_id") or ""),
         "preview": str(record.get("text") or "").strip()[:320],
         "answerPreview": answer,
         "createdAt": _valid_created_at_ms(record.get("created_at_ms")) or 0,
-        "cursor": _encode_page_cursor(ordinal),
+        "cursor": encode_page_cursor(ordinal, position),
         "turnId": str(record.get("turn_id") or ""),
     }
 
@@ -1969,32 +1584,46 @@ def _prompt_summary(record: dict[str, Any], ordinal: int, answer: str) -> Prompt
 def _history_prompt_summaries(history: HistoryReader) -> _ChunkPromptView:
     result: list[PromptSummary] = []
     candidates: list[_BackfillCandidate] = []
+    input_ids: set[str] = set()
+    answers: dict[str, str] = {}
+    response_inputs: dict[int, list[str]] = {}
     turns: dict[int, list[dict[str, Any]]] = {}
     for ordinal, position, fact in history.navigation():
         record = record_from_fact(fact, history.key)
-        record[_WEBUI_REPLAY_IDENTITY_KEY] = f"turn:{ordinal}:record:{position}"
+        record[WEBUI_REPLAY_IDENTITY_KEY] = f"turn:{ordinal}:record:{position}"
         turns.setdefault(ordinal, []).append(record)
+        if record.get("event") in {"message", "stream_end"} and not record.get("kind"):
+            if isinstance(references := record.get("response_input_ids"), list):
+                identifiers = [value for value in cast(list[object], references) if isinstance(value, str) and value]
+                response_inputs.setdefault(ordinal, []).extend(identifiers)
+                answer = str(record.get("text") or "").strip()[:240]
+                if answer:
+                    for input_id in identifiers:
+                        answers.setdefault(input_id, answer)
     for ordinal, records in turns.items():
         has_user = any(record.get("event") == "user" for record in records)
         signature = _transcript_turn_signature(records)
-        candidates.append(_BackfillCandidate(ordinal, _assistant_signature_identity(signature),
-                                             signature[0][:240] if signature else "", has_user))
-        seen_turns: set[str] = set()
+        candidates.append(_BackfillCandidate(
+            ordinal, _assistant_signature_identity(signature),
+            signature[0][:240] if signature else "", has_user,
+            tuple(dict.fromkeys(response_inputs[ordinal])) if ordinal in response_inputs else None,
+        ))
         seen_messages: set[str] = set()
         for index, record in enumerate(records):
             if record.get("event") != "user":
                 continue
-            turn_id = str(record.get("turn_id") or "")
+            position = int(record[WEBUI_REPLAY_IDENTITY_KEY].rsplit(":", 1)[1])
+            input_id = record.get("input_id")
+            if isinstance(input_id, str) and input_id:
+                input_ids.add(input_id)
+                result.append(_prompt_summary(record, ordinal, answers.get(input_id, ""), position))
+                continue
             provenance = normalize_session_message_ui_metadata(record.get("session_message"))
             if provenance:
                 message_id = str(provenance["message_id"])
                 if message_id in seen_messages:
                     continue
                 seen_messages.add(message_id)
-            elif turn_id and turn_id in seen_turns:
-                continue
-            if turn_id:
-                seen_turns.add(turn_id)
             answer = ""
             for following in records[index + 1:]:
                 if following.get("event") == "user":
@@ -2003,8 +1632,8 @@ def _history_prompt_summaries(history: HistoryReader) -> _ChunkPromptView:
                     answer = str(following.get("text") or "").strip()[:240]
                     if answer:
                         break
-            result.append(_prompt_summary(record, ordinal, answer))
-    return _ChunkPromptView(tuple(result), tuple(candidates))
+            result.append(_prompt_summary(record, ordinal, answer, position))
+    return _ChunkPromptView(tuple(result), tuple(candidates), frozenset(input_ids), answers, turns)
 
 
 def _build_prompt_view(
@@ -2016,19 +1645,45 @@ def _build_prompt_view(
     raw_prompts = list(chunk.prompts)
     candidates = list(chunk.candidates)
     session_turns = None
-    needs_canonical = any(not candidate.has_user and candidate.signature for candidate in candidates)
+    needs_canonical = any(
+        not set(candidate.input_ids).issubset(chunk.input_ids)
+        if candidate.input_ids is not None else not candidate.has_user and bool(candidate.signature)
+        for candidate in candidates
+    )
     if needs_canonical and session_turns_loader is not None:
         session_turns = session_turns_loader()
     entries: list[tuple[int, PromptSummary, dict[str, Any] | None]] = [
-        (decode_transcript_cursor(prompt["cursor"]) or 0, prompt, None) for prompt in raw_prompts
+        (cursor.turn if (cursor := decode_transcript_cursor(prompt["cursor"])) else 0, prompt, None)
+        for prompt in raw_prompts
     ]
     session_cursor = 0
     signature_positions: dict[str, list[int]] = {}
     for position, turn in enumerate(session_turns or []):
         signature_positions.setdefault(_assistant_signature_identity(turn.assistant_signature), []).append(position)
+    canonical_inputs = {
+        user["input_id"]: user
+        for turn in session_turns or []
+        for user in (turn.user_event,)
+        if isinstance(user.get("input_id"), str)
+    }
+    represented = set(chunk.input_ids)
+    # Identity references take precedence over legacy answer matching, even when
+    # the matching legacy answer occurs earlier in the display history.
+    reserved = {input_id for candidate in candidates for input_id in candidate.input_ids or ()
+                if input_id in canonical_inputs}
+    used_positions: set[int] = set()
     for candidate in candidates:
         if not session_turns:
             break
+        if candidate.input_ids is not None:
+            for input_id in candidate.input_ids:
+                if input_id in represented or input_id not in canonical_inputs:
+                    continue
+                user = dict(canonical_inputs[input_id])
+                summary = _prompt_summary(user, candidate.ordinal, chunk.answers.get(input_id, ""))
+                entries.append((candidate.ordinal, summary, user))
+                represented.add(input_id)
+            continue
         positions = signature_positions.get(candidate.signature)
         if not candidate.signature or not positions:
             continue
@@ -2042,15 +1697,46 @@ def _build_prompt_view(
         if candidate.has_user:
             continue
         user = dict(session_turns[match].user_event)
+        if match in used_positions or user.get("input_id") in represented or user.get("input_id") in reserved:
+            continue
+        used_positions.add(match)
+        if isinstance(input_id := user.get("input_id"), str) and input_id:
+            represented.add(input_id)
         summary = _prompt_summary(user, candidate.ordinal, candidate.answer_preview)
         entries.append((candidate.ordinal, summary, user))
-    prompts: list[PromptSummary] = []
-    backfilled_users: dict[int, dict[str, Any]] = {}
-    for ordinal, prompt, user in sorted(entries, key=lambda entry: entry[0]):
-        prompts.append(prompt)
+    backfilled_users: dict[int, list[dict[str, Any]]] = {}
+    for ordinal, _, user in entries:
         if user is not None:
-            backfilled_users[ordinal] = user
-    return _PromptView(tuple(prompts), backfilled_users, needs_canonical)
+            backfilled_users.setdefault(ordinal, []).append(user)
+    order: dict[tuple[int, str], int] = {}
+    plan: dict[int, list[tuple[int, dict[str, Any]]]] = {}
+    for ordinal, records in chunk.turns.items():
+        users = backfilled_users.get(ordinal, [])
+        recovered_ids = {projection_event_id(user) for user in users}
+        for user in users:
+            records = _with_backfilled_user(records, user)
+        next_anchor = 2**63 - 1
+        reverse_plan: list[tuple[int, dict[str, Any]]] = []
+        for position in range(len(records) - 1, -1, -1):
+            record = records[position]
+            identity = record.get(WEBUI_REPLAY_IDENTITY_KEY, "")
+            if identity.startswith(f"turn:{ordinal}:record:"):
+                next_anchor = int(identity.rsplit(":", 1)[1])
+            if record.get("event") == "user":
+                event_id = projection_event_id(record)
+                order[(ordinal, event_id)] = position
+                if event_id in recovered_ids:
+                    anchor = next_anchor if any("response_input_ids" in item for item in records) else 0
+                    reverse_plan.append((anchor, record))
+        if reverse_plan:
+            plan[ordinal] = list(reversed(reverse_plan))
+    for ordinal, prompt, user in entries:
+        if user is not None:
+            anchor = next(anchor for anchor, record in plan[ordinal]
+                          if projection_event_id(record) == prompt["id"])
+            prompt["cursor"] = encode_page_cursor(ordinal, anchor)
+    entries.sort(key=lambda entry: (entry[0], order.get((entry[0], entry[1]["id"]), 0)))
+    return _PromptView(tuple(prompt for _, prompt, _ in entries), plan, needs_canonical)
 
 
 def build_prompt_index(

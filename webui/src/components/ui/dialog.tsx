@@ -7,6 +7,7 @@ import {
   modalOverlayClassName,
   modalSurfaceClassName,
 } from "@/components/ui/floating-surface";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 import { FloatingPortalContext } from "@/components/ui/floating-portal";
 
@@ -24,7 +25,7 @@ const DialogOverlay = React.forwardRef<
     ref={ref}
     className={cn(
       modalOverlayClassName,
-      "duration-200 motion-reduce:animate-none",
+      "duration-200 motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none",
       className,
     )}
     {...props}
@@ -47,6 +48,7 @@ const DialogPositionedContent = React.forwardRef<
     overlayClassName?: string;
   }
 >(({ contained, positionerStyle, placement, overlayClassName, ...props }, ref) => {
+  const surfaceRef = useOverlaySurfaceRef("dialog", ref);
   const Overlay = contained ? "div" : DialogOverlay;
   return <Overlay data-dialog-backdrop {...(contained ? {} : { forceMount: true })} className={cn(contained && "absolute inset-0 z-50", overlayClassName)}>
   <div className={cn("fixed inset-0 z-50 flex items-start justify-center overscroll-contain", placement === "bottom" ? "overflow-clip" : "overflow-y-auto p-4", contained && "absolute")} style={{
@@ -55,7 +57,7 @@ const DialogPositionedContent = React.forwardRef<
     bottom: "auto",
     ...(contained ? { top: 0, height: "100%" } : positionerStyle),
   }}>
-    <DialogPrimitive.Content ref={ref} {...props} />
+    <DialogPrimitive.Content ref={surfaceRef} {...props} />
   </div>
   </Overlay>;
 });
@@ -209,9 +211,9 @@ const DialogContent = React.forwardRef<
           }}
           className={cn(
             modalSurfaceClassName,
-            "relative grid w-full max-w-lg gap-4 p-6 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 motion-reduce:animate-none",
+            "relative grid w-full max-w-lg gap-4 p-6 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none",
             placement === "bottom"
-              ? "mt-auto max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-modal pb-[max(1rem,env(safe-area-inset-bottom))] data-[state=open]:slide-in-from-bottom-full data-[state=closed]:slide-out-to-bottom-full ease-[cubic-bezier(0.2,0,0,1)] duration-300"
+              ? "mt-auto max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-modal pb-[max(1rem,env(safe-area-inset-bottom))] data-[state=open]:slide-in-from-bottom-full data-[state=closed]:slide-out-to-bottom-full [animation-timing-function:cubic-bezier(0.2,0,0,1)] duration-300"
               : "my-auto origin-center rounded-modal data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
             className,
             placement === "bottom" && "pt-9 transition-none",

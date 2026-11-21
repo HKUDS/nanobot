@@ -235,8 +235,10 @@ class TestRestartCommand:
     @pytest.mark.asyncio
     async def test_status_reports_runtime_info(self):
         loop, _bus = _make_loop()
-        session = MagicMock()
-        session.get_history.return_value = [{"role": "user"}] * 3
+        session = Session("telegram:c1")
+        session.add_message("user", [{"type": "image_attachment", "id": "a" * 64}])
+        session.add_message("assistant", "Image received")
+        session.add_message("user", "Continue")
         session.metadata = {
             "_last_usage": LLMUsage.reported(input_tokens=0, output_tokens=0).to_dict()
         }
@@ -275,8 +277,8 @@ class TestRestartCommand:
     @pytest.mark.asyncio
     async def test_status_counts_running_dispatch_and_subagent_tasks(self):
         loop, _bus = _make_loop()
-        session = MagicMock()
-        session.get_history.return_value = [{"role": "user"}]
+        session = Session("telegram:c1")
+        session.add_message("user", "Hello")
         loop.sessions.state.get = AsyncMock(return_value=session)
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(1000, "tiktoken")
@@ -327,8 +329,8 @@ class TestRestartCommand:
     @pytest.mark.asyncio
     async def test_status_falls_back_to_session_usage_when_context_estimate_missing(self):
         loop, _bus = _make_loop()
-        session = MagicMock()
-        session.get_history.return_value = [{"role": "user"}]
+        session = Session("telegram:c1")
+        session.add_message("user", "Hello")
         session.metadata = {
             "_last_usage": LLMUsage.reported(input_tokens=1200, output_tokens=34).to_dict()
         }
@@ -348,98 +350,9 @@ class TestRestartCommand:
         assert "Tasks: 0 active" in response.content
 
     @pytest.mark.asyncio
-    async def test_history_shows_recent_messages(self):
-        loop, _bus = _make_loop()
-        session = MagicMock()
-        session.get_history.return_value = [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there!"},
-            {"role": "tool", "content": "tool result"},
-            {"role": "user", "content": "How are you?"},
-            {"role": "assistant", "content": "I am doing well."},
-        ]
-        loop.sessions.state.get = AsyncMock(return_value=session)
-
-        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history")
-        response = await loop._process_message(msg)
-
-        assert response is not None
-        assert "👤 You: Hello" in response.content
-        assert "🤖 Bot: Hi there!" in response.content
-        assert "tool result" not in response.content
-        assert response.metadata == {"render_as": "text"}
-
-    @pytest.mark.asyncio
-    async def test_history_respects_count_argument(self):
-        loop, _bus = _make_loop()
-        session = MagicMock()
-        session.get_history.return_value = [
-            {"role": "user", "content": f"message {i}"} for i in range(20)
-        ]
-        loop.sessions.state.get = AsyncMock(return_value=session)
-
-        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history 3")
-        response = await loop._process_message(msg)
-
-        assert response is not None
-        assert "Last 3 message(s)" in response.content
-        assert "message 19" in response.content
-        assert "message 0" not in response.content
-
-    @pytest.mark.asyncio
-    async def test_history_clamps_count_and_extracts_text_blocks(self):
-        loop, _bus = _make_loop()
-        session = MagicMock()
-        session.get_history.return_value = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "visible text"},
-                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
-                ],
-            },
-            *({"role": "assistant", "content": f"reply {i}"} for i in range(60)),
-        ]
-        loop.sessions.state.get = AsyncMock(return_value=session)
-
-        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history 999")
-        response = await loop._process_message(msg)
-
-        assert response is not None
-        assert "Last 50 message(s)" in response.content
-        assert "visible text" not in response.content
-        assert "reply 59" in response.content
-        assert "reply 9" not in response.content
-
-    @pytest.mark.asyncio
-    async def test_history_invalid_count_returns_usage(self):
-        loop, _bus = _make_loop()
-
-        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history nope")
-        response = await loop._process_message(msg)
-
-        assert response is not None
-        assert response.content.startswith("Usage: /history [count]")
-
-    @pytest.mark.asyncio
-    async def test_history_empty_session(self):
-        loop, _bus = _make_loop()
-        session = MagicMock()
-        session.get_history.return_value = []
-        loop.sessions.state.get = AsyncMock(return_value=session)
-
-        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history")
-        response = await loop._process_message(msg)
-
-        assert response is not None
-        assert "No conversation history yet." in response.content
-
-    @pytest.mark.asyncio
     async def test_process_direct_preserves_render_metadata(self):
         loop, _bus = _make_loop()
-        session = MagicMock()
-        session.get_history.return_value = []
-        loop.sessions.state.get = AsyncMock(return_value=session)
+        loop.sessions.state.get = AsyncMock(return_value=Session("cli:test"))
         loop.subagents.get_running_count.return_value = 0
         loop.subagents.get_running_count_by_session.return_value = 0
 

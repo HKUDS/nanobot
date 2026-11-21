@@ -26,7 +26,9 @@ def configured_override(monkeypatch):
     def construct(owned, *, preset, model=None):
         factory.validate_provider_setup(owned, preset=preset, model=model)
         provider = MagicMock(spec=LLMProvider)
+        provider._image_input_error.return_value = None
         provider.generation = preset.to_generation_settings()
+        provider.supports_images = preset.supports_images
         provider.provider_name = owned.get_provider_name(preset=preset)
         provider.get_default_model.return_value = model or preset.model
         provider.chat = AsyncMock(return_value=LLMResponse(content="ok"))

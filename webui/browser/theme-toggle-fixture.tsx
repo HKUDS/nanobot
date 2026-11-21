@@ -9,19 +9,21 @@ import type { ChatSummary, UIMessage } from "@/lib/types";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
+import { StarPromptView } from "@/components/StarPromptView";
+import { Button } from "@/components/ui/button";
 
 export function ThemeToggleFixture() {
   const { theme, toggle } = useTheme();
   return (
     <ThemeProvider theme={theme}>
-      {new URLSearchParams(location.search).has("chat") ? <ThemeChatFixture theme={theme} toggle={toggle} /> : (
+      {new URLSearchParams(location.search).has("star") ? <ThemeInvitationFixture toggle={toggle} /> : new URLSearchParams(location.search).has("chat") ? <ThemeChatFixture theme={theme} toggle={toggle} /> : (
         <main data-theme-surface className="thread-workspace relative flex flex-col justify-center gap-8 bg-background px-6" style={{ height: "100vh" }}>
           <div className="absolute inset-x-0 top-0">
             <ThreadHeader title="Theme preview" hideTitle theme={theme} onToggleTheme={toggle} onToggleSidebar={() => {}} />
           </div>
           <div className="workbench-body">
             <section data-theme-surface className="workbench-pane flex flex-col gap-8 bg-background">
-              <h1 data-testid="hero-greeting" data-theme-ink className="text-center text-4xl text-foreground">Where should we start?</h1>
+              <h1 data-theme-ink className="text-center text-4xl text-foreground">Theme preview</h1>
               <ThreadComposer variant="hero" onSend={() => {}} />
             </section>
           </div>
@@ -29,6 +31,16 @@ export function ThemeToggleFixture() {
       )}
     </ThemeProvider>
   );
+}
+
+function ThemeInvitationFixture({ toggle }: { toggle: () => void }) {
+  const [open, setOpen] = useState(false);
+  return <main className="flex h-full flex-col items-center justify-center gap-4 bg-background">
+    <Button onClick={toggle}>Toggle theme</Button>
+    <Button onClick={() => setOpen(true)}>Open invitation</Button>
+    <StarPromptView open={open} saving={false} error={false} onOpenChange={setOpen}
+      onDismissForever={() => setOpen(false)} onStar={() => {}} />
+  </main>;
 }
 
 const sessions: ChatSummary[] = ["Theme chat", "Another chat"].map((title, index) => ({
@@ -51,11 +63,11 @@ function ThemeChatFixture({ theme, toggle }: { theme: "light" | "dark"; toggle: 
   if (new URLSearchParams(location.search).has("split")) panes.push({ key: "theme-secondary", title: "Secondary chat" });
   return <main data-theme-surface className="flex bg-background" style={{ height: "100vh" }}>
     <aside className="hidden w-64 shrink-0 sm:block">
-      <Sidebar sessions={sessions} activeKey={activeKey} onSelect={setActiveKey} loading={false} newChatActive={false}
+      <Sidebar sessions={sessions} activeKey={activeKey} onSelect={setActiveKey} loading={false}
         onNewChat={noop} onRequestDelete={noop} onTogglePin={noop} onRequestRename={async () => {}}
         onToggleArchive={noop} onToggleGroup={noop} onRequestRenameProject={noop} onNewChatInProject={noop}
-        onOpenSettings={noop} onOpenApps={noop} onOpenSkills={noop} onOpenAutomations={noop}
-        onOpenChannels={noop} onOpenSearch={noop} onToggleArchived={noop} />
+        onOpenSettings={noop} onOpenApps={noop} onOpenAutomations={noop}
+        onOpenSearch={noop} onToggleArchived={noop} />
     </aside>
     <div className="min-w-0 flex-1">
       <PaneWorkbench panes={panes} activePaneKey="theme" layout="columns"

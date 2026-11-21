@@ -251,7 +251,7 @@ def test_v4_archive_upgrade_removes_orphans_and_preserves_existing_membership(tm
             db.execute("INSERT INTO storage_meta (key, value) VALUES ('session_archives_imported', '1')")
     store.initialize(workspace)
     store.initialize(workspace)
-    assert _database_snapshot(store.path)[0] == 4
+    assert _database_snapshot(store.path)[0] == len(sqlite_store._SCHEMA_MIGRATIONS)
     assert store.archived_keys() == ["chat:empty-fork", "chat:extensions"]
     assert store.archives_imported()
     assert store.load("chat:extensions") == original

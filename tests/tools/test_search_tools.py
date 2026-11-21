@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
 import re
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -19,6 +21,8 @@ from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import WebSearchConfig
+from nanobot.execution import files as file_execution
+from nanobot.execution.files import FileSearch, WorkspaceFiles
 from nanobot.providers.base import GenerationSettings
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
@@ -128,6 +132,109 @@ async def test_find_files_supports_modified_sort_and_pagination(tmp_path: Path) 
     assert "pagination: limit=1, offset=1" in result
 
 
+async def test_find_files_modified_order_uses_only_authorized_link_timestamps(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for name, timestamp in (("target.txt", 20), ("z.txt", 20), ("other.txt", 10)):
+        path = workspace / name
+        path.write_text("ordinary\n", encoding="utf-8")
+        os.utime(path, (timestamp, timestamp))
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    os.utime(outside, (30, 30))
+    try:
+        (workspace / "alias.txt").symlink_to(workspace / "target.txt")
+        (workspace / "private.txt").symlink_to(outside)
+    except (NotImplementedError, OSError):
+        pytest.skip("symlinks unavailable")
+
+    tool = FindFilesTool(workspace=workspace, allowed_dir=workspace)
+    result = await tool.execute(sort="modified", head_limit=0)
+    assert result.splitlines() == ["alias.txt", "target.txt", "z.txt", "other.txt", "private.txt"]
+    sparse = await tool.execute(sort="modified", glob="{alias,private}.txt", head_limit=0)
+    assert sparse.splitlines() == ["alias.txt", "private.txt"]
+
+
+@pytest.mark.skipif(os.open not in os.supports_dir_fd, reason="requires native directory handles")
+async def test_find_files_discards_timestamps_when_open_directory_is_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    parent = workspace / "parent"
+    directory = parent / "src"
+    directory.mkdir(parents=True)
+    for name in ("a.txt", "b.txt", "c.txt", "d.txt"):
+        file = directory / name
+        file.write_text("inside\n", encoding="utf-8")
+        os.utime(file, (30, 30))
+    stable = workspace / "stable.txt"
+    stable.write_text("inside\n", encoding="utf-8")
+    os.utime(stable, (20, 20))
+
+    outside = tmp_path / "outside"
+    (outside / "src").mkdir(parents=True)
+    sentinel = outside / "src" / "a.txt"
+    sentinel.write_text("outside\n", encoding="utf-8")
+    os.utime(sentinel, (40, 40))
+    original = FileSearch._open_search_directory
+
+    @contextmanager
+    def replace_after_open(tree, path):
+        with original(tree, path) as fd:
+            if path == directory:
+                parent.rename(workspace / "moved")
+                parent.symlink_to(outside, target_is_directory=True)
+            yield fd
+
+    monkeypatch.setattr(FileSearch, "_open_search_directory", replace_after_open)
+    tool = FindFilesTool(workspace=workspace, allowed_dir=workspace)
+    result = await tool.execute(sort="modified", head_limit=0)
+    assert result.splitlines() == [
+        "stable.txt", "parent/src/a.txt", "parent/src/b.txt", "parent/src/c.txt", "parent/src/d.txt",
+    ]
+
+
+@pytest.mark.skipif(os.open not in os.supports_dir_fd, reason="requires native directory handles")
+async def test_find_files_modified_cancellation_closes_directory_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for i in range(4):
+        (tmp_path / f"{i}.txt").write_text("ordinary\n", encoding="utf-8")
+    opened = threading.Event()
+    resume = threading.Event()
+    closed = threading.Event()
+    original = FileSearch._open_search_directory
+
+    @contextmanager
+    def pause_after_open(tree, path):
+        fd = None
+        try:
+            with original(tree, path) as fd:
+                opened.set()
+                if not resume.wait(timeout=3):
+                    raise TimeoutError("scan was not released")
+                yield fd
+        finally:
+            if fd is not None:
+                try:
+                    os.fstat(fd)
+                except OSError as exc:
+                    if exc.errno == errno.EBADF:
+                        closed.set()
+
+    monkeypatch.setattr(FileSearch, "_open_search_directory", pause_after_open)
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    task = asyncio.create_task(tool.execute(sort="modified"))
+    try:
+        assert await asyncio.to_thread(opened.wait, 2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        resume.set()
+    assert await asyncio.to_thread(closed.wait, 2)
+
+
 @pytest.mark.asyncio
 async def test_find_files_rejects_paths_outside_workspace(tmp_path: Path) -> None:
     outside = tmp_path.parent / "outside-find-files.txt"
@@ -167,11 +274,11 @@ async def test_find_files_scan_keeps_event_loop_responsive(
     started = threading.Event()
     release = threading.Event()
 
-    def blocking_iter_paths(root: Path, *, include_dirs: bool, budget):
+    def blocking_iter_paths(tree, **kwargs):
         started.set()
         if not release.wait(timeout=1):
             raise TimeoutError("test did not release find_files traversal")
-        yield from original_iter_paths(root, include_dirs=include_dirs, budget=budget)
+        yield from original_iter_paths(tree, **kwargs)
 
     monkeypatch.setattr(tool, "_iter_paths", blocking_iter_paths)
     task = asyncio.create_task(tool.execute(path="."))
@@ -186,6 +293,136 @@ async def test_find_files_scan_keeps_event_loop_responsive(
     assert await asyncio.wait_for(task, timeout=0.5) == "match.txt"
 
 
+@pytest.mark.parametrize("native", [True, False])
+async def test_grep_authorizes_the_targets_of_links_found_during_traversal(tmp_path: Path, monkeypatch, native):
+    if not native:
+        monkeypatch.setattr(file_execution, "_supports_directory_handles", lambda: False)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    inside = workspace / "a.txt"
+    inside.write_text("needle allowed", encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("needle outside contents", encoding="utf-8")
+    try:
+        (workspace / "inside-link.txt").symlink_to(inside)
+        (workspace / "outside-link.txt").symlink_to(outside)
+    except (NotImplementedError, OSError):
+        pytest.skip("symlinks unavailable")
+
+    tool = GrepTool(workspace=workspace, allowed_dir=workspace)
+    result = await tool.execute(pattern="needle", fixed_strings=True)
+    assert "inside-link.txt" in result
+    assert "needle allowed" in result
+    assert "needle outside contents" not in result
+
+
+async def test_grep_discards_results_when_unpinned_directory_is_replaced(tmp_path, monkeypatch):
+    workspace = (tmp_path / "workspace").resolve()
+    directory = workspace / "src"
+    directory.mkdir(parents=True)
+    for name in ("a.txt", "b.txt"):
+        (directory / name).write_text("needle inside\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a.txt").write_text("needle outside\n", encoding="utf-8")
+    try:
+        link = workspace / "replacement"
+        link.symlink_to(outside, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("symlinks unavailable")
+    monkeypatch.setattr(file_execution, "_supports_directory_handles", lambda: False)
+    original = FileSearch._check_search_directory
+
+    @contextmanager
+    def replace_after_check(tree, path):
+        with original(tree, path):
+            if path == directory:
+                directory.rename(tmp_path / "moved")
+                link.rename(directory)
+            yield
+
+    monkeypatch.setattr(FileSearch, "_check_search_directory", replace_after_check)
+    tool = GrepTool(workspace=workspace, allowed_dir=workspace)
+    result = await tool.execute(pattern="needle", path="src")
+    assert result == "Error: Search directory changed during the scan; retry the search."
+
+
+@pytest.mark.skipif(os.open not in os.supports_dir_fd, reason="requires native directory handles")
+async def test_grep_discards_partial_results_when_a_pinned_directory_moves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = (tmp_path / "workspace").resolve()
+    directory = workspace / "src"
+    directory.mkdir(parents=True)
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (directory / name).write_text("needle inside\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "b.txt").write_text("needle outside\n", encoding="utf-8")
+    original = FileSearch._open_search_directory
+
+    @contextmanager
+    def replace_after_open(tree, path):
+        with original(tree, path) as fd:
+            if path == directory:
+                directory.rename(tmp_path / "moved")
+                directory.symlink_to(outside, target_is_directory=True)
+            yield fd
+
+    monkeypatch.setattr(FileSearch, "_open_search_directory", replace_after_open)
+    tool = GrepTool(workspace=workspace, allowed_dir=workspace)
+    # The first result is already buffered when the second file pins the parent.
+    # Even a page that stops early must not return the old directory's results.
+    result = await tool.execute(pattern="needle", head_limit=1)
+    assert result == "Error: Search directory changed during the scan; retry the search."
+
+
+async def test_exact_read_grant_does_not_authorize_a_directory_tree(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    grant = tmp_path / "history.jsonl"
+    options = {
+        "workspace": workspace,
+        "allowed_dir": workspace,
+        "extra_read_allowed_files": [grant],
+    }
+    grant.write_text("needle history", encoding="utf-8")
+    grep = GrepTool(**options)
+    assert "needle history" in await grep.execute(pattern="needle", path=str(grant))
+
+    grant.unlink()
+    grant.mkdir()
+    (grant / "private.txt").write_text("needle private", encoding="utf-8")
+    result = await grep.execute(pattern="needle", path=str(grant))
+    assert "outside allowed directory" in result
+    assert "needle private" not in result
+
+
+async def test_search_cannot_expand_exact_file_grant_after_file_becomes_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    grant = tmp_path / "history.jsonl"
+    grant.write_text("needle history", encoding="utf-8")
+    resolve_read = WorkspaceFiles._read_path
+
+    def replace_after_grant(files, path, **kwargs):
+        target = resolve_read(files, path, **kwargs)
+        if target == grant.resolve() and target.is_file():
+            target.unlink()
+            target.mkdir()
+            (target / "private.txt").write_text("needle private", encoding="utf-8")
+        return target
+
+    monkeypatch.setattr(WorkspaceFiles, "_read_path", replace_after_grant)
+    tool = GrepTool(workspace=workspace, allowed_dir=workspace, extra_read_allowed_files=[grant])
+    result = await tool.execute(pattern="needle", path=str(grant))
+    assert is_tool_error_result(result)
+    assert "outside allowed directory" in result
+    assert "needle private" not in result
+
+
 @pytest.mark.asyncio
 async def test_find_files_cancellation_stops_worker_scan(
     tmp_path: Path,
@@ -195,8 +432,7 @@ async def test_find_files_cancellation_stops_worker_scan(
     started = threading.Event()
     stopped = threading.Event()
 
-    def cancellable_iter_paths(root: Path, *, include_dirs: bool, budget):
-        del root, include_dirs
+    def cancellable_iter_paths(_tree, *, budget, **_kwargs):
         started.set()
         if not budget.cancelled.wait(timeout=1):
             raise TimeoutError("find_files worker did not receive cancellation")
@@ -226,12 +462,11 @@ async def test_find_files_path_limit_stops_after_pagination_lookahead(
     tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
     visited: list[str] = []
 
-    def ordered_iter_paths(root: Path, *, include_dirs: bool, budget):
-        del include_dirs
+    def ordered_iter_paths(_tree, *, entry_for, budget, **_kwargs):
         for path in paths:
             budget.checkpoint()
             visited.append(path.name)
-            yield tool._entry(path, root, is_dir=False)
+            yield entry_for(path, False)
 
     monkeypatch.setattr(tool, "_iter_paths", ordered_iter_paths)
     result = await tool.execute(path=".", head_limit=1)
@@ -242,16 +477,18 @@ async def test_find_files_path_limit_stops_after_pagination_lookahead(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("sort", ["path", "modified"])
 async def test_find_files_path_budget_counts_directories(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    sort: str,
 ) -> None:
     (tmp_path / "one").mkdir()
     (tmp_path / "two").mkdir()
     monkeypatch.setattr(FindFilesTool, "_MAX_SCAN_PATHS", 1)
     tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
 
-    result = await tool.execute(path=".")
+    result = await tool.execute(path=".", sort=sort)
 
     assert result.startswith("Error: find_files scan exceeded 1 paths")
 
@@ -441,6 +678,37 @@ async def test_grep_searches_pdf_with_page_locator(tmp_path: Path) -> None:
 
     assert "notes.pdf:2 [page=1,line=1]" in result
     assert "pdf needle" in result
+
+
+@pytest.mark.parametrize(("suffix", "locator"), [
+    (".pdf", "[page=1,line=1]"),
+    (".xlsx", "[sheet='Sheet',row=1,cell=A1]"),
+])
+async def test_grep_uses_document_link_name_for_format(tmp_path: Path, suffix: str, locator: str) -> None:
+    target = tmp_path / "stored-content"
+    link = tmp_path / f"manual{suffix}"
+    if suffix == ".pdf":
+        import fitz
+
+        with fitz.open() as document:
+            document.new_page().insert_text((72, 72), "document needle")
+            document.save(target)
+    else:
+        from openpyxl import Workbook
+
+        workbook = Workbook()
+        workbook["Sheet"]["A1"] = "document needle"
+        workbook.save(target)
+        workbook.close()
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError):
+        pytest.skip("symlinks unavailable")
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(pattern="document needle", path=".", glob=f"*{suffix}", fixed_strings=True)
+    assert f"{link.name}:2 {locator}" in result
+    assert "document needle" in result
 
 
 @pytest.mark.asyncio
@@ -647,26 +915,29 @@ async def test_grep_files_with_matches_mode_returns_unique_paths(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_grep_files_with_matches_supports_head_limit_and_offset(tmp_path: Path) -> None:
+@pytest.mark.parametrize("mode", ["files_with_matches", "count"])
+async def test_grep_ranked_modes_preserve_order_and_totals_when_paging(tmp_path: Path, mode: str) -> None:
     (tmp_path / "src").mkdir()
-    for name in ("a.py", "b.py", "c.py"):
-        (tmp_path / "src" / name).write_text("needle\n", encoding="utf-8")
+    for name, mtime, matches in (("c.py", 2, 3), ("b.py", 2, 2), ("a.py", 1, 1)):
+        path = tmp_path / "src" / name
+        path.write_text("needle\n" * matches, encoding="utf-8")
+        os.utime(path, (mtime, mtime))
 
     tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
     result = await tool.execute(
         pattern="needle",
         path="src",
-        output_mode="files_with_matches",
+        output_mode=mode,
         head_limit=1,
         offset=1,
     )
 
-    # Filesystem order is not deterministic across platforms, so just verify:
-    # 1. Only one file path is returned (head_limit=1 after offset=1)
-    # 2. The pagination info is correct
-    assert "pagination: limit=1, offset=1" in result
-    file_lines = [line for line in result.splitlines() if line.startswith("src/")]
-    assert len(file_lines) == 1
+    assert result.splitlines() == [
+        "src/c.py: 3" if mode == "count" else "src/c.py",
+        "",
+        "(pagination: limit=1, offset=1; use offset=2 to continue)",
+        *(["(total matches: 6 in 3 files)"] if mode == "count" else []),
+    ]
 
 
 @pytest.mark.asyncio
@@ -724,6 +995,34 @@ async def test_grep_reports_skipped_binary_and_large_files(
     assert "No matches found" in result
     assert "skipped 1 binary/unreadable files" in result
     assert "skipped 1 large files" in result
+
+
+@pytest.mark.parametrize("exceeds_limit", [False, True])
+async def test_grep_keeps_read_limit_when_an_open_file_grows(tmp_path, monkeypatch, exceeds_limit):
+    from nanobot.execution import files
+
+    target = tmp_path / "growing.log"
+    target.write_bytes(b"start\n")
+    open_regular_file = files._open_regular_file
+
+    @contextmanager
+    def grow_after_stat(path, *, dir_fd=None):
+        with open_regular_file(path, dir_fd=dir_fd) as (stream, size):
+            with target.open("ab") as writer:
+                writer.write(b"needle\n" + (b"x" * 64 if exceeds_limit else b""))
+            yield stream, size
+
+    monkeypatch.setattr(files, "_open_regular_file", grow_after_stat)
+    monkeypatch.setattr(GrepTool, "_MAX_EXPLICIT_FILE_BYTES", 64)
+    result = await GrepTool(workspace=tmp_path).execute(
+        pattern="needle", path="growing.log", output_mode="files_with_matches",
+    )
+
+    if exceeds_limit:
+        assert result.startswith("No matches found")
+        assert "skipped 1 large files" in result
+    else:
+        assert result == "growing.log"
 
 
 @pytest.mark.asyncio
@@ -982,13 +1281,13 @@ async def test_grep_scan_yields_and_cancellation_stops_worker(tmp_path, monkeypa
     tool = GrepTool(workspace=tmp_path)
     started, stopped = threading.Event(), threading.Event()
 
-    def blocking_iter_files(root, budget):
+    def blocking_iter_files(tree, budget):
         started.set()
         try:
             if not budget.cancelled.wait(timeout=2):
                 raise TimeoutError("worker did not receive cancellation")
             budget.checkpoint()
-            yield root / "unreachable.txt"
+            yield tree.root / "unreachable.txt"
         finally:
             stopped.set()
 
@@ -1061,7 +1360,7 @@ async def test_grep_closes_document_stream_and_preserves_locators(tmp_path, monk
             closed.append(True)
 
     monkeypatch.setattr(
-        "nanobot.agent.tools.search.open_document_line_source",
+        "nanobot.utils.document.open_document_line_source",
         lambda *_args, **_kwargs: DocumentLineSource(document_lines(), "pages=2-3"),
     )
     result = await GrepTool(workspace=tmp_path).execute(
@@ -1081,3 +1380,31 @@ async def test_grep_closes_document_stream_and_preserves_locators(tmp_path, monk
     else:
         assert result.startswith("source.pdf\n")
         assert visited == [2]
+
+
+@pytest.mark.parametrize("operation", ["find_files", "grep_content", "grep_files"])
+async def test_search_tools_accept_json_integer_pagination_and_context(tmp_path, operation):
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (tmp_path / name).write_text("before\nneedle\nafter\n", encoding="utf-8")
+    if operation == "find_files":
+        tool = FindFilesTool(workspace=tmp_path)
+        arguments = {"head_limit": 1.0, "offset": 1.0}
+    else:
+        tool = GrepTool(workspace=tmp_path)
+        arguments = {"pattern": "needle", "head_limit": 1.0, "offset": 1.0,
+                     "context_before": 1.0, "context_after": 1.0}
+        if operation == "grep_files":
+            arguments["output_mode"] = "files_with_matches"
+    registry = ToolRegistry()
+    registry.register(tool)
+    integers = {key: int(value) if isinstance(value, float) else value for key, value in arguments.items()}
+
+    expected = await registry.execute(tool.name, integers)
+    result = await registry.execute(tool.name, arguments)
+
+    assert not is_tool_error_result(expected)
+    assert result == expected
+    assert type(arguments["head_limit"]) is float
+    assert type(arguments["offset"]) is float

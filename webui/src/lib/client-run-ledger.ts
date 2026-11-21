@@ -9,6 +9,7 @@ interface TurnRecord {
   // Only openOrder marks unsettled ownership; a timestamp alone does not.
   openOrder: number | null;
   startedAt: number | null;
+  needsLiveCheck: boolean;
 }
 
 interface ChatRecord {
@@ -17,7 +18,7 @@ interface ChatRecord {
   effectiveStartedAt: number | null;
   anonymousActive: boolean;
   turns: Map<string, TurnRecord>;
-  /** Closed turns permit late inputs, messages, completions and idle. */
+  /** Lifecycle tombstones permit late content without reopening ownership. */
   closed: Set<string>;
   /** Canonical fences discard every frame with a matching top-level turn id. */
   fenced: Set<string>;
@@ -45,6 +46,7 @@ export type RunObservation = Readonly<{
   chatId: string;
   turnId: string | null;
   systemCommand?: boolean;
+  lifecycleSignal?: boolean;
 }> & (
   | { kind: "admission" | "input"; owner?: { turnId: string; startedAt?: number } }
   | { kind: "status"; activity: "running" | "idle"; startedAt?: number }
@@ -57,14 +59,15 @@ type Command =
   | ({ kind: "written" | "reject" } & TurnRef)
   | { kind: "transport-lost" }
   | { kind: "local-stop" | "forget"; chatId: string }
-  | { kind: "fence"; chatId: string; completedTurnIds: readonly string[] }
+  | { kind: "fence" | "settle-completed-lifecycle"; chatId: string; completedTurnIds: readonly string[] }
+  | { kind: "reattach"; chatId: string; liveTurnIds: readonly string[] }
   | { kind: "restore-pending"; chatId: string; generation: number; turnId: string | null };
 
 export type RunEffect =
   | { kind: "run-status"; chatId: string; state: RunState }
   | { kind: "completion"; chatId: string }
   | ({ kind: "discard-send" } & TurnRef)
-  | { kind: "prune-inbound"; chatId: string; turnIds: readonly string[] };
+  | { kind: "prune-inbound" | "prune-lifecycle-inbound"; chatId: string; turnIds: readonly string[] };
 
 interface ObservationResult {
   forward: "normal" | "without-owner" | "drop";
@@ -175,6 +178,7 @@ export class ClientRunLedger {
       case "transport-lost":
         for (const chat of this.chats.values()) {
           for (const turn of chat.turns.values()) {
+            turn.needsLiveCheck = turn.openOrder !== null && (!turn.delivery || turn.delivery.phase === "accepted");
             if (turn.delivery?.phase === "sent") {
               turn.delivery = { phase: "unknown", role: turn.delivery.role };
             }
@@ -206,8 +210,24 @@ export class ClientRunLedger {
         chat.anonymousActive = command.turnId === null;
         break;
       }
+      case "reattach": {
+        const chat = this.chats.get(command.chatId);
+        if (!chat) break;
+        const live = new Set(command.liveTurnIds);
+        const retired: string[] = [];
+        for (const [turnId, turn] of chat.turns) {
+          if (turn.needsLiveCheck && !live.has(turnId)) retired.push(turnId);
+          turn.needsLiveCheck = false;
+        }
+        // Absence only retires previously observed owners, not new/uncertain sends.
+        // It does not report an outcome or claim that the transcript is complete.
+        if (retired.length > 0) this.completeTurns(command.chatId, retired, "lifecycle", effects);
+        break;
+      }
       case "fence":
-        this.fence(command.chatId, command.completedTurnIds, effects);
+      case "settle-completed-lifecycle":
+        this.completeTurns(command.chatId, command.completedTurnIds,
+          command.kind === "fence" ? "content" : "lifecycle", effects);
         break;
       default: {
         const unhandled: never = command;
@@ -228,12 +248,15 @@ export class ClientRunLedger {
     let chat = this.chats.get(chatId);
     const effects: RunEffect[] = [];
     if (turnId !== null && chat?.fenced.has(turnId)) return { forward: "drop", effects };
-    if (
-      turnId && chat?.closed.has(turnId)
-      && observation.kind !== "admission" && observation.kind !== "input"
-      && observation.kind !== "message" && observation.kind !== "completed"
-      && !(observation.kind === "status" && observation.activity === "idle")
-    ) return { forward: "drop", effects };
+    if (turnId && chat?.closed.has(turnId)) {
+      if (observation.lifecycleSignal || observation.kind === "recovery" || observation.kind === "rejection"
+        || (observation.kind === "status" && observation.activity === "running")) {
+        return { forward: "drop", effects };
+      }
+      // Content delivery is independent of lifecycle ownership. In particular,
+      // delta/stream_end may arrive after an explicit canonical completion.
+      if (observation.kind === "activity" || observation.kind === "progress") return { forward: "normal", effects };
+    }
 
     let forward: ObservationResult["forward"] = "normal";
     if ((observation.kind === "admission" || observation.kind === "input") && observation.owner?.turnId) {
@@ -341,7 +364,7 @@ export class ClientRunLedger {
   private applyCanonicalSnapshot(request: CanonicalRequest): { accepted: boolean; effects: readonly RunEffect[] } {
     const { chatId, snapshot } = request;
     const effects: RunEffect[] = [];
-    this.fence(chatId, request.completedTurnIds, effects);
+    this.completeTurns(chatId, request.completedTurnIds, "content", effects);
     if (!this.canApplyCanonical({ ...request, completedTurnIds: [] })) return { accepted: false, effects };
 
     const chat = this.chats.get(chatId);
@@ -385,7 +408,7 @@ export class ClientRunLedger {
   private ensureTurn(chat: ChatRecord, turnId: string): TurnRecord {
     let turn = chat.turns.get(turnId);
     if (!turn) {
-      turn = { delivery: null, openOrder: null, startedAt: null };
+      turn = { delivery: null, openOrder: null, startedAt: null, needsLiveCheck: false };
       chat.turns.set(turnId, turn);
     }
     return turn;
@@ -456,24 +479,32 @@ export class ClientRunLedger {
 
   private rememberClosed(chat: ChatRecord, turnId: string): void {
     chat.closed.add(turnId);
-    this.trimTerminalSet(chat.closed);
+    this.trimTerminalSet(chat.closed, chat.latestTurnId);
   }
 
-  private fence(chatId: string, turnIds: readonly string[], effects: RunEffect[]): void {
+  private completeTurns(
+    chatId: string, turnIds: readonly string[], coverage: "lifecycle" | "content", effects: RunEffect[],
+  ): void {
     let chat = this.chats.get(chatId);
     for (const turnId of turnIds) {
       if (!turnId) continue;
       chat ??= this.ensureChat(chatId);
-      chat.fenced.add(turnId);
+      this.rememberClosed(chat, turnId);
+      this.settle(chatId, turnId, effects);
+      // Named completion never clears a different owner or anonymous recovery.
+      if (chat.latestTurnId === turnId) chat.effectiveStartedAt = null;
+      if (coverage === "content") chat.fenced.add(turnId);
     }
-    if (chat) this.trimTerminalSet(chat.fenced);
-    effects.push({ kind: "prune-inbound", chatId, turnIds: Array.from(chat?.fenced ?? []) });
+    if (coverage === "content") {
+      if (chat) this.trimTerminalSet(chat.fenced);
+      effects.push({ kind: "prune-inbound", chatId, turnIds: Array.from(chat?.fenced ?? []) });
+    } else effects.push({ kind: "prune-lifecycle-inbound", chatId, turnIds });
   }
 
-  private trimTerminalSet(turnIds: Set<string>): void {
+  private trimTerminalSet(turnIds: Set<string>, retainedTurnId?: string | null): void {
     for (const oldest of turnIds) {
       if (turnIds.size <= COMPLETED_TURN_FENCE_MAX) break;
-      turnIds.delete(oldest);
+      if (oldest !== retainedTurnId) turnIds.delete(oldest);
     }
   }
 

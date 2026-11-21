@@ -122,7 +122,7 @@ class ToolRegistry:
         name: str,
         params: Any,
     ) -> tuple[Tool | None, Any, str | None]:
-        """Resolve, cast, and validate one tool call."""
+        """Resolve and validate one tool call without changing argument values."""
         tool = self.get(name)
         if not tool:
             suggestion = self._suggest_name(str(name))
@@ -148,13 +148,13 @@ class ToolRegistry:
                 )
             )
 
-        cast_params = tool.cast_params(cast(dict[str, Any], params))
-        errors = tool.validate_params(cast_params)
+        arguments = cast(dict[str, Any], params)
+        errors = tool.validate_params(arguments)
         if errors:
-            return tool, cast_params, (
+            return tool, arguments, (
                 ToolResult.error(f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors))
             )
-        return tool, cast_params, None
+        return tool, arguments, None
 
     @classmethod
     def _coerce_argument_value(cls, value: Any) -> Any:
@@ -204,7 +204,10 @@ class ToolRegistry:
             assert tool is not None  # guarded by prepare_call()
             result = await tool.execute(**params)
             if is_tool_error_result(result):
-                return ToolResult.error(with_tool_error_hint(str(result)))
+                return ToolResult.error(
+                    with_tool_error_hint(str(result)),
+                    error_code=result.error_code if isinstance(result, ToolResult) else None,
+                )
             return result
         except Exception as e:
             return ToolResult.error(with_tool_error_hint(f"Error executing {name}: {str(e)}"))

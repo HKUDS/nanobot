@@ -17,13 +17,16 @@ export function SidebarActivityFixture() {
   const [count, setCount] = useState(new URLSearchParams(location.search).has("all") ? sessions.length : 1);
   const [visible, setVisible] = useState(true);
   const [activeKey, setActiveKey] = useState(sessions[0].key);
+  const [titleOverrides, setTitleOverrides] = useState<Record<string, string>>({});
   return <main className="flex min-h-screen flex-wrap items-start gap-6 bg-background p-4 text-foreground">
     <section aria-label="Activity sidebar" className="h-[480px] w-80 max-w-full bg-sidebar">
       {visible && <ChatList
         sessions={sessions} activeKey={activeKey} onSelect={setActiveKey}
         runningChatIds={sessions.slice(0, count).map((session) => session.chatId)}
         sort="title_asc" onRequestDelete={() => {}} onTogglePin={() => {}}
-        onRequestRename={async () => {}} onToggleArchive={() => {}}
+        titleOverrides={titleOverrides}
+        onRequestRename={async (key, title) => setTitleOverrides(current => ({ ...current, [key]: title }))}
+        onToggleArchive={() => {}}
       />}
     </section>
     <div className="flex flex-col gap-3">

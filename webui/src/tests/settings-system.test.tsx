@@ -5,7 +5,7 @@ import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettin
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { McpPresetInfo } from "@/lib/types";
 import { __clearLogoFallbackCacheForTests } from "@/hooks/useLogoFallback";
-import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
+import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, selectToolType, showOnlyReadyTools, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
 
 const installedAnyGen = {
@@ -80,6 +80,35 @@ describe("Settings system domains", () => {
     expect(restart).toHaveBeenCalledTimes(1);
   });
 
+  it("announces transient desktop utility failures once per action and keeps the exported path", async () => {
+    const openLogs = vi.fn().mockRejectedValue(new Error("Host could not open the folder"));
+    const exportDiagnostics = vi.fn().mockRejectedValueOnce(new Error("Host could not export"))
+      .mockResolvedValueOnce("/diagnostics/report.zip");
+    vi.stubGlobal("nanobotHost", { openLogs, exportDiagnostics });
+    renderSettingsView({ initialSection: "runtime", initialSettings: {
+      ...settingsPayload(), surface: "native",
+      runtime_capabilities: { can_restart_engine: false, can_open_logs: true, can_export_diagnostics: true },
+    } });
+
+    const open = screen.getByRole("button", { name: "Open" });
+    for (const attempts of [1, 2]) {
+      fireEvent.click(open);
+      await waitFor(() => expect(open).toBeEnabled());
+      expect(openLogs).toHaveBeenCalledTimes(attempts);
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not open logs folder.");
+      expect(screen.getAllByText("Could not open logs folder.")).toHaveLength(1);
+    }
+
+    const exportButton = screen.getByRole("button", { name: "Export" });
+    fireEvent.click(exportButton);
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toContain("Could not export diagnostics.");
+    expect(screen.getAllByText("Could not export diagnostics.")).toHaveLength(1);
+    fireEvent.click(exportButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Diagnostics" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Diagnostics exported to /diagnostics/report.zip.");
+  });
+
   it("leaves directly when no restart is pending", () => {
     const leave = vi.fn();
     renderSettingsView({ initialSection: "runtime", initialSettings: settingsPayload(), onBackToChat: leave });
@@ -138,11 +167,17 @@ describe("Settings system domains", () => {
 
     renderSettingsView();
 
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
     expect(await screen.findByText("Computer Use")).toBeInTheDocument();
-    expect(screen.getByText("Plugins")).toBeInTheDocument();
     expect(screen.getByText(/Control the desktop/)).toBeInTheDocument();
-    expect(screen.getByText("screen-recording, accessibility")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+    fireEvent.click(screen.getByRole("button", { name: "Computer Use" }));
+    const dialog = screen.getByRole("dialog", { name: "Computer Use" });
+    expect(within(dialog).getByText("Declared permissions")).toBeVisible();
+    expect(within(dialog).getByText("screen-recording, accessibility")).toBeVisible();
+    expect(within(dialog).queryByRole("tab", { name: "Tools" })).not.toBeInTheDocument();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable" }));
 
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.mcp.enable", { name: "plugin-computer-use" }, 20_000,
@@ -158,6 +193,54 @@ describe("Settings system domains", () => {
     expect(await screen.findByRole("button", { name: "Enable" })).toBeInTheDocument();
   });
 
+
+  it("groups a CLI-managed plugin under its app while keeping other plugins independent", async () => {
+    const managed = { ...agentPlugin, name: "plugin-cli-app-anygen", display_name: "Managed plugin", managed_by_cli: "anygen" };
+    const separate = { ...agentPlugin, name: "plugin-cli-app-other", display_name: "Separate plugin", managed_by_cli: null };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [installedAnyGen], installed_count: 1 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [managed, separate], installed_count: 1 });
+      return jsonResponse(settingsPayload());
+    }));
+    requestMutationMock.mockResolvedValue({
+      presets: [{ ...managed, enabled: true, status: "enabled" }, separate], installed_count: 2,
+    });
+    renderSettingsView({ initialSection: "apps" });
+
+    expect(await screen.findByRole("heading", { name: "AnyGen" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Managed plugin" })).not.toBeInTheDocument();
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
+    expect(screen.getByRole("heading", { name: "Separate plugin" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Managed plugin" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Search tools"), { target: { value: "separate" } });
+    expect(screen.getByRole("heading", { name: "Separate plugin" })).toBeVisible();
+    await selectToolType("CLI Apps");
+    expect(screen.queryByRole("heading", { name: "AnyGen" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Search tools"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Agent Plugin disabled" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Managed plugin" })).getByRole("button", { name: "Enable" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.enable", { name: "plugin-cli-app-anygen" }, 20_000,
+    ));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Agent Plugin disabled" })).not.toBeInTheDocument());
+  });
+
+  it("keeps a managed plugin accessible when its owning app is missing from the loaded catalog", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 1 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({
+        presets: [{ ...agentPlugin, managed_by_cli: "missing-app" }], installed_count: 0,
+      });
+      return jsonResponse(settingsPayload());
+    }));
+    renderSettingsView({ initialSection: "apps" });
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
+    expect(await screen.findByRole("heading", { name: "Computer Use" })).toBeVisible();
+  });
 
   it.each(["apps", "skills", "automations", "channels"] as const)(
     "uses the conversation-width content frame for the standalone %s page",
@@ -216,7 +299,8 @@ describe("Settings system domains", () => {
   it("does not hide a standalone heading when the navigation is collapsed or absent", () => {
     renderSettingsView({ initialSection: "skills", initialSettings: settingsPayload(), showSidebar: false, mainNavigationExpanded: false });
     expect(screen.getByTestId("settings-section-transition")).toHaveAttribute("data-main-navigation-expanded", "false");
-    expect(screen.getByRole("heading", { name: "Skills", level: 1 })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Apps", level: 1 })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("uses the inline section heading layout to align Apps titles and counts", async () => {
@@ -237,10 +321,13 @@ describe("Settings system domains", () => {
       expect(title.nextElementSibling).not.toHaveClass(className);
     }
 
-    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
     const mcpTitle = screen.getByRole("heading", { name: "MCP tools" });
     expect(mcpTitle.parentElement).toHaveClass("settings-section-heading");
     expect(mcpTitle.nextElementSibling).toHaveTextContent("0");
+    expect(screen.getByRole("switch", { name: "Ready only" })).toBeChecked();
+    expect(screen.getByText("No MCP tools available")).toBeVisible();
+    expect(screen.getByText("Add a custom MCP server below")).toBeVisible();
   });
 
   it.each(["cli", "mcp"] as const)(
@@ -269,7 +356,7 @@ describe("Settings system domains", () => {
       }));
       renderSettingsView({ initialSection: "apps", initialSettings: settingsPayload() });
       await screen.findByText("AnyGen");
-      if (kind === "mcp") fireEvent.click(screen.getByRole("button", { name: "MCP" }));
+      if (kind === "mcp") await selectToolType("MCP");
       const row = (await screen.findByText(name)).closest("article")!;
       const image = row.querySelector("img")!;
       expect(image).toHaveAttribute("src", logoUrl);
@@ -487,49 +574,55 @@ describe("Settings system domains", () => {
     });
   });
 
-  it("starts the managed API server from System", async () => {
-    const base = settingsPayload();
-    const stopped = {
-      installed: false,
-      running: false,
-      managed: false,
-      host: "127.0.0.1",
-      port: 8900,
-      timeout: 120,
-      api_key_hint: null,
-      endpoint: "http://127.0.0.1:8900/v1",
-      command: "nanobot serve",
-    };
+  it("refreshes plugin ownership after installing a CLI app without replacing its mutation result", async () => {
+    let installed = false;
+    const managed = { ...agentPlugin, name: "plugin-cli-app-anygen", display_name: "Managed plugin", enabled: true, managed_by_cli: "anygen" };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === "/api/settings") return jsonResponse(base);
-      if (url === "/api/settings/api-service") return jsonResponse(stopped);
-      if (url === "/api/settings/nanobot-features") {
-        return jsonResponse({ features: [], enabled_count: 0 });
-      }
-      return jsonResponse({});
+      if (url === "/api/settings/cli-apps") return jsonResponse({
+        apps: [{ ...installedAnyGen, installed: false }], installed_count: 0,
+      });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({
+        presets: installed ? [managed] : [], installed_count: Number(installed),
+      });
+      return jsonResponse(settingsPayload());
     });
     vi.stubGlobal("fetch", fetchMock);
-    requestMutationMock.mockResolvedValueOnce({
-      ...stopped,
-      installed: true,
-      running: true,
-      managed: true,
+    requestMutationMock.mockImplementation(async () => {
+      installed = true;
+      return { apps: [installedAnyGen], installed_count: 1 };
     });
+    renderSettingsView({ initialSection: "apps" });
 
-    renderSettingsView({ initialSection: "runtime", initialSettings: base, showSidebar: true });
+    fireEvent.click(await screen.findByRole("button", { name: "Install app" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/settings/mcp-presets")).toHaveLength(2));
+    const appAction = await screen.findByRole("button", { name: "App ready" });
+    fireEvent.pointerDown(appAction, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Agent Plugin" }));
+    expect(screen.getByRole("dialog", { name: "Managed plugin" })).toBeVisible();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/settings/cli-apps")).toHaveLength(1);
+  });
 
-    const startButton = await screen.findByRole("button", { name: "Start API server" });
-    await waitFor(() => expect(startButton).toBeEnabled());
-    fireEvent.click(startButton);
-
-    await waitFor(() => {
-      expect(requestMutationMock).toHaveBeenCalledWith(
-        "settings.api_service.start",
-        { host: "127.0.0.1", port: 8900, timeout: 120 },
-        150_000,
-      );
-    });
+  it("announces when copying an installed app's example prompt fails", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("Clipboard blocked"));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [{ ...installedAnyGen, installed: false }], installed_count: 0 });
+        }
+        if (String(input) === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        return jsonResponse(settingsPayload());
+      }));
+      requestMutationMock.mockResolvedValue({ apps: [installedAnyGen], installed_count: 1 });
+      renderSettingsView({ initialSection: "apps" });
+      fireEvent.click(await screen.findByRole("button", { name: "Install app" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Try @anygen" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Could not copy. Please try again.");
+      expect(writeText).toHaveBeenCalledWith("Ask nanobot to use @anygen for this task.");
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
   });
 
   it("shows a visible uninstall button for installed CLI apps and calls uninstall", async () => {
@@ -625,9 +718,12 @@ describe("Settings system domains", () => {
     renderSettingsView({ initialSection: "apps" });
 
     expect(await screen.findByText("AnyGen")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "Apps" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "MCP" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Ready only" })).not.toBeChecked();
+    const filters = within(screen.getByRole("radiogroup", { name: "Tool type" }));
+    expect(filters.getByRole("radio", { name: "All" })).toBeChecked();
+    for (const name of ["CLI Apps", "Agent Plugins", "MCP"]) {
+      expect(filters.getByRole("radio", { name })).toBeInTheDocument();
+    }
   });
 
   it("installs optional channel support before enabling and disabling it", async () => {
@@ -709,7 +805,6 @@ describe("Settings system domains", () => {
     renderSettingsView({ initialSection: "channels" });
 
     const matrixRow = await screen.findByRole("button", { name: "View Matrix settings" });
-    expect(matrixRow).toHaveAttribute("aria-haspopup", "dialog");
     fireEvent.click(matrixRow);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Matrix channel" })).not.toBeInTheDocument();
@@ -741,7 +836,9 @@ describe("Settings system domains", () => {
     );
     expect(screen.getAllByText("On").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "View Matrix settings" }));
+    const installedRow = screen.getByRole("button", { name: "View Matrix settings" });
+    expect(installedRow).toHaveAttribute("aria-haspopup", "dialog");
+    fireEvent.click(installedRow);
     expect(screen.getByLabelText("Homeserver")).toBeInTheDocument();
     expect(screen.getByLabelText("User ID")).toBeInTheDocument();
     expect(screen.getByLabelText("Device ID")).toBeInTheDocument();

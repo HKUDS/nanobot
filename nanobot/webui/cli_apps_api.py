@@ -9,8 +9,8 @@ from typing import Any, cast
 
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from nanobot.config.loader import load_config
-
-QueryParams = dict[str, list[str]]
+from nanobot.webui.settings_contracts import QueryParams
+from nanobot.webui.settings_contracts import query_first as _query_first
 
 _CLI_APP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$", re.IGNORECASE)
 _CLI_APP_ATTACHMENT_KEYS = (
@@ -82,11 +82,6 @@ def normalize_cli_app_mentions(raw: Any) -> list[dict[str, str]]:
                 row[field] = value
         out.append(row)
     return out
-
-
-def _query_first(query: QueryParams, key: str) -> str | None:
-    values = query.get(key)
-    return values[0] if values else None
 
 
 def _manager(config_path: Path | None = None) -> CliAppManager:

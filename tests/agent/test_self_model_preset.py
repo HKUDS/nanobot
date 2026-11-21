@@ -11,7 +11,7 @@ from nanobot.agent.tools.self import MyTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.factory import ProviderSnapshot
-from nanobot.session.model_selection import model_preset_from_metadata
+from nanobot.session.model_selection import SessionModelPreset
 
 
 def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
@@ -303,9 +303,9 @@ async def test_self_tool_sets_model_preset_for_current_session(tmp_path) -> None
         result = await tool._modify("model_preset", "fast")
 
     assert "for the next turn" in result
-    assert model_preset_from_metadata(
+    assert SessionModelPreset.from_metadata(
         loop.sessions.get_or_create("cli:one").metadata
-    ) == "fast"
+    ).base_preset == "fast"
     assert loop.model_preset is None
     assert loop.model == "base-model"
 

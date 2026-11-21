@@ -35,7 +35,7 @@ from urllib.parse import quote
 from zipfile import ZIP_DEFLATED, ZipFile
 
 if TYPE_CHECKING:
-    from nanobot.agent.tools._windows_job import WindowsJob
+    from nanobot.execution._windows_job import WindowsJob
 
 SCENARIOS = ("upgrade", "upgrade-again", "skipped-preview", "import-failure", "restart-failure",
              "backup-failure", "worker-exit", "metadata-loss", "restore-interruption")
@@ -819,7 +819,7 @@ def run_parallel(args, root: Path, target: Path, version: str, original_hash: st
                 owner = None
                 flags = 0
                 if os.name == "nt":
-                    from nanobot.agent.tools._windows_job import WindowsJob
+                    from nanobot.execution._windows_job import WindowsJob
 
                     owner = stack.enter_context(closing(WindowsJob.create()))
                     flags = subprocess.CREATE_NEW_PROCESS_GROUP | owner.creation_flags

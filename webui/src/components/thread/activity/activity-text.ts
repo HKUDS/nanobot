@@ -28,7 +28,10 @@ export function redactActivityText(value: string): string {
 }
 
 export function redactShellCommand(command: string): string {
-  return redactActivityText(command).replaceAll("<redacted>", "••••");
+  return redactActivityText(command)
+    .replace(/(^|[\s;])(-u(?:=|\s+)|--(?:proxy-)?user(?:=|\s+))(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s;]+)/gim, "$1$2<redacted>")
+    .replace(/(^|[\s;])(-u)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s;]*:[^\s;]+)/gim, "$1$2<redacted>")
+    .replaceAll("<redacted>", "••••");
 }
 
 export function compactActivityPath(value: string): string {

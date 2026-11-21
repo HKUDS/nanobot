@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -77,6 +78,24 @@ def test_home_rejects_file(tmp_path):
     target.touch()
     result = CliRunner().invoke(app, ["--home", str(target), "onboard"])
     assert result.exit_code == 2
+
+
+@pytest.mark.parametrize("legacy_args", [[], ["--help"], ["--host", "0.0.0.0", "-p", "8900", "-c", "old-config.json"]])
+def test_retired_serve_prints_migration_hint_without_initializing(tmp_path, legacy_args):
+    instance = tmp_path / "old API instance"
+    result = subprocess.run(
+        [sys.executable, "-m", "nanobot", "--home", str(instance), "serve", *legacy_args],
+        cwd=Path(__file__).parents[2],
+        env=dict(os.environ, HOME=str(tmp_path), USERPROFILE=str(tmp_path)),
+        capture_output=True, text=True, encoding="utf-8", check=False, timeout=20,
+    )
+    assert result.returncode == 2, result.stderr
+    assert result.stdout == ""
+    assert "'nanobot serve' has been removed" in result.stderr
+    assert "'nanobot webui'" in result.stderr
+    assert "/v1 endpoints have no drop-in replacement" in result.stderr
+    assert "old-config.json" not in result.stderr
+    assert not instance.exists()
 
 
 def test_home_bare_command_starts_agent_and_restores_selection(monkeypatch, tmp_path):

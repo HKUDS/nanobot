@@ -86,6 +86,14 @@ def host_for_url(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
+def etag_matches(value: str, etag: str) -> bool:
+    target = etag.strip().removeprefix("W/")
+    return any(
+        candidate.strip().removeprefix("W/") in {"*", target}
+        for candidate in value.split(",")
+    )
+
+
 def accepts_gzip(value: str) -> bool:
     wildcard_quality: float | None = None
     for item in value.split(","):

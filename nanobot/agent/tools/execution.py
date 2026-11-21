@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from functools import cache
 from typing import Any, cast
@@ -10,6 +9,7 @@ from typing import Any, cast
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result, with_tool_error_hint
@@ -185,10 +185,7 @@ async def _execute_tool_call_inner(
 
     await hook.before_execute_tool(context, tool_call, tool, params)
     try:
-        with (
-            file_read_context(tool_call.id, read_results)
-            if tool_call.name == "read_file" else nullcontext()
-        ):
+        with file_read_context(tool_call.id, read_results):
             if tool is not None:
                 result = await tool.execute(**params)
             else:
@@ -222,6 +219,8 @@ async def _execute_tool_call_inner(
             "status": "error",
             "detail": result.replace("\n", " ").strip()[:120],
         }
+        if isinstance(result, ToolResult) and result.error_code:
+            event["error_code"] = result.error_code
         handled = _classify_violation(
             raw_text=result,
             soft_payload=payload,

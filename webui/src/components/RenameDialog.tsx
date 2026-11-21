@@ -71,7 +71,7 @@ export function RenameDialog({
               variant="outline"
               onClick={onCancel}
             >
-              {t("deleteConfirm.cancel")}
+              {t("common.cancel")}
             </Button>
             <Button className="min-w-20" type="submit" disabled={!trimmed}>
               {t("chat.renameSave")}

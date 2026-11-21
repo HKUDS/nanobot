@@ -1,7 +1,8 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, vi } from "vitest";
 import { SettingsView } from "@/components/settings/SettingsView";
+import { ToastProvider } from "@/components/ui/toast";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
 import type { NanobotClient } from "@/lib/nanobot-client";
@@ -64,12 +65,6 @@ export function settingsPayload(): SettingsPayload {
       search: { max_results: 5, timeout: 30 },
       fetch: { use_jina_reader: true },
     },
-    api: {
-      host: "127.0.0.1",
-      port: 8900,
-      timeout: 120,
-      api_key_hint: null,
-    },
     observability: {
       provider: "langfuse",
       configured: false,
@@ -98,7 +93,6 @@ export function settingsPayload(): SettingsPayload {
       dream: {
         schedule: "every 2h",
       },
-      unified_session: false,
     },
     advanced: {
       restrict_to_workspace: false,
@@ -128,6 +122,7 @@ export function settingsPayload(): SettingsPayload {
 type SettingsViewTestOptions = Partial<Pick<
   React.ComponentProps<typeof SettingsView>,
   | "initialSection"
+  | "focusTarget"
   | "initialSettings"
   | "themePreference"
   | "onChangeTheme"
@@ -140,7 +135,7 @@ type SettingsViewTestOptions = Partial<Pick<
   | "onStartAutomationChat"
   | "onNativeEngineRestart"
   | "onRestart"
->> & { client?: NanobotClient };
+>> & { client?: NanobotClient; webuiCapabilities?: string[] };
 
 export function renderSettingsView(options: SettingsViewTestOptions = {}) {
   render(
@@ -151,10 +146,11 @@ export function renderSettingsView(options: SettingsViewTestOptions = {}) {
         handler("open");
         return () => {};
       },
-    } as never} token="tok">
+    } as never} token="tok" webuiCapabilities={options.webuiCapabilities}>
       <SettingsView
         themePreference={options.themePreference ?? "light"}
         initialSection={options.initialSection ?? "apps"}
+        focusTarget={options.focusTarget}
         initialSettings={options.initialSettings}
         skills={options.skills}
         skillsLoading={options.skillsLoading}
@@ -169,11 +165,22 @@ export function renderSettingsView(options: SettingsViewTestOptions = {}) {
         onRestart={options.onRestart}
       />
     </ClientProvider>,
+    { wrapper: ToastProvider },
   );
 }
 
 export async function openPopover(trigger: HTMLElement) {
   await userEvent.setup().click(trigger);
+}
+
+export async function selectToolType(name: string) {
+  const types = await screen.findByRole("radiogroup", { name: "Tool type" });
+  await userEvent.click(within(types).getByRole("radio", { name }));
+}
+
+export async function showOnlyReadyTools(ready: boolean) {
+  const toggle = await screen.findByRole("switch", { name: "Ready only" });
+  if ((toggle.getAttribute("aria-checked") === "true") !== ready) await userEvent.click(toggle);
 }
 
 export function installSettingsViewTestHooks() {

@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./globals.css";
 import { initializeI18n } from "./i18n";
+import { installFocusModality } from "./lib/focus-modality";
 import { initializePairReturn } from "./lib/remote-pair-return";
 
 // `crypto.randomUUID` is only defined in secure contexts (HTTPS or localhost).
@@ -24,6 +25,7 @@ if (typeof globalThis.crypto !== "undefined" && !("randomUUID" in globalThis.cry
 const root = document.getElementById("root");
 if (!root) throw new Error("root element missing");
 
+installFocusModality();
 initializePairReturn();
 window.addEventListener("hashchange", initializePairReturn);
 

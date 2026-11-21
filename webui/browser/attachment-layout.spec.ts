@@ -150,6 +150,31 @@ for (const width of [1024, 360]) {
   }
 }
 
+test("attachment-only pending messages keep static dashed edges in forced colors", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
+  await page.emulateMedia({ forcedColors: "active", reducedMotion: "no-preference", colorScheme: "dark" });
+  await page.goto("/browser/fixture.html?case=attachments&processing");
+
+  const solid = page.getByRole("region", { name: "Attachments: consumed" });
+  const fileSurface = "[data-file-attachment] > span";
+  await expect(solid.locator(fileSurface)).toHaveCSS("border-top-style", "solid");
+  await expect(solid.locator("[data-pending-edge-overlay]")).toHaveCount(0);
+
+  const region = page.getByRole("region", { name: "Attachments: pending" });
+  const card = region.locator(fileSurface);
+  await expect(card).toHaveCSS("border-top-style", "dashed");
+  await expect(card.locator("[data-pending-edge-overlay]")).toBeHidden();
+  const box = await bounds(card);
+  expect({ width: box.width, height: box.height }).toEqual({ width: 96, height: 96 });
+  const mediaEdges = region.locator('[data-solid-tone="media"] > .pending-edge-layer-dashed');
+  await expect(mediaEdges).toHaveCount(2);
+  for (const edge of await mediaEdges.all()) {
+    await expect(edge).toBeVisible();
+    await expect(edge).toHaveCSS("border-top-style", "dashed");
+    await expect(edge).toHaveCSS("animation-name", "none");
+  }
+});
+
 test("image lightbox and file download remain keyboard accessible", async ({ page }, testInfo) => {
   await page.route("**/fixture/retry.webm", (route) => route.fulfill({ status: 503, body: "Temporarily unavailable" }));
   await openAttachments(page);
@@ -162,9 +187,17 @@ test("image lightbox and file download remain keyboard accessible", async ({ pag
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("dialog", { name: "Blue study.svg" })).toBeVisible();
   await page.keyboard.press("End");
-  await expect(page.getByRole("dialog", { name: "Green study.svg" })).toBeVisible();
+  const lightbox = page.getByRole("dialog", { name: "Green study.svg" });
+  await expect(lightbox).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("lightbox.png") });
   await testInfo.attach("image lightbox", { path: testInfo.outputPath("lightbox.png"), contentType: "image/png" });
+  const viewport = lightbox.getByTestId("image-zoom-viewport");
+  await viewport.click();
+  await expect(viewport).toHaveCSS("box-shadow", "none");
+  await page.keyboard.press("=");
+  await expect(lightbox.getByRole("button", { name: "Fit image" })).toHaveText("150%");
+  await expect(viewport).toBeFocused();
+  await expect(viewport).not.toHaveCSS("box-shadow", "none");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(firstImage).toBeFocused();

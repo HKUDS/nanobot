@@ -40,9 +40,14 @@ function reloadPayload(body: WebuiThreadPersistedPayload): unknown {
       const { context_graph, ...rest } = event;
       return { ...rest, context_graph_ref: reference(context_graph) };
     }
-    if (event.event === "context_compaction" && event.context_snapshot) {
-      const { graph, ...snapshot } = event.context_snapshot;
-      return { ...event, context_snapshot: { ...snapshot, graph_ref: reference(graph) } };
+    if (event.event === "context_compaction" && (event.context_graph || event.context_snapshot)) {
+      const { context_graph, context_snapshot, ...rest } = event;
+      const snapshot = context_snapshot && (({ graph, ...fields }) => ({ ...fields, graph_ref: reference(graph) }))(context_snapshot);
+      return {
+        ...rest,
+        ...(context_graph ? { context_graph_ref: reference(context_graph) } : {}),
+        ...(snapshot ? { context_snapshot: snapshot } : {}),
+      };
     }
     return event;
   });
@@ -55,7 +60,7 @@ export class WebuiThreadCache extends MemoryLruCache<WebuiThreadPersistedPayload
   private readonly listeners = new Map<string, Set<(body: WebuiThreadPersistedPayload) => void>>();
 
   constructor(
-    maxBytes = 16 * 1024 * 1024,
+    maxBytes = 32 * 1024 * 1024,
     maxEntries = 12,
   ) {
     super(maxBytes, maxEntries);

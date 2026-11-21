@@ -50,7 +50,7 @@ class InstallResult:
 
 _INSTALL_TIMEOUT_SECONDS = 300
 _LOG_OUTPUT_LIMIT = 4000
-_HIDDEN_OPTIONAL_FEATURES = {"documents", "pdf"}
+_HIDDEN_OPTIONAL_FEATURES = {"api", "documents", "pdf"}
 _BUNDLED_FEATURE_ALIASES = {"documents", "pdf"}
 
 

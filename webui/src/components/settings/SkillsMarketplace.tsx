@@ -5,7 +5,6 @@ import {
   ExternalLink,
   Loader2,
   PackagePlus,
-  Search,
   ShieldAlert,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -22,8 +21,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { SearchInput } from "@/components/ui/input";
-import { SegmentedControl } from "@/components/ui/segmented-control";
+import { CatalogFilter } from "@/components/settings/shared/CatalogToolbar";
 import {
   ApiError,
   fetchMarketplaceSkillTrends,
@@ -41,17 +39,20 @@ import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
 export function SkillsMarketplace({
+  query,
+  provider,
   installedSkills,
   installing,
   onInstallingChange,
 }: {
+  query: string;
+  provider: MarketplaceProvider;
   installedSkills: SkillSummary[];
   installing: string;
   onInstallingChange: (skillId: string) => void;
 }) {
   const { client, getToken } = useClient();
   const { t } = useTranslation();
-  const [query, setQuery] = useState("");
   const [results, setResults] = useState<MarketplaceSkillSummary[]>([]);
   const [trending, setTrending] = useState<MarketplaceSkillSummary[]>([]);
   const [trends, setTrends] = useState<Record<string, number[]>>({});
@@ -59,7 +60,6 @@ export function SkillsMarketplace({
   const [trendingLoading, setTrendingLoading] = useState(true);
   const [error, setError] = useState("");
   const [installError, setInstallError] = useState("");
-  const [provider, setProvider] = useState<MarketplaceProvider>("all");
   const [selected, setSelected] = useState<MarketplaceSkillSummary | null>(null);
   const installTrigger = useRef<HTMLElement | null>(null);
   const selectSkill = (skill: MarketplaceSkillSummary) => {
@@ -196,38 +196,8 @@ export function SkillsMarketplace({
   };
 
   return (
-    <section className="space-y-4">
-      <div className="space-y-2">
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
-          <SearchInput
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t("settings.skills.marketplaceSearchPlaceholder", {
-              defaultValue: "Search skills",
-            })}
-            aria-label={t("settings.skills.marketplaceSearchLabel", {
-              defaultValue: "Search skills",
-            })}
-            className="h-11 rounded-full bg-settings-surface pl-9"
-          />
-          {loading ? (
-            <span
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              role="status"
-              aria-label={t("settings.skills.marketplaceSearching", {
-                defaultValue: "Searching",
-              })}
-            >
-              <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
-            </span>
-          ) : null}
-        </div>
-        <ProviderFilter value={provider} onChange={setProvider} />
-      </div>
+    <section className="grid gap-4">
+      {loading ? <span className="sr-only" role="status">{t("settings.skills.marketplaceSearching")}</span> : null}
 
       {error || installError ? (
         <div role="alert" className="rounded-control bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
@@ -361,7 +331,7 @@ export function SkillsMarketplace({
   );
 }
 
-function ProviderFilter({
+export function MarketplaceProviderFilter({
   value,
   onChange,
 }: {
@@ -371,24 +341,12 @@ function ProviderFilter({
   const { t } = useTranslation();
   const providers: MarketplaceProvider[] = ["all", "skills_sh", "skillhub"];
   return (
-    <SegmentedControl
+    <CatalogFilter
       value={value}
-      mode="tabs"
-      ariaLabel={t("settings.skills.marketplaceProviderFilter", {
-        defaultValue: "Skill source",
-      })}
-      className="w-fit bg-settings-surface"
-      itemClassName="inline-flex h-7 items-center gap-1.5"
+      label={t("settings.skills.marketplaceProviderFilter")}
       options={providers.map((provider) => ({
         value: provider,
-        label: (
-          <>
-            {provider !== "all" ? <ProviderDot provider={provider} /> : null}
-            {provider === "all"
-              ? t("settings.skills.marketplaceProviderAll", { defaultValue: "All" })
-              : providerLabel(provider)}
-          </>
-        ),
+        label: provider === "all" ? t("settings.skills.marketplaceProviderAll") : providerLabel(provider),
       }))}
       onChange={onChange}
     />

@@ -3,12 +3,12 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, TypedDict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict, TypeVar, cast
 from uuid import uuid4
 
 from nanobot.providers.base import ProviderConversationState
@@ -18,12 +18,12 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.display_history import HistoryFact, HistoryReader
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
+from nanobot.session.image_attachments import replay_user_image_blocks
 from nanobot.session.location import SessionLocation
-from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.message_content import message_text, text_history_blocks
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionTypes
 from nanobot.utils.helpers import (
-    content_with_media_breadcrumbs,
     estimate_message_tokens,
     find_legal_message_start,
     recent_message_start_index,
@@ -36,9 +36,6 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T")
 SESSION_CACHE_MAX_SIZE = 128
-_MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
-_LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
-_TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
 _SESSION_PREVIEW_MAX_CHARS = 120
 _FORK_VOLATILE_METADATA_KEYS = {
     "_stopped_at_iteration_limit",
@@ -54,40 +51,8 @@ _FORK_VOLATILE_METADATA_KEYS = {
 }
 
 
-def _sanitize_assistant_replay_text(content: str) -> str:
-    """Remove internal replay artifacts that the model may have copied before.
-
-    These strings are useful as runtime/session metadata, but when they appear
-    in assistant examples they become demonstrations for the model to repeat.
-    """
-    content = _MESSAGE_TIME_PREFIX_RE.sub("", content, count=1)
-    lines = [
-        line
-        for line in content.splitlines()
-        if not _LOCAL_IMAGE_BREADCRUMB_RE.match(line)
-        and not _TOOL_CALL_ECHO_RE.match(line)
-    ]
-    return "\n".join(lines).strip()
-
-
 def _text_preview(content: object) -> str:
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        parts: list[str] = []
-        for block in cast(list[object], content):
-            if isinstance(block, dict):
-                block_data = cast(dict[object, object], block)
-                if block_data.get("type") != "text":
-                    continue
-                value = block_data.get("text")
-                if isinstance(value, str):
-                    parts.append(value)
-        text = " ".join(parts)
-    else:
-        return ""
-    text = _sanitize_assistant_replay_text(text)
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", message_text(content)).strip()
     if len(text) > _SESSION_PREVIEW_MAX_CHARS:
         text = text[: _SESSION_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
     return text
@@ -176,7 +141,7 @@ class Session:
     def last_archived(self, value: int) -> None:
         self.last_consolidated = value
 
-    def add_message(self, role: str, content: str, **kwargs: Any) -> None:
+    def add_message(self, role: str, content: str | list[_T], **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
             "role": role,
@@ -223,6 +188,22 @@ class Session:
         is not a user request and must not resume an old task on the next turn.
         A positive ``max_messages`` applies an additional caller-owned count limit.
         """
+        return self._history(
+            max_messages, max_tokens=max_tokens, extend_to_user=extend_to_user,
+            view="model" if include_runtime_context else "public",
+        )
+
+    def get_text_history(
+        self, *, max_tokens: int = 0, include_runtime_context: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Return the replayable context for archives and estimates without loading images."""
+        return self._history(max_tokens=max_tokens, view="text" if include_runtime_context else "public")
+
+    def _history(
+        self, max_messages: int = 0, *, max_tokens: int = 0, extend_to_user: bool = False,
+        view: Literal["model", "text", "public"],
+    ) -> list[dict[str, Any]]:
+        include_runtime_context = view != "public"
         replayable = self.messages[self.last_archived:]
         if max_messages <= 0:
             start_idx = 0
@@ -260,18 +241,8 @@ class Session:
                 message = public_history_message(message)
             content = message.get("content", "")
             role = message.get("role")
-            if role == "assistant" and isinstance(content, str):
-                content = _sanitize_assistant_replay_text(content)
-            # Synthesize an ``[image: path]`` breadcrumb from the persisted
-            # ``media`` kwarg so LLM replay still sees *something* where the
-            # image used to be. Without this, an image-only user turn
-            # replays as an empty user message — the assistant's reply then
-            # looks like it's responding to nothing.
-            content = content_with_media_breadcrumbs(
-                role,
-                content,
-                message.get("media"),
-            )
+            if role == "user" and view != "model" and isinstance(content, list):
+                content = text_history_blocks(cast(list[object], content))
             cli_apps = cast(object, message.get("cli_apps"))
             if (
                 include_runtime_context
@@ -303,6 +274,12 @@ class Session:
                 if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
                     continue
             entry: dict[str, Any] = {"role": message["role"], "content": content}
+            if include_runtime_context and "input_id" in message and not is_hidden_history_message(message):
+                entry["_meta"] = {"input_id": message["input_id"]}
+            marker = message.get(HIDDEN_HISTORY_META)
+            if include_runtime_context and isinstance(marker, dict) and cast(dict[str, Any], marker).get("kind") == "internal_continuation":
+                # Attribution must distinguish persisted continuations from no-ID automation inputs.
+                entry[HIDDEN_HISTORY_META] = {"kind": "internal_continuation"}
             for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
                 if key in message:
                     entry[key] = message[key]
@@ -339,6 +316,11 @@ class Session:
             if start:
                 kept = kept[start:]
             out = kept
+        if view == "model":
+            for entry in out:
+                content = entry["content"]
+                if entry["role"] == "user" and isinstance(content, list):
+                    entry["content"] = replay_user_image_blocks(cast(list[object], content))
         return out
 
     def clear(self) -> None:
@@ -479,13 +461,8 @@ class SessionManager:
         return SessionLocation.safe_key(key)
 
     @staticmethod
-    def _storage_key(key: str) -> str:
-        """Collision-resistant encoding for internal session storage filenames."""
-        return SessionLocation.storage_key(key)
-
-    @staticmethod
     def _decode_storage_key(stem: str) -> str | None:
-        """Reverse _storage_key(): decode a base64url (no-padding) stem back to the original key."""
+        """Decode a base64url (no-padding) stem back to the original key."""
         return SessionLocation.decode_storage_key(stem)
 
     @staticmethod
@@ -515,6 +492,18 @@ class SessionManager:
         """Read persisted child headers without transcripts, checkpoints, or pending inputs."""
         return self._store.list_child_session_metadata(parent_key)
 
+    def list_subagent_session_metadata(
+        self, parent_key: str, *, turn_ids: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read persisted subagent headers attributed to the requested parent turns."""
+        return self._store.list_subagent_session_metadata(parent_key, turn_ids=turn_ids)
+
+    def read_child_session_metadata(
+        self, parent_key: str, child_keys: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read named persisted child headers without transcripts or pending inputs."""
+        return self._store.read_child_session_metadata(parent_key, child_keys)
+
     def save(self, session: Session) -> None:
         """Commit an offline administrative snapshot, rejecting obsolete history."""
         self._require_offline_mutation()
@@ -543,18 +532,7 @@ class SessionManager:
             return 0
         self._require_offline_mutation()
 
-        def rename() -> int:
-            changed = 0
-            for row in self._store.list_metadata():
-                if row["metadata"].get(SESSION_MODEL_PRESET_METADATA_KEY) == old_name:
-                    self._store.update_metadata(
-                        row["key"],
-                        {SESSION_MODEL_PRESET_METADATA_KEY: new_name},
-                    )
-                    changed += 1
-            return changed
-
-        return self._store.run_write(rename)
+        return len(self._store.rename_model_preset(old_name, new_name))
 
     def invalidate(self, key: str) -> None:
         if self._state is not None:

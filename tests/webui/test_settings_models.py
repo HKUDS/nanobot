@@ -8,12 +8,14 @@ import pytest
 
 from nanobot.config.schema import Config
 from nanobot.providers.registry import find_by_name
+from nanobot.webui.settings_contracts import MutationParams
 from nanobot.webui.settings_models import (
     WebUISettingsError,
     create_model_configuration,
     model_settings_payload,
     provider_models_payload,
     update_agent_model_settings,
+    update_model_call_order,
     update_model_configuration,
     update_provider_settings,
 )
@@ -156,6 +158,7 @@ def test_model_domain_owns_dto_and_config_updates() -> None:
         "model_presets",
         "model_call_order",
         "model_call_order_editable",
+        "image_fallback_configured",
         "model_configuration_migratable",
         "model_api_resolution_supported",
         "provider_api_configuration_supported",
@@ -366,3 +369,54 @@ def test_known_reasoning_efforts_preserve_default_none_and_custom_roundtrips() -
                if row["name"] == unknown)
     assert row["reasoning_effort"] == "future-effort"
     assert row["reasoning_effort_values"] == ["", "low", "medium", "high"]
+
+
+def test_model_call_order_accepts_json_request_and_legacy_alias() -> None:
+    config = Config.model_validate({
+        "providers": {"openai": {"apiKey": "fixture"}},
+        "modelPresets": {name: {"model": "gpt-4o", "provider": "openai"} for name in ("alpha", "beta")},
+    })
+    assert update_model_call_order(
+        config, MutationParams({"order": [" beta ", "alpha"]}), oauth_status=_oauth_status,
+    )
+    assert config.agents.defaults.model_preset == "beta"
+    assert config.agents.defaults.fallback_models == ["alpha"]
+    assert not update_model_call_order(
+        config, {"presetNames": ['["beta", "alpha"]']}, oauth_status=_oauth_status,
+    )
+
+    with pytest.raises(WebUISettingsError, match="model call order must contain at least one preset"):
+        update_model_call_order(
+            config, MutationParams({"order": ["alpha", 5]}), oauth_status=_oauth_status,
+        )
+    with pytest.raises(WebUISettingsError, match="model call order must be a JSON array"):
+        update_model_call_order(config, {"order": ["broken"]}, oauth_status=_oauth_status)
+    assert config.agents.defaults.model_preset == "beta"
+    assert config.agents.defaults.fallback_models == ["alpha"]
+
+
+def test_structured_api_declarations_can_be_set_and_cleared() -> None:
+    config = Config()
+    config.providers.openai.api_key = "fixture"
+    api = {"supportedApis": ["responses"], "preferredApi": "responses"}
+    changed, _ = update_provider_settings(config, MutationParams({"provider": "openai", "api": api}))
+    assert changed
+    assert config.providers.openai.api is not None
+    assert config.providers.openai.api.preferred_api == "responses"
+
+    name = create_model_configuration(
+        config, MutationParams({"name": "custom", "provider": "openai", "model": "gpt-4o", "api": api}),
+        oauth_status=_oauth_status,
+    )
+    saved_api = config.model_presets[name].api
+    assert saved_api is not None
+    assert saved_api.model_dump(by_alias=True, mode="json") == api
+    with pytest.raises(WebUISettingsError, match="api must declare supportedApis"):
+        update_model_configuration(
+            config, MutationParams({"name": name, "api": []}), oauth_status=_oauth_status,
+        )
+    assert config.model_presets[name].api == saved_api
+    assert update_model_configuration(
+        config, MutationParams({"name": name, "api": None}), oauth_status=_oauth_status,
+    )
+    assert config.model_presets[name].api is None

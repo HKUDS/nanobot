@@ -1,18 +1,18 @@
 {
+  "goal": {
+    "title": "GoalIsland · Mục tiêu",
+    "description": "Xem trước mục tiêu và chi tiết.",
+    "options": "Truyền trạng thái, tóm tắt, mục tiêu và báo cáo tùy chọn.",
+    "state": "Trạng thái",
+    "summary": "Chuẩn bị phát hành",
+    "objective": "Xem lại thay đổi và xác minh bản phát hành.\n\n- Kiểm tra thử nghiệm\n- Xem lại tài liệu\n- Xác nhận sẵn sàng",
+    "recap": "Đang chờ phê duyệt."
+  },
   "rename": {
     "title": "RenameDialog · Đổi tên nhóm và dự án",
     "description": "Thử hộp thoại đổi tên nhóm và dự án. Chủ đề được đổi tên ngay trong danh sách trò chuyện.",
     "options": "Bên gọi cung cấp dialogTitle, description và placeholder. title đặt giá trị ban đầu; onConfirm nhận tên đã bỏ khoảng trắng ở hai đầu. Không thể lưu tên trống.",
     "hint": "Khi lưu, tiêu đề phía trên sẽ được cập nhật."
-  },
-  "delete": {
-    "title": "DeleteConfirm · Xác nhận xóa",
-    "description": "So sánh việc xóa một cuộc trò chuyện, nhiều cuộc trò chuyện hoặc cuộc trò chuyện có tác vụ tự động.",
-    "options": "count điều khiển nội dung xóa hàng loạt. automations hiển thị tác vụ liên kết, lịch và lần chạy tiếp theo. Xác nhận sẽ gọi onConfirm.",
-    "scenario": "Tình huống xóa",
-    "open": "Mở xác nhận xóa",
-    "confirmed": "Đã xác nhận xóa ví dụ.",
-    "hint": "Chọn một, nhiều hoặc cuộc trò chuyện có tác vụ tự động."
   },
   "inlineTokens": {
     "title": "Inline tokens · Lệnh và định danh phiên",
@@ -178,6 +178,18 @@
     "dismissed": "Đã đóng thông báo khôi phục.",
     "reset": "Đặt lại bản xem trước",
     "hint": "Chọn trạng thái khôi phục, rồi thử tiếp tục hoặc đóng."
+  },
+  "sandbox": {
+    "gateway": "Gateway minh họa",
+    "unknownGateway": "Chưa chỉ định",
+    "title": "Thông báo lệnh",
+    "description": "So sánh thành phần bị thiếu, vị trí cài đặt không được bảo vệ và lỗi khởi động bằng thành phần thực tế.",
+    "options": "Thông báo không chiếm tiêu điểm hay tự chạy lại lệnh. Đổi trạng thái, đóng thông báo rồi tiếp tục nhập.",
+    "missing": "Không tìm thấy thành phần",
+    "permissions": "Cần kiểm tra cài đặt",
+    "startup": "Không thể khởi động",
+    "hint": "Chỉ minh họa thành phần. Không chạy lệnh hay thay đổi cài đặt.",
+    "settingsAction": "Đã yêu cầu mở cài đặt sandbox (minh họa)."
   },
   "fallback": {
     "title": "ModelFallbackNotice · Mô hình dự phòng",

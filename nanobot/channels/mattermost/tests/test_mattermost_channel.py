@@ -1035,3 +1035,18 @@ def test_message_splitting():
     chunks = split_message(long_text, MATTERMOST_MAX_MESSAGE_LEN)
     assert all(len(c) <= MATTERMOST_MAX_MESSAGE_LEN for c in chunks)
     assert "".join(chunks) == long_text
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["missing", "http", "no_id"])
+async def test_upload_failure_propagates_before_any_post(tmp_path, failure):
+    channel, fake = _make_channel()
+    path = tmp_path / "file.txt"
+    if failure != "missing":
+        path.write_text("data")
+    if failure == "http":
+        fake.post = AsyncMock(side_effect=httpx.ConnectError("offline"))
+    elif failure == "no_id":
+        fake.set_post_response("/api/v4/files", {"file_infos": [{}]})
+    with pytest.raises((OSError, httpx.ConnectError, ValueError)):
+        await channel.send(OutboundMessage("mattermost", "chan", "text", media=[str(path)]))
+    assert not [c for c in fake.post_calls if c["path"] == "/api/v4/posts"]

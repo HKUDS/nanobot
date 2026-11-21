@@ -20,7 +20,6 @@ interface StreamErrorNoticeProps {
  */
 export function StreamErrorNotice({ error, onDismiss, onOpenSettings }: StreamErrorNoticeProps) {
   const { t } = useTranslation();
-
   const { title, body } = resolveCopy(error, t);
 
   return (

@@ -32,6 +32,7 @@ import {
   Unplug,
   X,
 } from "lucide-react";
+import { useSidebarGroupMotion } from "@/hooks/useSidebarGroupMotion";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -80,6 +81,7 @@ import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 const INITIAL_VISIBLE_SESSIONS = 160;
 const VISIBLE_SESSIONS_INCREMENT = 160;
 const ACTION_MENU_CONTENT_CLASS = "w-[11rem] min-w-[11rem] whitespace-nowrap";
+const TOPIC_BUTTON_FOCUS_CLASS = "rounded-md focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-sidebar-muted-foreground";
 const COLLAPSED_PANE_GROUPS_STORAGE_KEY = "nanobot-webui.collapsed-pane-groups.v1";
 const DETACH_PANE_DROP_TARGET = "__sidebar-standalone__";
 
@@ -191,8 +193,6 @@ export interface SidebarDeleteItem {
   label: string;
 }
 
-export type SidebarDeleteDecision = (confirmed: boolean) => void;
-
 function droppablePaneKey(
   dataTransfer: DataTransfer,
   group: SidebarPaneGroup,
@@ -224,13 +224,14 @@ function isWorkbenchTabSurface(target: EventTarget | null): boolean {
 }
 
 interface ChatListProps {
+  listHeader?: ReactNode;
   sessions: ChatSummary[];
   temporarySessions?: ChatSummary[];
   activeKey: string | null;
   onSelect: (key: string) => void;
   onCloseTemporaryChat?: (key: string) => void;
-  onRequestDelete: (key: string, label: string, onDecision?: SidebarDeleteDecision) => void;
-  onRequestDeleteMany?: (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => void;
+  onRequestDelete: (key: string, label: string) => void;
+  onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, title: string) => Promise<void>;
   onRequestRenameTab?: (key: string, label: string) => void;
@@ -266,10 +267,10 @@ interface ChatListProps {
   actionMenuPortalContainer?: HTMLElement | null;
   loading?: boolean;
   initialLoading?: boolean;
-  emptyLabel?: string;
 }
 
 export const ChatList = memo(function ChatList({
+  listHeader,
   sessions,
   temporarySessions = [],
   activeKey,
@@ -309,12 +310,12 @@ export const ChatList = memo(function ChatList({
   actionMenuPortalContainer,
   loading,
   initialLoading = loading,
-  emptyLabel,
 }: ChatListProps) {
   const { t } = useTranslation();
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_SESSIONS);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const selectionBarRef = useRef<HTMLDivElement>(null);
+  const hasListHeader = Boolean(listHeader);
   useLayoutEffect(() => {
     const viewport = scrollViewportRef.current;
     if (!viewport) return;
@@ -334,23 +335,19 @@ export const ChatList = memo(function ChatList({
     viewport.addEventListener("scroll", onScroll, { passive: true });
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateEdges);
     observer?.observe(viewport);
-    if (viewport.firstElementChild) observer?.observe(viewport.firstElementChild);
+    for (const child of viewport.children) observer?.observe(child);
     return () => {
       viewport.removeEventListener("scroll", onScroll);
       clearTimeout(idleTimer);
       delete viewport.dataset.scrolling;
       observer?.disconnect();
     };
-  }, [loading, sessions.length, temporarySessions.length]);
-  const layoutRowRefs = useRef(new Map<string, HTMLElement>());
-  const pendingLayoutRectsRef = useRef<Map<string, DOMRect> | null>(null);
-  const layoutAnimationsRef = useRef(new Map<string, Animation>());
+  }, [hasListHeader, loading, sessions.length, temporarySessions.length]);
   const [collapsedPaneGroups, setCollapsedPaneGroups] = useState<Set<string>>(
     readCollapsedPaneGroups,
   );
   const [paneDropTarget, setPaneDropTarget] = useState<string | null>(null);
   const [deleteSelectionMode, setDeleteSelectionMode] = useState(false);
-  const [deleteConfirmationPending, setDeleteConfirmationPending] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<{
     keys: string[];
     archive: boolean;
@@ -376,7 +373,7 @@ export const ChatList = memo(function ChatList({
     () => new Set(),
   );
   const deleteSelectionAnchorRef = useRef<string | null>(null);
-  const selectionConfirmationPending = pendingArchive !== null || deleteConfirmationPending;
+  const selectionConfirmationPending = pendingArchive !== null;
   const closeDeleteSelection = useCallback(() => {
     setDeleteSelectionMode(false);
     setSelectedDeleteKeys(new Set());
@@ -552,19 +549,7 @@ export const ChatList = memo(function ChatList({
     });
   }, [loading, paneGroups]);
 
-  const measureLayoutRows = useCallback(() => {
-    const rects = new Map<string, DOMRect>();
-    for (const [key, row] of layoutRowRefs.current) {
-      rects.set(key, row.getBoundingClientRect());
-    }
-    return rects;
-  }, []);
-
-  const captureLayout = useCallback(() => {
-    for (const animation of layoutAnimationsRef.current.values()) animation.cancel();
-    layoutAnimationsRef.current.clear();
-    pendingLayoutRectsRef.current = measureLayoutRows();
-  }, [measureLayoutRows]);
+  const { registerRow, captureLayout } = useSidebarGroupMotion(collapsedGroups, collapsedPaneGroups);
 
   const togglePaneGroup = useCallback((key: string) => {
     captureLayout();
@@ -581,43 +566,6 @@ export const ChatList = memo(function ChatList({
     captureLayout();
     onToggleGroup(key);
   }, [captureLayout, onToggleGroup]);
-
-  useLayoutEffect(() => {
-    const previousRects = pendingLayoutRectsRef.current;
-    if (!previousRects) return;
-    pendingLayoutRectsRef.current = null;
-    const nextRects = measureLayoutRows();
-    const reduceMotion = typeof window.matchMedia === "function"
-      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduceMotion) return;
-    for (const [key, nextRect] of nextRects) {
-      const previousRect = previousRects.get(key);
-      const row = layoutRowRefs.current.get(key);
-      if (!previousRect || !row || typeof row.animate !== "function") continue;
-      const deltaY = previousRect.top - nextRect.top;
-      if (Math.abs(deltaY) < 0.5) continue;
-      const animation = row.animate(
-        [
-          { transform: `translateY(${deltaY}px)` },
-          { transform: "translateY(0)" },
-        ],
-        {
-          duration: 180,
-          easing: "cubic-bezier(0.2, 0, 0, 1)",
-        },
-      );
-      layoutAnimationsRef.current.set(key, animation);
-      animation.addEventListener("finish", () => {
-        if (layoutAnimationsRef.current.get(key) === animation) {
-          layoutAnimationsRef.current.delete(key);
-        }
-      }, { once: true });
-    }
-  }, [collapsedGroups, collapsedPaneGroups, measureLayoutRows]);
-
-  useEffect(() => () => {
-    for (const animation of layoutAnimationsRef.current.values()) animation.cancel();
-  }, []);
 
   if (initialLoading && sessions.length === 0 && temporarySessions.length === 0) {
     return (
@@ -638,13 +586,7 @@ export const ChatList = memo(function ChatList({
     );
   }
 
-  if (sessions.length === 0 && temporarySessions.length === 0) {
-    return (
-      <div className="px-3 py-6 text-[12px] leading-5 text-sidebar-muted-foreground">
-        {emptyLabel ?? t("chat.noSessions")}
-      </div>
-    );
-  }
+  if (sessions.length === 0 && temporarySessions.length === 0) return null;
 
   const running = new Set(runningChatIds);
   const updated = new Set(updatedChatIds);
@@ -695,28 +637,19 @@ export const ChatList = memo(function ChatList({
     });
     if (!range) deleteSelectionAnchorRef.current = targetKey ?? null;
   };
-  const requestDeleteItems = (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => {
+  const requestDeleteKeys = (keys: string[]) => {
+    const items = keys.map((key) => deleteItemsByKey.get(key))
+      .filter((item): item is SidebarDeleteItem => item !== undefined);
     if (items.length === 0) return;
-    if (onRequestDeleteMany) onRequestDeleteMany(items, onDecision);
-    else if (items.length === 1) onRequestDelete(items[0].key, items[0].label, onDecision);
-  };
-  const requestDeleteKeys = (keys: string[], onDecision?: SidebarDeleteDecision) => {
-    requestDeleteItems(keys
-      .map((key) => deleteItemsByKey.get(key))
-      .filter((item): item is SidebarDeleteItem => item !== undefined), onDecision);
-  };
-  const confirmDeleteSelection = () => {
-    setDeleteConfirmationPending(true);
-    requestDeleteKeys(Array.from(selectedDeleteKeys), (confirmed) => {
-      setDeleteConfirmationPending(false);
-      if (confirmed) closeDeleteSelection();
-    });
+    if (onRequestDeleteMany) onRequestDeleteMany(items);
+    else if (items.length === 1) onRequestDelete(items[0].key, items[0].label);
   };
   const selectedArchiveKeys = Array.from(selectedDeleteKeys).filter((key) => archivableKeys.has(key));
   const allSelectedArchived = selectedArchiveKeys.length > 0
     && selectedArchiveKeys.every((key) => archivedPanes.has(key) || archived.has(key));
   return (
     <div ref={scrollViewportRef} className="sidebar-scroll-fade sidebar-scrollbar h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain pb-2">
+      {listHeader}
       <SidebarSelectionHighlight
         scope="chats"
         activeId={activeKey}
@@ -812,8 +745,7 @@ export const ChatList = memo(function ChatList({
                 <div
                   ref={(element) => {
                     const key = `group:${group.id}`;
-                    if (element) layoutRowRefs.current.set(key, element);
-                    else layoutRowRefs.current.delete(key);
+                    registerRow(key, element);
                   }}
                   data-sidebar-group-header={group.id}
                 >
@@ -882,8 +814,7 @@ export const ChatList = memo(function ChatList({
                         <li
                           key={s.key}
                           ref={(element) => {
-                            if (element) layoutRowRefs.current.set(s.key, element);
-                            else layoutRowRefs.current.delete(s.key);
+                            registerRow(s.key, element);
                           }}
                           data-sidebar-tab-group="true"
                           data-pane-group-collapsed={paneGroupCollapsed ? "true" : undefined}
@@ -1024,8 +955,7 @@ export const ChatList = memo(function ChatList({
                       <li
                         key={s.key}
                         ref={(element) => {
-                          if (element) layoutRowRefs.current.set(s.key, element);
-                          else layoutRowRefs.current.delete(s.key);
+                          registerRow(s.key, element);
                         }}
                         className="relative min-w-0"
                       >
@@ -1075,6 +1005,7 @@ export const ChatList = memo(function ChatList({
                               aria-pressed={deleteSelectionMode ? tabSelected : undefined}
                               className={cn(
                                 "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left",
+                                TOPIC_BUTTON_FOCUS_CLASS,
                                 canDragSession && "cursor-grab active:cursor-grabbing",
                                 deleteSelectionMode && "cursor-default",
                                 compact ? "py-1" : "py-1.5",
@@ -1209,7 +1140,6 @@ export const ChatList = memo(function ChatList({
           <div
             ref={selectionBarRef}
             data-testid="delete-selection-bar"
-            aria-busy={deleteConfirmationPending}
             className="sticky bottom-2 z-30 mx-1 mt-3 flex min-h-11 items-center gap-1 rounded-floating border border-sidebar-border/80 bg-popover/95 p-1.5 pl-3 shadow-[0_10px_30px_rgba(15,23,42,0.14)] backdrop-blur-xl"
           >
             <span className="min-w-0 flex-1 truncate pr-2 text-[12.5px] font-medium text-foreground/85">
@@ -1223,7 +1153,7 @@ export const ChatList = memo(function ChatList({
                 <button
                   type="button"
                   aria-label={t(allSelectedArchived ? "chat.unarchive" : "chat.archive")}
-                  disabled={selectedDeleteKeys.size === 0 || deleteConfirmationPending}
+                  disabled={selectedDeleteKeys.size === 0}
                   onClick={() => setPendingArchive({
                     keys: selectedArchiveKeys,
                     archive: !allSelectedArchived,
@@ -1240,8 +1170,11 @@ export const ChatList = memo(function ChatList({
               <button
                 type="button"
                 aria-label={t("chat.delete")}
-                disabled={selectedDeleteKeys.size === 0 || deleteConfirmationPending}
-                onClick={confirmDeleteSelection}
+                disabled={selectedDeleteKeys.size === 0}
+                onClick={() => {
+                  requestDeleteKeys(Array.from(selectedDeleteKeys));
+                  closeDeleteSelection();
+                }}
                 className="touch-target inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-destructive transition-colors media-hover:hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-40"
               >
                 <Trash2 className="h-4 w-4" aria-hidden />
@@ -1557,6 +1490,7 @@ function ActivePaneRows({
                   aria-pressed={deleteSelectionMode ? selected : undefined}
                   className={cn(
                     "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left font-normal leading-5",
+                    TOPIC_BUTTON_FOCUS_CLASS,
                     canDragSession && "cursor-grab active:cursor-grabbing",
                     compact ? "py-1" : "py-1.5",
                     deleteSelectionMode && "cursor-default",

@@ -44,12 +44,7 @@ from nanobot.config.schema import Config
 from nanobot.gateway.runtime import GatewayHealthIdentity, GatewayInstance, GatewayRuntime
 from nanobot.installation_lock import installation_access
 from nanobot.security.network import is_loopback_host
-from nanobot.session.keys import (
-    HEARTBEAT_SESSION_KEY,
-    UNIFIED_SESSION_KEY,
-    last_channel_from_metadata,
-    session_key_for_channel,
-)
+from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
@@ -73,7 +68,6 @@ async def _deliver_to_channel(
     *,
     bus: MessageBus,
     session_manager: SessionManager,
-    unified_session: bool = False,
     record: bool = False,
     session_key: str | None = None,
     session_generation: str | None = None,
@@ -89,9 +83,7 @@ async def _deliver_to_channel(
     )
     key = session_key or (raw_key if isinstance(raw_key, str) else None)
     if key is None:
-        key = session_key_for_channel(
-            msg.channel, msg.chat_id, unified_session=unified_session,
-        )
+        key = f"{msg.channel}:{msg.chat_id}"
     if msg.channel == "websocket":
         from nanobot.agent.turn_delivery import TurnRoute
         from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
@@ -223,19 +215,6 @@ def _advance_dream_cursor_if_behind(memory: Any) -> None:
         memory.set_last_dream_cursor(latest)
 
 
-def _commit_dream_changes(memory: Any) -> str | None:
-    if not memory.git.is_initialized():
-        return None
-    diff_body = memory.dream_content_diff()
-    if not diff_body:
-        return None
-    message = memory.build_dream_commit_message(
-        "dream: periodic memory consolidation",
-        diff_body,
-    )
-    return memory.git.auto_commit(message)
-
-
 _HEARTBEAT_PREAMBLE = (
     "[Your response will be delivered directly to the user's messaging app. "
     "Output ONLY the final user-facing message. Never reference internal "
@@ -274,20 +253,12 @@ def _pick_heartbeat_target_from_sessions(
     enabled_channels: Iterable[str],
     sessions: Iterable[dict[str, Any]],
     archived_keys: Iterable[str],
-    unified_session_metadata: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     enabled = set(enabled_channels)
     archived = set(archived_keys)
     for item in sessions:
         key = item.get("key") or ""
         if key in archived:
-            continue
-        if key == UNIFIED_SESSION_KEY:
-            route = last_channel_from_metadata(unified_session_metadata)
-            if route is not None:
-                channel, chat_id = route
-                if channel not in {"cli", "system"} and channel in enabled:
-                    return channel, chat_id
             continue
         if ":" not in key:
             continue
@@ -591,7 +562,6 @@ def _run_claimed_gateway(
     recovery = RecoveryCoordinator(
         sessions=session_manager,
         bus=bus,
-        unified_session=config.agents.defaults.unified_session,
     )
 
     from nanobot.goal.assembly import install_goal
@@ -624,18 +594,10 @@ def _run_claimed_gateway(
         schedule_background=_schedule_webui_background,
         recovery=recovery,
     )
-    def _channel_session_key(channel: str, chat_id: str) -> str:
-        return session_key_for_channel(
-            channel,
-            chat_id,
-            unified_session=config.agents.defaults.unified_session,
-        )
-
     deliver_to_channel = partial(
         _deliver_to_channel,
         bus=bus,
         session_manager=session_manager,
-        unified_session=config.agents.defaults.unified_session,
     )
 
     message_tool = agent.tools.get("message")
@@ -648,61 +610,17 @@ def _run_claimed_gateway(
 
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
-            from nanobot.agent.memory import MemoryStore
+            from nanobot.agent.dream import run_dream
 
-            dream_session_key = MemoryStore.dream_session_key
-
-            store = agent.context.memory
-            resp = None
-            diff_body = ""
-            try:
-                result = store.build_dream_prompt()
-                if result is None:
-                    logger.info("Dream: nothing to process")
-                    return None
-                prompt, last_cursor = result
-                key = dream_session_key()
-                dream_runtime = agent.dream_runtime()
-                await mcp_provider.connect()
-                resp = await agent.process_direct(
-                    prompt,
-                    session_key=key,
-                    ephemeral=True,
-                    tools=store.build_dream_tools(),
-                    on_progress=_silent,
-                    runtime=dream_runtime,
-                )
-                # The real file delta grounds the audit record; normal completion
-                # decides whether this history batch has finished processing.
-                diff_body = store.dream_content_diff()
-                completed = MemoryStore.dream_run_completed(resp)
-                if completed:
-                    store.set_last_dream_cursor(last_cursor)
-                    if diff_body:
-                        logger.info(
-                            "Dream cron job completed, cursor advanced to {}",
-                            last_cursor,
-                        )
-                    else:
-                        logger.info(
-                            "Dream cron job completed with no memory changes; "
-                            "cursor advanced to {}",
-                            last_cursor,
-                        )
-                else:
-                    logger.warning(
-                        "Dream cron job did not complete ({}); cursor remains at {}",
-                        MemoryStore.dream_incompletion_reason(resp),
-                        store.get_last_dream_cursor(),
-                    )
-            except Exception:
-                logger.exception("Dream cron job failed")
-            finally:
-                sha = _commit_dream_changes(store)
-                if sha:
-                    logger.info("Dream commit: {}", sha)
-                store.compact_history()
-                await agent.sessions.state.prune_dream_sessions()
+            result = await run_dream(agent, commit_prefix="dream: periodic memory consolidation")
+            if result.error:
+                logger.warning("Dream did not complete ({})", result.error)
+            elif not result.had_input:
+                logger.info("Dream: nothing to process")
+            else:
+                logger.info("Dream completed the pending history range")
+            if result.commit_sha:
+                logger.info("Dream commit: {}", result.commit_sha)
             return None
 
         if job.name == "heartbeat":
@@ -719,7 +637,7 @@ def _run_claimed_gateway(
             channel, chat_id = await _pick_heartbeat_target()
             if channel == "cli":
                 return None
-            delivery_key = _channel_session_key(channel, chat_id)
+            delivery_key = f"{channel}:{chat_id}"
             delivery_session = await session_manager.state.read(delivery_key)
             if delivery_session is None:
                 return None
@@ -835,16 +753,10 @@ def _run_claimed_gateway(
 
     async def _pick_heartbeat_target() -> tuple[str, str]:
         archived_keys = await ensure_webui_session_archives(session_manager.state)
-        unified_metadata = None
-        if config.agents.defaults.unified_session:
-            record = await session_manager.state.read_metadata(UNIFIED_SESSION_KEY)
-            if isinstance(record, dict) and isinstance(record.get("metadata"), dict):
-                unified_metadata = record["metadata"]
         return _pick_heartbeat_target_from_sessions(
             enabled_channels=channels.enabled_channels,
             sessions=await session_manager.state.list_sessions(),
             archived_keys=archived_keys,
-            unified_session_metadata=unified_metadata,
         )
 
     if channels.enabled_channels:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping, TypeAlias, cast
+from typing import Any, Literal, TypeAlias, cast
 
 from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import public_history_messages
@@ -133,28 +133,6 @@ def snapshot_from_session(
         created_at=session.created_at.isoformat(),
         updated_at=session.updated_at.isoformat(),
         metadata=deepcopy(session.metadata),
-        messages=messages,
-    )
-
-
-def snapshot_from_payload(
-    payload: Mapping[str, Any],
-    *,
-    include_runtime_context: bool = False,
-) -> SessionSnapshot:
-    raw_messages: list[Any] = list(payload.get("messages") or [])
-    messages: list[dict[str, Any]] = [
-        deepcopy(dict(cast(Mapping[str, Any], message)))
-        for message in raw_messages
-        if isinstance(message, Mapping)
-    ]
-    if not include_runtime_context:
-        messages = public_history_messages(messages)
-    return SessionSnapshot(
-        key=str(payload.get("key") or ""),
-        created_at=payload.get("created_at"),
-        updated_at=payload.get("updated_at"),
-        metadata=deepcopy(dict(cast(Mapping[str, Any], payload.get("metadata") or {}))),
         messages=messages,
     )
 
