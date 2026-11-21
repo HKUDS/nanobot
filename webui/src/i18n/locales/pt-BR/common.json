@@ -2414,6 +2414,8 @@
     },
     "copyReply": "Copiar",
     "copiedReply": "Copiado",
+    "expandUserMessage": "Mostrar mais",
+    "collapseUserMessage": "Mostrar menos",
     "turnLatencyTitle": "Tempo de resposta (ponta a ponta)",
     "fileEditViewDiff": "Ver alterações",
     "fileEditViewLargeDiff": "Expandir alterações",

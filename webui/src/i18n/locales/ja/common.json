@@ -2206,6 +2206,8 @@
     },
     "copyReply": "コピー",
     "copiedReply": "コピー済み",
+    "expandUserMessage": "さらに表示",
+    "collapseUserMessage": "折りたたむ",
     "turnLatencyTitle": "応答時間（全行程）",
     "fileEditViewDiff": "変更を表示",
     "fileEditViewLargeDiff": "変更を展開",

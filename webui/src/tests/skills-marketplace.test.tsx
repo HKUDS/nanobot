@@ -141,7 +141,7 @@ describe("useSkills", () => {
     fireEvent.change(input, { target: { value: "$", selectionStart: 1 } });
     await act(async () => {});
     expect(fetchSkills).toHaveBeenCalledTimes(3);
-    expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
   it("coalesces opens during an older fetch into one trailing refresh", async () => {

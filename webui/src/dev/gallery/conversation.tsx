@@ -23,7 +23,7 @@ import { WebSearchRun } from "@/components/thread/activity/WebSearchRun";
 import { Button } from "@/components/ui/button";
 import type { StreamError } from "@/lib/nanobot-client";
 import { formatToolCallTrace } from "@/lib/tool-traces";
-import type { RecoveryState, SlashCommand, ToolProgressEvent, UIContextCompaction, UIMessage, WorkspaceScopePayload, WorkspacesPayload } from "@/lib/types";
+import type { RecoveryState, SkillSummary, SlashCommand, ToolProgressEvent, UIContextCompaction, UIMessage, WorkspaceScopePayload, WorkspacesPayload } from "@/lib/types";
 import { Sample, StatePicker, type ComponentExample } from "./example";
 import { useGalleryTranslation } from "./i18n";
 
@@ -41,6 +41,11 @@ const commands: SlashCommand[] = [
   { command: "/status", title: "previews.composer.statusCommand", description: "previews.composer.statusDescription", icon: "activity", lifecycle: "side_channel", acceptsArgs: false },
   { command: "/compact", title: "previews.composer.compactCommand", description: "previews.composer.compactDescription", icon: "archive", lifecycle: "finalize_active_turn", acceptsArgs: false },
   { command: "/help", title: "previews.composer.helpCommand", description: "previews.composer.helpDescription", icon: "circle-help", lifecycle: "side_channel", acceptsArgs: false },
+];
+const gallerySkills: SkillSummary[] = [
+  { name: "frontend-design", description: "Build refined interfaces with balanced typography, motion, and responsive layout.", source: "workspace", enabled: true, available: true },
+  { name: "nanobot-document", description: "Look up nanobot configuration, architecture, and troubleshooting guides.", source: "builtin", enabled: true, available: true },
+  { name: "skill-creator", description: "Create or update reusable AgentSkills in the workspace.", source: "builtin", enabled: true, available: true },
 ];
 const projectScope: WorkspaceScopePayload = { project_path: "D:\\Projects\\nanobot", project_name: "nanobot", access_mode: "restricted" };
 const workspaceCatalog: WorkspacesPayload = {
@@ -79,6 +84,7 @@ function ComposerPreview() {
         inputAriaLabel={t("previews.composer.input")} placeholder={t("previews.composer.placeholder")}
         modelLabel={selected.name} modelDetail={selected.model} modelProvider={selected.provider} modelPreset={preset}
         modelPresets={presets} onModelPresetChange={setPreset} slashCommands={commands.map((command) => ({ ...command, title: t(command.title), description: t(command.description) }))}
+        skills={gallerySkills}
         renderContextUsage={renderContextUsage}
         workspaceScope={projectScope} workspaceControlsHidden quotedContext={quoted} onQuotedContextChange={setQuoted}
         onStop={() => { setMode("thread"); setSent({ kind: "stopped" }); }}
@@ -360,7 +366,7 @@ export const conversationExamples: ComponentExample[] = [
   { title: "previews.goal.title", files: ["thread/GoalIsland"], Preview: GoalPreview,
     description: "previews.goal.description", options: "previews.goal.options",
     code: '<GoalIsland goal={{ active: true, status: "active", ui_summary: summary, objective }} />' },
-  { title: "previews.composer.title", files: ["thread/ThreadComposer"], Preview: ComposerPreview,
+  { title: "previews.composer.title", files: ["thread/ThreadComposer", "thread/ComposerPalette"], Preview: ComposerPreview,
     description: "previews.composer.description", options: "previews.composer.options",
     code: '<ThreadComposer onSend={send} modelPresets={presets} onModelPresetChange={setPreset} slashCommands={commands} />' },
   { title: "previews.modelPreset.title", files: ["thread/ModelPresetBadge"], Preview: ModelPresetPreview,

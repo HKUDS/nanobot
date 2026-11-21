@@ -17,7 +17,7 @@ async function expectBackgroundToCover(page: Page, owner: Locator) {
     surface.boundingBox(),
     surface.evaluate(el => {
       const style = getComputedStyle(el, "::before");
-      return { color: style.backgroundColor, clip: style.clipPath };
+      return { color: style.backgroundColor, radius: style.borderRadius };
     }),
   ]);
   expect(ownerBox).not.toBeNull();
@@ -25,7 +25,7 @@ async function expectBackgroundToCover(page: Page, owner: Locator) {
   expect(surfaceBox!.width).toBeCloseTo(ownerBox!.width, 1);
   expect(surfaceBox!.height).toBeCloseTo(ownerBox!.height, 1);
   expect(background.color).not.toBe("rgba(0, 0, 0, 0)");
-  expect(background.clip).not.toBe("none");
+  expect(background.radius).not.toBe("0px");
 
   const image = await page.screenshot({ clip: { x: ownerBox!.x + 12, y: ownerBox!.y + 10, width: 1, height: 1 } });
   const pixel = await page.evaluate(async bytes => {
@@ -49,6 +49,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
 
     const trigger = page.getByRole("button", { name: "Show full goal" });
     await expect(trigger).toBeVisible();
+    await page.locator(".goal-island").evaluate(async el => { await Promise.all(el.getAnimations().map(animation => animation.finished)); });
     await expectBackgroundToCover(page, trigger);
 
     await trigger.click();

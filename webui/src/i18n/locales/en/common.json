@@ -2594,6 +2594,8 @@
     },
     "copyReply": "Copy",
     "copiedReply": "Copied",
+    "expandUserMessage": "Show more",
+    "collapseUserMessage": "Show less",
     "turnLatencyTitle": "Response time (end-to-end)",
     "fileEditViewDiff": "View changes",
     "fileEditViewLargeDiff": "Expand changes",

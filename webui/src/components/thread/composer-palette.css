@@ -1,0 +1,49 @@
+@keyframes composer-palette-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--palette-enter-y, 4px)) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes composer-palette-preview-in {
+  from {
+    opacity: 0.55;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.composer-palette-surface {
+  --palette-enter-y: 4px;
+  transform-origin: bottom center;
+  animation: composer-palette-enter 130ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.composer-palette-surface[data-placement="below"] {
+  --palette-enter-y: -4px;
+  transform-origin: top center;
+}
+
+.composer-palette-surface[data-placement="beside"] {
+  --palette-enter-y: 0px;
+  transform-origin: left center;
+}
+
+.composer-palette-preview-body {
+  animation: composer-palette-preview-in 110ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-palette-surface, .composer-palette-preview-body { animation: none; }
+}
+
+@media (forced-colors: active) {
+  .composer-palette-surface { outline: 1px solid CanvasText; }
+}

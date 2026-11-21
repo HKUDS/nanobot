@@ -2205,6 +2205,8 @@
     },
     "copyReply": "複製",
     "copiedReply": "已複製",
+    "expandUserMessage": "展開",
+    "collapseUserMessage": "收起",
     "turnLatencyTitle": "回覆耗時",
     "fileEditViewDiff": "檢視修改",
     "fileEditViewLargeDiff": "展開修改",

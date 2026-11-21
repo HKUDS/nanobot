@@ -761,8 +761,18 @@
     overflow: hidden;
   }
   @media (prefers-reduced-motion: no-preference) {
-    .expandable-text {
+    .expandable-text,
+    .user-message-collapsible-body {
       transition: height 240ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .user-message-toggle-bar {
+      transition: bottom 240ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .user-message-stack {
+      transition: height 240ms cubic-bezier(0.4, 0, 0.2, 1), opacity 180ms ease-out;
+    }
+    .user-message-stack-sheet {
+      transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 180ms ease-out;
     }
     .inline-disclosure {
       transition:
@@ -1227,6 +1237,101 @@
   --tw-shadow: var(--surface-depth-shadow);
 }
 
+.user-message-collapsible {
+  padding-bottom: 2.5rem;
+}
+
+.user-message-collapsible-masked {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 2.75rem), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 2.75rem), transparent 100%);
+}
+
+[data-user-text-bubble][data-user-message-collapsed="true"] {
+  --user-message-stack-height: 10px;
+}
+
+.user-message-toggle-bar {
+  bottom: var(--user-message-stack-height, 0px);
+}
+
+.user-message-stack {
+  --composer-shadow-color: 240 10% 16%;
+  height: 10px;
+  overflow: visible;
+  opacity: 1;
+}
+
+.dark .user-message-stack {
+  --composer-shadow-color: 240 12% 3%;
+}
+
+.user-message-stack[data-state="hidden"] {
+  height: 0;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.user-message-stack-sheet {
+  display: block;
+  height: 5px;
+  border-inline: 1px solid hsl(var(--border) / 0.82);
+  border-bottom: 1px solid hsl(var(--border) / 0.82);
+  background-color: hsl(var(--secondary) / 0.62);
+  box-shadow: 0 2px 6px -2px hsl(var(--composer-shadow-color) / 0.1);
+}
+
+.dark .user-message-stack-sheet {
+  border-color: hsl(var(--border) / 0.92);
+}
+
+.user-message-stack-sheet-first {
+  margin-inline: 1rem;
+  border-bottom-left-radius: 0.625rem;
+  border-bottom-right-radius: 0.625rem;
+}
+
+.user-message-stack-sheet-second {
+  margin-inline: 2rem;
+  border-bottom-left-radius: 0.5rem;
+  border-bottom-right-radius: 0.5rem;
+  border-color: hsl(var(--border) / 0.62);
+  background-color: hsl(var(--secondary) / 0.42);
+  box-shadow: 0 2px 6px -2px hsl(var(--composer-shadow-color) / 0.08);
+}
+
+.dark .user-message-stack-sheet-second {
+  border-color: hsl(var(--border) / 0.68);
+}
+
+.user-message-stack[data-state="hidden"] .user-message-stack-sheet {
+  transform: translateY(-5px);
+}
+
+.user-message-stack[data-temporary="true"] .user-message-stack-sheet {
+  background-color: transparent;
+  border-style: dashed;
+  border-color: hsl(var(--muted-foreground) / 0.34);
+}
+
+.user-message-stack[data-temporary="true"] .user-message-stack-sheet-second {
+  border-color: hsl(var(--muted-foreground) / 0.22);
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-user-text-bubble][data-user-message-collapsed="true"]:has([data-user-message-toggle]:hover) .user-message-stack-sheet-first {
+    transform: translateY(1px);
+  }
+  [data-user-text-bubble][data-user-message-collapsed="true"]:has([data-user-message-toggle]:hover) .user-message-stack-sheet-second {
+    transform: translateY(2px);
+  }
+}
+
+@media (pointer: coarse) {
+  .user-message-collapsible {
+    padding-bottom: 3.25rem;
+  }
+}
+
 .pending-edge-overlay {
   --pending-edge-progress: -20%;
   --pending-edge-solid-color: hsl(var(--border) / 0.75);
@@ -1414,6 +1519,16 @@
 @media (forced-colors: active) {
   .thread-composer-surface, .context-inspector-surface, .user-message-surface, .side-panel-surface { outline: 1px solid CanvasText; }
   .user-message-surface-dashed { outline-style: dashed; }
+  .user-message-collapsible-masked {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  [data-user-message-toggle] {
+    border: 1px solid ButtonBorder;
+  }
+  .user-message-stack-sheet {
+    border-color: CanvasText;
+  }
   .pending-edge-overlay { display: none; }
   :has(> .pending-edge-overlay[data-solid-tone="card"][data-pending-edge-overlay="pending"]) {
     border-color: CanvasText;
@@ -1808,35 +1923,6 @@
       }
     }
   }
-  .automation-calendar-grid { display: none; }
-  .automation-calendar-agenda { display: block; }
-  @container automations (min-width: 44rem) {
-    .automation-calendar-grid { display: block; }
-    .automation-calendar-agenda { display: none; }
-    .automation-calendar-weekdays {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-    }
-    .automation-calendar-weekdays > div {
-      padding: 8px 10px;
-      color: hsl(var(--muted-foreground));
-      font-size: 10px;
-      line-height: 16px;
-      text-align: end;
-    }
-    .automation-calendar-month {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-    }
-    .automation-calendar-day {
-      min-block-size: 112px;
-      min-inline-size: 0;
-      border-inline-end: 1px solid hsl(var(--border) / 0.55);
-      border-block-end: 1px solid hsl(var(--border) / 0.55);
-    }
-    .automation-calendar-day:nth-child(7n) { border-inline-end: 0; }
-    .automation-calendar-day:nth-last-child(-n + 7) { border-block-end: 0; }
-  }
   .settings-stack > :not([hidden]) ~ :not([hidden]) {
     margin-block-start: var(--settings-module-gap, 20px);
   }
@@ -2149,6 +2235,14 @@ html[data-custom-background] .context-inspector-surface,
 html[data-custom-background] .side-panel-surface {
   background-color: hsl(var(--settings-surface) / 0.78);
   backdrop-filter: blur(12px);
+}
+html[data-custom-background] .user-message-stack:not([data-temporary="true"]) .user-message-stack-sheet-first {
+  background-color: hsl(var(--settings-surface) / 0.56);
+  backdrop-filter: blur(10px);
+}
+html[data-custom-background] .user-message-stack:not([data-temporary="true"]) .user-message-stack-sheet-second {
+  background-color: hsl(var(--settings-surface) / 0.38);
+  backdrop-filter: blur(10px);
 }
 html[data-custom-background] aside.bg-settings-surface {
   background-color: hsl(var(--settings-surface) / 0.65);

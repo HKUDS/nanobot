@@ -2206,6 +2206,8 @@
     },
     "copyReply": "Salin",
     "copiedReply": "Disalin",
+    "expandUserMessage": "Tampilkan lebih banyak",
+    "collapseUserMessage": "Tampilkan lebih sedikit",
     "turnLatencyTitle": "Waktu respons (ujung ke ujung)",
     "fileEditViewDiff": "Lihat perubahan",
     "fileEditViewLargeDiff": "Perluas perubahan",

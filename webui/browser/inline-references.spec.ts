@@ -157,6 +157,52 @@ for (const narrow of [false, true]) {
       await expectMatchingInputLayers(input);
     });
 
+    test(`slash and skill palettes match composer width with split preview on desktop: ${narrow ? "narrow" : "desktop"}, ${theme}`, async ({ page }, info) => {
+      await page.setViewportSize(narrow ? { width: 320, height: 844 } : { width: 1440, height: 1000 });
+      await page.addInitScript(theme => {
+        localStorage.setItem("nanobot.locale", "en");
+        localStorage.setItem("nanobot-webui.theme", theme);
+      }, theme);
+      await page.goto("/browser/fixture.html?case=inline-references");
+      const input = page.getByRole("textbox", { name: "Message input", exact: true });
+      const surface = page.locator(".thread-composer-surface");
+      const settledBox = async (locator: Locator) => {
+        await locator.evaluate(async (node) => {
+          await Promise.all(node.getAnimations().map((animation) => animation.finished.catch(() => {})));
+        });
+        return (await locator.boundingBox())!;
+      };
+
+      await input.fill("/");
+      const slashPalette = page.getByRole("listbox", { name: "Slash commands" });
+      await expect(slashPalette).toBeVisible();
+      const slashBox = await settledBox(slashPalette);
+      const surfaceBox = (await surface.boundingBox())!;
+      expect(Math.abs(slashBox.x - surfaceBox.x)).toBeLessThanOrEqual(2);
+      expect(Math.abs(slashBox.width - surfaceBox.width)).toBeLessThanOrEqual(2);
+      const slashPreview = slashPalette.locator("[data-palette-preview]");
+      if (narrow) await expect(slashPreview).toBeHidden();
+      else await expect(slashPreview).toBeVisible();
+      expect(await slashPalette.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      expect(await slashPalette.locator(":scope > div").first().evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      await page.screenshot({ path: info.outputPath("slash-palette.png") });
+
+      await input.fill("$");
+      const skillPalette = page.getByRole("listbox", { name: "Skills" });
+      await expect(skillPalette).toBeVisible();
+      await expect(skillPalette.getByRole("group", { name: "Custom" })).toBeVisible();
+      await expect(skillPalette.getByRole("group", { name: "Built-in" })).toBeVisible();
+      const skillBox = await settledBox(skillPalette);
+      expect(Math.abs(skillBox.x - surfaceBox.x)).toBeLessThanOrEqual(2);
+      expect(Math.abs(skillBox.width - surfaceBox.width)).toBeLessThanOrEqual(2);
+      const skillPreview = skillPalette.locator("[data-palette-preview]");
+      if (narrow) await expect(skillPreview).toBeHidden();
+      else await expect(skillPreview).toBeVisible();
+      expect(await skillPalette.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      expect(await skillPalette.locator(":scope > div").first().evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      await page.screenshot({ path: info.outputPath("skill-palette.png") });
+    });
+
     test(`inline references preserve native editing: ${narrow ? "narrow" : "desktop"}, ${theme}`, async ({ page }, info) => {
       await page.setViewportSize(narrow ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
       await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
