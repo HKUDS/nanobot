@@ -16,6 +16,44 @@ describe("NanobotTui transcript", () => {
   const createRenderer = (rendererOptions: Parameters<typeof createTestRenderer>[0]) => (
     createTestRenderer(rendererOptions)
   )
+  test("keeps localized help syntax literal live and after reattaching to the thread", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const help = {
+      event: "message", chat_id: "chat", turn_id: "help", side_channel: true, render_as: "text",
+      text: "Server fallback", command_result: { command: "/help", parts: [
+        { key: "help.title", values: {} }, { text: "/model [preset]" }, { text: "/dream-prompt [init]" },
+      ] },
+    } as const
+    const original = globalThis.fetch
+    const lang = process.env.LC_ALL
+    globalThis.fetch = Object.assign(async () => Response.json({
+      schemaVersion: 3, projection: "events", events: [help],
+    }), { preconnect: original.preconnect })
+    try {
+      process.env.LC_ALL = "fr_FR.UTF-8"
+      const app = NanobotTui.mount(setup.renderer, { ...options, apiUrl: "http://fixture", apiToken: "fixture" }, client())
+      app.accept({ event: "attached", chat_id: "chat" })
+      app.accept(help)
+      await setup.flush()
+      const live = setup.captureCharFrame()
+      expect(live).toContain("Commandes nanobot")
+      expect(live).toContain("/model [preset]")
+      expect(live).toContain("/dream-prompt [init]")
+      process.env.LC_ALL = "zh_TW.UTF-8"
+      app.accept({ event: "attached", chat_id: "chat" })
+      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+      await setup.flush()
+      const replay = setup.captureCharFrame()
+      expect(replay).toContain("nanobot 指令")
+      expect(replay).toContain("/model [preset]")
+      expect(replay).toContain("/dream-prompt [init]")
+    } finally {
+      globalThis.fetch = original
+      if (lang === undefined) delete process.env.LC_ALL
+      else process.env.LC_ALL = lang
+    }
+  })
+
   test("loads earlier transcript pages in place when PageUp reaches the top", async () => {
     setup = await createRenderer({ width: 100, height: 40, screenMode: "alternate-screen" })
     const original = globalThis.fetch

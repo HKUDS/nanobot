@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { CliRenderEvents, TextareaRenderable, TextRenderable, rgbToHex } from "@opentui/core"
 import { MockTreeSitterClient, createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 import { NanobotTui } from "./app"
-import type { RecoveryState, SlashCommand, WorkspaceScopePayload } from "../client"
+import type { MessageOptions, RecoveryState, SlashCommand, WorkspaceScopePayload } from "../client"
 import { options, client, mount, waitUntil, occurrences, contrastRatio } from "./test-support"
 
 describe("NanobotTui session navigation", () => {
@@ -344,6 +344,7 @@ describe("NanobotTui session navigation", () => {
     const original = globalThis.fetch
     const sent: string[] = []
     const scopes: WorkspaceScopePayload[] = []
+    const sentOptions: MessageOptions[] = []
     let settingsRequests = 0
     let workspaceRequests = 0
     globalThis.fetch = (async (input: string | URL | Request) => {
@@ -369,7 +370,7 @@ describe("NanobotTui session navigation", () => {
     const app = NanobotTui.mount(
       setup.renderer,
       { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
-      client(sent, [], [], [], [], scopes),
+      client(sent, [], [], sentOptions, [], scopes),
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
     )
     app.accept({ event: "attached", chat_id: "chat" })
@@ -414,6 +415,16 @@ describe("NanobotTui session navigation", () => {
       expect(ui.composer.focused).toBe(false)
       await setup.mockMouse.click(fast.x + 2, fast.y)
       await waitUntil(() => sent.includes("/model fast"))
+      expect(sentOptions.at(-1)?.systemCommand).toBe(true)
+      app.accept({
+        event: "message", chat_id: "chat", turn_id: "webui-system:picker", side_channel: true,
+        text: "Fallback", command_result: {
+          command: "/model", parts: [{ key: "model.failed", values: { error: "Missing provider key" } }],
+        },
+      })
+      await setup.flush()
+      expect(setup.captureCharFrame()).toContain("Missing provider key")
+      expect(ui.runtimeControls.modelText.plainText).toBe("default ▾")
       expect(ui.composer.focused).toBe(true)
 
       await setup.mockMouse.click(
@@ -523,7 +534,19 @@ describe("NanobotTui session navigation", () => {
 
       setup.mockInput.pressEnter()
       await waitUntil(() => sent.includes("/model preset-8"))
+      app.accept({
+        event: "user_message", chat_id: "chat", turn_id: "webui-system:picker", starts_turn: false, text: "/model preset-8",
+      })
+      app.accept({
+        event: "message", chat_id: "chat", turn_id: "webui-system:picker", side_channel: true,
+        text: "Fallback", command_result: {
+          command: "/model", parts: [{ key: "model.switched", values: { preset: "preset-8" } }],
+        },
+      })
+      await setup.flush()
       expect(ui.runtimeControls.visible).toBe(false)
+      expect(ui.runtimeControls.modelText.plainText).toBe("preset-8 ▾")
+      expect(occurrences(setup.captureCharFrame(), "preset-8")).toBe(1)
     } finally {
       globalThis.fetch = original
     }

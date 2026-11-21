@@ -915,6 +915,8 @@ class AgentLoop:
                 await self._enqueue_session_message(result)
             elif result is not None:
                 await self.bus.publish_outbound(result)
+                if ctx.after_reply:
+                    ctx.after_reply()
 
         # A shell command may run for up to the configured exec timeout. Keep
         # the inbound consumer responsive when it runs beside an active turn.
@@ -1620,6 +1622,8 @@ class AgentLoop:
                         delivery=delivery,
                     )
                     await delivery.complete(response, publish_completion=True)
+                    if response is not None and delivery.after_command_reply:
+                        delivery.after_command_reply()
                     for coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, response=response)
                 except asyncio.CancelledError as exc:
@@ -2111,15 +2115,16 @@ class AgentLoop:
             command_matched = False
         if result is not None:
             ctx.outbound = result
+            ctx.delivery.after_command_reply = cmd_ctx.after_reply
             if cmd_ctx.raw.lower() == "/new":
                 current = await self.sessions.state.get_header(ctx.session_key)
                 await ctx.delivery.bind_session_generation(current.generation)
             # Shortcut commands skip BUILD and SAVE, so we must persist the
             # turn here so WebUI history hydration after turn_end sees the
             # message.  Mark messages with _command so get_history can filter
-            # them out of LLM context.  /new is excluded because it
-            # intentionally clears the session.
-            if cmd_ctx.raw.lower() != "/new" and ctx.commit_session:
+            # them out of LLM context. Commands that clear the session or
+            # leave its archive untouched can return a receipt without writing here.
+            if cmd_ctx.record_exchange and ctx.commit_session:
                 ctx.input_persisted_early = await self._persist_user_message_early(
                     ctx.msg, session, _command=True
                 )
@@ -2643,7 +2648,10 @@ class AgentLoop:
                     delivery = self.turn_delivery_factory.create(msg, session_key)
                     kwargs["delivery"] = delivery
                     try:
-                        return await self._process_message(msg, **kwargs)
+                        response = await self._process_message(msg, **kwargs)
+                        if response is not None and delivery.after_command_reply:
+                            delivery.after_command_reply()
+                        return response
                     finally:
                         if temporary_parent:
                             parent = self.sessions.state.peek_header(session_key)

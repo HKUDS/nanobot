@@ -46,7 +46,9 @@ async def test_goal_usage_can_be_read_in_different_languages():
     assert reply.event.command == "/goal"
     assert reply.content == "用法：/goal <長期工作說明>"
     assert render(reply.event.parts, "en") == "Usage: /goal <long-running task description>"
-    assert build_help_text(locale="zh-TW").count("/cancel_goal") == 1
+    help_lines = build_help_text(locale="zh-TW").splitlines()
+    assert len(help_lines) == 1 + len(BUILTIN_COMMAND_SPECS)
+    assert any(row.startswith("/model [preset] — 檢視") for row in help_lines)
 
 
 def test_literal_output_and_parameter_values_are_not_translated(monkeypatch):

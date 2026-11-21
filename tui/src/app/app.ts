@@ -19,6 +19,7 @@ import {
 } from "@opentui/core"
 
 import { switchedModelPreset } from "../../../packages/client-events/model-selection"
+import { isSystemCommandTurnId } from "../client/system-command"
 import { terminalMessageText } from "../platform/locale"
 import {
   NanobotClient,
@@ -213,7 +214,6 @@ export class NanobotTui {
   private sessionRefreshPending = false
   private sessionRefreshTimer: ReturnType<typeof setInterval> | null = null
   private readonly commandTurns = new Map<string, ResolvedSlashCommandLifecycle>()
-  private readonly silentCommandTurns = new Set<string>()
   private currentFileEdits: FileEditEvent[] = []
   private lastFileEdits: FileEditEvent[] = []
   private recoveryState: RecoveryState | null = null
@@ -343,7 +343,13 @@ export class NanobotTui {
         available: () => this.ready,
         beforeOpen: () => this.closeTransientMenus(),
         refreshScope: () => this.refreshSessionMetadata(this.client.activeChatId),
-        onModel: (preset) => this.sendGatewayCommand(`/model ${preset}`, "side_channel", true),
+        onModel: (preset) => {
+          try {
+            this.client.send(`/model ${preset}`, { systemCommand: true })
+          } catch (error) {
+            this.transcript.notice(error instanceof Error ? error.message : String(error), true)
+          }
+        },
         onAccess: (scope) => {
           try {
             this.client.setWorkspaceScope(scope)
@@ -590,7 +596,7 @@ export class NanobotTui {
       return
     }
     if (visibleContent.startsWith("!")) {
-      this.sendGatewayCommand(visibleContent, "side_channel", false, { userShell: true })
+      this.sendGatewayCommand(visibleContent, "side_channel", { userShell: true })
       return
     }
     if (!this.ready) {
@@ -740,6 +746,7 @@ export class NanobotTui {
         this.reconcileTurnOwnership(event)
         return
       case "user_message": {
+        if (isSystemCommandTurnId(event.turn_id)) return
         if (this.transcript.user(
           event.text,
           event.turn_id,
@@ -763,13 +770,13 @@ export class NanobotTui {
         if (preset) {
           this.applyModelPreset(preset)
           this.updateTitle()
+          if (isSystemCommandTurnId(event.turn_id)) return
         }
         if (event.turn_id && this.commandTurns.has(event.turn_id) && !event.kind) {
           const lifecycle = this.commandTurns.get(event.turn_id)
           if (lifecycle !== "agent_turn") {
             this.commandTurns.delete(event.turn_id)
-            const silent = this.silentCommandTurns.delete(event.turn_id)
-            if (!silent) this.transcript.assistant(terminalMessageText(event), event.render_as)
+            this.transcript.assistant(terminalMessageText(event), event.render_as)
             if (!this.activeTurn) this.status.content = "Ready"
             return
           }
@@ -905,10 +912,7 @@ export class NanobotTui {
         return
       case "error":
         const commandLifecycle = event.turn_id ? this.commandTurns.get(event.turn_id) : undefined
-        if (event.turn_id) {
-          this.commandTurns.delete(event.turn_id)
-          this.silentCommandTurns.delete(event.turn_id)
-        }
+        if (event.turn_id) this.commandTurns.delete(event.turn_id)
         if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) {
           this.transcript.notice(event.reason || event.detail || "Unknown gateway error", true)
           return
@@ -2300,7 +2304,6 @@ export class NanobotTui {
   private sendGatewayCommand(
     content: string,
     lifecycle: ResolvedSlashCommandLifecycle,
-    silent = false,
     options: MessageOptions = {},
   ): void {
     if (!this.ready) {
@@ -2320,11 +2323,10 @@ export class NanobotTui {
     }
     this.unsentSubmit = false
     this.commandTurns.set(turnId, lifecycle)
-    if (silent) this.silentCommandTurns.add(turnId)
     this.clearComposer()
     this.commandMenu.hide()
-    if (!silent && lifecycle !== "stop_active_turn") this.transcript.user(content)
-    if (!silent) this.recordPrompt(content)
+    if (lifecycle !== "stop_active_turn") this.transcript.user(content)
+    this.recordPrompt(content)
 
     if (lifecycle === "finalize_active_turn") {
       this.activeTurnId = null

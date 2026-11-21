@@ -1928,6 +1928,7 @@
       "goalBlocked": "Bloqueado",
       "goalStateSheetTitle": "Objetivo",
       "cancelGoal": "Cancelar objetivo",
+      "modelSwitchUnconfirmed": "Não foi possível confirmar a troca de modelo. Verifique a conexão e tente novamente.",
       "cancelGoalFailed": "Não foi possível cancelar. Tente novamente.",
       "cancelGoalOffline": "Reconecte-se para cancelar o objetivo.",
       "expandDraft": "Expandir a área de edição",
@@ -2554,6 +2555,7 @@
       "body": "O gateway rejeitou este projeto ou modo de acesso. Escolha um projeto existente ou outro modo de acesso e tente novamente."
     },
     "turnRejected": {
+      "temporaryCommand": "Nos chats temporários, só é possível usar /model e /stop. Para outros comandos, use um chat normal.",
       "title": "A mensagem não foi enviada",
       "body": "O gateway rejeitou esta mensagem. Revise o texto ou os anexos e tente novamente."
     },

@@ -447,12 +447,16 @@ class WebUIOutboundDelivery:
 
     async def _message_payload(self, msg: OutboundMessage, progress: ProgressEvent | None) -> dict[str, Any]:
         text = msg.content
-        user_shell = msg.metadata.get(INBOUND_META_USER_SHELL) is True
+        # Help lists literal command syntax; other command receipts can contain Markdown.
+        literal = msg.metadata.get(INBOUND_META_USER_SHELL) is True or (
+            isinstance(msg.event, CommandResultEvent) and msg.event.command == "/help"
+            and msg.metadata.get("render_as") == "text"
+        )
         payload: MessageWirePayload = {
             "event": "message", "chat_id": msg.chat_id,
-            "text": text if user_shell else await self._rewrite_markdown_images(text),
+            "text": text if literal else await self._rewrite_markdown_images(text),
         }
-        if user_shell:
+        if literal:
             payload["render_as"] = "text"
         if isinstance(msg.event, SideChannelReplyEvent):
             payload["side_channel"] = True

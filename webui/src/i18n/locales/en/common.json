@@ -2108,6 +2108,7 @@
       "goalBlocked": "Blocked",
       "goalStateSheetTitle": "Goal",
       "cancelGoal": "Cancel goal",
+      "modelSwitchUnconfirmed": "Could not confirm the model switch. Check your connection and try again.",
       "cancelGoalFailed": "Could not cancel goal. Try again.",
       "cancelGoalOffline": "Reconnect to cancel the goal.",
       "expandDraft": "Expand editor",
@@ -2734,6 +2735,7 @@
       "body": "The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again."
     },
     "turnRejected": {
+      "temporaryCommand": "Temporary chats support only /model and /stop. Use a regular chat for other commands.",
       "title": "Message was not sent",
       "body": "The gateway rejected this message. Review its text or attachments, then try again."
     },

@@ -15,7 +15,9 @@ def line(key: str, **values: str | int | float) -> CommandLine:
 
 def render(parts: tuple[CommandPart, ...], locale: object = None) -> str:
     def translate(part: CommandPart) -> str:
-        return part["text"] if "text" in part else command_text(part["key"], locale, **part["values"])
+        if "text" in part:
+            return part["text"]
+        return part.get("prefix", "") + command_text(part["key"], locale, **part["values"])
 
     return "\n".join(translate(part) for part in parts)
 
@@ -24,9 +26,19 @@ def command_reply(
     msg: InboundMessage, command: str, *parts: CommandLine | str,
     metadata: dict[str, Any] | None = None, notification_id: str | None = None,
 ) -> OutboundMessage:
+    return command_result(
+        msg.channel, msg.chat_id, command, *parts,
+        metadata={**msg.metadata, **(metadata or {})}, notification_id=notification_id,
+    )
+
+
+def command_result(
+    channel: str, chat_id: str, command: str, *parts: CommandLine | str,
+    metadata: dict[str, Any], notification_id: str | None = None,
+) -> OutboundMessage:
     structured = tuple(LiteralLine(text=p) if isinstance(p, str) else p for p in parts)
     return OutboundMessage(
-        channel=msg.channel, chat_id=msg.chat_id, content=render(structured, msg.metadata.get("locale")),
-        metadata={**msg.metadata, **(metadata or {})},
+        channel=channel, chat_id=chat_id, content=render(structured, metadata.get("locale")),
+        metadata=metadata,
         event=CommandResultEvent(command=command, parts=structured, notification_id=notification_id),
     )

@@ -35,11 +35,12 @@ export function renderCommandResult(result: unknown, locale: string): string | u
     if (!record(part)) return undefined
     if (typeof part.text === 'string') { lines.push(part.text); continue }
     if (typeof part.key !== 'string' || !record(part.values)) return undefined
+    if (part.prefix !== undefined && typeof part.prefix !== 'string') return undefined
     const format = template(part.key, locale)
     if (format === undefined) return undefined
     const values = part.values
     let valid = true
-    lines.push(format.replace(/\{(\w+)\}/g, (_, name: string) => {
+    lines.push((part.prefix ?? '') + format.replace(/\{(\w+)\}/g, (_, name: string) => {
       const value = values[name]
       if (typeof value === 'string' || typeof value === 'number') return String(value)
       valid = false

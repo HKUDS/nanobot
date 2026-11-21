@@ -1926,6 +1926,7 @@
       "goalBlocked": "已受阻",
       "goalStateSheetTitle": "目標",
       "cancelGoal": "取消目標",
+      "modelSwitchUnconfirmed": "無法確認模型是否已切換。請檢查連線後再試一次。",
       "cancelGoalFailed": "取消失敗，請重試。",
       "cancelGoalOffline": "請重新連線後取消目標。",
       "expandDraft": "展開編輯",
@@ -2552,6 +2553,7 @@
       "body": "閘道拒絕了此專案或存取模式。請選擇現有專案或其他存取模式，然後再試一次。"
     },
     "turnRejected": {
+      "temporaryCommand": "臨時聊天僅支援 /model 和 /stop。請在一般聊天中使用其他指令。",
       "title": "訊息未傳送",
       "body": "閘道拒絕了這則訊息。請檢查內容或附件後再試一次。"
     },

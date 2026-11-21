@@ -1,10 +1,10 @@
+import { messageDisplayText } from "./message-display-text";
 import { projectWebuiThreadMessages } from "./thread-display-projection";
 import type { LoadedThreadMessages } from "./thread-message-cache";
 import type { UIMessage } from "./types";
 
 // Message objects and arrays are immutable; eviction also releases these weak entries.
 const visibleMessages = new WeakMap<UIMessage[], UIMessage[]>();
-const foldedContent = new WeakMap<UIMessage, string>();
 
 function excerpt(text: string, folded: string, index: number): string {
   if (text.length !== folded.length) {
@@ -23,25 +23,29 @@ function excerpt(text: string, folded: string, index: number): string {
 }
 
 /** Find a literal substring in received user/answer text, never load history. */
-export function findLoadedMessagePreview(groups: LoadedThreadMessages, query: string): string | undefined {
-  for (const group of groups) {
-    let visible = visibleMessages.get(group);
-    if (!visible) {
-      visible = projectWebuiThreadMessages(group);
-      visibleMessages.set(group, visible);
-    }
-    for (let index = visible.length - 1; index >= 0; index--) {
-      const message = visible[index];
-      if ((message.role !== "user" && message.role !== "assistant")
-        || (message.kind && message.kind !== "message") || message.activityKind) continue;
-      let folded = foldedContent.get(message);
-      if (folded === undefined) {
-        folded = message.content.toLowerCase();
-        foldedContent.set(message, folded);
+export function createLoadedMessageSearch(locale: string, t: (key: string) => string) {
+  const content = new WeakMap<UIMessage, { text: string; folded: string }>();
+  return (groups: LoadedThreadMessages, query: string): string | undefined => {
+    for (const group of groups) {
+      let visible = visibleMessages.get(group);
+      if (!visible) {
+        visible = projectWebuiThreadMessages(group);
+        visibleMessages.set(group, visible);
       }
-      const match = folded.indexOf(query);
-      if (match >= 0) return excerpt(message.content, folded, match);
+      for (let index = visible.length - 1; index >= 0; index--) {
+        const message = visible[index];
+        if ((message.role !== "user" && message.role !== "assistant")
+          || (message.kind && message.kind !== "message") || message.activityKind) continue;
+        let entry = content.get(message);
+        if (!entry) {
+          const text = messageDisplayText(message, t, locale);
+          entry = { text, folded: text.toLowerCase() };
+          content.set(message, entry);
+        }
+        const match = entry.folded.indexOf(query);
+        if (match >= 0) return excerpt(entry.text, entry.folded, match);
+      }
     }
-  }
-  return undefined;
+    return undefined;
+  };
 }

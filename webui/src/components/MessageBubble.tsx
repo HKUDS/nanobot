@@ -11,7 +11,7 @@ import {
 } from "react";
 import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Info, Quote, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { renderCommandResult } from "../../../packages/client-events/command-result";
+import { messageDisplayText } from "@/lib/message-display-text";
 import { DisclosureContent } from "@/components/ui/disclosure";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
@@ -116,21 +116,9 @@ function useMessageCopy(content: string) {
   return { copied, label, onCopy };
 }
 
-function messageCopyContent(message: UIMessage, t: (key: string) => string, locale: string) {
-  if (message.commandResult !== undefined) {
-    return renderCommandResult(message.commandResult, locale) ?? message.content;
-  }
-  if (message.renderAs === "text") return message.content;
-  return message.role === "assistant" && message.compactReply === "empty"
-    ? t("thread.compaction.empty")
-    : message.role === "assistant" && message.compactReply === "failed"
-      ? t("thread.compaction.failed")
-      : message.content;
-}
-
 export function MessageCopyButton({ message, className }: { message: UIMessage; className?: string }) {
   const { t, i18n } = useTranslation();
-  const content = messageCopyContent(message, t, i18n.resolvedLanguage ?? i18n.language);
+  const content = messageDisplayText(message, t, i18n.resolvedLanguage ?? i18n.language);
   const { copied, label, onCopy } = useMessageCopy(content);
   if (!content.trim()) return null;
   return <HoverHint content={label} side="top" align="center"><button type="button" data-message-block-copy-action
@@ -170,7 +158,7 @@ export function MessageBlockMenuActions({
 }: MessageBlockMenuActionsProps) {
   const { t, i18n } = useTranslation();
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const content = messageCopyContent(message, t, i18n.resolvedLanguage ?? i18n.language);
+  const content = messageDisplayText(message, t, i18n.resolvedLanguage ?? i18n.language);
   const hasText = content.trim().length > 0;
   const showFork = message.role === "assistant"
     && !message.isStreaming
@@ -304,9 +292,11 @@ function deliveryErrorCopy(
 function UserDeliveryStatus({
   status,
   errorKind,
+  errorDetail,
 }: {
   status: MessageDeliveryStatus | undefined;
   errorKind: MessageDeliveryErrorKind | undefined;
+  errorDetail?: string;
 }) {
   const { t } = useTranslation();
   if (status !== "sending" && status !== "failed") return null;
@@ -320,6 +310,10 @@ function UserDeliveryStatus({
         {t("message.delivery.sending")}
       </span>
     );
+  }
+
+  if (errorDetail === "temporary_chat_command_rejected") {
+    return <span role="alert" className="text-[12px] text-destructive">{t("errors.turnRejected.temporaryCommand")}</span>;
   }
 
   const label = t("message.delivery.failed");
@@ -516,6 +510,7 @@ export function MessageBubble({
               <UserDeliveryStatus
                 status={message.deliveryStatus}
                 errorKind={message.deliveryErrorKind}
+                errorDetail={message.deliveryErrorDetail}
               />
             </div>
         ) : null}
@@ -523,7 +518,7 @@ export function MessageBubble({
     );
   }
 
-  const assistantContent = messageCopyContent(message, t, i18n.resolvedLanguage ?? i18n.language);
+  const assistantContent = messageDisplayText(message, t, i18n.resolvedLanguage ?? i18n.language);
   const empty = assistantContent.trim().length === 0;
   const media = message.media ?? [];
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";

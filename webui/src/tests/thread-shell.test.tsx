@@ -130,7 +130,9 @@ function makeClient() {
       for (const h of sessionUpdateHandlers) h(chatId, scope);
     },
     sendMessage,
-    sendSystemCommand: vi.fn().mockResolvedValue(undefined),
+    sendSystemCommand: vi.fn().mockImplementation(async (_chatId: string, command: string) => command.startsWith("/model ")
+      ? { command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: command.slice(7) } }] } }
+      : undefined),
     newChat: vi.fn(),
     forkChat: vi.fn(),
     attach: vi.fn(),
@@ -499,7 +501,7 @@ describe("ThreadShell", () => {
       expect.objectContaining({ modelOptions: { reasoning_effort: "high", codex_fast_mode: false } })));
     fireEvent.click(screen.getByRole("button", { name: "Default" }));
     fireEvent.click(await screen.findByRole("option", { name: "fast" }));
-    fireEvent.click(screen.getByRole("button", { name: "fast" }));
+    fireEvent.click(await screen.findByRole("button", { name: "fast" }));
     expect(screen.getByRole("slider", { name: "Reasoning effort" })).toHaveAttribute("aria-valuetext", "low");
     expect(screen.getByRole("button", { name: "Fast" })).toHaveAttribute("aria-pressed", "true");
     expect(client.sendSystemCommand).toHaveBeenCalledWith("model-options", "/model fast");
@@ -1795,6 +1797,30 @@ describe("ThreadShell", () => {
     expect(await screen.findByLabelText("fast")).toBeVisible();
   });
 
+  it("keeps the confirmed model and shows a localized picker failure outside the transcript", async () => {
+    await i18n.changeLanguage("fr");
+    const client = makeClient();
+    const settings = settingsWithFastPreset();
+    const providerError = "No API key configured for provider 'openai_codex'.";
+    let rejectSelection!: () => void;
+    client.sendSystemCommand.mockImplementationOnce(() => new Promise((resolve) => {
+      rejectSelection = () => resolve({ text: "English fallback", command_result: {
+        command: "/model", parts: [{ key: "model.failed", values: { error: providerError } }],
+      } });
+    }));
+    render(wrap(client, <ThreadShell session={session("picker-failure", "default")} title="Model switch"
+      onToggleSidebar={() => {}} settingsSnapshot={settings} />));
+    const defaultModel = await screen.findByRole("button", { name: i18n.t("settings.values.default") });
+    fireEvent.click(defaultModel);
+    fireEvent.click(await screen.findByRole("option", { name: "fast" }));
+    expect(defaultModel).toBeVisible();
+    expect(defaultModel).toHaveAccessibleName(i18n.t("settings.values.default"));
+    await act(async () => rejectSelection());
+    expect(await screen.findByRole("alert")).toHaveTextContent(`Impossible de changer de préréglage : ${providerError}`);
+    expect(screen.getByRole("button", { name: i18n.t("settings.values.default") })).toBeVisible();
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("switches through every named preset while preserving call-order priority", async () => {
     const client = makeClient();
     const settings = settingsWithFastPreset();
@@ -1835,7 +1861,10 @@ describe("ThreadShell", () => {
       "preset-order",
       "/model extra",
     );
-    expect(await screen.findByText("extra")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "extra" }));
+    fireEvent.click(await screen.findByRole("option", { name: /^Default\b/ }));
+    expect(client.sendSystemCommand).toHaveBeenLastCalledWith("preset-order", "/model default");
+    expect(await screen.findByRole("button", { name: "Default" })).toBeVisible();
 
     rerender(view("fast"));
     expect(await screen.findByLabelText("fast", { selector: "button" })).toBeInTheDocument();
@@ -5640,7 +5669,7 @@ describe("ThreadShell", () => {
     expect(client.sendSystemCommand).toHaveBeenCalledTimes(2);
   });
 
-  it("sends /cancel_goal directly while streaming without a transcript entry, /stop, or offline replay", async () => {
+  it("shows typed /cancel_goal and its result without interrupting a stream or replaying an offline request", async () => {
     const client = makeClient();
     const chatId = "cancel-slash";
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/api/commands")
@@ -5649,7 +5678,6 @@ describe("ThreadShell", () => {
     render(wrap(client, <ThreadShell session={session(chatId)} title="Goal" onToggleSidebar={() => {}} />));
     await act(async () => {});
     act(() => {
-      client._emitChat(chatId, { event: "goal_state", chat_id: chatId, goal_state: { active: false, status: "blocked", objective: "Ship the release" } });
       client._emitChat(chatId, { event: "goal_status", chat_id: chatId, turn_id: "unrelated", status: "running", started_at: 100 });
       client._emitChat(chatId, { event: "delta", chat_id: chatId, turn_id: "unrelated", stream_id: "live", text: "Unrelated reply" });
       client._emitStatus("closed");
@@ -5664,16 +5692,19 @@ describe("ThreadShell", () => {
     expect(input).toHaveValue("/cancel_goal");
     act(() => client._emitStatus("open"));
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
-    client.sendSystemCommand.mockImplementationOnce(async () => {
-      client._emitChat(chatId, { event: "goal_state", chat_id: chatId, goal_state: { active: false } });
-    });
+    expect(client.sendMessage).not.toHaveBeenCalled();
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(input).toHaveValue(""));
-    expect(client.sendSystemCommand).toHaveBeenCalledTimes(1);
-    expect(client.sendSystemCommand).toHaveBeenCalledWith(chatId, "/cancel_goal");
-    expect(client.sendMessage).not.toHaveBeenCalled();
+    expect(client.sendSystemCommand).not.toHaveBeenCalled();
+    expectSendMessageWithTurn(client, chatId, "/cancel_goal");
+    const region = within(screen.getByTestId("thread-message-region"));
+    expect(region.getByTestId("message-slash-command")).toHaveTextContent("/cancel_goal");
+    act(() => client._emitChat(chatId, {
+      event: "message", chat_id: chatId, turn_id: client.sendMessage.mock.calls[0][3]?.turnId,
+      side_channel: true, text: "No goal to cancel.",
+    }));
+    expect(await region.findByText("No goal to cancel.")).toBeVisible();
     expect(client.finishRunLocally).not.toHaveBeenCalled();
-    expect(within(screen.getByTestId("thread-message-region")).queryByText("/cancel_goal")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop response" })).toBeVisible();
   });
 
@@ -5889,6 +5920,20 @@ describe("ThreadShell", () => {
       event: "turn_end", chat_id: "chat-model-failure", turn_id: nextTurnId,
     }));
     expect(screen.queryByRole("button", { name: "停止响应" })).not.toBeInTheDocument();
+  });
+
+  it("explains which commands can be used when a temporary chat rejects a typed command", async () => {
+    const client = makeClient();
+    const chatId = "temp-help";
+    render(wrap(client, <ThreadShell session={session(chatId)} temporary title="Temporary chat" onToggleSidebar={() => {}} />));
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "/help" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expectSendMessageWithTurn(client, chatId, "/help");
+    act(() => client._emitChat(chatId, {
+      event: "error", chat_id: chatId, turn_id: client.sendMessage.mock.calls[0][3]?.turnId,
+      detail: "temporary_chat_command_rejected",
+    }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Temporary chats support only /model and /stop. Use a regular chat for other commands.");
   });
 
   it("moves a correlated delivery error from the banner into the failed message tooltip", async () => {

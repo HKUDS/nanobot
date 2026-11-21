@@ -84,6 +84,7 @@ import type {
 } from "@/lib/types";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
+import { renderCommandResult } from "../../../../packages/client-events/command-result";
 import { switchedModelPreset } from "../../../../packages/client-events/model-selection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { providerDisplayLabel } from "@/lib/provider-brand";
@@ -393,7 +394,7 @@ export function ThreadShell({
   onOpenSandboxSettings,
   skills = [],
 }: ThreadShellProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const showToast = useToast();
   const chatId = session?.chatId ?? null;
   const historyKey = temporary ? null : session?.key ?? null;
@@ -843,13 +844,27 @@ export function ThreadShell({
     sessionKey: session?.key ?? null, preset: activeModelPreset, settings,
     open: modelMenuOpen, disabled: temporary, storedValue: session?.modelOptions,
   });
-  const handleModelPresetChange = useCallback((name: string) => {
-    resetModelOptions(name);
-    setLocalModelPreset(name);
+  // A receipt for the previous chat must not change the newly opened chat's badge.
+  const modelScope = useRef(0);
+  useLayoutEffect(() => () => { modelScope.current++; }, [client, chatId]);
+  const handleModelPresetChange = useCallback(async (name: string) => {
+    let preset = name;
     if (chatId) {
-      void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
+      const scope = modelScope.current;
+      const reply = client.status === "open"
+        ? await client.sendSystemCommand(chatId, `/model ${name}`).catch(() => undefined)
+        : undefined;
+      if (scope !== modelScope.current) return;
+      const confirmed = switchedModelPreset(reply?.command_result);
+      if (!confirmed) {
+        throw new Error(renderCommandResult(reply?.command_result, i18n.resolvedLanguage ?? i18n.language)
+          ?? (reply?.text || t("thread.composer.modelSwitchUnconfirmed")));
+      }
+      preset = confirmed;
     }
-  }, [chatId, client, resetModelOptions]);
+    resetModelOptions(preset);
+    setLocalModelPreset(preset);
+  }, [chatId, client, i18n, resetModelOptions, t]);
   const modelPresetOptions = useMemo(
     () => modelPresetOptionsFromSettings(settings),
     [settings],
@@ -1087,8 +1102,8 @@ export function ThreadShell({
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
-      if (content.trim() === "/cancel_goal" && options?.sideChannel) {
-        return cancelGoal().then(() => true);
+      if (content.trim() === "/cancel_goal" && options?.sideChannel && client.status !== "open") {
+        return Promise.reject(new Error(t("thread.composer.cancelGoalOffline")));
       }
       setRestoredFirstDraft((current) => current?.chatId === chatId ? { ...current, error: "" } : current);
       const submitted = send(content, images, withWorkspaceScope(options));
@@ -1103,7 +1118,7 @@ export function ThreadShell({
       }
       return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
     },
-    [cancelGoal, chatId, send, withWorkspaceScope],
+    [chatId, client, send, t, withWorkspaceScope],
   );
 
   const loadTemporaryFilePreview = useCallback((path: string) =>

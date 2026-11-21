@@ -305,6 +305,7 @@ export interface SkillCandidate {
 }
 
 export interface MessageOptions {
+  systemCommand?: boolean
   media?: OutboundMedia[]
   cliApps?: Array<{ name: string }>
   mcpPresets?: Array<{ name: string }>

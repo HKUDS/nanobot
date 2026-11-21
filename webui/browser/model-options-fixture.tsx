@@ -145,7 +145,10 @@ export function ModelOptionsFixture() {
       if (frame.type !== "message") return;
       if (!frame.content.startsWith("/")) setSent(frame.model_options);
       queueMicrotask(() => {
-        preview.receive({ event: "message", chat_id: frame.chat_id, turn_id: frame.turn_id, text: "Fixture message accepted." });
+        const preset = frame.content.startsWith("/model ") ? frame.content.slice(7) : null;
+        preview.receive({ event: "message", chat_id: frame.chat_id, turn_id: frame.turn_id, text: "Fixture message accepted.",
+          ...(preset && { side_channel: true, command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset } }] } }),
+        });
         preview.receive({ event: "turn_end", chat_id: frame.chat_id, turn_id: frame.turn_id });
       });
     });

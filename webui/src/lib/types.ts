@@ -189,6 +189,7 @@ export interface UIMessage {
   /** Live UI hint; not part of the persisted transcript. */
   processingStatus?: InputProcessingStatus;
   deliveryErrorKind?: MessageDeliveryErrorKind;
+  deliveryErrorDetail?: string;
 }
 
 /** Turn-owned telemetry, not a transcript row or body-history source. */

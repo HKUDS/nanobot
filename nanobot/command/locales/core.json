@@ -659,6 +659,18 @@
     "vi": "Đã khởi động lại trong {seconds} giây.",
     "id": "Mulai ulang selesai dalam {seconds} detik."
   },
+  "compact.empty": {
+    "en": "Nothing to compact.",
+    "zh-CN": "没有需要压缩的上下文。",
+    "zh-TW": "沒有需要壓縮的上下文。",
+    "fr": "Aucun contexte à compresser.",
+    "ja": "圧縮するコンテキストはありません。",
+    "ko": "압축할 컨텍스트가 없습니다.",
+    "es": "No hay contexto que comprimir.",
+    "pt-BR": "Não há contexto para compactar.",
+    "vi": "Không có ngữ cảnh nào cần nén.",
+    "id": "Tidak ada konteks yang perlu dipadatkan."
+  },
   "compact.started": {
     "en": "Compressing context…",
     "zh-CN": "正在压缩上下文…",

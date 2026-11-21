@@ -246,10 +246,11 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
             )
 
     await shield_and_drain(reset_and_schedule_archive())
+    ctx.record_exchange = False
     return command_reply(ctx.msg, "/new", line("new.done"))
 
 
-async def cmd_compact(ctx: CommandContext) -> None:
+async def cmd_compact(ctx: CommandContext) -> OutboundMessage | None:
     """Compact the current session without resetting the conversation."""
     loop = ctx.loop
     session = ctx.session or await loop.sessions.state.get(ctx.key)
@@ -257,7 +258,7 @@ async def cmd_compact(ctx: CommandContext) -> None:
     delivery = loop.turn_delivery_factory.create(ctx.msg, ctx.key)
 
     try:
-        await loop.consolidator.compact_idle_session(
+        summary = await loop.consolidator.compact_idle_session(
             ctx.key,
             runtime=runtime,
             events=delivery.events,
@@ -266,7 +267,12 @@ async def cmd_compact(ctx: CommandContext) -> None:
         )
     except Exception:
         logger.exception("Manual context compaction failed for {}", ctx.key)
-        return
+        return None
+    if summary == "":
+        # A no-op should not create new history or reset the archive's idle timer.
+        ctx.record_exchange = False
+        return command_reply(ctx.msg, "/compact", line("compact.empty"))
+    return None
 
 
 def _format_preset_names(names: list[str]) -> str:
@@ -341,7 +347,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
             notification_id=f"command-result:{uuid4().hex}",
         ))
 
-    asyncio.create_task(_run_dream())
+    ctx.after_reply = lambda: loop.schedule_background(_run_dream())
     return command_reply(msg, "/dream", line("dream.started"))
 
 
@@ -552,7 +558,8 @@ def _help_parts(specs: tuple[BuiltinCommandSpec, ...]) -> list[CommandLine | str
     for spec in specs:
         syntax = f"{spec.command} {spec.arg_hint}" if spec.arg_hint else spec.command
         key = f"palette.{spec.command.removeprefix('/')}.description"
-        parts.extend((syntax, line(key) if key in catalog() else spec.description))
+        prefix = f"{syntax} — "
+        parts.append(CommandLine(prefix=prefix, key=key, values={}) if key in catalog() else prefix + spec.description)
     return parts
 
 

@@ -1926,6 +1926,7 @@
       "goalBlocked": "Bloqué",
       "goalStateSheetTitle": "Objectif",
       "cancelGoal": "Annuler l’objectif",
+      "modelSwitchUnconfirmed": "Impossible de confirmer le changement de modèle. Vérifiez votre connexion et réessayez.",
       "cancelGoalFailed": "Échec de l’annulation. Réessayez.",
       "cancelGoalOffline": "Reconnectez-vous pour annuler l’objectif.",
       "expandDraft": "Agrandir la zone de saisie",
@@ -2552,6 +2553,7 @@
       "body": "La passerelle a refusé ce projet ou ce mode d’accès. Choisissez un projet existant ou un autre mode d’accès, puis réessayez."
     },
     "turnRejected": {
+      "temporaryCommand": "Seules les commandes /model et /stop sont disponibles dans une discussion temporaire. Pour les autres commandes, utilisez une discussion normale.",
       "title": "Le message n’a pas été envoyé",
       "body": "La passerelle a refusé ce message. Vérifiez le texte ou les pièces jointes, puis réessayez."
     },

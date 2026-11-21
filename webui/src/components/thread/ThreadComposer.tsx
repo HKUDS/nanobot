@@ -166,7 +166,7 @@ interface ThreadComposerProps {
   modelPresets?: ModelPresetOption[];
   modelOptionsControl?: ModelOptionsControlProps;
   onModelMenuOpenChange?: (open: boolean) => void;
-  onModelPresetChange?: (name: string) => void;
+  onModelPresetChange?: (name: string) => void | Promise<void>;
   imageInputBlocked?: boolean;
   onInspectImagePreset?: () => void;
   modelProvider?: string | null;
@@ -1887,7 +1887,12 @@ export function ThreadComposer({
       modelPresets={modelPresets}
       modelOptionsControl={modelOptionsControl}
       onMenuOpenChange={onModelMenuOpenChange}
-      onPresetChange={onModelPresetChange}
+      onPresetChange={onModelPresetChange && ((name) => {
+        setInlineError(null);
+        void onModelPresetChange(name)?.catch((error: unknown) => {
+          setInlineError(error instanceof Error ? error.message : t("thread.composer.modelSwitchUnconfirmed"));
+        });
+      })}
       onManageModels={onManageModels}
       onRequestComposerFocus={() => textareaRef.current?.focus()}
       provider={modelProvider}

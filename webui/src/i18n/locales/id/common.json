@@ -1926,6 +1926,7 @@
       "goalBlocked": "Terhambat",
       "goalStateSheetTitle": "Tujuan",
       "cancelGoal": "Batalkan tujuan",
+      "modelSwitchUnconfirmed": "Perubahan model tidak dapat dikonfirmasi. Periksa koneksi lalu coba lagi.",
       "cancelGoalFailed": "Tujuan gagal dibatalkan. Coba lagi.",
       "cancelGoalOffline": "Hubungkan kembali untuk membatalkan tujuan.",
       "expandDraft": "Perluas kotak pesan",
@@ -2552,6 +2553,7 @@
       "body": "Gateway menolak proyek atau mode akses ini. Pilih proyek yang sudah ada atau mode akses lain, lalu coba lagi."
     },
     "turnRejected": {
+      "temporaryCommand": "Obrolan sementara hanya mendukung /model dan /stop. Gunakan obrolan biasa untuk perintah lain.",
       "title": "Pesan tidak terkirim",
       "body": "Gateway menolak pesan ini. Periksa teks atau lampiran, lalu coba lagi."
     },

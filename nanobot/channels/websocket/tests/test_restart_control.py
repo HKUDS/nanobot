@@ -7,10 +7,14 @@ import pytest
 from websockets.datastructures import Headers
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket.runtime import WebSocketChannel
 from nanobot.command.builtin import cmd_restart
 from nanobot.command.router import CommandContext
+from nanobot.config.schema import Config
 from nanobot.session.manager import SessionManager
+from nanobot.session.recovery import RECOVERY_METADATA_KEY
 from nanobot.webui.metadata import WEBUI_RESTART_CONTROL_METADATA_KEY
 from nanobot.webui.session_list_index import list_webui_sessions
 
@@ -30,6 +34,72 @@ def _channel(tmp_path: Path, *, allowed: bool = True, sessions=None):
     connection.request = SimpleNamespace(headers=Headers({"Host": "localhost:8765"}))
     channel.gateway.endpoint.webui_connections.add(connection)
     return sessions, bus, channel, connection
+
+
+async def _acknowledge_restart(message, monkeypatch):
+    with monkeypatch.context() as patch:
+        patch.setattr("nanobot.command.builtin.asyncio", SimpleNamespace(create_task=lambda coro: coro.close()))
+        return await cmd_restart(CommandContext(
+            msg=message, session=None, key=message.session_key, raw=message.content, loop=MagicMock(),
+        ))
+
+
+@pytest.mark.parametrize("settings_control", [False, True], ids=["typed", "settings"])
+async def test_restart_completion_after_gateway_start(history, tmp_path, monkeypatch, settings_control):
+    sessions, bus, channel, connection = _channel(tmp_path, sessions=history.sessions)
+    chat_id = "restart-chat"
+    recovery = {"status": "awaiting_user", "recovery_id": "checkpoint", "reason": "uncertain_tool_state"}
+    session = sessions.get_or_create(f"websocket:{chat_id}")
+    session.metadata[RECOVERY_METADATA_KEY] = recovery
+    sessions.save(session)
+    turn_id = "webui-system:restart" if settings_control else "typed-restart"
+    await channel._dispatch_envelope(connection, "browser", {
+        "type": "message", "chat_id": chat_id, "content": "/restart", "webui": True, "turn_id": turn_id,
+    })
+    message = bus.publish_inbound.await_args.args[0]
+    await channel.send(await _acknowledge_restart(message, monkeypatch))
+    await channel._cleanup_connection(connection)
+
+    fresh = SessionManager(sessions.workspace)
+    config = Config.model_validate({
+        "agents": {"defaults": {"workspace": str(sessions.workspace)}},
+        "channels": {"websocket": {"enabled": True, "allowFrom": ["*"]}},
+    })
+    manager = ChannelManager(config, MessageBus(), session_manager=fresh, config_path=tmp_path / "config.json")
+    target = manager.channels["websocket"]
+    target._running = True
+    subscriber = AsyncMock()
+    try:
+        await target._dispatch_envelope(subscriber, "browser", {"type": "attach", "chat_id": chat_id})
+        attached = _sent_ws_payloads(subscriber)[0]
+        assert attached["event"] == "attached"
+        assert attached["recovery_state"] == recovery
+        subscriber.send.reset_mock()
+
+        task = manager._notify_restart_done_if_needed()
+        if task is not None:
+            await task
+        frames = _sent_ws_payloads(subscriber)
+        if settings_control:
+            assert frames == []
+            assert history.read(message.session_key) == []
+            return
+        completed, = frames
+        assert completed["event"] == "message"  # Not a recovery transition or turn_end.
+        assert completed["side_channel"] is True
+        assert completed["turn_id"] != turn_id
+        assert completed["command_result"]["command"] == "/restart"
+        part, = completed["command_result"]["parts"]
+        assert part["key"] == "restart.elapsed"
+        assert completed["text"] == f"Restart completed in {part['values']['seconds']}s."
+        replay = [e for e in history.build(message.session_key)["events"] if e["event"] == "message"]
+        ack, result = replay
+        assert ack["turn_id"] == turn_id
+        assert ack["command_result"]["parts"][0]["key"] == "restart.started"
+        for key in ("turn_id", "turn_seq", "text", "side_channel", "command_result"):
+            assert result[key] == completed[key]
+    finally:
+        await fresh.state.aclose()
 
 
 @pytest.mark.asyncio
@@ -62,14 +132,7 @@ async def test_settings_restart_does_not_create_or_change_chat_history(history, 
         await channel._dispatch_envelope(connection, "browser", envelope)
         message = bus.publish_inbound.await_args.args[0]
         assert message.metadata[WEBUI_RESTART_CONTROL_METADATA_KEY] is True
-        def discard_restart_task(coro):
-            coro.close()
-        with monkeypatch.context() as patch:
-            patch.setattr("nanobot.command.builtin.asyncio.create_task", discard_restart_task)
-            response = await cmd_restart(CommandContext(
-                msg=message, session=None, key=message.session_key, raw=message.content, loop=MagicMock(),
-            ))
-        await channel.send(response)
+        await channel.send(await _acknowledge_restart(message, monkeypatch))
         calls = bus.publish_inbound.await_count
         await channel._dispatch_envelope(connection, "browser", envelope)
         assert bus.publish_inbound.await_count == calls

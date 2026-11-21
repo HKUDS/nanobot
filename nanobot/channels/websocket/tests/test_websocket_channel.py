@@ -3550,11 +3550,13 @@ async def test_deferred_dream_reply_is_delivered_and_replayed_after_command_turn
     metadata = await history.metadata(chat_id, {WEBUI_TURN_METADATA_KEY: "dream-turn"})
     msg = InboundMessage("websocket", "user", chat_id, "/dream", metadata=metadata)
     context = CommandContext(msg=msg, session=None, key=msg.session_key, raw=msg.content,
-                             loop=cast(Any, SimpleNamespace(bus=bus)))
+                             loop=cast(Any, SimpleNamespace(bus=bus, schedule_background=asyncio.create_task)))
 
     acknowledgement = await cmd_dream(context)
     try:
         await channel.send(acknowledgement)
+        assert context.after_reply is not None
+        context.after_reply()
         await channel.send(OutboundMessage("websocket", chat_id, "", metadata=metadata, event=TurnEndEvent()))
     finally:
         finish_dream.set()

@@ -1926,6 +1926,7 @@
       "goalBlocked": "Bị chặn",
       "goalStateSheetTitle": "Mục tiêu",
       "cancelGoal": "Hủy mục tiêu",
+      "modelSwitchUnconfirmed": "Không thể xác nhận việc chuyển mô hình. Hãy kiểm tra kết nối rồi thử lại.",
       "cancelGoalFailed": "Không thể hủy mục tiêu. Hãy thử lại.",
       "cancelGoalOffline": "Kết nối lại để hủy mục tiêu.",
       "expandDraft": "Mở rộng ô soạn thảo",
@@ -2552,6 +2553,7 @@
       "body": "Gateway đã từ chối dự án hoặc chế độ truy cập này. Chọn dự án hiện có hoặc chế độ truy cập khác rồi thử lại."
     },
     "turnRejected": {
+      "temporaryCommand": "Cuộc trò chuyện tạm thời chỉ hỗ trợ /model và /stop. Hãy dùng các lệnh khác trong cuộc trò chuyện thông thường.",
       "title": "Tin nhắn chưa được gửi",
       "body": "Gateway đã từ chối tin nhắn này. Hãy kiểm tra nội dung hoặc tệp đính kèm rồi thử lại."
     },

@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 from loguru import logger
 
@@ -34,13 +35,14 @@ from nanobot.channels.contracts import (
     resolve_channel_action_target,
 )
 from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
+from nanobot.command.results import command_result
 from nanobot.config.schema import Config
 from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.security.workspace_policy import resolve_allowed_path
 from nanobot.utils.restart import (
     RestartNotice,
     consume_restart_notice_from_env,
-    format_restart_completed_message,
+    restart_completed_line,
 )
 
 if TYPE_CHECKING:
@@ -656,11 +658,7 @@ class ChannelManager:
         if target is None:
             logger.warning("Restart notice target channel is not enabled: {}", notice.channel)
             return
-        if notice.channel == "websocket":
-            # Reconnect and recovery are already represented by WebSocket
-            # protocol state. A generic restart-complete notice must not
-            # masquerade as a recovery transition and overwrite a real
-            # awaiting-user checkpoint in connected clients.
+        if not notice.should_notify_chat:
             return
 
         while not target.is_running:
@@ -676,11 +674,9 @@ class ChannelManager:
 
         await self._send_with_retry(
             target,
-            OutboundMessage(
-                channel=notice.channel,
-                chat_id=notice.chat_id,
-                content=format_restart_completed_message(notice.started_at_raw, notice.metadata.get("locale")),
-                metadata=dict(notice.metadata or {}),
+            command_result(
+                notice.channel, notice.chat_id, "/restart", restart_completed_line(notice.started_at_raw),
+                metadata=notice.metadata, notification_id=f"command-result:{uuid4().hex}",
             ),
             deadline=deadline,
         )

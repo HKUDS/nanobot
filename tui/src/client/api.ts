@@ -1,6 +1,8 @@
 import { isRecoveryState } from "../../../packages/client-events/notifications"
 
+import { switchedModelPreset } from "../../../packages/client-events/model-selection"
 import { terminalMessageText } from "../platform/locale"
+import { isSystemCommandTurnId } from "./system-command"
 import type {
   ApiReauthenticator,
   GatewayApiConnection,
@@ -200,6 +202,7 @@ export async function fetchHistory(
         const media = event.media_urls ?? []
         if (!event.text.trim() && !media.length) break
         userIndex += 1
+        if (isSystemCommandTurnId(event.turn_id)) break
         messages.push({
           role: "user", content: event.text,
           ...(media.length ? { media } : {}),
@@ -228,6 +231,7 @@ export async function fetchHistory(
             ...(event.tool_events?.length ? { toolEvents: event.tool_events } : {}),
           })
         } else if (event.side_channel === true) {
+          if (isSystemCommandTurnId(event.turn_id) && switchedModelPreset(event.command_result)) break
           messages.push({ role: "assistant", content: terminalMessageText(event), forkIndex: userIndex,
             ...(event.render_as === "text" ? { renderAs: event.render_as } : {}) })
         } else {

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.command_copy import command_text
@@ -67,6 +67,7 @@ class SideChannelReplyEvent(AgentEvent):
 class CommandLine(TypedDict):
     key: str
     values: dict[str, str | int | float]
+    prefix: NotRequired[str]  # Literal syntax displayed beside a translated description.
 
 
 class LiteralLine(TypedDict):
