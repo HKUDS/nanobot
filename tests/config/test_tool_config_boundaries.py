@@ -31,7 +31,9 @@ class RuntimeImportBlocker(importlib.abc.MetaPathFinder):
         config_modules = {
             'nanobot.agent', 'nanobot.agent.tools',
             'nanobot.agent.tools.cli_apps_config',
+            'nanobot.agent.tools.drive_config',
             'nanobot.agent.tools.filesystem_config',
+            'nanobot.agent.tools.google_config',
             'nanobot.agent.tools.image_generation_config',
             'nanobot.agent.tools.self_config',
             'nanobot.agent.tools.shell_config',
@@ -94,6 +96,7 @@ assert 'nanobot.agent.tools.shell' not in sys.modules
     ("module", "names"),
     [
         ("cli_apps", ("CliAppsToolConfig",)),
+        ("drive", ("DriveToolConfig",)),
         ("filesystem", ("FileToolsConfig",)),
         ("image_generation", ("ImageGenerationToolConfig",)),
         ("self", ("MyToolConfig",)),

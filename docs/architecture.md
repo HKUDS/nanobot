@@ -140,6 +140,7 @@ Important files:
 | MCP tools | `nanobot/agent/tools/mcp.py` |
 | Cron | `nanobot/agent/tools/cron.py`, `nanobot/cron/` |
 | Image generation | `nanobot/agent/tools/image_generation.py` |
+| Google Drive | `nanobot/agent/tools/drive.py`; service-account helpers in `_google.py` |
 | Runtime self-inspection | `nanobot/agent/tools/self.py` |
 
 Tool behavior is part of the model contract. Keep user-visible tool names, schemas, and error messages stable unless a change is intentional.
