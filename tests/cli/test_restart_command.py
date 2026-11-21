@@ -11,7 +11,7 @@ import pytest
 
 from nanobot.agent.context import TranscriptInput
 from nanobot.bus.events import InboundMessage
-from nanobot.providers.base import LLMResponse, LLMUsage
+from nanobot.providers.base import GenerationSettings, LLMResponse, LLMUsage
 from nanobot.session.manager import Session
 from nanobot.session.state import SessionState
 
@@ -22,7 +22,7 @@ def _make_loop():
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
-    provider = MagicMock(aclose=AsyncMock())
+    provider = MagicMock(aclose=AsyncMock(), generation=GenerationSettings())
     provider.get_default_model.return_value = "test-model"
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
@@ -34,6 +34,7 @@ def _make_loop():
         mock_sessions.return_value.state.get = AsyncMock(side_effect=lambda key: Session(key))
         mock_sessions.return_value.state.peek.return_value = None
         mock_sub_mgr.return_value.close = AsyncMock()
+        mock_sub_mgr.return_value.get_running_count_by_session.return_value = 0
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
     return loop, bus
 
@@ -264,9 +265,9 @@ class TestRestartCommand:
         assert response is not None
         assert "Model: test-model" in response.content
         assert "Tokens: 0 in / 0 out" in response.content
-        assert "Context: 20k/200k (10% of input budget)" in response.content
+        assert "Context: 20500/200000 (10% of input budget)" in response.content
         assert "Session: 3 messages" in response.content
-        assert "Uptime: 2m 5s" in response.content
+        assert "Uptime: 0:02:05" in response.content
         assert "Tasks: 0 active" in response.content
         assert response.metadata == {"render_as": "text"}
         loop.consolidator.estimate_session_prompt_tokens.assert_called_once_with(
@@ -346,7 +347,7 @@ class TestRestartCommand:
 
         assert response is not None
         assert "Tokens: 1200 in / 34 out" in response.content
-        assert "Context: 1k/200k (0% of input budget)" in response.content
+        assert "Context: 1200/200000 (0% of input budget)" in response.content
         assert "Tasks: 0 active" in response.content
 
     @pytest.mark.asyncio

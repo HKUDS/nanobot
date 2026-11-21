@@ -2801,6 +2801,7 @@ describe("ThreadShell", () => {
         chat_id: "chat-new", turn_id: turnId, turn_seq: 2,
         text: "English fallback",
         side_channel: true,
+        render_as: "text",
         command_result: { command: "/model", parts: [{ key: "model.current", values: { model: "Ring-2.6-1T" } }] },
       });
       client._emitChat("chat-new", {
@@ -2809,8 +2810,9 @@ describe("ThreadShell", () => {
         text: "This unrelated reply stays visible.",
       });
     });
+    const modelResult = "- Current model: `Ring-2.6-1T`";
     expect(screen.getByText("/model")).toBeInTheDocument();
-    expect(screen.getByText("Ring-2.6-1T")).toBeInTheDocument();
+    expect(screen.getByText(modelResult)).toBeInTheDocument();
     expect(screen.getByText("This unrelated reply stays visible.")).toBeInTheDocument();
 
     await act(async () => {
@@ -2821,7 +2823,7 @@ describe("ThreadShell", () => {
 
     await waitFor(() => {
       expect(screen.getByText("/model")).toBeInTheDocument();
-      expect(screen.getByText("Ring-2.6-1T")).toBeInTheDocument();
+      expect(screen.getByText(modelResult)).toBeInTheDocument();
       expect(screen.getByText("This unrelated reply stays visible.")).toBeInTheDocument();
     });
   });
