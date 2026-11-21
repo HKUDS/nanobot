@@ -60,16 +60,16 @@ async def test_browser_flow_retries_current_server_and_ignores_unrelated_reload_
         lambda _url: (True, ""),
     )
 
-    async def connect(servers, _registry, *, oauth_handlers, network):
-        assert set(servers) == {"xmind"}
-        received["cfg"] = servers["xmind"]
+    async def connect(name, cfg, *, oauth_handler, network):
+        assert name == "xmind"
+        received["cfg"] = cfg
         received["network"] = network
-        handlers = oauth_handlers["xmind"]
+        handlers = oauth_handler
         await handlers.redirect_handler(
             "https://accounts.example.com/authorize?client_id=test&state=state-123"
         )
         received["callback"] = await handlers.callback_handler()
-        return {"xmind": connection}
+        return connection
 
     async def reload_mcp() -> dict[str, object]:
         nonlocal reload_calls
@@ -88,7 +88,7 @@ async def test_browser_flow_retries_current_server_and_ignores_unrelated_reload_
             "message": "MCP config reloaded, but some servers did not connect: notion",
         }
 
-    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_server", connect)
 
     started = await manager.start(
         "xmind",
@@ -148,13 +148,13 @@ async def test_browser_flow_activates_tools_before_probe_cleanup_completes(
         lambda _url: (True, ""),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers, network):
-        handlers = oauth_handlers["linear"]
+    async def connect(_name, _cfg, *, oauth_handler, network):
+        handlers = oauth_handler
         await handlers.redirect_handler(
             "https://accounts.example.com/authorize?client_id=test&state=blocked-close"
         )
         await handlers.callback_handler()
-        return {"linear": connection}
+        return connection
 
     async def reload_mcp() -> dict[str, object]:
         reload_started.set()
@@ -165,7 +165,7 @@ async def test_browser_flow_activates_tools_before_probe_cleanup_completes(
             "failed": [],
         }
 
-    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_server", connect)
 
     started = await manager.start(
         "linear",
@@ -215,17 +215,17 @@ async def test_browser_flow_remains_busy_through_cancelled_or_expired_cleanup(
     if expire:
         monkeypatch.setattr("nanobot.webui.mcp_oauth_api._FLOW_TTL_S", 0)
 
-    async def connect(_servers, _registry, *, oauth_handlers, network):
-        handlers = oauth_handlers["linear"]
+    async def connect(_name, _cfg, *, oauth_handler, network):
+        handlers = oauth_handler
         await handlers.redirect_handler("https://accounts.example.com/auth?state=pending")
         try:
             await handlers.callback_handler()
         finally:
             cleanup_started.set()
             await allow_cleanup.wait()
-        return {}
+        return None
 
-    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_server", connect)
     started = await manager.start(
         "linear", _config(), "https://agent.example.com/auth/mcp/callback",
         reload_mcp=lambda: asyncio.sleep(0, result={"ok": True}),
@@ -269,16 +269,16 @@ async def test_remote_http_flow_accepts_a_pasted_loopback_callback(
         lambda _url: (True, ""),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers, network):
-        handlers = oauth_handlers["linear"]
+    async def connect(_name, _cfg, *, oauth_handler, network):
+        handlers = oauth_handler
         received["redirect_uri"] = handlers.redirect_uri
         await handlers.redirect_handler(
             "https://accounts.example.com/authorize?client_id=test&state=manual-state"
         )
         received["callback"] = await handlers.callback_handler()
-        return {"linear": connection}
+        return connection
 
-    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_server", connect)
 
     started = await manager.start(
         "linear",
@@ -342,13 +342,13 @@ async def test_browser_flow_surfaces_provider_denial_without_callback_descriptio
         lambda _url: (True, ""),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers, network):
-        handlers = oauth_handlers["notion"]
+    async def connect(_name, _cfg, *, oauth_handler, network):
+        handlers = oauth_handler
         await handlers.redirect_handler("https://accounts.example.com/auth?state=deny-state")
         await handlers.callback_handler()
-        return {}
+        return None
 
-    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_server", connect)
     started = await manager.start(
         "notion",
         _config(),
@@ -388,11 +388,11 @@ async def test_browser_flow_blocks_unsafe_authorization_url(
         lambda _url: (url_is_safe, "private address"),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers, network):
-        await oauth_handlers["linear"].redirect_handler(authorization_url)
-        return {}
+    async def connect(_name, _cfg, *, oauth_handler, network):
+        await oauth_handler.redirect_handler(authorization_url)
+        return None
 
-    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_server", connect)
 
     result = await manager.start(
         "linear",

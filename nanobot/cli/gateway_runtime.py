@@ -12,7 +12,6 @@ from loguru import logger
 from rich.console import Console
 
 from nanobot import __logo__, __version__
-from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.image_generation import (
@@ -111,17 +110,6 @@ async def _deliver_to_channel(
             key, msg.content, extra, expected_generation=expected_generation,
         )
     await bus.publish_outbound(msg)
-
-
-class _MCPReadinessHook(AgentHook):
-    """Retry application-owned MCP connections before the runner reads tools."""
-
-    def __init__(self, provider: MCPProvider) -> None:
-        super().__init__()
-        self._provider = provider
-
-    async def before_run(self, context: AgentRunHookContext) -> None:
-        await self._provider.connect()
 
 
 def _http_endpoint_responding(url: str, *, timeout_s: float = 0.25) -> bool:
@@ -578,7 +566,6 @@ def _run_claimed_gateway(
         turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,
         local_trigger_store=trigger_store,
-        hooks=[_MCPReadinessHook(mcp_provider)],
         hook_factories=[create_file_edit_activity_hook, create_context_source_hook],
         tool_registry=tools,
         recovery_admission=recovery,
@@ -654,7 +641,6 @@ def _run_claimed_gateway(
             if isinstance(message_tool, MessageTool):
                 suppress_token = message_tool.set_suppress_delivery(True)
             try:
-                await mcp_provider.connect()
                 resp = await agent.process_direct(
                     prompt,
                     session_key=HEARTBEAT_SESSION_KEY,
@@ -933,8 +919,16 @@ def _run_claimed_gateway(
             async def _run_agent() -> None:
                 try:
                     await bus.admission.wait_until_open()
-                    await mcp_provider.connect()
-                    await agent.run()
+                    async with asyncio.TaskGroup() as group:
+                        initial = asyncio.Event()
+                        mcp = group.create_task(mcp_provider.maintain(initial), name="nanobot-mcp")
+                        try:
+                            # Give healthy servers one shared window, not one wait per turn.
+                            with suppress(TimeoutError):
+                                await asyncio.wait_for(initial.wait(), timeout=1)
+                            await agent.run()
+                        finally:
+                            mcp.cancel()
                 finally:
                     await mcp_provider.aclose()
 

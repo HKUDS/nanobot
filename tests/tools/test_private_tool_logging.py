@@ -38,32 +38,45 @@ _SECRET = "synthetic-private-detail"
 async def test_mcp_reconnect_failure_obeys_private_log_policy(
     log_content, transient, monkeypatch, diagnostic_records,
 ):
-    @asynccontextmanager
-    async def broken_stdio(_params):
-        if transient:
-            raise ConnectionResetError(_SECRET)
-        raise RuntimeError(_SECRET)
-        yield  # pragma: no cover
-
-    monkeypatch.setattr("mcp.client.stdio.stdio_client", broken_stdio)
     session = SimpleNamespace(
+        initialize=AsyncMock(return_value=SimpleNamespace(capabilities=types.ServerCapabilities(
+            tools=types.ToolsCapability(),
+        ))),
+        list_tools=AsyncMock(return_value=types.ListToolsResult(tools=[types.Tool(
+            name="search", inputSchema={},
+        )])),
         send_ping=AsyncMock(side_effect=RuntimeError("session terminated")),
         call_tool=AsyncMock(),
     )
-    wrapper = MCPToolWrapper(session, "sample", SimpleNamespace(
-        name="search", description="synthetic", inputSchema={},
-    ))
+    attempts = 0
+
+    @asynccontextmanager
+    async def stdio(_params):
+        nonlocal attempts
+        attempts += 1
+        if attempts > 1:
+            raise (ConnectionResetError if transient else RuntimeError)(_SECRET)
+        yield None, None
+
+    @asynccontextmanager
+    async def client_session(_read, _write):
+        yield session
+
+    monkeypatch.setattr("mcp.client.stdio.stdio_client", stdio)
+    monkeypatch.setattr("mcp.ClientSession", client_session)
     registry = ToolRegistry()
-    registry.register(wrapper)
-    provider = MCPProvider({"sample": MCPServerConfig(command="synthetic-mcp")}, registry)
-    provider._attach_reconnect_handlers({"sample"})
+    provider = MCPProvider({"sample": MCPServerConfig(
+        command="synthetic-mcp", enabled_tools=["search"],
+    )}, registry)
     try:
+        await provider.connect()
         with request_context(RequestContext(channel="websocket", chat_id="test", log_content=log_content)):
-            result = await wrapper.execute(query=_SECRET)
+            result = await registry.execute("mcp_sample_search", {"query": _SECRET})
     finally:
         await provider.aclose()
 
     assert "failed" in result
+    assert attempts == 2
     session.send_ping.assert_awaited_once()
     session.call_tool.assert_not_awaited()
     failures = [

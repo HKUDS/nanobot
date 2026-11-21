@@ -1183,6 +1183,8 @@
       "statusMissingCredentials": "Butuh kunci",
       "connectingAccount": "Menghubungkan {{name}}",
       "connectingLabel": "Menghubungkan…",
+      "connectingSlow": "Koneksi memerlukan waktu lebih lama…",
+      "startupTimedOut": "Waktu mulai habis.",
       "continueSignIn": "Lanjutkan masuk",
       "preparingSignIn": "Menyiapkan proses masuk yang aman…",
       "openSignInToContinue": "Buka halaman masuk untuk melanjutkan.",

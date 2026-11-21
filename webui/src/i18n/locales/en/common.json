@@ -1150,6 +1150,8 @@
       "statusMissingCredentials": "Needs key",
       "connectingAccount": "Connecting {{name}}",
       "connectingLabel": "Connecting…",
+      "connectingSlow": "Taking longer to connect…",
+      "startupTimedOut": "Startup timed out.",
       "continueSignIn": "Continue sign-in",
       "preparingSignIn": "Preparing secure sign-in…",
       "openSignInToContinue": "Open the sign-in page to continue.",

@@ -10,9 +10,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import SplitResult, parse_qs, urlsplit, urlunsplit
 
-from nanobot.agent.tools.mcp import MCPConnection, connect_mcp_servers
+from nanobot.agent.tools.mcp import MCPServerConnection, connect_mcp_server
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH, MCPOAuthHandlers
-from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import MCPServerConfig
 from nanobot.runtime_admission import RuntimeAdmission
@@ -325,46 +324,33 @@ class McpOAuthManager:
             flow.error = "MCP authorization timed out."
             raise _OAuthCallbackError(flow.error) from exc
 
-    async def _close_connections(self, connections: dict[str, MCPConnection]) -> None:
-        if not connections:
-            return
-
-        async def close_all() -> None:
-            for connection in connections.values():
-                with suppress(Exception):
-                    await connection.aclose()
+    async def _close_connection(self, connection: MCPServerConnection) -> None:
+        async def close() -> None:
+            with suppress(Exception):
+                await connection.aclose()
 
         # Cancelling/expiring the browser flow must not interrupt a transport
         # close already in progress. Keep ownership until it actually finishes.
-        cleanup = asyncio.create_task(close_all(), name="mcp-oauth-cleanup")
+        cleanup = asyncio.create_task(close(), name="mcp-oauth-cleanup")
         self._cleanup_tasks.add(cleanup)
         cleanup.add_done_callback(self._cleanup_tasks.discard)
         await asyncio.shield(cleanup)
 
     async def _connect(
         self, flow: _McpOAuthFlow, handlers: MCPOAuthHandlers
-    ) -> dict[str, MCPConnection]:
-        connections: dict[str, MCPConnection] = {}
+    ) -> MCPServerConnection | None:
         try:
-            connections = await connect_mcp_servers(
-                {flow.name: flow.cfg},
-                ToolRegistry(),
-                oauth_handlers={flow.name: handlers},
+            connection = await connect_mcp_server(
+                flow.name,
+                flow.cfg,
+                oauth_handler=handlers,
                 network=flow.network,
             )
-            if flow.name not in connections:
-                await self._close_connections(connections)
-                connections = {}
-            if not connections and flow.error is None:
-                flow.error = "Could not complete the MCP OAuth connection."
-            return connections
-        except asyncio.CancelledError:
-            raise
         except Exception:
-            if flow.error is None:
-                flow.error = "Could not complete the MCP OAuth connection."
-            await self._close_connections(connections)
-            return {}
+            connection = None
+        if connection is None and flow.error is None:
+            flow.error = "Could not complete the MCP OAuth connection."
+        return connection
 
     async def _connect_and_reload(
         self,
@@ -372,8 +358,8 @@ class McpOAuthManager:
         handlers: MCPOAuthHandlers,
         reload_mcp: McpReload,
     ) -> bool:
-        connections = await self._connect(flow, handlers)
-        if flow.name not in connections:
+        connection = await self._connect(flow, handlers)
+        if connection is None:
             return False
         try:
             flow.reload_result = await reload_mcp()
@@ -392,7 +378,7 @@ class McpOAuthManager:
                 "requires_restart": True,
             }
         finally:
-            await self._close_connections(connections)
+            await self._close_connection(connection)
         return True
 
     def _flow(self, flow_id: str) -> _McpOAuthFlow:

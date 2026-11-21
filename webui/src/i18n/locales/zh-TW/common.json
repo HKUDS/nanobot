@@ -1183,6 +1183,8 @@
       "statusMissingCredentials": "需要金鑰",
       "connectingAccount": "正在連接 {{name}}",
       "connectingLabel": "正在連線…",
+      "connectingSlow": "連線耗時較長，仍在嘗試…",
+      "startupTimedOut": "啟動逾時。",
       "continueSignIn": "繼續登入",
       "preparingSignIn": "正在準備安全登入…",
       "openSignInToContinue": "開啟登入頁面以繼續。",

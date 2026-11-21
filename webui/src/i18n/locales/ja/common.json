@@ -1183,6 +1183,8 @@
       "statusMissingCredentials": "キーが必要",
       "connectingAccount": "{{name}} に接続しています",
       "connectingLabel": "接続中…",
+      "connectingSlow": "接続に時間がかかっています…",
+      "startupTimedOut": "起動がタイムアウトしました。",
       "continueSignIn": "サインインを続ける",
       "preparingSignIn": "安全なサインインを準備しています…",
       "openSignInToContinue": "サインインページを開いて続行してください。",

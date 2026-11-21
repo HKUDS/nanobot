@@ -7,6 +7,7 @@ import pytest
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.context_governance import ContextWindowExceededError
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import AgentDefaults
 from nanobot.events import EventSink, ModelRequestEvent
 from nanobot.providers.base import (
@@ -270,6 +271,56 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
         msg.get("role") == "tool" and msg.get("content") == "tool result"
         for msg in captured_second_call
     )
+
+
+@pytest.mark.asyncio
+async def test_runner_can_use_mcp_tool_registered_during_the_same_turn():
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    registry = ToolRegistry()
+
+    def make_tool(name: str, output: str):
+        tool = MagicMock()
+        tool.name = name
+        tool.to_schema.return_value = {
+            "type": "function",
+            "function": {"name": name, "parameters": {"type": "object"}},
+        }
+        tool.validate_params.return_value = []
+        tool.execute = AsyncMock(return_value=output)
+        return tool
+
+    registry.register(make_tool("read_file", "source"))
+    call_count = 0
+
+    async def chat(*, messages, tools, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        names = [tool["function"]["name"] for tool in tools]
+        if call_count == 1:
+            assert names == ["read_file"]
+            registry.register(make_tool("mcp_slow_ping", "pong"))
+            call = ToolCallRequest(id="start", name="read_file", arguments={})
+        elif call_count == 2:
+            assert names == ["read_file", "mcp_slow_ping"]
+            call = ToolCallRequest(id="late", name="mcp_slow_ping", arguments={})
+        else:
+            assert messages[-1]["content"] == "pong"
+            return LLMResponse(content="done")
+        return LLMResponse(content=None, finish_reason="tool_calls", tool_calls=[call])
+
+    provider.chat_stream_with_retry = chat
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        model="test-model",
+        tools=registry,
+        initial_messages=[{"role": "user", "content": "Work with the available tools."}],
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+    assert result.final_content == "done"
+    assert result.tools_used == ["read_file", "mcp_slow_ping"]
 
 
 @pytest.mark.asyncio

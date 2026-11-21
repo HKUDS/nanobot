@@ -1183,6 +1183,8 @@
       "statusMissingCredentials": "키 필요",
       "connectingAccount": "{{name}} 연결 중",
       "connectingLabel": "연결 중…",
+      "connectingSlow": "연결에 시간이 더 걸리고 있어요…",
+      "startupTimedOut": "시작 시간이 초과되었습니다.",
       "continueSignIn": "로그인 계속",
       "preparingSignIn": "안전한 로그인을 준비하는 중…",
       "openSignInToContinue": "계속하려면 로그인 페이지를 여세요.",
