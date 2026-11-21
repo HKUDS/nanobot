@@ -116,6 +116,61 @@ async def test_edit_keeps_identity_prefix_and_one_new_input(editing, index):
     assert "obsolete suffix" not in str((await manager.state.read(KEY)).messages)
 
 
+async def test_replay_uses_one_snapshot_and_rejects_an_edit_from_before_concurrent_append(editing, tmp_path, monkeypatch):
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.bus.queue import MessageBus
+    from nanobot.channels.websocket.runtime import WebSocketConfig
+    from nanobot.webui import ws_http
+    from nanobot.webui.gateway_services import build_gateway_services
+
+    manager, host, submissions, _ = editing
+    gateway = build_gateway_services(
+        config=WebSocketConfig(), bus=MessageBus(), session_manager=manager,
+        static_dist_path=None, workspace_path=tmp_path, config_path=tmp_path / "config.json",
+        default_restrict_to_workspace=False, runtime_model_name=None,
+        runtime_surface="browser", runtime_capabilities_overrides=None,
+    )
+    auth = ("Authorization", "Bearer " + gateway.tokens.issue_api_token(300))
+    path = "/api/sessions/websocket%3Aedit-chat/webui-thread"
+
+    async def read(*headers):
+        return await gateway.http._dispatch_session_routes(Request(path, Headers([auth, *headers])), path)
+
+    before = await read()
+    build = ws_http.build_webui_thread_response
+    writer = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
+    fact = fact_from_record({"event": "user", "turn_id": "later", "text": "later question"})
+    with ThreadPoolExecutor(max_workers=1) as pool, monkeypatch.context() as patch:
+        def concurrent_build(*args, **kwargs):
+            pool.submit(writer.append_history, KEY, [fact]).result(timeout=5)
+            return build(*args, **kwargs)
+
+        patch.setattr(ws_http, "build_webui_thread_response", concurrent_build)
+        overlapping = await read()
+    assert overlapping.status_code == before.status_code == 200
+    assert overlapping.headers["ETag"] == before.headers["ETag"]
+    assert overlapping.body == before.body
+    old = json.loads(overlapping.body)
+    changed = await read(("If-None-Match", overlapping.headers["ETag"]))
+    assert changed.status_code == 200
+    assert changed.headers["ETag"] != overlapping.headers["ETag"]
+    current = json.loads(changed.body)
+    assert current["source_revision"] != old["source_revision"]
+    assert current["events"][-1]["text"] == "later question"
+    user = next(event for event in old["events"] if event["event"] == "user_message")
+    with pytest.raises(HistoryEditError, match="edit_source_changed"):
+        await replace_webui_chat_input(host, payload({
+            "revision": old["source_revision"], "message_id": user["projection_id"],
+            "turn_id": user["turn_id"], "text": user["text"],
+        }))
+    assert not submissions
+
+
 async def test_other_chat_revision_cannot_authorize_replacement(editing):
     manager, host, submissions, _ = editing
     before = await manager.state.read(KEY)

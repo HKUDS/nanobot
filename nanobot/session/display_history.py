@@ -104,13 +104,21 @@ class HistoryReader:
     # A reader belongs to one transaction snapshot. Page cursors, edit sources and
     # conditional responses can reuse its header, never one from an earlier request.
     @cached_property
-    def revision(self) -> tuple[str, int] | None:
+    def _versions(self) -> tuple[str, int, int] | None:
         row = self._db.execute(
-            """SELECT sessions.generation, coalesce(history_heads.revision, -1) FROM sessions
+            """SELECT sessions.generation, sessions.revision, coalesce(history_heads.revision, -1) FROM sessions
                LEFT JOIN history_heads ON history_heads.session_key=sessions.key WHERE sessions.key=?""",
             (self.key,),
         ).fetchone()
-        return (str(row[0]), int(row[1])) if row is not None else None
+        return (str(row[0]), int(row[1]), int(row[2])) if row is not None else None
+
+    @property
+    def session_version(self) -> tuple[str, int] | None:
+        return (self._versions[0], self._versions[1]) if self._versions is not None else None
+
+    @property
+    def revision(self) -> tuple[str, int] | None:
+        return (self._versions[0], self._versions[2]) if self._versions is not None else None
 
     @cached_property
     def turn_count(self) -> int:
