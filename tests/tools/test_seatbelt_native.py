@@ -75,6 +75,7 @@ async def test_native_outside_reads_denied(layout, target):
     path = layout[target] if target == "config" else layout[target] / "sentinel"
     result = await run_script(layout, f"cat {shlex.quote(str(path))}")
     assert "Operation not permitted" in result
+    assert completed(result)[1] != 0
     assert "synthetic-" not in result
 
 
@@ -92,6 +93,7 @@ async def test_native_other_writes_denied(layout, target):
     before = path.read_text()
     result = await run_script(layout, f"printf changed > {shlex.quote(str(path))}")
     assert "Operation not permitted" in result
+    assert completed(result)[1] != 0
     assert path.read_text() == before
 
 
@@ -164,6 +166,7 @@ async def test_native_readonly_ancestor_cannot_be_renamed(layout, target, ancest
     )
 
     assert "Operation not permitted" in result
+    assert completed(result)[1] != 0
     assert sentinel.read_text() == "synthetic-readonly"
     assert not (workspace / "shifted").exists()
 
@@ -201,6 +204,7 @@ async def test_native_rw_override_preserves_readonly_ancestor_policy(layout, ove
     result = await run_script(layout, "mv tree shifted")
     if override == "child":
         assert "Operation not permitted" in result
+        assert completed(result)[1] != 0
         assert protected.is_dir()
     else:
         assert completed(result) == ("", 0)
@@ -268,4 +272,5 @@ async def test_native_rw_override_respects_volume_case_sensitivity(layout, overr
         # On a case-sensitive volume the distinct RW directory must not remove
         # protection from Tree/ReadOnly, even though its spelling differs only by case.
         assert "Operation not permitted" in result
+        assert completed(result)[1] != 0
         assert sentinel.read_text() == "synthetic-readonly"
