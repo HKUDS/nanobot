@@ -11,6 +11,7 @@ import {
 } from "react";
 import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Info, Quote, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { renderCommandResult } from "../../../packages/client-events/command-result";
 import { DisclosureContent } from "@/components/ui/disclosure";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
@@ -115,7 +116,10 @@ function useMessageCopy(content: string) {
   return { copied, label, onCopy };
 }
 
-function messageCopyContent(message: UIMessage, t: (key: string) => string) {
+function messageCopyContent(message: UIMessage, t: (key: string) => string, locale: string) {
+  if (message.commandResult !== undefined) {
+    return renderCommandResult(message.commandResult, locale) ?? message.content;
+  }
   if (message.renderAs === "text") return message.content;
   return message.role === "assistant" && message.compactReply === "empty"
     ? t("thread.compaction.empty")
@@ -125,8 +129,8 @@ function messageCopyContent(message: UIMessage, t: (key: string) => string) {
 }
 
 export function MessageCopyButton({ message, className }: { message: UIMessage; className?: string }) {
-  const { t } = useTranslation();
-  const content = messageCopyContent(message, t);
+  const { t, i18n } = useTranslation();
+  const content = messageCopyContent(message, t, i18n.resolvedLanguage ?? i18n.language);
   const { copied, label, onCopy } = useMessageCopy(content);
   if (!content.trim()) return null;
   return <HoverHint content={label} side="top" align="center"><button type="button" data-message-block-copy-action
@@ -164,9 +168,9 @@ export function MessageBlockMenuActions({
   activity,
   sheet = false,
 }: MessageBlockMenuActionsProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const content = messageCopyContent(message, t);
+  const content = messageCopyContent(message, t, i18n.resolvedLanguage ?? i18n.language);
   const hasText = content.trim().length > 0;
   const showFork = message.role === "assistant"
     && !message.isStreaming
@@ -396,7 +400,7 @@ export function MessageBubble({
   onOpenFilePreview,
   contextMenu,
 }: MessageBubbleProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const mentionCliApps = useMemo(
     () => mergeCliMentionApps(cliApps, message.cliApps),
     [cliApps, message.cliApps],
@@ -519,7 +523,7 @@ export function MessageBubble({
     );
   }
 
-  const assistantContent = messageCopyContent(message, t);
+  const assistantContent = messageCopyContent(message, t, i18n.resolvedLanguage ?? i18n.language);
   const empty = assistantContent.trim().length === 0;
   const media = message.media ?? [];
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";

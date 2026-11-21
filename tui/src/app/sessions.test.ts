@@ -287,7 +287,7 @@ describe("NanobotTui session navigation", () => {
     expect(ui.runtimeControls.modelText.plainText).not.toContain("deepseek/deepseek-chat")
   })
 
-  test("refreshes the canonical preset after the model command completes", async () => {
+  test("applies the confirmed preset after the model command completes", async () => {
     setup = await createRenderer({ width: 96, height: 20, screenMode: "alternate-screen" })
     const original = globalThis.fetch
     globalThis.fetch = ((input: string | URL | Request) => {
@@ -295,7 +295,7 @@ describe("NanobotTui session navigation", () => {
         return Promise.resolve(new Response(JSON.stringify({})))
       }
       return Promise.resolve(new Response(JSON.stringify({
-        sessions: [{ key: "websocket:chat", model_preset: "Deep Research" }],
+        sessions: [{ key: "websocket:chat", model_preset: null }],
       })))
     }) as typeof fetch
     const sent: string[] = []
@@ -327,7 +327,9 @@ describe("NanobotTui session navigation", () => {
       app.accept({
         event: "message",
         chat_id: "chat",
-        text: "Switched model preset to Deep Research.",
+        text: "Fallback receipt",
+        side_channel: true,
+        command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "Deep Research" } }] },
         turn_id: "turn",
       })
       await waitUntil(() => ui.runtimeControls.modelText.plainText.includes("Deep Research"))

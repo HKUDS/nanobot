@@ -679,7 +679,7 @@ class ChannelManager:
             OutboundMessage(
                 channel=notice.channel,
                 chat_id=notice.chat_id,
-                content=format_restart_completed_message(notice.started_at_raw),
+                content=format_restart_completed_message(notice.started_at_raw, notice.metadata.get("locale")),
                 metadata=dict(notice.metadata or {}),
             ),
             deadline=deadline,

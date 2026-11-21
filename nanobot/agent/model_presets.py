@@ -12,6 +12,12 @@ PresetSnapshotLoader = Callable[[str], ProviderSnapshot]
 PresetCatalogLoader = Callable[[], Mapping[str, ModelPresetConfig]]
 
 
+class UnknownModelPresetError(KeyError):
+    def __init__(self, name: str, available: Mapping[str, ModelPresetConfig]) -> None:
+        self.name = name
+        super().__init__(f"model_preset {name!r} not found. Available: {', '.join(available) or '(none)'}")
+
+
 def default_selection_signature(
     signature: tuple[object, ...] | None,
     model_preset: str | None = None,
@@ -82,4 +88,4 @@ def normalize_preset_name(name: str | None, presets: dict[str, ModelPresetConfig
     matches = [candidate for candidate in presets if candidate.casefold() == name.casefold()]
     if len(matches) == 1:
         return matches[0]
-    raise KeyError(f"model_preset {name!r} not found. Available: {', '.join(presets) or '(none)'}")
+    raise UnknownModelPresetError(name, presets)

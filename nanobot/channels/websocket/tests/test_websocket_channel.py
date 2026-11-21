@@ -3573,9 +3573,10 @@ async def test_deferred_dream_reply_is_delivered_and_replayed_after_command_turn
     assert completed["turn_id"] != ack["turn_id"]
     for reply, replay in zip(replies, replayed, strict=True):
         assert reply["side_channel"] is True
-        assert {key: replay[key] for key in ("turn_id", "turn_seq", "side_channel", "text")} == {
-            key: reply[key] for key in ("turn_id", "turn_seq", "side_channel", "text")
-        }
+        assert reply["command_result"]["command"] == "/dream"
+        assert reply["command_result"]["parts"]
+        for key in ("turn_id", "turn_seq", "side_channel", "text", "command_result"):
+            assert replay[key] == reply[key]
 
 
 @pytest.mark.asyncio

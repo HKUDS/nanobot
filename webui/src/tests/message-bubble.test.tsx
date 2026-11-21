@@ -185,6 +185,29 @@ describe("MessageBubble", () => {
     }
   });
 
+  it.each(["live", "history"])("redisplays %s command receipts when the reader changes language", async (source) => {
+    const event = { event: "message", chat_id: "commands", text: "Fallback", turn_id: "switch", side_channel: true,
+      command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "{count}" } }, { text: "Raw {preset}" }] },
+    } as const;
+    const transcript = new ThreadTranscript();
+    if (source === "history") {
+      transcript.accept(parseWebuiThreadPayload({ schemaVersion: 3, projection: "events", events: [event] }), transcript.begin("initial"));
+    } else {
+      const { client, receive } = createStreamClient();
+      const off = client.onTranscript("commands", (message) => {
+        if (message.event === "message") transcript.project(message, { createId: () => "reply", now: 42 });
+      });
+      try { receive(event); } finally { off(); client.close(); }
+    }
+    const { container } = render(<ThreadMessages messages={projectWebuiThreadMessages(transcript.messages)} />);
+    const answer = container.querySelector("[data-assistant-message]");
+    expect(answer).toHaveTextContent("Switched model preset to {count}.");
+    await act(() => setAppLanguage("zh-CN"));
+    expect(answer).toHaveTextContent("{count}");
+    expect(answer).toHaveTextContent("已切换");
+    expect(answer).toHaveTextContent("Raw {preset}");
+  });
+
   it.each([undefined, "TEXT"])("keeps Markdown after bang input unless render_as is literally text (%s)", async (render_as) => {
     const payload = parseWebuiThreadPayload({
       schemaVersion: 3, projection: "events", events: [

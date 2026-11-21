@@ -11,6 +11,7 @@ from nanobot.agent.session_inbox import SessionInbox
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import CommandResultEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
 from nanobot.cron.service import CronService
@@ -65,7 +66,7 @@ async def test_idle_new_resets_session_and_accepts_next_message(loop):
         async with asyncio.timeout(5):
             while True:
                 reply = await loop.bus.consume_outbound()
-                if reply.event is None:
+                if isinstance(reply.event, CommandResultEvent) and reply.event.command == "/new":
                     break
         assert reply.content == "New session started."
         assert (await loop.sessions.state.read(key)).messages == []
@@ -117,7 +118,7 @@ async def test_message_queued_during_idle_new_runs_in_reset_session(loop):
         async with asyncio.timeout(5):
             while len(replies) < 2:
                 reply = await loop.bus.consume_outbound()
-                if reply.event is None:
+                if reply.event is None or (isinstance(reply.event, CommandResultEvent) and reply.event.command == "/new"):
                     replies.append(reply.content)
         assert replies == ["New session started.", "fresh reply"]
         session = await loop.sessions.state.read(key)
@@ -154,7 +155,7 @@ async def test_new_during_active_turn_stops_it_and_resets_session(loop):
         async with asyncio.timeout(5):
             while True:
                 reply = await loop.bus.consume_outbound()
-                if reply.event is None and reply.content == "New session started.":
+                if isinstance(reply.event, CommandResultEvent) and reply.event.command == "/new":
                     break
         assert cancelled.is_set()
         assert (await loop.sessions.state.read(key)).messages == []
@@ -627,7 +628,7 @@ async def test_stop_does_not_strand_automation_submitted_during_cleanup(
         await stop
         while True:
             reply = await loop.bus.consume_outbound()
-            if reply.event is None and reply.content.startswith("Stopped "):
+            if isinstance(reply.event, CommandResultEvent) and reply.event.command == "/stop":
                 break
         result = await submitted
         assert result is not None and result.content == "automation finished"
@@ -666,7 +667,7 @@ async def test_automation_arriving_during_queue_cancellation_is_not_stranded(loo
         await stop
         while True:
             reply = await loop.bus.consume_outbound()
-            if reply.event is None and reply.content.startswith("Stopped "):
+            if isinstance(reply.event, CommandResultEvent) and reply.event.command == "/stop":
                 break
         result = await submitted
         assert result is not None and result.content == "automation finished"

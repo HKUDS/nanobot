@@ -24,8 +24,8 @@ def _builtin_specs() -> tuple[BuiltinCommandSpec, ...]:
 BUILTIN_COMMAND_SPECS = _builtin_specs()
 
 
-def build_help_text() -> str:
-    return build_registered_help_text(BUILTIN_COMMAND_SPECS)
+def build_help_text(*, locale: object = None) -> str:
+    return build_registered_help_text(BUILTIN_COMMAND_SPECS, locale=locale)
 
 
 def builtin_command_palette() -> list[dict[str, str | bool]]:

@@ -122,8 +122,8 @@ describe("NanobotTui lifecycle", () => {
   })
 
   test.each([
-    ["succeeded", "Conversation compacted"],
-    ["cancelled", "Conversation compaction cancelled"],
+    ["succeeded", "Context compacted."],
+    ["cancelled", "Context compaction cancelled."],
   ] as const)("updates idle compaction in place to %s", async (phase, copy) => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const app = mount(setup)
@@ -136,7 +136,7 @@ describe("NanobotTui lifecycle", () => {
     const event = { event: "context_compaction", chat_id: "chat", compaction_id: "idle" } as const
     app.accept({ ...event, phase: "started" })
     await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("Compacting conversation…")
+    expect(setup.captureCharFrame()).toContain("Compressing context…")
     const rows = ui.transcript.root.getChildren()
     app.accept({ ...event, phase })
     app.accept({ ...event, phase })
@@ -145,8 +145,8 @@ describe("NanobotTui lifecycle", () => {
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
     expect(occurrences(frame, copy)).toBe(1)
-    expect(frame).not.toContain("Compacting conversation")
-    expect(frame).not.toContain("Could not compact")
+    expect(frame).not.toContain("Compressing context")
+    expect(frame).not.toContain("Unable to compact")
     expect(ui.transcript.root.getChildren()).toEqual(rows)
     expect(ui.activeTurn).toBe(false)
     expect(ui.composer.plainText).toBe("unfinished draft")
@@ -168,9 +168,9 @@ describe("NanobotTui lifecycle", () => {
     await setup.flush()
     const frame = setup.captureCharFrame()
     expect(frame).toContain("Answer before and after compaction")
-    expect(frame.indexOf("First step")).toBeLessThan(frame.indexOf("Conversation compacted"))
-    expect(frame.indexOf("Conversation compacted")).toBeLessThan(frame.indexOf("Second step"))
-    expect(occurrences(frame, "Conversation compacted")).toBe(1)
+    expect(frame.indexOf("First step")).toBeLessThan(frame.indexOf("Context compacted."))
+    expect(frame.indexOf("Context compacted.")).toBeLessThan(frame.indexOf("Second step"))
+    expect(occurrences(frame, "Context compacted.")).toBe(1)
   })
 
   test("preserves compaction rows through pagination, theming, and session reset", async () => {
@@ -194,17 +194,17 @@ describe("NanobotTui lifecycle", () => {
     ui.transcript.scrollToEdge("top")
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
-    expect(occurrences(frame, "Conversation compacted")).toBe(1)
-    expect(frame).not.toContain("Compacting conversation")
+    expect(occurrences(frame, "Context compacted.")).toBe(1)
+    expect(frame).not.toContain("Compressing context")
     expect(frame).toContain("Earlier answer")
-    expect(frame.indexOf("Earlier answer")).toBeLessThan(frame.indexOf("Could not compact conversation"))
+    expect(frame.indexOf("Earlier answer")).toBeLessThan(frame.indexOf("Unable to compact context."))
     expect(frame).toContain("Recent answer")
-    expect(frame.indexOf("Could not compact conversation")).toBeLessThan(frame.indexOf("Recent answer"))
+    expect(frame.indexOf("Unable to compact context.")).toBeLessThan(frame.indexOf("Recent answer"))
     setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
     await setup.flush()
     const failure = ui.transcript.root.getChildren()
       .flatMap((row) => row.getChildren())
-      .find((child) => child instanceof TextRenderable && child.plainText.includes("Could not compact"))
+      .find((child) => child instanceof TextRenderable && child.plainText.includes("Unable to compact"))
     expect(failure).toBeInstanceOf(TextRenderable)
     expect((failure as TextRenderable).fg.toInts().slice(0, 3)).toEqual([
       1, 3, 5,
@@ -212,8 +212,8 @@ describe("NanobotTui lifecycle", () => {
     ui.transcript.reset({ workspace: "workspace", version: "test" })
     app.accept({ event: "context_compaction", chat_id: "chat", compaction_id: "recent", phase: "started" })
     await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("Compacting conversation…")
-    expect(setup.captureCharFrame()).not.toContain("Conversation compacted")
+    expect(setup.captureCharFrame()).toContain("Compressing context…")
+    expect(setup.captureCharFrame()).not.toContain("Context compacted.")
   })
 
   test("deduplicates compaction history against events queued during hydration", async () => {
@@ -241,8 +241,8 @@ describe("NanobotTui lifecycle", () => {
       await waitUntil(() => (app as unknown as { ready: boolean }).ready)
       await setup.renderOnce()
       const frame = setup.captureCharFrame()
-      expect(occurrences(frame, "Conversation compacted")).toBe(1)
-      expect(frame).not.toContain("Compacting conversation")
+      expect(occurrences(frame, "Context compacted.")).toBe(1)
+      expect(frame).not.toContain("Compressing context")
       expect((app as unknown as { activeTurn: boolean }).activeTurn).toBe(false)
     } finally {
       globalThis.fetch = original

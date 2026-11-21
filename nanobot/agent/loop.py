@@ -881,12 +881,7 @@ class AgentLoop:
         if ctx.msg.session_generation is not None and session.generation != ctx.msg.session_generation:
             raise SessionConflictError("command belongs to a replaced session")
         if result.temporary_session_error is not None and not session.policy.persist:
-            return OutboundMessage(
-                channel=ctx.msg.channel,
-                chat_id=ctx.msg.chat_id,
-                content=result.temporary_session_error,
-                metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
-            )
+            return result.temporary_session_error
         session.add_message("user", ctx.msg.content, _command=True, media=list(ctx.msg.media))
         await self.sessions.state.prepare_input(session)
         return result.message

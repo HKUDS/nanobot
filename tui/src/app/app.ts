@@ -18,6 +18,8 @@ import {
   type TreeSitterClient,
 } from "@opentui/core"
 
+import { switchedModelPreset } from "../../../packages/client-events/model-selection"
+import { terminalMessageText } from "../platform/locale"
 import {
   NanobotClient,
   connectionEndpoint,
@@ -211,7 +213,6 @@ export class NanobotTui {
   private sessionRefreshPending = false
   private sessionRefreshTimer: ReturnType<typeof setInterval> | null = null
   private readonly commandTurns = new Map<string, ResolvedSlashCommandLifecycle>()
-  private readonly modelCommandTurns = new Set<string>()
   private readonly silentCommandTurns = new Set<string>()
   private currentFileEdits: FileEditEvent[] = []
   private lastFileEdits: FileEditEvent[] = []
@@ -698,7 +699,6 @@ export class NanobotTui {
         this.updateTitle()
       }
       this.commandTurns.clear()
-      this.modelCommandTurns.clear()
       const restoring = this.attachedOnce
       this.attachedOnce = true
       if (restoring) {
@@ -758,16 +758,18 @@ export class NanobotTui {
         this.turnHadAnswer = true
         this.transcript.stream(event.text)
         return
-      case "message":
+      case "message": {
+        const preset = switchedModelPreset(event.command_result)
+        if (preset) {
+          this.applyModelPreset(preset)
+          this.updateTitle()
+        }
         if (event.turn_id && this.commandTurns.has(event.turn_id) && !event.kind) {
           const lifecycle = this.commandTurns.get(event.turn_id)
           if (lifecycle !== "agent_turn") {
             this.commandTurns.delete(event.turn_id)
             const silent = this.silentCommandTurns.delete(event.turn_id)
-            if (this.modelCommandTurns.delete(event.turn_id)) {
-              void this.refreshSessionMetadata(event.chat_id)
-            }
-            if (!silent) this.transcript.assistant(event.text, event.render_as)
+            if (!silent) this.transcript.assistant(terminalMessageText(event), event.render_as)
             if (!this.activeTurn) this.status.content = "Ready"
             return
           }
@@ -777,12 +779,13 @@ export class NanobotTui {
           this.activeLabel = event.kind === "tool_hint" ? "Working" : "Thinking"
           this.transcript.progress(event.text, event.tool_events)
           this.setActive(true)
-        } else if (event.render_as === "text") {
-          this.transcript.assistant(event.text, event.render_as)
+        } else if (event.side_channel === true || event.render_as === "text") {
+          this.transcript.assistant(terminalMessageText(event), event.render_as)
         } else {
           this.finalMessage = event.text
         }
         return
+      }
       case "file_edit":
         this.retryStatus = null
         this.activeLabel = "Editing"
@@ -829,10 +832,7 @@ export class NanobotTui {
         return
       case "turn_end":
         if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) return
-        if (event.turn_id) {
-          this.commandTurns.delete(event.turn_id)
-          this.modelCommandTurns.delete(event.turn_id)
-        }
+        if (event.turn_id) this.commandTurns.delete(event.turn_id)
         const failed = event.outcome === "failed"
         this.transcript.finishStream(failed || this.turnHadAnswer ? "" : this.finalMessage)
         if (failed) {
@@ -907,7 +907,6 @@ export class NanobotTui {
         const commandLifecycle = event.turn_id ? this.commandTurns.get(event.turn_id) : undefined
         if (event.turn_id) {
           this.commandTurns.delete(event.turn_id)
-          this.modelCommandTurns.delete(event.turn_id)
           this.silentCommandTurns.delete(event.turn_id)
         }
         if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) {
@@ -2322,7 +2321,6 @@ export class NanobotTui {
     this.unsentSubmit = false
     this.commandTurns.set(turnId, lifecycle)
     if (silent) this.silentCommandTurns.add(turnId)
-    if (/^\/model(?:\s|$)/iu.test(content)) this.modelCommandTurns.add(turnId)
     this.clearComposer()
     this.commandMenu.hide()
     if (!silent && lifecycle !== "stop_active_turn") this.transcript.user(content)

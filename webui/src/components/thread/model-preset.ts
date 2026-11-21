@@ -38,7 +38,8 @@ function modelPresetForBadge(
 export function toModelBadgeInfo(
   modelName: string | null,
   settings: SettingsPayload | null,
-  modelPreset: string | null = null,
+  modelPreset: string | null,
+  defaultLabel: string,
 ): ModelBadgeInfo {
   const scopedPreset = modelPreset?.trim() || null;
   const preset = modelPresetForBadge(settings, scopedPreset);
@@ -47,7 +48,7 @@ export function toModelBadgeInfo(
     : settings?.agent.model || modelName || null;
   const label = preset
     ? preset.is_default
-      ? preset.label?.trim() || "Default"
+      ? defaultLabel
       : preset.name.trim()
     : scopedPreset || compactModelName(model);
   const rawProvider = preset?.provider

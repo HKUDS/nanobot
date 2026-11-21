@@ -393,7 +393,7 @@ export function ModelPresetBadge({
                       return (
                         <PresetPill
                           key={motion.index + offset}
-                          label={preset.name}
+                          label={preset.name === activeName ? label : preset.name}
                           modelDetail={preset.model}
                           provider={preset.provider}
                           isHero={isHero}
@@ -466,7 +466,7 @@ export function ModelPresetBadge({
             <PresetOption
               key={preset.name}
               preset={preset}
-              label={preset.name || label}
+              label={preset.name === activeName ? label : preset.name}
               selected={preset.name === activeName}
               onSelect={selectPreset}
             />

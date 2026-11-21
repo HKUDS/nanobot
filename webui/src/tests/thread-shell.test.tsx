@@ -1783,6 +1783,18 @@ describe("ThreadShell", () => {
     expect(screen.queryByRole("button", { name: "Choose model" })).not.toBeInTheDocument();
   });
 
+  it("updates the model badge from a confirmed slash result, not the display text", async () => {
+    const client = makeClient();
+    render(wrap(client, <ThreadShell session={session("manual-model", "default")} title="Model switch"
+      onToggleSidebar={() => {}} settingsSnapshot={settingsWithFastPreset()} />));
+    expect(await screen.findByRole("button", { name: "Default" })).toBeVisible();
+    await act(async () => client._emitChat("manual-model", {
+      event: "message", chat_id: "manual-model", turn_id: "switch", side_channel: true, text: "Fallback",
+      command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "fast" } }] },
+    }));
+    expect(await screen.findByLabelText("fast")).toBeVisible();
+  });
+
   it("switches through every named preset while preserving call-order priority", async () => {
     const client = makeClient();
     const settings = settingsWithFastPreset();
@@ -2722,7 +2734,7 @@ describe("ThreadShell", () => {
     expect(screen.getByTestId("thread-composer-motion").closest("[data-layout]")).toHaveAttribute("data-layout", "thread");
   });
 
-  it("hides a live first /model turn when the initial history snapshot is stale", async () => {
+  it("keeps an explicit /model result visible when the initial history snapshot is stale", async () => {
     const client = makeClient();
     const onCreateChat = vi.fn().mockResolvedValue("chat-new");
     let resolveThread:
@@ -2782,11 +2794,14 @@ describe("ThreadShell", () => {
       expectSendMessageWithTurn(client, "chat-new", "/model"),
     );
 
+    const turnId = client.sendMessage.mock.calls.at(-1)?.[3]?.turnId;
     await act(async () => {
       client._emitChat("chat-new", {
         event: "message",
-        chat_id: "chat-new",
-        text: "## Model\n- Current model: `Ring-2.6-1T`",
+        chat_id: "chat-new", turn_id: turnId, turn_seq: 2,
+        text: "English fallback",
+        side_channel: true,
+        command_result: { command: "/model", parts: [{ key: "model.current", values: { model: "Ring-2.6-1T" } }] },
       });
       client._emitChat("chat-new", {
         event: "message",
@@ -2794,19 +2809,19 @@ describe("ThreadShell", () => {
         text: "This unrelated reply stays visible.",
       });
     });
-    expect(screen.queryByText("/model")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Current model/)).not.toBeInTheDocument();
+    expect(screen.getByText("/model")).toBeInTheDocument();
+    expect(screen.getByText("Ring-2.6-1T")).toBeInTheDocument();
     expect(screen.getByText("This unrelated reply stays visible.")).toBeInTheDocument();
 
     await act(async () => {
       resolveThread?.(
-        httpJson(transcriptFromSimpleMessages([{ role: "user", content: "/model" }])),
+        httpJson(transcriptFromSimpleMessages([{ role: "user", content: "/model", turnId }])),
       );
     });
 
     await waitFor(() => {
-      expect(screen.queryByText("/model")).not.toBeInTheDocument();
-      expect(screen.queryByText(/Current model/)).not.toBeInTheDocument();
+      expect(screen.getByText("/model")).toBeInTheDocument();
+      expect(screen.getByText("Ring-2.6-1T")).toBeInTheDocument();
       expect(screen.getByText("This unrelated reply stays visible.")).toBeInTheDocument();
     });
   });

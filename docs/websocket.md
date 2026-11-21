@@ -134,6 +134,8 @@ All frames are JSON text. Each message has an `event` field.
 
 `media` and `reply_to` are only present when applicable.
 
+Slash command replies use the same `message` frame, with `side_channel: true` and an optional `command_result`. For example, a successful `/model fast` reply includes `{"command":"/model","parts":[{"key":"model.switched","values":{"preset":"fast"}}, …]}`. Render known keys in the reader’s language and insert values verbatim. A `{"text":"…"}` part is literal output, such as a diff. Use the frame’s `text` when no supported result is available. The same result is available when loading saved replies. A receipt does not by itself start or finish an agent turn; `/compact` continues to report its existing lifecycle events.
+
 **`delta`** — streaming text chunk (only when `streaming: true`):
 
 ```json

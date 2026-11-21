@@ -24,41 +24,6 @@ class SearchUsageInfo:
     extract_used: int | None = None
     crawl_used: int | None = None
 
-    def format(self) -> str:
-        """Return a human-readable multi-line string for /status output."""
-        lines: list[str] = [f"🔍 Web Search: {self.provider}"]
-
-        if not self.supported:
-            lines.append("   Usage tracking: not available for this provider")
-            return "\n".join(lines)
-
-        if self.error:
-            lines.append(f"   Usage: unavailable ({self.error})")
-            return "\n".join(lines)
-
-        if self.used is not None and self.limit is not None:
-            lines.append(f"   Usage: {self.used} / {self.limit} requests")
-        elif self.used is not None:
-            lines.append(f"   Usage: {self.used} requests")
-
-        breakdown_parts: list[str] = []
-        if self.search_used is not None:
-            breakdown_parts.append(f"Search: {self.search_used}")
-        if self.extract_used is not None:
-            breakdown_parts.append(f"Extract: {self.extract_used}")
-        if self.crawl_used is not None:
-            breakdown_parts.append(f"Crawl: {self.crawl_used}")
-        if breakdown_parts:
-            lines.append(f"   Breakdown: {' | '.join(breakdown_parts)}")
-
-        if self.remaining is not None:
-            lines.append(f"   Remaining: {self.remaining} requests")
-
-        if self.reset_date:
-            lines.append(f"   Resets: {self.reset_date}")
-
-        return "\n".join(lines)
-
 
 async def fetch_search_usage(
     provider: str,

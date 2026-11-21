@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import CommandResultEvent
 from nanobot.command.application import build_help_text, builtin_command_palette
 from nanobot.command.builtin import cmd_evaluator_prompt
 from nanobot.command.router import CommandContext
@@ -30,11 +31,13 @@ async def test_evaluator_prompt_reports_default_prompt(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_evaluator_prompt_init_copies_default_prompt(tmp_path) -> None:
     ctx = _make_ctx(tmp_path, "/evaluator-prompt init", "init")
+    ctx.msg.metadata = {"locale": "es"}
 
     out = await cmd_evaluator_prompt(ctx)
 
     prompt_file = tmp_path / "prompts" / "evaluator.md"
-    assert "Created heartbeat evaluator prompt" in out.content
+    assert isinstance(out.event, CommandResultEvent) and out.event.command == "/evaluator-prompt"
+    assert "Se creó" in out.content
     assert "prompts/evaluator.md" in out.content
     assert str(tmp_path) not in out.content
     assert "evaluate_notification" in out.content

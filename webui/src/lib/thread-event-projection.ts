@@ -1165,6 +1165,7 @@ function reduceThreadEvent(
     const projected = {
       content: event.text,
       ...(event.render_as === "text" ? { renderAs: event.render_as } : {}),
+      ...(event.command_result !== undefined ? { commandResult: event.command_result } : {}),
       ...(media?.length ? { media } : {}),
       ...(latencyMs !== undefined ? { latencyMs } : {}),
       ...(event.source ? { source: event.source } : {}),

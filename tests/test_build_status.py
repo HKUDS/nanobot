@@ -1,9 +1,14 @@
+from nanobot.command.results import render
+from nanobot.command.status import status_lines
 from nanobot.providers.base import LLMUsage
-from nanobot.utils.helpers import build_status_content
+
+
+def status_text(**kwargs):
+    return render(tuple(status_lines(**kwargs)), "en")
 
 
 def test_status_shows_cache_hit_rate():
-    content = build_status_content(
+    content = status_text(
         version="0.1.0",
         model="glm-4-plus",
         start_time=1000000.0,
@@ -18,7 +23,7 @@ def test_status_shows_cache_hit_rate():
 
 
 def test_status_no_cache_info():
-    content = build_status_content(
+    content = status_text(
         version="0.1.0",
         model="glm-4-plus",
         start_time=1000000.0,
@@ -33,7 +38,7 @@ def test_status_no_cache_info():
 
 
 def test_status_zero_cache_read_tokens():
-    content = build_status_content(
+    content = status_text(
         version="0.1.0",
         model="glm-4-plus",
         start_time=1000000.0,
@@ -46,7 +51,7 @@ def test_status_zero_cache_read_tokens():
 
 
 def test_status_100_percent_cached():
-    content = build_status_content(
+    content = status_text(
         version="0.1.0",
         model="glm-4-plus",
         start_time=1000000.0,
@@ -59,7 +64,7 @@ def test_status_100_percent_cached():
 
 
 def test_status_context_pct_uses_budget_not_total():
-    content = build_status_content(
+    content = status_text(
         version="0.1.0",
         model="test",
         start_time=1000000.0,
@@ -73,7 +78,7 @@ def test_status_context_pct_uses_budget_not_total():
 
 
 def test_status_context_pct_capped_at_999():
-    content = build_status_content(
+    content = status_text(
         version="0.1.0",
         model="test",
         start_time=1000000.0,

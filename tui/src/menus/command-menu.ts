@@ -1,6 +1,9 @@
 import { type BoxRenderable, type CliRenderer } from "@opentui/core"
 
+import { commandLabel } from "../../../packages/client-events/command-result"
 import type { SlashCommand, SlashCommandLifecycle } from "../client"
+import { terminalLocale } from "../platform/locale"
+import { localCommandLabels } from "./local-command-copy"
 import { PickerMenu, type PickerMenuTheme } from "./picker-menu"
 
 export type CommandMenuTheme = PickerMenuTheme
@@ -65,17 +68,23 @@ export class CommandMenu {
     renderer: CliRenderer,
     theme: CommandMenuTheme,
   ) {
+    const locale = terminalLocale()
+    const labels = (choice: CommandChoice) => choice.source === "tui"
+      ? localCommandLabels(choice.command, locale)
+      : [commandLabel(choice.command.command, "title", locale) ?? choice.command.title,
+          commandLabel(choice.command.command, "description", locale) ?? choice.command.description] as const
     this.picker = new PickerMenu(renderer, theme, {
       id: "nanobot-tui-command-menu",
       searchText: (choice) => {
         const command = descriptor(choice)
-        return `${command.command} ${command.title}`
+        return `${command.command} ${labels(choice)[0]} ${command.title}`
       },
       render: (choice) => {
         const command = descriptor(choice)
         const argHint = "argHint" in command ? command.argHint : ""
         const hint = argHint ? ` ${argHint}` : ""
-        const detail = (command.description || command.title).replace(/\s+/gu, " ")
+        const [title, description] = labels(choice)
+        const detail = (description || title).replace(/\s+/gu, " ")
         return `${command.command}${hint}  ${detail}`
       },
     })

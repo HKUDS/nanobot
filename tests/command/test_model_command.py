@@ -147,7 +147,7 @@ async def test_model_command_unknown_preset_keeps_old_state(tmp_path) -> None:
 
     out = await cmd_model(_ctx(loop, "/model missing", args="missing"))
 
-    assert "Could not switch model preset" in out.content
+    assert "Model preset `missing` not found." in out.content
     assert "\"model_preset" not in out.content
     assert "Available presets: `default`, `fast`" in out.content
     assert loop.model_preset is None
@@ -220,7 +220,7 @@ async def test_model_command_reports_and_recovers_removed_session_preset(tmp_pat
     switched = await loop.process_direct("/model default", session_key="cli:direct")
 
     assert status is not None
-    assert "model_preset 'removed' not found" in status.content
+    assert "Model preset `removed` not found." in status.content
     assert "Available presets: `default`, `fast`" in status.content
     assert "Switch with `/model <preset>`" in status.content
     assert switched is not None

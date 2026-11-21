@@ -84,6 +84,7 @@ import type {
 } from "@/lib/types";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
+import { switchedModelPreset } from "../../../../packages/client-events/model-selection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
@@ -808,6 +809,11 @@ export function ThreadShell({
     setModelFallback(null);
     if (!chatId) return;
     return client.onChat(chatId, (event) => {
+      if (event.event === "message") {
+        const preset = switchedModelPreset(event.command_result);
+        if (preset) setLocalModelPreset(preset);
+        return;
+      }
       if (event.event !== "turn_model_updated") return;
       if (event.fallback !== true) {
         // The next turn starts with its configured model, not the previous fallback.
@@ -855,8 +861,8 @@ export function ThreadShell({
     [slashCommands, temporary],
   );
   const modelBadge = useMemo(
-    () => toModelBadgeInfo(modelName, settings, activeModelPreset),
-    [activeModelPreset, modelName, settings],
+    () => toModelBadgeInfo(modelName, settings, activeModelPreset, t("settings.values.default")),
+    [activeModelPreset, modelName, settings, t],
   );
   const modelBadgeLabel = modelBadge.needsSetup
     ? t("thread.composer.chooseAI", { defaultValue: "Choose your AI" })

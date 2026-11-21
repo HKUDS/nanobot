@@ -8,6 +8,7 @@ from dulwich import porcelain
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import CommandResultEvent
 from nanobot.command.application import build_help_text, builtin_command_palette
 from nanobot.command.builtin import (
     cmd_dream,
@@ -161,8 +162,13 @@ async def test_dream_no_history_explains_how_to_create_input(tmp_path) -> None:
 
     assert immediate.content == "Dreaming..."
     assert immediate.metadata == ctx.msg.metadata
+    assert isinstance(immediate.event, CommandResultEvent)
+    assert immediate.event.command == "/dream" and immediate.event.notification_id is None
     [completion] = bus.outbound
     assert completion.metadata == {**ctx.msg.metadata, "render_as": "text"}
+    assert isinstance(completion.event, CommandResultEvent)
+    assert completion.event.command == "/dream"
+    assert completion.event.notification_id and completion.event.notification_id.startswith("command-result:")
     content = completion.content
     assert "Dream has no conversation history to process yet." in content
     assert "`memory/history.jsonl`" in content
@@ -284,6 +290,20 @@ async def test_dream_log_latest_is_more_user_friendly() -> None:
     assert "- Changed files: `SOUL.md`" in out.content
     assert "Use `/dream-restore abcd1234` to undo this change." in out.content
     assert "```diff" in out.content
+
+
+@pytest.mark.asyncio
+async def test_dream_log_localizes_summary_without_changing_diff() -> None:
+    commit = CommitInfo(sha="abcd1234", message="dream: edit", timestamp="2026-04-04 12:00")
+    diff = "diff --git a/SOUL.md b/SOUL.md\n+preserve {sha} and trailing spaces  \n\n"
+    ctx = _make_ctx("/dream-log abcd1234", _FakeGit(diff_map={commit.sha: (commit, diff)}), args=commit.sha)
+    ctx.msg.metadata = {"locale": "ja"}
+
+    out = await cmd_dream_log(ctx)
+
+    assert isinstance(out.event, CommandResultEvent) and out.event.command == "/dream-log"
+    assert "選択した" in out.content and f"```diff\n{diff}```" in out.content
+    assert out.event.parts[-1] == {"text": f"```diff\n{diff}```"}
 
 
 @pytest.mark.asyncio

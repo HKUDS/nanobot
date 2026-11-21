@@ -81,6 +81,27 @@ describe("NanobotTui transcript", () => {
     }
   })
 
+  test("localizes deferred slash results and compaction without consuming the active answer", async () => {
+    const lang = process.env.LC_ALL
+    process.env.LC_ALL = "fr_FR.UTF-8"
+    try {
+      setup = await createRenderer({ width: 100, height: 26, screenMode: "alternate-screen" })
+      const app = mount(setup)
+      app.accept({ event: "delta", chat_id: "chat", turn_id: "agent", text: "Beginning" })
+      app.accept({ event: "message", chat_id: "chat", text: "Fallback", side_channel: true, turn_id: "notice",
+        command_result: { command: "/model", parts: [{ key: "model.current", values: { model: "{preset}" } }, { text: "Raw {model}" }] } })
+      app.accept({ event: "context_compaction", chat_id: "chat", compaction_id: "manual", phase: "succeeded" })
+      app.accept({ event: "delta", chat_id: "chat", turn_id: "agent", text: " to end" })
+      app.accept({ event: "turn_end", chat_id: "chat", turn_id: "agent" })
+      await setup.flush()
+      const frame = setup.captureCharFrame()
+      for (const text of ["Modèle actuel", "{preset}", "Raw {model}", "Contexte compressé.", "Beginning to end"]) expect(frame).toContain(text)
+    } finally {
+      if (lang === undefined) delete process.env.LC_ALL
+      else process.env.LC_ALL = lang
+    }
+  })
+
   test("shows literal shell output from another client without replacing a pending Markdown reply", async () => {
     setup = await createRenderer({ width: 100, height: 26, screenMode: "alternate-screen" })
     const app = mount(setup)

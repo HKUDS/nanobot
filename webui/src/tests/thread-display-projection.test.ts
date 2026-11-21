@@ -29,7 +29,7 @@ function message(
 }
 
 describe("command display projection", () => {
-  it("removes model and silent-command turns without hiding concurrent replies", () => {
+  it("keeps explicit model requests and unrelated replies visible, but hides silent commands", () => {
     const visible = projectWebuiThreadMessages([
       message("user", { id: "model", content: "/model fast", turnId: "model-turn" }),
       message("assistant", {
@@ -46,7 +46,7 @@ describe("command display projection", () => {
     ]);
 
     expect(visible.map(({ content }) => content)).toEqual([
-      "This unrelated reply stays visible.",
+      "/model fast", "Switched model preset to fast.", "This unrelated reply stays visible.",
     ]);
     expect([
       isModelCommandText("/MODEL@nanobot fast"),

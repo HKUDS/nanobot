@@ -56,6 +56,7 @@ RULES = (
       "COMMUNICATION.md", "CONTRIBUTING.md", "SECURITY.md", "webui/README.md",
       "tui/README.md", "images/*"), frozenset(), "documentation only"),
     (("scripts/check_client_import_boundaries.*",), WEBUI | TUI, "shared client import boundary checker"),
+    (("nanobot/command/locales/*.json",), PYTHON | WEBUI | TUI | DOCKER, "shared slash command translations"),
     (("packages/client-events/*",), WEBUI | TUI | DOCKER, "shared client event protocol"),
     (("webui/*", "nanobot/channels/*/webui/*", "nanobot/channels/*/tests/webui/*"),
      WEBUI | DOCKER, "WebUI source or embedded channel frontend"),

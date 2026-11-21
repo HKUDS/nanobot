@@ -11,6 +11,7 @@ from loguru import logger
 
 from nanobot.bus.events import INBOUND_META_USER_SHELL, OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.outbound_events import (
+    CommandResultEvent,
     ContextCompactionEvent,
     GoalStateSyncEvent,
     GoalStatusEvent,
@@ -455,6 +456,8 @@ class WebUIOutboundDelivery:
             payload["render_as"] = "text"
         if isinstance(msg.event, SideChannelReplyEvent):
             payload["side_channel"] = True
+        if isinstance(msg.event, CommandResultEvent):
+            payload["command_result"] = {"command": msg.event.command, "parts": list(msg.event.parts)}
         turn_id = msg.metadata.get(WEBUI_TURN_METADATA_KEY)
         if isinstance(turn_id, str) and turn_id:
             payload["turn_id"] = turn_id

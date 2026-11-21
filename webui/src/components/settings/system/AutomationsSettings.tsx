@@ -157,8 +157,8 @@ export function AutomationsSettings({
     [settingsSnapshot],
   );
   const modelBadge = useMemo(
-    () => toModelBadgeInfo(settingsSnapshot?.agent.model ?? null, settingsSnapshot, activeModelPreset),
-    [activeModelPreset, settingsSnapshot],
+    () => toModelBadgeInfo(settingsSnapshot?.agent.model ?? null, settingsSnapshot, activeModelPreset, t("settings.values.default")),
+    [activeModelPreset, settingsSnapshot, t],
   );
   const modelBadgeLabel = modelBadge.needsSetup
     ? tx("thread.composer.chooseAI", "Choose your AI")

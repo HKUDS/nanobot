@@ -59,6 +59,25 @@ test("preserves literal shell output and leaves ordinary replies as Markdown", a
   ])
 })
 
+test("replays command results in the current terminal locale alongside an uninterrupted stream", async () => {
+  const lang = process.env.LC_ALL
+  process.env.LC_ALL = "fr_FR.UTF-8"
+  try {
+    respond([
+      { event: "delta", text: "A", turn_id: "agent" },
+      { event: "message", text: "Fallback", side_channel: true, turn_id: "notice",
+        command_result: { command: "/stop", parts: [{ key: "stop.done", values: { count: 2 } }, { text: "Raw {count}" }] } },
+      { event: "stream_end", text: "AB", turn_id: "agent" },
+    ])
+    expect((await fetchHistory("http://fixture", "token", "chat")).messages.map(row => row.content)).toEqual([
+      "AB", "Tâches arrêtées : 2.\nRaw {count}",
+    ])
+  } finally {
+    if (lang === undefined) delete process.env.LC_ALL
+    else process.env.LC_ALL = lang
+  }
+})
+
 test("keeps distinct answer segments and resumes an unfinished stream", async () => {
   respond([
     { event: "user_message", starts_turn: true, text: "question" },
