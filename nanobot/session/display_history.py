@@ -249,6 +249,19 @@ class HistoryReader:
             (self.key, ordinal, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT, HistoryKind.ANSWER_FRAGMENT),
         ).fetchone() is not None
 
+    def recent_context_facts(self) -> Iterator[HistoryFact]:
+        """Stream potential graph checkpoints and reads, newest first until restore stops."""
+        # Project rather than filter: sqlite3 steps to the next row before yielding,
+        # which must not scan past the latest checkpoint to find an older match.
+        for row in self._db.execute(
+            """SELECT CASE WHEN kind IN (?, ?) OR json_type(record, '$.content.tool_events')='array'
+                           THEN record END FROM history_entries WHERE session_key=?
+               ORDER BY turn_ordinal DESC, position DESC""",
+            (HistoryKind.MODEL_REQUEST, HistoryKind.COMPACTION, self.key),
+        ):
+            if row[0] is not None:
+                yield HistoryFact.decode(row[0])
+
     def navigation(self) -> Iterator[tuple[int, int, HistoryFact]]:
         """Read input/answer records only, never file diffs or tool result bodies."""
         kinds = (HistoryKind.INPUT, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT,
