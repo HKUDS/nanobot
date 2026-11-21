@@ -55,7 +55,7 @@ describe("message editing", () => {
     expect(input.selectionStart).toBe("original question".length);
     expect(input.selectionEnd).toBe("original question".length);
     expect(bubble).toContainElement(input);
-    expect(screen.getByText("Resending replaces this message and any later replies.")).toBeVisible();
+    expect(screen.getByText("Resending replaces this message and everything after it.")).toBeVisible();
     expect(onBegin).toHaveBeenCalledTimes(1);
     expect(onBegin).toHaveBeenCalledWith("history-original");
     expect(input).toHaveValue("original question");
@@ -111,11 +111,10 @@ describe("message editing", () => {
     const { requests } = setup();
     const input = await openEditor();
     fireEvent.change(input, { target: { value: "keep this edit" } });
-    requests.mockRejectedValueOnce(new Error("edit_source_changed"));
+    requests.mockRejectedValueOnce(new Error("Connection lost"));
     fireEvent.click(screen.getByRole("button", { name: "Resend" }));
     await screen.findByRole("alert");
     expect(input).toHaveValue("keep this edit");
-    expect(screen.getByRole("alert")).toHaveTextContent("conversation changed");
     expect(input).toHaveAccessibleDescription(screen.getByRole("alert").textContent!);
     const submitted = requests.mock.calls[0][1];
     requests.mockResolvedValueOnce({ accepted: true });
@@ -130,7 +129,8 @@ describe("message editing", () => {
     const replacement: UIMessage = { ...message, id: "new-source", content: "another browser replaced the history", turnId: "another-turn" };
     rerender(tree(false, [replacement]));
     expect(screen.getByRole("textbox", { name: "Edit message" })).toHaveValue("local edit still needs a decision");
-    expect(screen.getByRole("alert")).toHaveTextContent("conversation changed");
+    expect(screen.getByRole("alert")).toHaveTextContent("copy your draft");
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Edit message" }), { key: "Enter", ctrlKey: true });
     expect(screen.getByRole("button", { name: "Resend" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("textbox", { name: "Edit message" })).not.toBeInTheDocument();

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useClient } from "@/providers/ClientProvider";
 import { parseQuotedUserMessage } from "@/lib/user-message-quote";
 import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import type { UIMessage } from "@/lib/types";
 
 interface EditDraft {
@@ -12,6 +13,7 @@ interface EditDraft {
   text: string;
   turnId: string;
   revision: string | null;
+  needsReview: boolean;
   submitting: boolean;
   error: string | null;
 }
@@ -48,11 +50,12 @@ function textRestriction(text: string): string | null {
 }
 
 /** Deliberately separate from Composer drafts, attachments and waiting input. */
-export function MessageEditingProvider({ chatId, busy, enabled, onBegin, children }: {
+export function MessageEditingProvider({ chatId, busy, enabled, onBegin, onReviewLatest, children }: {
   chatId: string | null;
   busy: boolean;
   enabled: boolean;
   onBegin?: (messageId: string) => void;
+  onReviewLatest?: () => void;
   children: ReactNode;
 }) {
   const { client, getToken } = useClient();
@@ -73,7 +76,7 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
     const code = error instanceof Error ? error.message : "";
     return t(`message.editErrors.${code}`, { defaultValue: t(fallbackKey) });
   }, [t]);
-  const readRevision = useCallback((turnId: string) => {
+  const readRevision = useCallback((turnId: string, reviewLatest = false) => {
     if (!chatId || read.current) return;
     const controller = new AbortController();
     read.current = controller;
@@ -81,14 +84,19 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
     void fetchLatestWebuiThread(client, getToken(), `websocket:${chatId}`, controller.signal).then((body) => {
       if (controller.signal.aborted) return;
       const revision = body?.source_revision;
-      if (!revision) throw new Error("edit_source_changed");
-      setDraft((value) => value?.turnId === turnId ? { ...value, revision } : value);
+      if (!revision) throw new Error("Missing source revision");
+      if (reviewLatest) {
+        // Show the very snapshot that the next explicit resend will be checked against.
+        webuiThreadCache.set(`websocket:${chatId}`, body);
+        onReviewLatest?.();
+      }
+      setDraft((value) => value?.turnId === turnId ? { ...value, revision, needsReview: false } : value);
     }).catch((error: unknown) => {
       if (!controller.signal.aborted) {
         setDraft((value) => value?.turnId === turnId ? { ...value, error: errorLabel(error, "message.editLoadFailed") } : value);
       }
     }).finally(() => { if (read.current === controller) read.current = null; });
-  }, [chatId, client, errorLabel, getToken]);
+  }, [chatId, client, errorLabel, getToken, onReviewLatest]);
   const actions = useMemo<EditActions | null>(() => {
     if (!chatId || !enabled) return null;
     const reason = (message: UIMessage): string | null => {
@@ -105,7 +113,7 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
       if (reason(message) || read.current || submitting.current) return;
       const turnId = crypto.randomUUID();
       onBegin?.(message.id);
-      setDraft({ message, text: message.content, turnId, revision: null, submitting: false, error: null });
+      setDraft({ message, text: message.content, turnId, revision: null, needsReview: false, submitting: false, error: null });
       readRevision(turnId);
     } };
   }, [busy, chatId, enabled, onBegin, readRevision, selected, t]);
@@ -132,11 +140,16 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
     }).then(() => {
       if (submitting.current === current.turnId) setDraft((value) => value?.turnId === current.turnId ? null : value);
     }, (error: unknown) => {
-      if (submitting.current === current.turnId) setDraft((value) => value?.turnId === current.turnId ? { ...value, submitting: false, error: errorLabel(error) } : value);
+      if (submitting.current !== current.turnId) return;
+      const stale = error instanceof Error && error.message === "edit_source_changed";
+      setDraft((value) => value?.turnId === current.turnId ? {
+        ...value, submitting: false, error: errorLabel(error),
+        ...(stale ? { revision: null, needsReview: true } : {}),
+      } : value);
     }).finally(() => { if (submitting.current === current.turnId) submitting.current = null; });
   };
   return <Actions.Provider value={actions}><Editor.Provider value={{ draft, busy, confirm, cancel,
-    retryRead: () => { if (draft && !draft.revision) readRevision(draft.turnId); },
+    retryRead: () => { if (draft && !draft.revision) readRevision(draft.turnId, draft.needsReview); },
     change: (text) => setDraft((current) => current && !submitting.current
       ? { ...current, text, error: current.revision ? null : current.error }
       : current),
@@ -159,11 +172,11 @@ export function InlineMessageEditor({ sourceMissing = false }: { sourceMissing?:
   }, [id]);
   if (!editing?.draft) return null;
   const { draft, busy, change, cancel, confirm } = editing;
-  const error = sourceMissing ? t("message.editErrors.edit_source_changed")
-    : busy ? t("message.editErrors.edit_session_busy") : draft.error;
+  const error = busy ? t("message.editErrors.edit_session_busy")
+    : draft.needsReview ? draft.error : sourceMissing ? t("message.editSourceMissing") : draft.error;
   const loadingRevision = !sourceMissing && !busy && !draft.revision && !draft.error;
   const pendingAction = draft.submitting || loadingRevision;
-  const showHint = !error && !sourceMissing;
+  const showHint = !error && !sourceMissing && !draft.needsReview;
   return <form data-message-editor className="min-w-0 max-w-full whitespace-normal"
     onSubmit={(event) => { event.preventDefault(); if (!sourceMissing) confirm(); }}>
     <div className="grid min-w-0 [text-autospace:no-autospace]">
@@ -197,8 +210,10 @@ export function InlineMessageEditor({ sourceMissing = false }: { sourceMissing?:
       <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
         <Button type="button" size="sm" variant="ghost" disabled={draft.submitting} onClick={cancel}
           className="max-md:min-h-11">{t("common.cancel")}</Button>
-        {!sourceMissing && !draft.revision && draft.error ? <Button type="button" size="sm" className="max-md:min-h-11"
-          onClick={editing.retryRead}>{t("common.retry")}</Button> : <Button type="submit" size="sm"
+        {draft.needsReview || (!sourceMissing && !draft.revision && draft.error) ? <Button type="button" size="sm" className="max-md:min-h-11"
+          disabled={!draft.error || busy} aria-busy={!draft.error || undefined} onClick={editing.retryRead}>
+          {t(draft.needsReview ? "message.reviewLatest" : "common.retry")}
+        </Button> : <Button type="submit" size="sm"
           aria-busy={pendingAction || undefined}
           aria-keyshortcuts="Control+Enter Meta+Enter"
           disabled={sourceMissing || busy || draft.submitting || !draft.revision || !draft.text.trim()}
