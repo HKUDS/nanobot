@@ -1,4 +1,4 @@
-name: Publish approved release to PyPI
+name: Publish accepted release to PyPI
 
 on:
   workflow_run:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Published, signed stable release version (without v)
+        description: Published stable release version (without v)
         required: true
         type: string
       destination:
@@ -32,16 +32,17 @@ jobs:
       (github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'release' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
       (github.event.workflow_run.path == '.github/workflows/trigger-pypi.yml' ||
       startsWith(github.event.workflow_run.path, '.github/workflows/trigger-pypi.yml@'))))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
+      actions: read
     outputs:
       artifact_id: ${{ steps.staged.outputs.artifact-id }}
       upload_required: ${{ steps.reconcile.outputs.upload_required }}
-      release_actor: ${{ steps.release.outputs.release_actor }}
       release_version: ${{ steps.release.outputs.release_version }}
       destination: ${{ steps.release.outputs.destination }}
     steps:
@@ -54,7 +55,7 @@ jobs:
       - name: Install locked verification dependencies
         run: |
           python -m pip install --require-hashes --only-binary=:all: -r .github/release-signing-requirements.txt
-      - name: Download and verify the approved public release
+      - name: Match the public release to the accepted candidate
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -62,7 +63,6 @@ jobs:
           DESTINATION_INPUT: ${{ inputs.destination }}
           UPSTREAM_TAG: ${{ github.event.workflow_run.head_branch }}
           UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
-          UPSTREAM_ACTOR: ${{ github.event.workflow_run.actor.login }}
         shell: bash
         run: |
           set -euo pipefail
@@ -70,15 +70,12 @@ jobs:
             [[ "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid release tag.' >&2; exit 1; }
             VERSION="${UPSTREAM_TAG#v}"
             destination=pypi
-            release_actor="$UPSTREAM_ACTOR"
           else
             VERSION="$VERSION_INPUT"
             destination="$DESTINATION_INPUT"
-            release_actor="$GITHUB_ACTOR"
           fi
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected a final X.Y.Z version.' >&2; exit 1; }
           [[ "$destination" == pypi || "$destination" == testpypi ]] || { echo 'Invalid destination.' >&2; exit 1; }
-          [[ "$release_actor" =~ ^[A-Za-z0-9-]+$ ]] || { echo 'A human release actor is required.' >&2; exit 1; }
           tag="v$VERSION"
           gh release view "$tag" --repo HKUDS/nanobot --json tagName,isDraft,isPrerelease \
             | jq -e --arg tag "$tag" '.tagName == $tag and .isDraft == false and .isPrerelease == false' >/dev/null
@@ -87,15 +84,33 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
             [[ "$UPSTREAM_SHA" == "$commit" ]] || { echo 'Release tag no longer matches the trigger.' >&2; exit 1; }
           fi
-          echo "release_actor=$release_actor" >> "$GITHUB_OUTPUT"
-          echo "release_version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "destination=$destination" >> "$GITHUB_OUTPUT"
           gh release download "$tag" --repo HKUDS/nanobot --dir "$RUNNER_TEMP/release" \
-            --pattern 'release-manifest.json' --pattern 'release-manifest.json.sigstore.json' \
+            --pattern 'release-manifest.json' \
             --pattern 'nanobot_ai-*.whl' --pattern 'nanobot_ai-*.tar.gz' \
             --pattern 'nanobot-tui-*.zip' --pattern 'nanobot-tui-*.zip.sha256'
-          python -m scripts.prepare_pypi_release --release-dir "$RUNNER_TEMP/release" \
-            --output "$RUNNER_TEMP/pypi" --version "$VERSION" --tag-commit "$commit"
+          # The build report alone isn't acceptance: require the final gate from the same attempt.
+          gh api --paginate --method GET 'repos/HKUDS/nanobot/actions/workflows/release-candidate.yml/runs' \
+            -f head_sha="$commit" -f branch=main -f event=workflow_dispatch -f status=success -F per_page=100 \
+            --jq '.workflow_runs[] | select(.head_repository.full_name == "HKUDS/nanobot") | [.id, .run_number, .run_attempt] | @tsv' \
+            > "$RUNNER_TEMP/candidate-runs"
+          while IFS=$'\t' read -r run number attempt; do
+            accepted="$(gh api "repos/HKUDS/nanobot/actions/runs/$run/attempts/$attempt/jobs?per_page=100" \
+              --jq 'any(.jobs[]; .name == "Candidate required" and .conclusion == "success")')"
+            [[ "$accepted" == true ]] || continue
+            report="candidate-report-$number-$attempt"
+            if ! gh run download "$run" --repo HKUDS/nanobot --name "$report" --dir "$RUNNER_TEMP/$report"; then
+              continue
+            fi
+            manifest="$RUNNER_TEMP/$report/release-artifacts/release-manifest.json"
+            cmp -s "$manifest" "$RUNNER_TEMP/release/release-manifest.json" || continue
+            python -m scripts.prepare_pypi_release --release-dir "$RUNNER_TEMP/release" \
+              --accepted-manifest "$manifest" --output "$RUNNER_TEMP/pypi" --version "$VERSION" --tag-commit "$commit"
+            echo "release_version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "destination=$destination" >> "$GITHUB_OUTPUT"
+            exit 0
+          done < "$RUNNER_TEMP/candidate-runs"
+          echo 'No matching accepted main candidate report. Check the original run, tag and manifest before retrying.' >&2
+          exit 1
       - name: Check for an interrupted upload
         id: reconcile
         env:
@@ -130,26 +145,12 @@ jobs:
     timeout-minutes: 20
     permissions:
       id-token: write
-      actions: read
     steps:
-      - name: Require a fresh run and verify PyPI approval
-        env:
-          GH_TOKEN: ${{ github.token }}
-          DESTINATION: ${{ needs.verify.outputs.destination }}
-          RELEASE_ACTOR: ${{ needs.verify.outputs.release_actor }}
+      - name: Require a fresh run
         shell: bash
         run: |
-          set -euo pipefail
-          # GitHub can reuse job outputs and the approval API is scoped to the run, not the attempt.
+          # Reruns can reuse previous staging outputs instead of reconciling the current index.
           [[ "$GITHUB_RUN_ATTEMPT" == 1 ]] || { echo 'To retry, start a new workflow run for the same version and destination.' >&2; exit 1; }
-          if [[ "$DESTINATION" == testpypi ]]; then
-            exit 0
-          fi
-          [[ "$DESTINATION" == pypi ]]
-          gh api "repos/HKUDS/nanobot/actions/runs/$GITHUB_RUN_ID/approvals" | jq -e \
-            --arg actor "$RELEASE_ACTOR" \
-            'any(.[]; .state == "approved" and ([.environments[]?.name] | index("pypi")) != null and (.user.login | ascii_downcase) != ($actor | ascii_downcase))' >/dev/null \
-            || { echo 'A different maintainer must approve this release in the pypi environment.' >&2; exit 1; }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ needs.verify.outputs.artifact_id }}
