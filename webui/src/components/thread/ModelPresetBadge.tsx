@@ -133,6 +133,7 @@ export function ModelPresetBadge({
   const gestureRef = useRef<PresetGesture | null>(null);
   const suppressClickRef = useRef(false);
   const escapeFocus = useOverlayEscapeFocus();
+  const pickerRef = useRef<HTMLDivElement>(null);
   const focusAfterClose = useRef<"composer" | "management" | null>(null);
   const activeName = modelPreset?.trim() || "";
   const listedIndex = modelPresets.findIndex((preset) => preset.name === activeName);
@@ -319,7 +320,10 @@ export function ModelPresetBadge({
       </Container>
     </TooltipTrigger>
   ) : (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(next) => {
+      if (next) focusAfterClose.current = null;
+      setOpen(next);
+    }}>
       <PopoverTrigger asChild>
         <TooltipTrigger asChild>
           <button
@@ -406,6 +410,7 @@ export function ModelPresetBadge({
         </TooltipTrigger>
       </PopoverTrigger>
       <PopoverContent
+        ref={pickerRef}
         align="end"
         side="top"
         sideOffset={10}
@@ -414,6 +419,11 @@ export function ModelPresetBadge({
         aria-label={switchModelLabel}
         onEscapeKeyDown={escapeFocus.contentProps.onEscapeKeyDown}
         onCloseAutoFocus={(event) => {
+          // The old focus scope can finish after a new picker has mounted.
+          if (pickerRef.current) {
+            event.preventDefault();
+            return;
+          }
           if (focusAfterClose.current === "management") event.preventDefault();
           else if (focusAfterClose.current === "composer" && onRequestComposerFocus) {
             event.preventDefault();
