@@ -290,6 +290,34 @@ for (const { width, height, theme } of [
   });
 }
 
+test("reopening the model picker keeps focus after the previous picker closes", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 440 });
+  await page.goto("/browser/fixture.html?case=model-options&group=local&dark");
+  await page.getByTestId("thread-welcome-layout").getByRole("button", { name: "Default", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Switch model", exact: true });
+  const preset = dialog.getByRole("option", { name: "Custom API", exact: true });
+
+  // Reopen at the actual exit boundary, before the old surface can restore focus.
+  await dialog.evaluate((closing) => {
+    const observer = new MutationObserver(() => {
+      if (closing.isConnected) return;
+      observer.disconnect();
+      const trigger = document.querySelector<HTMLButtonElement>(`button[aria-controls="${closing.id}"]`);
+      trigger?.focus();
+      trigger?.click();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+  await preset.click();
+  const trigger = page.getByRole("button", { name: "Custom API", exact: true });
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  await dialog.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+  await expect(preset).toBeFocused();
+  await expect(preset).toHaveAttribute("aria-selected", "true");
+  await dialog.getByRole("combobox", { name: "Reasoning effort" }).press("Enter");
+  await expect(page.getByRole("option", { name: "extended", exact: true })).toBeFocused();
+});
+
 test("touch drag previews the next effort without saving it until release", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   const cdp = await page.context().newCDPSession(page);
