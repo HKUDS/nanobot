@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/providers/ClientProvider";
@@ -65,9 +66,12 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
     submitting.current = null;
     return () => { read.current?.abort(); read.current = null; submitting.current = null; };
   }, [chatId, client, enabled]);
-  const errorLabel = useCallback((error: unknown) => {
+  const errorLabel = useCallback((
+    error: unknown,
+    fallbackKey: "message.editFailed" | "message.editLoadFailed" = "message.editFailed",
+  ) => {
     const code = error instanceof Error ? error.message : "";
-    return t(`message.editErrors.${code}`, { defaultValue: t("message.editFailed") });
+    return t(`message.editErrors.${code}`, { defaultValue: t(fallbackKey) });
   }, [t]);
   const readRevision = useCallback((turnId: string) => {
     if (!chatId || read.current) return;
@@ -80,7 +84,9 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
       if (!revision) throw new Error("edit_source_changed");
       setDraft((value) => value?.turnId === turnId ? { ...value, revision } : value);
     }).catch((error: unknown) => {
-      if (!controller.signal.aborted) setDraft((value) => value?.turnId === turnId ? { ...value, error: errorLabel(error) } : value);
+      if (!controller.signal.aborted) {
+        setDraft((value) => value?.turnId === turnId ? { ...value, error: errorLabel(error, "message.editLoadFailed") } : value);
+      }
     }).finally(() => { if (read.current === controller) read.current = null; });
   }, [chatId, client, errorLabel, getToken]);
   const actions = useMemo<EditActions | null>(() => {
@@ -131,7 +137,9 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
   };
   return <Actions.Provider value={actions}><Editor.Provider value={{ draft, busy, confirm, cancel,
     retryRead: () => { if (draft && !draft.revision) readRevision(draft.turnId); },
-    change: (text) => setDraft((current) => current && !submitting.current ? { ...current, text } : current),
+    change: (text) => setDraft((current) => current && !submitting.current
+      ? { ...current, text, error: current.revision ? null : current.error }
+      : current),
   }}>{children}</Editor.Provider></Actions.Provider>;
 }
 
@@ -140,31 +148,65 @@ export function InlineMessageEditor({ sourceMissing = false }: { sourceMissing?:
   const { t } = useTranslation();
   const input = useRef<HTMLTextAreaElement>(null);
   const errorId = useId();
+  const hintId = useId();
   const id = editing?.draft?.message.id;
-  useLayoutEffect(() => { input.current?.focus({ preventScroll: true }); }, [id]);
+  useLayoutEffect(() => {
+    const el = input.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    const end = el.value.length;
+    el.setSelectionRange(end, end);
+  }, [id]);
   if (!editing?.draft) return null;
   const { draft, busy, change, cancel, confirm } = editing;
   const error = sourceMissing ? t("message.editErrors.edit_source_changed")
     : busy ? t("message.editErrors.edit_session_busy") : draft.error;
+  const loadingRevision = !sourceMissing && !busy && !draft.revision && !draft.error;
+  const pendingAction = draft.submitting || loadingRevision;
+  const showHint = !error && !sourceMissing;
   return <form data-message-editor className="min-w-0 max-w-full whitespace-normal"
     onSubmit={(event) => { event.preventDefault(); if (!sourceMissing) confirm(); }}>
-    <div className="relative min-w-0 [text-autospace:no-autospace]">
-      <div aria-hidden className="invisible whitespace-pre-wrap [overflow-wrap:anywhere]">{draft.text + "\u200b"}</div>
+    <div className="grid min-w-0 [text-autospace:no-autospace]">
+      <div aria-hidden
+        className="invisible touch-text-input col-start-1 row-start-1 max-h-[min(45vh,22rem)] overflow-hidden whitespace-pre-wrap [overflow-wrap:anywhere]">
+        {draft.text + "\u200b"}
+      </div>
       <textarea ref={input} aria-label={t("message.editMessage")} value={draft.text}
-        aria-describedby={error ? errorId : undefined} aria-invalid={!!error}
+        aria-describedby={error ? errorId : showHint ? hintId : undefined} aria-invalid={!!error}
         disabled={draft.submitting}
         onChange={(event) => change(event.target.value)}
-        onKeyDown={(event) => { if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.stopPropagation(); cancel(); } }}
-        className="absolute inset-0 block h-full w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 [font:inherit] text-inherit outline-none" />
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            cancel();
+            return;
+          }
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!sourceMissing) confirm();
+          }
+        }}
+        className="touch-text-input scrollbar-thin col-start-1 row-start-1 block max-h-[min(45vh,22rem)] min-h-[1.6em] w-full min-w-0 resize-none overflow-y-auto border-0 bg-transparent p-0 [font:inherit] text-inherit outline-none" />
     </div>
     {error ? <p id={errorId} role="alert" className="mt-2 text-xs leading-5 text-destructive">{error}</p> : null}
-    <div className="mt-2 flex flex-wrap justify-end gap-1.5">
-      <Button type="button" size="sm" variant="ghost" disabled={draft.submitting} onClick={cancel}
-        className="max-md:min-h-11">{t("common.cancel")}</Button>
-      {!sourceMissing && !draft.revision && draft.error ? <Button type="button" size="sm" className="max-md:min-h-11"
-        onClick={editing.retryRead}>{t("common.retry")}</Button> : <Button type="submit" size="sm"
-        disabled={sourceMissing || busy || draft.submitting || !draft.revision || !draft.text.trim()}
-        className="max-md:min-h-11">{t("message.confirmEditResend")}</Button>}
+    <div className="mt-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border/50 pt-2">
+      {showHint ? <p id={hintId} className="min-w-0 text-xs leading-5 text-muted-foreground">{t("message.editReplaceHint")}</p> : null}
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+        <Button type="button" size="sm" variant="ghost" disabled={draft.submitting} onClick={cancel}
+          className="max-md:min-h-11">{t("common.cancel")}</Button>
+        {!sourceMissing && !draft.revision && draft.error ? <Button type="button" size="sm" className="max-md:min-h-11"
+          onClick={editing.retryRead}>{t("common.retry")}</Button> : <Button type="submit" size="sm"
+          aria-busy={pendingAction || undefined}
+          aria-keyshortcuts="Control+Enter Meta+Enter"
+          disabled={sourceMissing || busy || draft.submitting || !draft.revision || !draft.text.trim()}
+          className="max-md:min-h-11">
+          {pendingAction ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
+          {t("message.confirmEditResend")}
+        </Button>}
+      </div>
     </div>
   </form>;
 }

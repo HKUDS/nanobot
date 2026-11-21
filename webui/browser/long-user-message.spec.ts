@@ -164,7 +164,9 @@ for (const width of [1280, 390]) {
     const editor = bubble.getByRole("textbox", { name: "Edit message" });
     await expect(editor).toBeFocused();
     await expect(editor).toHaveValue(/Final line sentinel/);
-    await expect(bubble.getByRole("button", { name: "Resend" })).toBeEnabled();
+    const resend = bubble.getByRole("button", { name: "Resend" });
+    await expect(resend).toBeEnabled();
+    await expect(resend).toBeInViewport();
     await expect(bubble).not.toHaveAttribute("data-user-message-collapsed");
     await editor.fill("unsubmitted replacement");
     await editor.press("Escape");

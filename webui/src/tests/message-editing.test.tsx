@@ -50,9 +50,12 @@ describe("message editing", () => {
     expect(within(menu as HTMLElement).getByRole("button", { name: "Copy" })).toBeVisible();
     expect(edit.querySelector('svg[data-product-icon="edit"]')).toBeTruthy();
     fireEvent.click(edit);
-    const input = screen.getByRole("textbox", { name: "Edit message" });
+    const input = screen.getByRole("textbox", { name: "Edit message" }) as HTMLTextAreaElement;
     expect(input).toHaveFocus();
+    expect(input.selectionStart).toBe("original question".length);
+    expect(input.selectionEnd).toBe("original question".length);
     expect(bubble).toContainElement(input);
+    expect(screen.getByText("Resending replaces this message and any later replies.")).toBeVisible();
     expect(onBegin).toHaveBeenCalledTimes(1);
     expect(onBegin).toHaveBeenCalledWith("history-original");
     expect(input).toHaveValue("original question");
@@ -72,9 +75,11 @@ describe("message editing", () => {
     fireEvent.click(openMenu());
     const input = screen.getByRole("textbox", { name: "Edit message" });
     fireEvent.change(input, { target: { value: "keep my unconfirmed edit" } });
-    expect(screen.getByRole("button", { name: "Resend" })).toBeDisabled();
+    const resend = screen.getByRole("button", { name: "Resend" });
+    expect(resend).toBeDisabled();
+    expect(resend).toHaveAttribute("aria-busy", "true");
     await act(async () => fail(new Error("history read failed")));
-    expect(screen.getByRole("alert")).toHaveTextContent("Resend not confirmed");
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not load the latest message version");
     expect(input).toHaveValue("keep my unconfirmed edit");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("original question")).toBeVisible();
@@ -89,6 +94,7 @@ describe("message editing", () => {
     requests.mockReturnValueOnce(new Promise((resolve) => { accept = resolve; }));
     const confirm = screen.getByRole("button", { name: "Resend" });
     fireEvent.click(confirm);
+    expect(confirm).toHaveAttribute("aria-busy", "true");
     fireEvent.click(confirm);
     expect(requests).toHaveBeenCalledTimes(1);
     expect(requests.mock.calls[0]).toEqual(["chat.fork", {
@@ -158,5 +164,20 @@ describe("message editing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resend" }));
     expect(screen.getByRole("alert")).toBeVisible();
     expect(requests).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "plain replacement" } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("submits with Cmd/Ctrl+Enter unless composing", async () => {
+    const { requests } = setup();
+    const input = await openEditor();
+    fireEvent.change(input, { target: { value: "shortcut edit" } });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, isComposing: true });
+    expect(requests).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(requests).toHaveBeenCalledWith("chat.fork", {
+      mode: "replace", chat_id: "same-chat", text: "shortcut edit", turn_id: expect.any(String),
+      source: { revision, message_id: message.id, turn_id: "old-turn", text: "original question" },
+    }));
   });
 });

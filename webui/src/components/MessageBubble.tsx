@@ -205,20 +205,27 @@ export function MessageBlockMenuActions({
             {(!sheet && hasText) || showFork || onEdit ? (
               <div className="flex min-h-[var(--message-block-control-size)] items-center gap-0.5">
                 {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
-                {onEdit ? <HoverHint content={editDisabledReason || t("message.editMessage")} side="top" align="center">
-                  <span className={sheet ? "w-full" : "inline-flex"} tabIndex={editDisabledReason ? 0 : undefined}>
+                {onEdit ? <HoverHint enabled={!sheet} content={editDisabledReason || t("message.editMessage")} side="top" align="center">
+                  <span
+                    className={cn(
+                      sheet ? "w-full" : "inline-flex rounded-control",
+                      !sheet && editDisabledReason && "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    )}
+                    tabIndex={!sheet && editDisabledReason ? 0 : undefined}
+                    aria-label={!sheet && editDisabledReason ? `${t("message.editMessage")}: ${editDisabledReason}` : undefined}
+                  >
                     <button type="button" data-message-block-edit-action onClick={onEdit}
                       disabled={!!editDisabledReason} aria-label={t("message.editMessage")}
                       className={cn(
                         "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
-                        "text-muted-foreground transition-[color] hover:text-foreground disabled:opacity-50",
+                        "text-muted-foreground transition-[color,background-color] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none",
-                        sheet && "w-full justify-start gap-2 px-2 text-sm",
+                        sheet && "w-full justify-start gap-2 px-2 text-sm hover:bg-muted/70 disabled:hover:bg-transparent",
                       )}>
                       <EditIcon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
                       {sheet ? <span>{t("message.editMessage")}</span> : null}
                     </button>
-                    {sheet && editDisabledReason ? <span className="block px-2 pb-2 text-xs text-muted-foreground">{editDisabledReason}</span> : null}
+                    {sheet && editDisabledReason ? <span className="block px-2 pb-2 text-left text-xs text-muted-foreground">{editDisabledReason}</span> : null}
                   </span>
                 </HoverHint> : null}
                 {showFork ? (
@@ -524,9 +531,13 @@ export function MessageBubble({
         sessionMentions={message.sessionMentions}
       />
     );
+    const editing = textEditor != null;
     return (
       <div
-        className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5"
+        className={cn(
+          "group relative ml-auto flex max-w-[min(85%,36rem)] flex-col items-end gap-1.5",
+          editing ? "w-full" : "w-fit",
+        )}
       >
         {!hasText ? contextMenu : null}
         {userMedia}
@@ -754,22 +765,26 @@ function UserTextBubble({
       data-user-text-bubble
       data-user-message-collapsible={isCollapsible ? "true" : undefined}
       data-user-message-collapsed={isCollapsed ? "true" : undefined}
-      className="relative ml-auto w-fit max-w-full min-w-0"
+      className={cn("relative ml-auto max-w-full min-w-0", editing ? "w-full" : "w-fit")}
     >
       {contextMenu}
       <div
         data-user-message-body
+        data-editing={editing ? "true" : undefined}
         ref={bubbleRef}
         id={isCollapsible ? contentId : undefined}
         data-theme-surface
         data-temporary-message={temporary ? "true" : undefined}
         data-pending-edge={edgeState !== "solid" ? edgeState : undefined}
         className={cn(
-          "relative ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
+          "relative ml-auto max-w-full min-w-0 rounded-floating px-4",
+          editing ? "w-full py-3" : "w-fit py-2",
           "text-left text-reading whitespace-pre-wrap [overflow-wrap:anywhere]",
           temporary
             ? "border border-dashed border-muted-foreground/40 bg-transparent"
-            : "user-message-surface bg-secondary/70",
+            : editing
+              ? "user-message-surface bg-card ring-1 ring-border focus-within:ring-2 focus-within:ring-ring/50"
+              : "user-message-surface bg-secondary/70",
           showProcessingStatus && "user-message-surface-dashed",
           isCollapsible && "user-message-collapsible",
         )}

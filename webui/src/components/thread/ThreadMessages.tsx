@@ -483,6 +483,10 @@ function MessageBlockMenu({
   // Re-evaluated when this message becomes active, including after an overnight idle.
   const shortTime = mobileActions ? "" : formatMessageHoverTime(timestamp);
   const fullTime = shortTime ? fmtDateTime(timestamp) : "";
+  const handleMenuOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) editingRef.current = false;
+    onOpenChange(nextOpen);
+  };
   const actions = <MessageBlockMenuActions
     message={message}
     isTurnStreaming={isTurnStreaming}
@@ -495,7 +499,7 @@ function MessageBlockMenu({
   if (mobileActions) {
     return <div data-message-mobile-actions className={cn("mt-1 flex items-center", message.role === "user" ? "me-2 justify-end" : "-ms-2")}>
       <MessageCopyButton message={message} className="h-11 w-8 [&_svg]:h-4 [&_svg]:w-4" />
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open} onOpenChange={handleMenuOpenChange}>
         <DialogTrigger asChild>
           <button ref={triggerRef} type="button" data-message-block-menu-trigger aria-label={label}
             className="inline-flex h-11 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -505,7 +509,11 @@ function MessageBlockMenu({
         <DialogContent ref={contentRef} placement="bottom" aria-describedby={undefined}
           data-message-block-menu data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
           className="gap-2 p-4 pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] outline-none"
-          onCloseAutoFocus={(event) => { if (editingRef.current || activity?.expanded) event.preventDefault(); }}>
+          onCloseAutoFocus={(event) => {
+            const startedEdit = editingRef.current;
+            editingRef.current = false;
+            if (startedEdit || activity?.expanded) event.preventDefault();
+          }}>
           <DialogTitle className="px-2 pb-2 text-sm font-medium text-muted-foreground">{label}</DialogTitle>
           {actions}
         </DialogContent>
@@ -513,7 +521,7 @@ function MessageBlockMenu({
     </div>;
   }
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
+    <Popover open={open} onOpenChange={handleMenuOpenChange}>
       <PopoverTrigger asChild>
         <button
           ref={triggerRef}
@@ -578,7 +586,9 @@ function MessageBlockMenu({
           contentRef.current?.focus({ preventScroll: true });
         }}
         onCloseAutoFocus={(event) => {
-          if (editingRef.current || !contextActiveRef.current || activity?.expanded) event.preventDefault();
+          const startedEdit = editingRef.current;
+          editingRef.current = false;
+          if (startedEdit || !contextActiveRef.current || activity?.expanded) event.preventDefault();
         }}
         onPointerEnter={(event) => {
           if (event.pointerType === "touch") return;
