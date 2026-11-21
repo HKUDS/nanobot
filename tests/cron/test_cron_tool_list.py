@@ -294,6 +294,39 @@ def test_add_at_job_rejects_past_datetime(tmp_path) -> None:
     assert "2020-01-01T09:00:00" in result
     assert tool._cron.list_jobs() == []
 
+def test_add_at_job_rejects_nonexistent_local_time(tmp_path) -> None:
+    """Spring-forward gaps are not real local times and must not be shifted."""
+    tool = _make_tool_with_tz(tmp_path, "America/New_York")
+    missing = "2027-03-14T02:30:00"
+    with request_context(
+        RequestContext(channel="telegram", chat_id="chat-1", session_key="telegram:chat-1")
+    ):
+        result = tool._add_job(None, "Gap reminder", None, None, None, missing)
+
+    assert "does not exist" in result
+    assert missing in result
+    assert "America/New_York" in result
+    assert tool._cron.list_jobs() == []
+
+def test_add_at_job_keeps_ambiguous_and_valid_local_times(tmp_path) -> None:
+    tool = _make_tool_with_tz(tmp_path, "America/New_York")
+    zone = ZoneInfo("America/New_York")
+    cases = (
+        ("2027-03-14T03:30:00", "After the gap"),
+        ("2026-11-01T01:30:00", "Repeated hour"),
+    )
+    with request_context(
+        RequestContext(channel="telegram", chat_id="chat-1", session_key="telegram:chat-1")
+    ):
+        for at, name in cases:
+            result = tool._add_job(None, name, None, None, None, at)
+            assert result.startswith("Created job")
+            naive = datetime.fromisoformat(at)
+            expected = int(naive.replace(tzinfo=zone).timestamp() * 1000)
+            job = next(item for item in tool._cron.list_jobs() if item.name == name)
+            assert job.schedule.at_ms == expected
+            assert tool._format_timing(job.schedule).startswith(f"at {at}")
+
 def test_add_at_job_rejects_datetime_equal_to_now(tmp_path, monkeypatch) -> None:
     tool = _make_tool(tmp_path)
     fixed_now = 1_900_000_000.0
