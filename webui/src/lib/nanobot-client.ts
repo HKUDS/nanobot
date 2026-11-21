@@ -13,6 +13,7 @@ import type {
   SidebarStatePayload,
   GoalStateWsPayload,
   WorkspaceScopePayload,
+  WebuiThreadPersistedPayload,
 } from "./types";
 import { createHostWebSocket } from "./runtime";
 import { ClientRunLedger } from "./client-run-ledger";
@@ -257,6 +258,8 @@ export class NanobotClient {
   private transcriptHandlers = new Map<string, { handler: EventHandler }>();
   /** Inbound frames received while the transcript owner is absent, regardless of observers. */
   private pendingInboundByChat = new Map<string, InboundEvent[]>();
+  private historyGenerations = new Map<string, string>();
+  private retiredHistoryGenerations = new Map<string, Set<string>>();
   private static readonly PENDING_INBOUND_MAX = 2000;
   private static readonly PENDING_TEMP_INBOUND_MAX = 20_000;
   private knownChats = new Set<string>();
@@ -393,6 +396,30 @@ export class NanobotClient {
 
   isRunCompleted(chatId: string, turnId: string): boolean {
     return this.runs.isCompleted({ chatId, turnId });
+  }
+
+  /** Adopt a canonical lifecycle boundary, including after a missed live reset. */
+  adoptHistorySnapshot(chatId: string, body: WebuiThreadPersistedPayload, retiredTurnIds: string[] = [], previousGeneration?: string): boolean {
+    const generation = body.history_generation;
+    if (!generation || this.retiredHistoryGenerations.get(chatId)?.has(generation)) return false;
+    const previous = this.historyGenerations.get(chatId);
+    this.historyGenerations.set(chatId, generation);
+    if ((!previous || previous === generation) && !previousGeneration) return false;
+    if (previous === generation) return false;
+    const retired = this.retiredHistoryGenerations.get(chatId) ?? new Set<string>();
+    if (previous) retired.add(previous);
+    if (previousGeneration) retired.add(previousGeneration);
+    this.retiredHistoryGenerations.set(chatId, retired);
+    this.pendingInboundByChat.delete(chatId);
+    this.goalStateByChatId.delete(chatId);
+    this.applyRunEffects(this.runs.transition({ kind: "forget", chatId }));
+    this.fenceCanonicalCompletedTurns(chatId, retiredTurnIds);
+    this.dispatch(chatId, { event: "history_replaced", chat_id: chatId, thread: body });
+    return true;
+  }
+
+  isRetiredHistorySnapshot(chatId: string, body: Pick<WebuiThreadPersistedPayload, "history_generation">): boolean {
+    return !!body.history_generation && this.retiredHistoryGenerations.get(chatId)?.has(body.history_generation) === true;
   }
 
   /** End the local optimistic run without confirming gateway cancellation. */
@@ -976,6 +1003,13 @@ export class NanobotClient {
       return;
     }
 
+    if (parsed.event === "history_replaced") {
+      this.adoptHistorySnapshot(parsed.chat_id, parsed.thread, parsed.retired_turn_ids, parsed.previous_generation);
+      return;
+    }
+    if ("history_generation" in parsed && typeof parsed.history_generation === "string"
+      && "chat_id" in parsed && parsed.chat_id
+      && this.retiredHistoryGenerations.get(parsed.chat_id)?.has(parsed.history_generation)) return;
     if (parsed.event === "error" && parsed.request_id !== undefined) {
       const pending = this.pendingChatRequest;
       if (pending && pending.phase !== "queued" && pending.frame.request_id === parsed.request_id) {

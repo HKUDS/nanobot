@@ -1172,6 +1172,7 @@ class GatewayHTTPHandler:
             websocket_turn_transcript_persistence_failed(chat_id)
         )
         include_model_requests = _query_first(query, "include_model_requests") == "1"
+        source_version = self._read_session_version(decoded_key)
         revision_variant = {
             "include_model_requests": include_model_requests,
             "context_graph_encoding": _query_first(query, "context_graph_encoding"),
@@ -1185,7 +1186,7 @@ class GatewayHTTPHandler:
             "direction": direction,
             "gateway_instance": self.tokens.instance_id,
             "limit": limit,
-            "session_version": self._read_session_version(decoded_key),
+            "session_version": source_version,
             "workspace_scope": scope.payload(),
         }
         initial_revision = webui_transcript_revision(decoded_key, history=history, variant=revision_variant)
@@ -1204,7 +1205,7 @@ class GatewayHTTPHandler:
                 workspace_path=scope.project_path,
             ),
             session_messages_loader=lambda: self._read_session_messages(decoded_key),
-            session_version_loader=lambda: self._read_session_version(decoded_key),
+            session_version_loader=lambda: source_version,
             active_turn_started_at=active_turn_started_at,
             active_turn_id=active_turn_id,
             active_turn_transcript_persistence_failed=(
@@ -1221,6 +1222,7 @@ class GatewayHTTPHandler:
         if data is None:
             return _http_error(404, "webui thread not found")
         data["workspace_scope"] = scope.payload()
+        data["history_generation"] = source_version[0] if source_version is not None else None
         revision_variant["session_version"] = self._read_session_version(decoded_key)
         final_revision = webui_transcript_revision(decoded_key, history=history, variant=revision_variant)
         response_headers = list(_NO_STORE_HEADERS)

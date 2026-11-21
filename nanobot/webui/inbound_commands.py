@@ -6,6 +6,7 @@ import json
 import re
 import time
 import uuid
+import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast
@@ -35,6 +36,7 @@ from nanobot.security.workspace_access import (
     WorkspaceScopeError,
 )
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
+from nanobot.session.history_edit import HistoryEditError
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -53,7 +55,10 @@ from nanobot.webui.file_preview import (
     file_preview_payload,
     file_reference_payload,
 )
-from nanobot.webui.forking import handle_webui_fork_chat
+from nanobot.webui.forking import (
+    handle_webui_fork_chat,
+    replace_webui_chat_input,
+)
 from nanobot.webui.gateway_services import GatewayServices
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
 from nanobot.webui.metadata import (
@@ -168,7 +173,7 @@ class WebUICommandRouter:
         self.request_locks: dict[ServerConnection, asyncio.Lock] = {}
         self._background_lock = asyncio.Lock()
         self._accepted_messages: dict[tuple[str, str], float] = {}
-        self._message_locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
+        self._message_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
     def workspace_project_selection_available(self, connection: ServerConnection) -> bool:
         return connection in self._webui_connections
@@ -210,6 +215,17 @@ class WebUICommandRouter:
             workspace_scope=scope.payload(),
         )
         await self._outbound.hydrate(fork_id)
+
+    async def announce_webui_history_replacement(
+        self, chat_id: str, body: dict[str, Any], *, retired_turn_ids: list[str], previous_generation: str,
+    ) -> None:
+        self._outbound.discard(chat_id)
+        for connection in self._transport.webui_subscribers(chat_id):
+            await self._transport.webui_send_event(
+                connection, "history_replaced", chat_id=chat_id,
+                thread=body, retired_turn_ids=retired_turn_ids, previous_generation=previous_generation,
+            )
+        await self._outbound.session_updated(chat_id, scope="thread")
 
     async def discard_owned_chat(
         self,
@@ -542,22 +558,18 @@ class WebUICommandRouter:
         client_id: str,
         envelope: dict[str, Any],
     ) -> None:
-        chat_id, turn_id = envelope.get("chat_id"), envelope.get("turn_id")
-        if not isinstance(chat_id, str) or not isinstance(turn_id, str) or not turn_id:
+        chat_id = envelope.get("chat_id")
+        if not is_valid_webui_chat_id(chat_id):
             await self._dispatch_message_once(connection, client_id, envelope)
             return
-        key = (chat_id, turn_id)
-        lock, users = self._message_locks.get(key, (asyncio.Lock(), 0))
-        self._message_locks[key] = (lock, users + 1)
-        try:
-            async with lock:
-                await self._dispatch_message_once(connection, client_id, envelope)
-        finally:
-            _, users = self._message_locks[key]
-            if users == 1:
-                del self._message_locks[key]
-            else:
-                self._message_locks[key] = (lock, users - 1)
+        async with self._message_lock(chat_id):
+            await self._dispatch_message_once(connection, client_id, envelope)
+
+    def _message_lock(self, chat_id: str) -> asyncio.Lock:
+        lock = self._message_locks.get(chat_id)
+        if lock is None:
+            lock = self._message_locks[chat_id] = asyncio.Lock()
+        return lock
 
     def _parse_inbound_attachments(
         self,
@@ -1225,6 +1237,21 @@ class WebUICommandRouter:
         try:
             lock = self.request_locks.setdefault(connection, asyncio.Lock())
             async with lock:
+                if action == "chat.fork":
+                    try:
+                        chat_id = payload.get("chat_id")
+                        if not is_valid_webui_chat_id(chat_id):
+                            raise HistoryEditError("edit_invalid_request")
+                        with self._http_router.bus.admission.activity():
+                            async with self._message_lock(chat_id), self._outbound.history_lock(chat_id):
+                                result = await replace_webui_chat_input(self, payload)
+                    except HistoryEditError as exc:
+                        return WebUIRequestResult(status=409, message=exc.code)
+                    except RuntimeMaintenanceError:
+                        return WebUIRequestResult(
+                            status=503, message="Gateway update is being verified. Retry shortly.",
+                        )
+                    return WebUIRequestResult(result=result)
                 if action in {"background.update", "background.delete", "background.style"}:
                     from nanobot.webui.background import (
                         MAX_BYTES,

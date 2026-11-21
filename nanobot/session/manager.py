@@ -44,6 +44,7 @@ _FORK_VOLATILE_METADATA_KEYS = {
     "pending_user_turn",
     "pending_user_followups",
     "runtime_checkpoint",
+    "history_edit_receipt",
     "session_handle",
     "webui_recovery",
     "title",
@@ -323,6 +324,14 @@ class Session:
                     entry["content"] = replay_user_image_blocks(cast(list[object], content))
         return out
 
+    def retain_history_prefix(self, boundary: int) -> None:
+        """Keep an already resolved prefix without changing session identity."""
+        self.messages = self.messages[:boundary]
+        if self.last_archived > boundary:
+            self.last_archived = 0
+            self.metadata.pop("_last_summary", None)
+        self.provider_state = None
+
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
         self.messages = []
@@ -360,46 +369,40 @@ class SessionInfo(TypedDict):
     path: str
 
 
+def history_prefix_boundary(source: Session, before_user_index: int) -> int | None:
+    """Locate a global visible-user boundary, shared by new forks and replacement."""
+    if before_user_index < 0:
+        return None
+    user_index = 0
+    for position, message in enumerate(source.messages):
+        if message.get("role") == "user" and not is_hidden_history_message(message):
+            if user_index == before_user_index:
+                return position
+            user_index += 1
+    return len(source.messages) if user_index == before_user_index else None
+
+
 def fork_session(
     source: Session, target_key: str, before_user_index: int,
     *, exclude_metadata: frozenset[str] = frozenset(),
 ) -> Session | None:
     """Build a portable fork ending before the requested visible user message."""
-    if before_user_index < 0:
+    boundary = history_prefix_boundary(source, before_user_index)
+    if boundary is None:
         return None
-    copied: list[dict[str, Any]] = []
-    user_index = 0
-    found_target = False
-    for message in source.messages:
-        if message.get("role") == "user" and not is_hidden_history_message(message):
-            if user_index == before_user_index:
-                found_target = True
-                break
-            user_index += 1
-        copied.append(public_history_message(message))
-    if user_index == before_user_index:
-        found_target = True
-    if not found_target:
-        return None
-
-    metadata = deepcopy(source.metadata)
-    for key in _FORK_VOLATILE_METADATA_KEYS | exclude_metadata:
-        metadata.pop(key, None)
-
-    last_consolidated = min(source.last_archived, len(copied))
-    if source.last_archived > len(copied):
-        metadata.pop("_last_summary", None)
-        last_consolidated = 0
-
     now = datetime.now()
     target = Session(
         key=target_key,
-        messages=copied,
+        messages=source.messages,
         created_at=now,
         updated_at=now,
-        metadata=metadata,
-        last_consolidated=last_consolidated,
+        metadata=deepcopy(source.metadata),
+        last_consolidated=source.last_archived,
     )
+    target.retain_history_prefix(boundary)
+    target.messages = [public_history_message(message) for message in target.messages]
+    for key in _FORK_VOLATILE_METADATA_KEYS | exclude_metadata:
+        target.metadata.pop(key, None)
     return target
 
 

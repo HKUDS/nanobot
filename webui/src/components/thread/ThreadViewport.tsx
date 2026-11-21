@@ -1309,6 +1309,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                 <DiffViewportContext.Provider value={diffViewport}>
                 <DiagramScope identity={conversationKey}>
                 <SubagentThreadMessages
+                  editScope={messagesKey}
                   historyRows={historyRows}
                   key={messagesKey}
                   messages={visibleMessages}

@@ -56,7 +56,7 @@ async def test_message_tool_keeps_task_local_context() -> None:
 
 @pytest.mark.asyncio
 async def test_subagent_tool_keeps_task_local_context() -> None:
-    seen: list[tuple[str, str, str, str | None, str | None]] = []
+    seen: list[tuple[str, str, str, str | None, str | None, str | None]] = []
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -77,11 +77,12 @@ async def test_subagent_tool_keeps_task_local_context() -> None:
             session_key: str,
             origin_message_id: str | None = None,
             origin_turn_id: str | None = None,
+            session_generation: str | None = None,
             temperature: float | None = None,
             workspace_scope=None,
             session_policy=None,
         ) -> str:
-            seen.append((origin_channel, origin_chat_id, session_key, origin_message_id, origin_turn_id))
+            seen.append((origin_channel, origin_chat_id, session_key, origin_message_id, origin_turn_id, session_generation))
             return f"{origin_channel}:{origin_chat_id}:{task}"
 
     tool = SubagentTool(_Manager())
@@ -92,6 +93,7 @@ async def test_subagent_tool_keeps_task_local_context() -> None:
             chat_id="chat-a",
             message_id="msg-a",
             turn_id="turn-a",
+            session_generation="generation-a",
             runtime=_runtime("model-a"),
         )):
             entered.set()
@@ -105,6 +107,7 @@ async def test_subagent_tool_keeps_task_local_context() -> None:
             chat_id="chat-b",
             message_id="msg-b",
             turn_id="turn-b",
+            session_generation="generation-b",
             runtime=_runtime("model-b"),
         )):
             release.set()
@@ -114,8 +117,8 @@ async def test_subagent_tool_keeps_task_local_context() -> None:
 
     assert result_one == "whatsapp:chat-a:one"
     assert result_two == "telegram:chat-b:two"
-    assert ("whatsapp", "chat-a", "whatsapp:chat-a", "msg-a", "turn-a") in seen
-    assert ("telegram", "chat-b", "telegram:chat-b", "msg-b", "turn-b") in seen
+    assert ("whatsapp", "chat-a", "whatsapp:chat-a", "msg-a", "turn-a", "generation-a") in seen
+    assert ("telegram", "chat-b", "telegram:chat-b", "msg-b", "turn-b", "generation-b") in seen
 
 
 @pytest.mark.asyncio
@@ -189,7 +192,8 @@ async def test_message_tool_default_values_without_request_context() -> None:
 
 @pytest.mark.asyncio
 async def test_subagent_tool_basic_request_context_and_execute() -> None:
-    seen: list[tuple[str, str, str, str | None, str | None]] = []
+    """A bound request context should provide the correct origin."""
+    seen: list[tuple[str, str, str, str | None, str | None, str | None]] = []
 
     class _Manager:
         max_concurrent_subagents = 1
@@ -208,11 +212,12 @@ async def test_subagent_tool_basic_request_context_and_execute() -> None:
             session_key,
             origin_message_id=None,
             origin_turn_id=None,
+            session_generation=None,
             temperature=None,
             workspace_scope=None,
             session_policy=None,
         ):
-            seen.append((origin_channel, origin_chat_id, session_key, origin_message_id, origin_turn_id))
+            seen.append((origin_channel, origin_chat_id, session_key, origin_message_id, origin_turn_id, session_generation))
             return f"ok: {task}"
 
     tool = SubagentTool(_Manager())
@@ -225,7 +230,7 @@ async def test_subagent_tool_basic_request_context_and_execute() -> None:
     )):
         result = await tool.execute(action="create", task="do something")
     assert result == "ok: do something"
-    assert seen == [("feishu", "chat-abc", "feishu:chat-abc", "msg-123", "turn-123")]
+    assert seen == [("feishu", "chat-abc", "feishu:chat-abc", "msg-123", "turn-123", None)]
 
 
 @pytest.mark.asyncio

@@ -62,6 +62,7 @@ export interface ThreadPaging {
   completedTurnIds: string[];
   completionIdsProvided: boolean;
   activeTurnId: string | null;
+  historyGeneration: string | null;
 }
 export interface ThreadRead {
   kind: "initial" | "latest" | "older";
@@ -69,6 +70,7 @@ export interface ThreadRead {
   lineage: number;
   before: string | null;
   empty: boolean;
+  historyGeneration: string | null;
 }
 export interface ThreadTranscriptSnapshot extends ThreadCheckpoint {
   units: Unit[];
@@ -80,7 +82,6 @@ export interface ThreadTranscriptSnapshot extends ThreadCheckpoint {
   revision: number;
   fragments: WebuiThreadPersistedPayload[];
   live: LiveContribution[];
-  historyGeneration: string | null;
   pendingFragmentGap: PendingFragmentGap | null;
   withdrawnSources: Set<string>;
 }
@@ -142,7 +143,7 @@ function emptyPaging(): ThreadPaging {
   return { loading: false, loadingOlder: false, error: null, olderError: null,
     beforeCursor: null, hasMoreBefore: null, userMessageOffset: 0,
     forkBoundaryMessageCount: null, truncated: false, version: 0, lineage: 0,
-    hasPendingToolCalls: false, completedTurnIds: [], completionIdsProvided: false, activeTurnId: null };
+    hasPendingToolCalls: false, completedTurnIds: [], completionIdsProvided: false, activeTurnId: null, historyGeneration: null };
 }
 function textKey(text: TextSource): string {
   return JSON.stringify([text.turn, text.phase, text.stream,
@@ -241,7 +242,6 @@ export class ThreadTranscript {
   private knownTurns = new Set<string>();
   private fragments: WebuiThreadPersistedPayload[] = [];
   private live: LiveContribution[] = [];
-  private historyGeneration: string | null = null;
   private pendingFragmentGap: PendingFragmentGap | null = null;
   private withdrawnSources = new Set<string>();
   fragmentCompletedTurnIds: string[] = [];
@@ -262,7 +262,6 @@ export class ThreadTranscript {
       this.knownTurns = new Set(saved.knownTurns);
       this.fragments = [...saved.fragments];
       this.live = this.recordLiveContributions ? [...saved.live] : [];
-      this.historyGeneration = saved.historyGeneration;
       this.pendingFragmentGap = saved.pendingFragmentGap ? { ...saved.pendingFragmentGap } : null;
       this.withdrawnSources = new Set(saved.withdrawnSources);
       this.paging = { ...saved.paging, loading: false, loadingOlder: false };
@@ -494,7 +493,7 @@ export class ThreadTranscript {
       [kind === "older" ? "loadingOlder" : "loading"]: kind === "older" || this.paging.version === 0,
       [kind === "older" ? "olderError" : "error"]: null };
     return { kind, revision: this.revision, lineage: this.paging.lineage,
-      before: this.paging.beforeCursor, empty: this.messages.length === 0 };
+      before: this.paging.beforeCursor, empty: this.messages.length === 0, historyGeneration: this.paging.historyGeneration };
   }
 
   private unitCovered(unit: Unit, candidate: ThreadTranscript): boolean {
@@ -519,8 +518,8 @@ export class ThreadTranscript {
     // The visible projection is retained until admission, including across cache restore.
     for (const event of joined.withdrawn) this.withdrawnSources.add(this.describe(event).source);
     this.pendingFragmentGap = gap;
-    this.historyGeneration = page.history_generation ?? this.historyGeneration;
     this.paging = { ...this.paging, loading: false, loadingOlder: false, error: null, olderError: null,
+      historyGeneration: joined.body.history_generation ?? page.history_generation ?? this.paging.historyGeneration,
       beforeCursor: page.before_cursor ?? null, hasMoreBefore: page.has_more_before === true, truncated: true,
       version: this.paging.version + (read.kind === "older" ? 0 : 1),
       lineage: this.paging.lineage + (read.kind === "older" ? 0 : 1) };
@@ -551,7 +550,16 @@ export class ThreadTranscript {
     return candidate;
   }
 
+  /** An authoritative replacement retires even unpersisted rows, staged fragments and pending details. */
+  replacedBy(body: WebuiThreadPersistedPayload): ThreadTranscript {
+    const owner = new ThreadTranscript([], undefined, { recordLiveContributions: this.recordLiveContributions });
+    owner.paging = { ...owner.paging, version: this.paging.version, lineage: this.paging.lineage + 1 };
+    owner.accept(body, owner.begin("initial"));
+    return owner;
+  }
+
   accept(body: WebuiThreadPersistedPayload | null, read: ThreadRead): boolean {
+    if (read.historyGeneration !== null && read.historyGeneration !== this.paging.historyGeneration) return false;
     this.fragmentCompletedTurnIds = [];
     if (read.kind === "older" && (read.lineage !== this.paging.lineage || read.before !== this.paging.beforeCursor)) return false;
     // An initial network read may have started just before its cached seed was installed.
@@ -566,9 +574,9 @@ export class ThreadTranscript {
       this.finishRead(read, "Earlier history cursor did not advance");
       return false;
     }
-    const generation = body?.page?.history_generation ?? null;
-    const replacedHistory = generation !== null && this.historyGeneration !== null
-      && generation !== this.historyGeneration;
+    const generation = body?.history_generation ?? body?.page?.history_generation ?? null;
+    const replacedHistory = generation !== null && this.paging.historyGeneration !== null
+      && generation !== this.paging.historyGeneration;
     if (replacedHistory && (read.kind === "older" || this.live.length > 0 || this.revision > read.revision)) {
       this.finishRead(read, "History changed during loading");
       return false;
@@ -910,8 +918,8 @@ export class ThreadTranscript {
     if (reset) this.fragments = [];
     if (joined) this.fragments = joined.pages;
     if (pending && !hasGap) this.pendingFragmentGap = null;
-    if (generation !== null) this.historyGeneration = generation;
     this.paging = { ...this.paging, loading: false, loadingOlder: false, error: null,
+      historyGeneration: generation ?? this.paging.historyGeneration,
       olderError: read.kind !== "older" && !reset
         && (preserveFrontier || this.paging.beforeCursor === page?.before_cursor) ? this.paging.olderError : null,
       beforeCursor: preserveFrontier ? this.paging.beforeCursor : page?.before_cursor ?? null,
@@ -936,6 +944,7 @@ export class ThreadTranscript {
   }
 
   finishRead(read: ThreadRead, error: string | null = null): void {
+    if (read.historyGeneration !== null && read.historyGeneration !== this.paging.historyGeneration) return;
     this.paging = { ...this.paging, [read.kind === "older" ? "loadingOlder" : "loading"]: false,
       [read.kind === "older" ? "olderError" : "error"]: error };
   }
@@ -964,7 +973,6 @@ export class ThreadTranscript {
       installed: copyMembers(this.installed), textCoverage: this.textCoverage.map(copyText),
       boundaries: new Map(this.boundaries), knownTurns: new Set(this.knownTurns),
       paging: { ...this.paging }, revision: this.revision, fragments: [...this.fragments], live: [...this.live],
-      historyGeneration: this.historyGeneration,
       pendingFragmentGap: this.pendingFragmentGap ? { ...this.pendingFragmentGap } : null,
       withdrawnSources: new Set(this.withdrawnSources) };
   }

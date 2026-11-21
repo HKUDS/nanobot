@@ -66,6 +66,12 @@ Each topic in the sidebar keeps its own history, title, project folder, and link
 - **Delete with undo:** Deleting a topic hides it with an 8-second **Undo** window. Topics with linked automations pause for confirmation in the toast before starting the undo countdown.
 - **Navigate long conversations:** Use the message rail on wide screens or prompt-summary search in the header to jump directly to earlier messages. Scroll past the top (or pull down on touch devices) to load older history.
 
+### Edit a sent message
+
+In a saved topic, wait for the reply to finish, then open **Message actions** on one of your plain-text messages and choose **Edit message**. **Cancel** leaves the conversation and your composer draft unchanged. **Resend** replaces the selected message and everything after it in the same topic, then generates a new reply. It does not undo earlier tool actions such as file changes. To keep the original conversation, use **Fork** instead.
+
+Messages with attachments, quotes, mentions, or commands cannot be edited this way.
+
 ### Conversation groups and panes
 
 Open a topic's menu and choose **Create group** to arrange up to four topics side by side. Use **Add pane** in the header to start another topic alongside it, or drag an existing topic into the group.

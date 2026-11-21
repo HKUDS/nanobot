@@ -39,6 +39,7 @@ import type {
   RetryStatus,
   UIMediaAttachment,
   UIMessage,
+  WebuiThreadPersistedPayload,
   UIModelRequestSnapshot,
   WorkspaceScopePayload,
 } from "@/lib/types";
@@ -161,6 +162,7 @@ export function useNanobotStream(
 } {
   const { client, getToken } = useClient();
   const historyKey = history?.key ?? null;
+  const historyChatId = historyKey?.startsWith("websocket:") ? historyKey.slice("websocket:".length) : null;
   const temporary = history?.temporary === true;
   const messageCache = history?.cache;
   const [initialTranscript] = useState(() => createTranscript(initialMessages,
@@ -465,16 +467,52 @@ export function useNanobotStream(
     if (!client.getRunState(chatId)?.active) setRetryStatus(null);
   }, [chatId, client]);
 
+  const publishingReplacement = useRef(false);
+  const replaceHistory = useCallback((body: WebuiThreadPersistedPayload, publish = true) => {
+    const previous = transcriptRef.current;
+    if (body.history_generation && previous.paging.historyGeneration === body.history_generation) return;
+    drainStreamEvents();
+    cancelOlderRead();
+    const owner = previous.replacedBy(body);
+    transcriptRef.current = owner;
+    setMessages(owner.messages);
+    setExecSourceMessages(owner.messages);
+    setLiveInputs(null);
+    setRetryStatus(null);
+    setRecoveryState(null);
+    setGoalState(undefined);
+    setStreamError(null);
+    if (chatId) messageCache?.set(chatId, owner.save());
+    if (historyKey && publish) {
+      publishingReplacement.current = true;
+      try { webuiThreadCache.set(historyKey, body); }
+      finally { publishingReplacement.current = false; }
+    }
+  }, [cancelOlderRead, chatId, drainStreamEvents, historyKey, messageCache, setMessages]);
+
+  useEffect(() => {
+    if (chatId || !historyChatId) return;
+    return client.onChat(historyChatId, (event) => {
+      if (event.event === "history_replaced") replaceHistory(event.thread);
+    });
+  }, [chatId, client, historyChatId, replaceHistory]);
+
   useEffect(() => {
     if (!historyKey) return;
-    const owner = transcriptRef.current;
     const controller = new AbortController();
     const generation = chatId ? client.getRunGeneration(chatId) : 0;
     let disposed = false;
     let superseded = false;
     let publishing = false;
     const install = (body: Awaited<ReturnType<typeof fetchWebuiThread>>, ownRead: boolean, seed = false) => {
-      if (disposed || (ownRead && superseded) || transcriptRef.current !== owner) return;
+      if (disposed || (ownRead && (superseded || transcriptRef.current !== readOwner))) return;
+      const owner = transcriptRef.current;
+      if (body?.history_generation && historyChatId && client.isRetiredHistorySnapshot(historyChatId, body)) return;
+      if (body?.history_generation && owner.paging.historyGeneration !== null
+        && body.history_generation !== owner.paging.historyGeneration) {
+        replaceHistory(body, ownRead);
+        return;
+      }
       flushPendingStreamEvents();
       const decision = ownRead ? read : owner.begin(seed ? "initial" : "latest");
       const canonical = body ? persistedCanonicalRunState(body) : null;
@@ -500,27 +538,28 @@ export function useNanobotStream(
       }
     };
     const cached = webuiThreadCache.get(historyKey);
-    if (cached && owner.paging.version === 0) install(cached, false, true);
+    if (cached && transcriptRef.current.paging.version === 0) install(cached, false, true);
     // A restored projection or cached seed already has history. Revalidate it
     // as latest so a safe disjoint window can replace its durable baseline.
-    const read = owner.begin(owner.paging.version > 0 ? "latest" : "initial");
+    const readOwner = transcriptRef.current;
+    const read = readOwner.begin(readOwner.paging.version > 0 ? "latest" : "initial");
     publishHistory();
     const unsubscribe = webuiThreadCache.subscribe(historyKey, (body) => {
       if (publishing) return;
       superseded = true;
       controller.abort();
       cancelOlderRead();
-      install(body, false);
+      if (!publishingReplacement.current) install(body, false);
     });
     void fetchLatestWebuiThread(client, getToken(), historyKey, controller.signal)
       .then((body) => install(body, true))
       .catch((error: unknown) => {
-        if (disposed || superseded || controller.signal.aborted || transcriptRef.current !== owner) return;
+        if (disposed || superseded || controller.signal.aborted || transcriptRef.current !== readOwner) return;
         if (error instanceof ApiError && error.status === 404) install(null, true);
-        else { owner.finishRead(read, (error as Error).message); publishHistory(); }
+        else { readOwner.finishRead(read, (error as Error).message); publishHistory(); }
       });
     return () => { disposed = true; controller.abort(); cancelOlderRead(); unsubscribe(); };
-  }, [cancelOlderRead, chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, publishHistory, reconcileCanonical, refreshSeq, setMessages, settleFragment]);
+  }, [cancelOlderRead, chatId, client, flushPendingStreamEvents, getToken, historyChatId, historyKey, messageCache, publishHistory, reconcileCanonical, refreshSeq, replaceHistory, setMessages, settleFragment]);
 
   const loadOlder = useCallback(async () => {
     const owner = transcriptRef.current;
@@ -537,6 +576,13 @@ export function useNanobotStream(
           before: operation.read.before!, limit: 120, signal: controller.signal,
         });
         if (olderReadRef.current !== operation || transcriptRef.current !== owner) return;
+        if (body?.history_generation && owner.paging.historyGeneration && body.history_generation !== owner.paging.historyGeneration) {
+          // A non-latest page cannot replace the current owner's baseline.
+          owner.finishRead(operation.read);
+          publishHistory();
+          refreshHistory();
+          return;
+        }
         flushPendingStreamEvents();
         const previousContent = historyContentSnapshot(owner.messages, owner.paging.forkBoundaryMessageCount);
         const accepted = owner.accept(body, operation.read);
@@ -562,7 +608,7 @@ export function useNanobotStream(
     } finally {
       if (olderReadRef.current === operation) olderReadRef.current = null;
     }
-  }, [chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, publishHistory, setMessages, settleFragment]);
+  }, [chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, publishHistory, refreshHistory, setMessages, settleFragment]);
 
   useEffect(() => {
     const bridging = transcriptRef.current.hasPendingFragmentGap;
@@ -591,6 +637,9 @@ export function useNanobotStream(
         setMessages(owner.messages);
         setExecSourceMessages(owner.messages);
         return { ref, events: detail.events };
+      }).catch((error: unknown) => {
+        if (transcriptRef.current !== owner) return null;
+        throw error;
       }).finally(() => ownerRequests.delete(id));
       ownerRequests.set(id, request);
       return request;
@@ -604,6 +653,11 @@ export function useNanobotStream(
     // A request may start before its acceptance frame reaches this tab.
     const startedInputs = new Set<string>();
     const handle = (ev: InboundEvent) => {
+      if (ev.event === "history_replaced") {
+        startedInputs.clear();
+        replaceHistory(ev.thread);
+        return;
+      }
       if (ev.event === "error") {
         if (ev.detail === "message_too_big") {
           applyStreamError({
@@ -912,6 +966,7 @@ export function useNanobotStream(
     onTurnEnd,
     onStreamDetach,
     messageCache,
+    replaceHistory,
     enqueueStreamEvent,
     setMessages,
   ]);

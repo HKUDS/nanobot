@@ -54,7 +54,7 @@ for (const narrow of [false, true]) {
       expect(body.line).toBeCloseTo(bodySize * 1.6);
       expect(body.weight).toBe("400");
       expect(body.family).toContain("Open Sans");
-      expect((await metrics(page.locator("[data-user-text-bubble] p"))).size).toBe(bodySize);
+      expect((await metrics(page.locator("[data-user-message-body]"))).size).toBe(bodySize);
       for (const selector of ["blockquote", "ol > li", ".task-list-item"]) {
         expect((await metrics(page.locator(`.markdown-content ${selector}`).first())).size).toBe(bodySize);
       }

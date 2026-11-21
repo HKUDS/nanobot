@@ -45,6 +45,7 @@ from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import (
     INBOUND_META_MODEL_OPTIONS,
     INBOUND_META_RUNTIME_CONTROL,
+    INBOUND_META_TURN_ID,
     INBOUND_META_USER_SHELL,
     RUNTIME_CONTROL_SESSION_DISCARD,
     InboundMessage,
@@ -85,6 +86,11 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
+from nanobot.session.history_edit import (
+    HistoryEditAccepted,
+    HistoryEditProjection,
+    HistoryEditSource,
+)
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.image_attachments import persist_user_image_blocks
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
@@ -765,7 +771,10 @@ class AgentLoop:
                 session.metadata.update(SessionModelPreset(
                     selection.base_preset, ModelOptions.parse(msg.metadata[INBOUND_META_MODEL_OPTIONS]),
                 ).metadata_update())
-            session.add_message("user", content, **extra)
+            if msg.input_persisted:
+                session.messages[-1] = {**session.messages[-1], **extra, "content": content}
+            else:
+                session.add_message("user", content, **extra)
             self._mark_pending_user_turn(session)
             followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
             if isinstance(followup_id, str) and followup_id:
@@ -951,6 +960,7 @@ class AgentLoop:
 
     async def _cancel_active_tasks(self, key: str) -> int:
         with self._pending_queues.controlling(key):
+            await self._pending_queues.wait_for_edit(key)
             return await self._cancel_session_work(key)
 
     async def _cancel_session_work(self, key: str) -> int:
@@ -996,6 +1006,7 @@ class AgentLoop:
         """Stop active work for *key* and forget its cached session."""
         with self.bus.admission.activity(), self._pending_queues.controlling(key, discard=True):
             try:
+                await self._pending_queues.wait_for_edit(key)
                 await self.sessions.state.discard(key)
                 await self._cancel_session_work(key)
             finally:
@@ -1053,7 +1064,9 @@ class AgentLoop:
         session: Session | None,
         tools: ToolRegistry,
     ) -> dict[str, Any] | None:
-        # Commands and independent turns retain their own worker and completion.
+        # Leave stale work to the generation check in independent dispatch, never inject it.
+        if session is not None and message.session_generation not in (None, session.generation):
+            return None
         if not self._can_inject_message(message):
             return None
         content = message.content
@@ -1261,7 +1274,7 @@ class AgentLoop:
                 consume=execution_scope.consume_inputs if execution_scope is not None else None,
                 session_key=session.key if session is not None else None,
                 running_subagents=(
-                    partial(self.subagents.get_running_count_by_session, session.key)
+                    partial(self.subagents.get_running_count_by_session, session.key, session_generation=session.generation)
                     if session is not None else None
                 ),
                 terminal_wait_seconds=_SUBAGENT_TERMINAL_WAIT_SECONDS,
@@ -1503,7 +1516,47 @@ class AgentLoop:
         )
         return pending_msg
 
+    async def replace_user_input(
+        self, msg: InboundMessage, source: HistoryEditSource, projection: HistoryEditProjection,
+        accepted: HistoryEditAccepted,
+    ) -> None:
+        """Reserve an idle execution lane before committing an in-place history edit."""
+        key = msg.session_key
+        lock = self._get_session_lock(key)
+
+        async def admit() -> None:
+            async with self._pending_queues.admission_lock(key):
+                self.bus.admission.check()
+                self._pending_queues.check_admission()
+                if not self._pending_queues.idle(key) or lock.locked():
+                    # A retry of the committed edit still receives its acknowledgement.
+                    await self.sessions.state.replace_user_input(key, source, msg, None)
+                    return
+                async with lock:
+                    with self._pending_queues.reserving_edit(key) as pending:
+                        session = await self.sessions.state.replace_user_input(key, source, msg, projection)
+                        if session is None:
+                            return
+                        self.auto_compact.discard_summary(key)
+                        self.discard_session_file_state(key)
+                        msg.session_generation = session.generation
+                        msg.require_existing_session = True
+                        msg.input_persisted = True
+                        pending.put_nowait(msg)
+                        try:
+                            await accepted(session)
+                        except Exception:
+                            logger.exception("Unable to announce accepted history replacement for {}", key)
+                        finally:
+                            self._start_session_worker(key, pending)
+
+        await shield_and_drain(admit())
+
     async def _enqueue_session_message(self, msg: InboundMessage) -> None:
+        async with self._pending_queues.admission_lock(msg.session_key):
+            await self._admit_session_message(msg)
+
+    async def _admit_session_message(self, msg: InboundMessage) -> None:
         self._pending_queues.check_admission()
         self.bus.admission.check()
         session_key = msg.session_key
@@ -1525,7 +1578,10 @@ class AgentLoop:
         new_pending = SessionInbox()
         new_pending.put_nowait(msg)
         self._pending_queues.install(session_key, new_pending)
-        task = asyncio.create_task(self._run_session_queue(session_key, new_pending))
+        self._start_session_worker(session_key, new_pending)
+
+    def _start_session_worker(self, session_key: str, inbox: SessionInbox) -> None:
+        task = asyncio.create_task(self._run_session_queue(session_key, inbox))
         self._track_active_task(session_key, task)
 
     async def _run_session_queue(
@@ -1612,8 +1668,13 @@ class AgentLoop:
                             return
                     await execution.enter_async_context(lock)
                     await execution.enter_async_context(gate)
+                    session = await self.sessions.state.read(session_key)
+                    if msg.session_generation is not None and (
+                        session is None or session.generation != msg.session_generation
+                    ):
+                        skip_idle = True
+                        return
                     processing = True
-                    await self.sessions.state.read(session_key)
                     delivery = self.turn_delivery_factory.create(
                         msg,
                         session_key,
@@ -1721,6 +1782,7 @@ class AgentLoop:
 
     async def _aclose_unlocked(self) -> None:
         self._pending_queues.close_admission()
+        await self._pending_queues.join_edits()
         self._running = False
         errors: list[BaseException] = []
         active_task_groups = getattr(self, "_active_tasks", {})
@@ -2037,6 +2099,7 @@ class AgentLoop:
                 ctx.session = await self.sessions.state.get(ctx.session_key)
         session = ctx.session
         await ctx.delivery.bind_session_generation(session.generation)
+        ctx.input_persisted_early = msg.input_persisted
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools if ctx.tools is not None else self.tools
         if session.policy.disabled_tools:
@@ -2069,7 +2132,8 @@ class AgentLoop:
         if restore_runtime_checkpoint(session) and ctx.commit_session:
             await self.sessions.state.restore_interruption(session)
         if (
-            RECOVERY_INBOUND_METADATA_KEY not in msg.metadata
+            not msg.input_persisted
+            and RECOVERY_INBOUND_METADATA_KEY not in msg.metadata
             and restore_pending_interruption(session)
             and ctx.commit_session
         ):
@@ -2164,6 +2228,14 @@ class AgentLoop:
         ctx.history = await self.runner.prepare_prompt(
             session.get_history, extend_to_user=is_subagent,
         )
+        if ctx.msg.input_persisted:
+            # The admission owner wrote this user tail atomically with a history
+            # replacement. It is fresh input, not a second history occurrence.
+            expected_id = ctx.msg.metadata.get(INBOUND_META_TURN_ID)
+            if not session.messages or session.messages[-1].get(INBOUND_META_TURN_ID) != expected_id:
+                raise SessionConflictError("prepared input is no longer the session tail")
+            if ctx.history and ctx.history[-1].get("role") == "user":
+                ctx.history = ctx.history[:-1]
         stored_state = session.provider_state
         subagent_followup_persisted = False
         if is_subagent:

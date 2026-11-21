@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import weakref
 from collections import deque
 from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
@@ -46,6 +47,39 @@ class SessionInboxes(Mapping[str, SessionInbox]):
         self._active: dict[str, SessionInbox] = {}
         self._controls: dict[str, dict[asyncio.Event, tuple[asyncio.Task[object] | None, bool]]] = {}
         self._closed = False
+        self._admission_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        self._edits: dict[str, asyncio.Event] = {}
+
+    def admission_lock(self, key: str) -> asyncio.Lock:
+        lock = self._admission_locks.get(key)
+        if lock is None:
+            lock = self._admission_locks[key] = asyncio.Lock()
+        return lock
+
+    def idle(self, key: str) -> bool:
+        return key not in self and key not in self._controls
+
+    @contextmanager
+    def reserving_edit(self, key: str) -> Generator[SessionInbox]:
+        """Under admission_lock, install before yielding; hand off only a committed input."""
+        inbox = SessionInbox()
+        self.install(key, inbox)
+        finished = self._edits[key] = asyncio.Event()
+        try:
+            yield inbox
+        finally:
+            if inbox.empty():
+                self.detach(key, inbox)
+            del self._edits[key]
+            finished.set()
+
+    async def wait_for_edit(self, key: str) -> None:
+        if finished := self._edits.get(key):
+            await finished.wait()
+
+    async def join_edits(self) -> None:
+        if self._edits:
+            await asyncio.gather(*(finished.wait() for finished in self._edits.values()))
 
     def __getitem__(self, key: str) -> SessionInbox:
         return self._active[key]

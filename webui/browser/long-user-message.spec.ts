@@ -29,7 +29,7 @@ for (const theme of ["light", "dark"] as const) {
       const collapsedMetrics = await page.evaluate(() => {
         const scroller = document.querySelector<HTMLElement>("[data-testid='thread-message-region']")!;
         const longRow = document.querySelectorAll<HTMLElement>("[data-user-text-bubble]")[1]!;
-        const pill = longRow.querySelector<HTMLElement>(":scope > p")!;
+        const pill = longRow.querySelector<HTMLElement>(":scope > [data-user-message-body]")!;
         const clip = pill.querySelector<HTMLElement>("[data-user-message-clip]")!;
         const stackEl = longRow.querySelector<HTMLElement>("[data-user-message-stack]")!;
         const toggleEl = longRow.querySelector<HTMLElement>("[data-user-message-toggle]")!;
@@ -76,7 +76,7 @@ for (const theme of ["light", "dark"] as const) {
       }).toBeLessThan(2);
 
       const expandedMetrics = await longBubble.evaluate((el) => {
-        const pill = el.querySelector<HTMLElement>(":scope > p")!;
+        const pill = el.querySelector<HTMLElement>(":scope > [data-user-message-body]")!;
         const clip = pill.querySelector<HTMLElement>("[data-user-message-clip]")!;
         const toggleEl = el.querySelector<HTMLElement>("[data-user-message-toggle]")!;
         const clipRect = clip.getBoundingClientRect();
@@ -131,7 +131,7 @@ test("copies full user message text while collapsed and anchors scroll when coll
   // Scroll the expanded bubble's top above the viewport, then collapse from the bottom toggle.
   await page.evaluate(() => {
     const scroller = document.querySelector<HTMLElement>("[data-testid='thread-message-region']")!;
-    const pill = document.querySelector<HTMLElement>("[data-user-prompt-id='long-user'] [data-user-text-bubble] > p")!;
+    const pill = document.querySelector<HTMLElement>("[data-user-prompt-id='long-user'] [data-user-message-body]")!;
     const pillTop = scroller.scrollTop + (pill.getBoundingClientRect().top - scroller.getBoundingClientRect().top);
     scroller.scrollTop = pillTop + 260;
   });
@@ -141,8 +141,35 @@ test("copies full user message text while collapsed and anchors scroll when coll
 
   const topVisible = await page.evaluate(() => {
     const scroller = document.querySelector<HTMLElement>("[data-testid='thread-message-region']")!;
-    const pill = document.querySelector<HTMLElement>("[data-user-prompt-id='long-user'] [data-user-text-bubble] > p")!;
+    const pill = document.querySelector<HTMLElement>("[data-user-prompt-id='long-user'] [data-user-message-body]")!;
     return pill.getBoundingClientRect().top >= scroller.getBoundingClientRect().top;
   });
   expect(topVisible).toBe(true);
 });
+
+for (const width of [1280, 390]) {
+  test(`editing a collapsed prompt keeps the editor unclipped and restores keyboard navigation at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.route("**/webui-thread?**", (route) => route.fulfill({ json: {
+      schemaVersion: 1, projection: "events", events: [], source_revision: "fixture-revision",
+    } }));
+    await page.goto("/browser/fixture.html?case=long-user-message");
+    const row = page.locator('[data-user-prompt-id="long-user"]');
+    const bubble = row.locator("[data-user-text-bubble]");
+    await expect(bubble).toHaveAttribute("data-user-message-collapsed", "true");
+    const trigger = row.getByRole("button", { name: "Message actions" });
+    await trigger.focus();
+    await trigger.press("Enter");
+    await page.getByRole("button", { name: "Edit message" }).click();
+    const editor = bubble.getByRole("textbox", { name: "Edit message" });
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveValue(/Final line sentinel/);
+    await expect(bubble.getByRole("button", { name: "Resend" })).toBeEnabled();
+    await expect(bubble).not.toHaveAttribute("data-user-message-collapsed");
+    await editor.fill("unsubmitted replacement");
+    await editor.press("Escape");
+    await expect(bubble).toHaveAttribute("data-user-message-collapsed", "true");
+    await expect(bubble).toContainText("Final line sentinel");
+    await expect(trigger).toBeFocused();
+  });
+}
