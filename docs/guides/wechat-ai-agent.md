@@ -64,8 +64,6 @@ In the WebUI, follow any restart prompt and keep the launcher running for the fi
 
 For manual config changes, restart the existing gateway through its owning terminal, `nanobot gateway restart` for background mode, or its service/container supervisor. If none is running, start `nanobot gateway` and leave it running. Run diagnostic CLI commands in a separate terminal using the same installation and config.
 
-To turn off WeChat without deleting its settings, open **Apps → Channels** and turn off the switch beside **WeChat**. You can do this even if the login has expired.
-
 ## Test a message
 
 Send a private WeChat message to the bot. It should reply with a pairing code. Return to the WebUI pairing prompt and enter the code from your own private chat. Only a matching pending code is approved; do not enter another person's code. Then send your message again.
