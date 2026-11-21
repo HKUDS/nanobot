@@ -146,3 +146,30 @@ test("copies full user message text while collapsed and anchors scroll when coll
   });
   expect(topVisible).toBe(true);
 });
+
+for (const width of [1280, 390]) {
+  test(`editing a collapsed prompt keeps the editor unclipped and restores keyboard navigation at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.route("**/webui-thread?**", (route) => route.fulfill({ json: {
+      schemaVersion: 1, projection: "events", events: [], source_revision: "fixture-revision",
+    } }));
+    await page.goto("/browser/fixture.html?case=long-user-message");
+    const row = page.locator('[data-user-prompt-id="long-user"]');
+    const bubble = row.locator("[data-user-text-bubble]");
+    await expect(bubble).toHaveAttribute("data-user-message-collapsed", "true");
+    const trigger = row.getByRole("button", { name: "Message actions" });
+    await trigger.focus();
+    await trigger.press("Enter");
+    await page.getByRole("button", { name: "Edit message" }).click();
+    const editor = bubble.getByRole("textbox", { name: "Edit message" });
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveValue(/Final line sentinel/);
+    await expect(bubble.getByRole("button", { name: "Resend" })).toBeEnabled();
+    await expect(bubble).not.toHaveAttribute("data-user-message-collapsed");
+    await editor.fill("unsubmitted replacement");
+    await editor.press("Escape");
+    await expect(bubble).toHaveAttribute("data-user-message-collapsed", "true");
+    await expect(bubble).toContainText("Final line sentinel");
+    await expect(trigger).toBeFocused();
+  });
+}
