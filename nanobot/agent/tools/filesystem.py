@@ -119,11 +119,8 @@ class _WritableFsTool(_FsTool):
         return self._files.display_workspace
 
 
-_LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
-
-
 class _TextRange:
-    """Count splitlines and retain only the requested, displayable text."""
+    """Count LF-separated lines and retain only the requested, displayable text."""
 
     def __init__(self, offset: int, limit: int, max_chars: int):
         self.offset = offset
@@ -138,13 +135,12 @@ class _TextRange:
         self._stopped = False
         self._incomplete = False
         self._normalize_cr = False
-        self._pending_cr = False
 
     def feed(self, text: str) -> None:
         if not text:
             return
-        # The existing CRLF replacement runs before splitlines: for example,
-        # CR-CR-LF becomes CR-LF and therefore counts as one separator.
+        # Normalize CRLF to LF across chunk boundaries; for example, CR-CR-LF
+        # becomes CR-LF, and the remaining CR stays in the line.
         if self._normalize_cr:
             text = "\r" + text
         self._normalize_cr = text.endswith("\r")
@@ -155,15 +151,11 @@ class _TextRange:
     def _feed_normalized(self, text: str) -> None:
         if not text:
             return
-        if self._pending_cr and text.startswith("\n"):
-            text = text[1:]
-        self._pending_cr = False
-        if not text:
-            return
 
-        self._pending_cr = text.endswith("\r")
-        self._incomplete = text[-1] not in _LINE_BREAKS
-        parts = text.splitlines(keepends=True)
+        # Count LF only, like edit_file and rg; splitlines() also breaks on \f and U+2028.
+        self._incomplete = not text.endswith("\n")
+        parts = text.split("\n")
+        parts = [part + "\n" for part in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
         completed = len(parts) - int(self._incomplete)
 
         if not self._stopped:
@@ -173,7 +165,7 @@ class _TextRange:
                 line_no = self.total + i + 1
                 part = parts[i]
                 if i < completed:
-                    part = part[:-2] if part.endswith("\r\n") else part[:-1]
+                    part = part[:-1]
                 self._accept(part, line_no, complete=i < completed)
                 if self._stopped:
                     break
@@ -780,7 +772,7 @@ def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = 
                 start=start,
                 end=end,
                 text=content[start:end],
-                line=i + 1,
+                line=content.count("\n", 0, start) + 1,
             )
         )
     return matches
@@ -831,7 +823,8 @@ def _best_window(old_text: str, content: str) -> tuple[float, int, list[str], li
 
     actual_text = "".join(best_window_lines).replace("\r\n", "\n").rstrip("\n")
     hints = _diagnose_near_match(old_text.replace("\r\n", "\n").rstrip("\n"), actual_text)
-    return best_ratio, best_start, best_window_lines, hints
+    best_line = content.count("\n", 0, sum(len(line) for line in lines[:best_start])) + 1
+    return best_ratio, best_line, best_window_lines, hints
 
 
 @tool_parameters(
@@ -1063,13 +1056,13 @@ class EditFileTool(_WritableFsTool):
 
     @staticmethod
     def _not_found_msg(old_text: str, content: str, path: str) -> str:
-        best_ratio, best_start, best_window_lines, hints = _best_window(old_text, content)
+        best_ratio, best_line, best_window_lines, hints = _best_window(old_text, content)
         if best_ratio > 0.5:
             diff = "\n".join(difflib.unified_diff(
                 old_text.splitlines(keepends=True),
                 best_window_lines,
                 fromfile="old_text (provided)",
-                tofile=f"{path} (actual, line {best_start + 1})",
+                tofile=f"{path} (actual, line {best_line})",
                 lineterm="",
             ))
             hint_text = ""
@@ -1077,7 +1070,7 @@ class EditFileTool(_WritableFsTool):
                 hint_text = "\nPossible cause: " + ", ".join(hints) + "."
             return ToolResult.error(
                 f"Error: old_text not found in {path}."
-                f"{hint_text}\nBest match ({best_ratio:.0%} similar) at line {best_start + 1}:\n{diff}"
+                f"{hint_text}\nBest match ({best_ratio:.0%} similar) at line {best_line}:\n{diff}"
             )
 
         if hints:

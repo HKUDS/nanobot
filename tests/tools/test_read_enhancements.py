@@ -676,7 +676,7 @@ class TestBoundedTextReads:
             ("utf-32-be", codecs.BOM_UTF32_BE),
         ],
     )
-    async def test_chunked_text_matches_splitlines_and_normalization(
+    async def test_chunked_text_matches_lf_split_and_normalization(
         self, tmp_path, monkeypatch, encoding, bom, chunk_size,
     ):
         content = (
@@ -687,7 +687,7 @@ class TestBoundedTextReads:
         f.write_bytes(bom + content.encode(encoding))
         tool = ReadFileTool(workspace=tmp_path)
         monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", chunk_size)
-        lines = content.replace("\r\n", "\n").splitlines()
+        lines = content.replace("\r\n", "\n").removesuffix("\n").split("\n")
 
         for offset, limit in [(1, 3), (4, 4), (len(lines), 1)]:
             end = min(offset - 1 + limit, len(lines))
@@ -718,7 +718,7 @@ class TestBoundedTextReads:
 
         result = await tool.execute(path=str(text_file), limit=1)
 
-        assert result == "1| cafÃ©\n\n(Showing lines 1-1 of 3. Use offset=2 to continue.)"
+        assert result == "1| cafÃ©\n\n(Showing lines 1-1 of 2. Use offset=2 to continue.)"
         assert tool._file_states.get(text_file).content_hash == hashlib.sha256(raw).hexdigest()
 
         binary = tmp_path / "data.bin"
@@ -738,7 +738,7 @@ class TestBoundedTextReads:
 
         result = await tool.execute(path=str(f), limit=4)
 
-        assert result == "1| first\n2| aaaaaaaaa\n3| Ã©ÿ\n4| last\n\n(End of file — 4 lines total)"
+        assert result == "1| first\n2| aaaaaaaaa\rÃ©ÿ\n3| last\n\n(End of file — 3 lines total)"
         assert tool._file_states.get(f).content_hash == hashlib.sha256(raw).hexdigest()
 
     @pytest.mark.asyncio
