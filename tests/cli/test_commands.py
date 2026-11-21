@@ -2243,6 +2243,128 @@ def test_heartbeat_empty_response_is_not_evaluated(
     assert response is None
 
 
+@pytest.mark.parametrize("override", [None, "openai/gpt-4o-mini"])
+def test_heartbeat_configured_runtime(
+    monkeypatch, tmp_path: Path, override: str | None,
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.agents.defaults.dream.enabled = True
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    config.gateway.heartbeat.model_override = override
+    config.workspace_path.mkdir(parents=True)
+    (config.workspace_path / "HEARTBEAT.md").write_text(
+        "## Active Tasks\n\n- Check repository health\n",
+        encoding="utf-8",
+    )
+
+    provider = _fake_provider()
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    seen: dict[str, object] = {}
+
+    from nanobot.session.manager import SessionManager
+
+    class _FakeSessionManager:
+        safe_key = staticmethod(SessionManager.safe_key)
+
+        def __init__(self, _workspace: Path) -> None:
+            pass
+
+        @property
+        def state(self):
+            return SimpleNamespace(
+                list_sessions=AsyncMock(return_value=[{"key": "telegram:u1"}]),
+                read=AsyncMock(return_value=SimpleNamespace(generation=1)),
+                read_metadata=AsyncMock(return_value=None),
+            )
+
+        def list_sessions(self) -> list[dict[str, str]]:
+            return [{"key": "telegram:u1"}]
+
+        def read_session_metadata(self, _key):
+            return {"metadata": {"last_channel": "telegram:u1"}}
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+            seen["cron"] = self
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, _job: CronJob) -> None:
+            raise _StopGatewayError("stop")
+
+    class _FakeAgentLoop(_GatewayAgentContractStub):
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = "test-model"
+            self.provider = kwargs.get("provider", object())
+            self.sessions = kwargs["session_manager"]
+            self.runtime_resolver = MagicMock()
+            from nanobot.utils.llm_runtime import LLMRuntime
+
+            self.runtime_resolver.current.return_value = LLMRuntime.capture(
+                provider, "test-model", context_window_tokens=0
+            )
+            self.runtime_resolver.resolve_override.return_value = LLMRuntime.capture(
+                provider, "openai/gpt-4o-mini", context_window_tokens=0
+            )
+            self.tools = {}
+            seen["agent"] = self
+
+        async def process_direct(self, *_args, **_kwargs):
+            seen["run_kwargs"] = _kwargs
+            return SimpleNamespace(content="health result")
+
+        async def aclose(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeChannelManager:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.enabled_channels = ["telegram"]
+
+    async def _recorded_evaluator(*_args, **_kwargs) -> bool:
+        seen["eval_kwargs"] = _kwargs
+        return False
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        make_provider=lambda _config: provider,
+        message_bus=lambda: bus,
+        session_manager=_FakeSessionManager,
+        cron_service=_FakeCron,
+    )
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.read_webui_sidebar_state", lambda: {})
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.evaluate_response", _recorded_evaluator)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGatewayError)
+    cron = seen["cron"]
+    response = asyncio.run(cron.on_job(CronJob(id="heartbeat", name="heartbeat")))
+
+    assert response == "health result"
+    runtime = seen["run_kwargs"]["runtime"]
+    assert runtime.model == (override or "test-model")
+    assert seen["eval_kwargs"]["provider"] is runtime.provider
+    assert seen["eval_kwargs"]["model"] == runtime.model
+    assert seen["agent"].model == "test-model"
+
+
 @pytest.mark.parametrize("yes", [True, False])
 def test_webui_creates_config_and_enables_local_websocket_with_one_confirmation(
     monkeypatch,
