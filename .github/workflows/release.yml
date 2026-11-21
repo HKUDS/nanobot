@@ -1,0 +1,89 @@
+name: Create Tag and Release
+
+env:
+  GHCR_REGISTRY: "ghcr.io"
+  GHCR_IMAGE_NAME: ${{ github.repository }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (required, e.g. v0.2.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: "Create as draft"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  create-tag:
+    name: Create Git Tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Create and push tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
+          git push origin "$RELEASE_TAG"
+
+  release:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare image tags
+        id: tags
+        shell: bash
+        run: |
+          tag="$(echo "${{ inputs.tag }}" | tr '[:upper:]' '[:lower:]')"
+          image_name="$(echo "${{ env.GHCR_IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')"
+          echo "ghcr_tag=${{ env.GHCR_REGISTRY }}/${image_name}:${tag}" >> "$GITHUB_OUTPUT"
+          echo "ghcr_latest=${{ env.GHCR_REGISTRY }}/${image_name}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.tags.outputs.ghcr_tag }}
+            ${{ steps.tags.outputs.ghcr_latest }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
