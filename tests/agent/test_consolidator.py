@@ -289,6 +289,11 @@ class TestConsolidatorSummarize:
         assert checkpoint == "[RAW] 3 messages\n[?] USER: look\n[?] USER: [image]\n[?] USER: [image]\na caption"
         assert store.read_unprocessed_history(since_cursor=0)[0]["content"] == checkpoint
 
+    def test_format_messages_defaults_missing_role(self):
+        formatted = MemoryStore._format_messages([{"content": "hello"}])
+
+        assert formatted == "[?] UNKNOWN: hello"
+
     async def test_archive_uses_captured_generation(
         self, consolidator, mock_provider, runtime
     ):
