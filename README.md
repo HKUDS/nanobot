@@ -294,7 +294,7 @@ Browse the [documentation index](./docs/README.md) (or [nanobot.wiki](https://na
 
 ## Releases
 
-**Latest release: [v0.4.1](https://github.com/HKUDS/nanobot/releases/tag/v0.4.1)** — improves workspace permissions, sandboxed commands, connection recovery, file-context previews, and navigation. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.4.1), [Updating nanobot](./docs/updating.md), and the [release archive](./docs/release-archive.md).
+[Latest release](https://github.com/HKUDS/nanobot/releases/latest) · [Updating nanobot](./docs/updating.md) · [Release archive](./docs/release-archive.md)
 
 ## Open Source Partners
 
