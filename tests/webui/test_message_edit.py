@@ -87,6 +87,9 @@ async def test_edit_keeps_identity_prefix_and_one_new_input(editing, index):
     prepared = await read_source(host, index)
     result = await replace_webui_chat_input(host, payload(prepared))
     assert result == {"accepted": True, "turn_id": "new-edit"}
+    assert host.announce_webui_history_replacement.await_args.kwargs["retired_turn_ids"] == [
+        f"old-{i}" for i in range(index, 4)
+    ]
     after = await manager.state.read(KEY)
     assert after.key == before.key and after.created_at == before.created_at
     for name, value in old_metadata.items():

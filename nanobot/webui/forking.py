@@ -212,10 +212,7 @@ async def replace_webui_chat_input(
             raise HistoryEditError("edit_source_changed")
         if reason := ordinary_text_error(original):
             raise HistoryEditError(reason)
-        retired_turn_ids.extend(list(dict.fromkeys(
-            fact.turn_id for turn, offset, fact in history.navigation()
-            if (turn, offset) >= (ordinal, position) and fact.turn_id is not None
-        ))[-256:])
+        retired_turn_ids.extend(history.retired_turn_ids(ordinal, position))
         event = build_user_transcript_event(chat_id, text)
         assert event is not None
         gateway.transcripts.prepare_event(chat_id, event, metadata=message.metadata, phase="user")

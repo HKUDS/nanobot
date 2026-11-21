@@ -236,13 +236,8 @@ def transcript_edit_target(
     session_key: str, message_id: str, turn_id: str | None, *, history: HistoryReader,
 ) -> tuple[dict[str, Any], int, int, int] | None:
     """Resolve persisted input identity independently of the loaded page window."""
-    from nanobot.session.display_history import HistoryKind
-
-    count = 0
     matches: list[tuple[dict[str, Any], int, int, int]] = []
-    for ordinal, position, fact in history.navigation():
-        if fact.kind is not HistoryKind.INPUT:
-            continue
+    for count, (ordinal, position, fact) in enumerate(history.inputs()):
         row = {**record_from_fact(fact, session_key),
                WEBUI_REPLAY_IDENTITY_KEY: f"turn:{ordinal}:record:{position}"}
         event_id = projection_event_id(row)
@@ -250,7 +245,6 @@ def transcript_edit_target(
             if turn_id is not None and fact.turn_id != turn_id or message_id.startswith("history-") and event_id != message_id:
                 return None
             matches.append((row, count, ordinal, position))
-        count += 1
     return matches[0] if len(matches) == 1 else None
 
 
