@@ -411,6 +411,7 @@ nanobot channels login <channel_name> --force  # re-authenticate
 | `send_reasoning_delta(chat_id, delta, metadata?, *, stream_id?)` | Optional hook for streamed model reasoning/thinking content. Default is no-op. |
 | `send_reasoning_end(chat_id, metadata?, *, stream_id?)` | Optional hook marking the end of a reasoning block. Default is no-op. |
 | `send_reasoning(msg)` | Optional one-shot reasoning fallback. Default translates to `send_reasoning_delta()` + `send_reasoning_end()`. |
+| `send_retry_wait(msg)` | Optional hook for a provider backoff notice (`RetryWaitEvent`). Default is no-op, so it is not posted as a chat message. Independent of `sendProgress`. |
 
 ### Optional management contract
 
@@ -727,6 +728,15 @@ Recommended rendering:
 - Render tool hints and progress as trace/status UI, not as normal assistant replies.
 - Render reasoning with lower visual emphasis and collapse it after completion when the platform supports that.
 - Keep reasoning separate from final answer text. A final answer still arrives through `send()` or `send_delta()`.
+
+### Provider retry waits
+
+When a model request fails and backs off, the runtime publishes `RetryWaitEvent` (for example, "Model request failed, retry in 2s (attempt 1)."). `ChannelManager` delivers that outbound message to `send_retry_wait(msg)` and does not call `send()`. The base method does nothing, including when `sendProgress` is on, so a channel posts a notice only by overriding the hook. Use a temporary status — an edited message or an ephemeral activity — rather than a permanent chat line.
+
+```python
+async def send_retry_wait(self, msg: OutboundMessage) -> None:
+    await self._show_status(msg.chat_id, msg.content)
+```
 
 ## Config
 
