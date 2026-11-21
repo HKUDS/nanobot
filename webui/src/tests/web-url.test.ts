@@ -22,9 +22,16 @@ describe("activity web URLs", () => {
     "http://172.16.0.1",
     "http://192.168.1.1",
     "http://[::1]",
+    "http://[fc00::1]",
+    "http://[fd00::1]",
+    "http://[fe80::1]",
     "http://[::ffff:127.0.0.1]",
   ])("rejects private target %s", (value) => {
     expect(parseSafeActivityHttpUrl(value)).toBeNull();
+  });
+
+  it.each(["fda.gov", "fca.org.uk"])("keeps public host %s", (host) => {
+    expect(parseSafeActivityHttpUrl(`https://${host}/docs`)?.href).toBe(`https://${host}/docs`);
   });
 
   it("normalizes credential-bearing public URLs for safe activity display", () => {
