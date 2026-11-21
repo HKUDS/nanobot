@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, TypeGuard, cast
 
@@ -123,6 +124,7 @@ class MyTool(Tool):
     def description(self) -> str:
         base = (
             "Inspect runtime state with check: omit key for an overview or use a dot-path. "
+            "Check model_presets for the configured models and their usage descriptions. "
             "set changes runtime parameters or stores scratchpad keys across turns, not restarts. "
             "Use model_preset for session model/context switching; direct model and "
             "context_window_tokens writes are disabled during active sessions. "
@@ -274,6 +276,8 @@ class MyTool(Tool):
             if found:
                 return self._format_value(value, key)
         snapshot = self._runtime_control.snapshot()
+        if key == "model_presets":
+            return f"model_presets: {json.dumps(snapshot.model_presets, ensure_ascii=False, indent=2)}"
         top = key.split(".")[0]
         if top in self._DENIED_ATTRS or top.startswith("__"):
             return ToolResult.error(f"Error: '{top}' is not accessible")

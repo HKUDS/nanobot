@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -62,6 +62,28 @@ describe("ModelPresetBadge setup tooltip", () => {
 });
 
 describe("ModelPresetBadge selected preset tooltip", () => {
+  it.each([true, false])("shows usage notes as secondary text without replacing preset names or model details (hero: %s)", async (isHero) => {
+    const onPresetChange = vi.fn();
+    render(<ModelPresetBadge label="zhipu" modelPreset="zhipu"
+      modelPresets={[
+        { ...presets[0], description: "Long drafts & careful review" },
+        { ...presets[1], description: "" },
+      ]} onPresetChange={onPresetChange} isHero={isHero} />);
+    const trigger = screen.getByRole("button", { name: "zhipu" });
+    expect(trigger).not.toHaveTextContent("Long drafts & careful review");
+    fireEvent.click(trigger);
+    const selected = await screen.findByRole("option", { name: "zhipu" });
+    expect(selected).toHaveAccessibleDescription("Long drafts & careful review");
+    expect(within(selected).getByText("Long drafts & careful review")).toHaveClass("text-muted-foreground");
+    expect(selected).toHaveTextContent("glm-5");
+    const other = screen.getByRole("option", { name: "codex" });
+    expect(other).toHaveTextContent("gpt-5.5");
+    expect(other).not.toHaveAttribute("aria-describedby");
+    fireEvent.click(other);
+    expect(onPresetChange).toHaveBeenCalledTimes(1);
+    expect(onPresetChange).toHaveBeenCalledWith("codex");
+  });
+
   it.each([true, false])("keeps the single-preset menu and management reachable (hero: %s)", async (isHero) => {
     const user = userEvent.setup();
     const onPresetChange = vi.fn();
