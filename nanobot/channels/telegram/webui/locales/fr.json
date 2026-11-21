@@ -86,6 +86,11 @@
       },
       "webhookMaxConnections": {
         "label": "Limite de connexions Webhook"
+      },
+      "apiBase": {
+        "label": "URL de base de l'API Bot",
+        "placeholder": "https://my-bot-api.example.com",
+        "help": "Facultatif. Pointez vers un serveur Bot API auto-hébergé ou une passerelle au lieu d'api.telegram.org."
       }
     }
   }
