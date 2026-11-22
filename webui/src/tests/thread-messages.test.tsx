@@ -49,7 +49,7 @@ describe("ThreadMessages", () => {
     ]} />);
     const link = await screen.findByRole("link", { name: "Website" });
     expect(fireEvent.contextMenu(within(link).getByText("Website"))).toBe(true);
-    link.focus();
+    act(() => link.focus());
     expect(fireEvent.keyDown(link, { key: "F10", shiftKey: true })).toBe(true);
     expect(link).toHaveFocus();
     expect(link).toHaveAttribute("href", "https://example.com/?q=one#two");

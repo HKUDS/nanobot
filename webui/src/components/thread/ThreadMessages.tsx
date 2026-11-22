@@ -451,7 +451,7 @@ function MessageBlockMenu({
           </button>
         </DialogTrigger>
         <DialogContent placement="bottom" aria-describedby={undefined}
-          data-message-block-menu data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
+          data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
           className="gap-2 p-4 pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] outline-none"
           onCloseAutoFocus={(event) => { if (activity?.expanded) event.preventDefault(); }}>
           <DialogTitle className="px-2 pb-2 text-sm font-medium text-muted-foreground">{label}</DialogTitle>
@@ -530,9 +530,6 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
     observer.observe(element);
     return () => observer.disconnect();
   }, [deferOffscreenRender, interacted]);
-  const onForkFromHere = useCallback(() => {
-    if (forkIndex !== undefined) onForkFromMessage?.(forkIndex);
-  }, [forkIndex, onForkFromMessage]);
   const onBlockActivityExpandedChange = useCallback((expanded: boolean) => {
     if (contextBlockKey !== undefined) {
       onActivityExpandedChange(contextBlockKey, expanded);
@@ -575,7 +572,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
       contextBlockKey={contextBlockKey}
       open={contextBlockMenuOpen}
       onOpenChange={(open) => onContextBlockMenuOpenChange(contextBlockKey, open)}
-      onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
+      onForkFromHere={onForkFromMessage && forkIndex !== undefined ? () => onForkFromMessage(forkIndex) : undefined}
       activity={activityLabel ? {
         label: activityLabel,
         expanded: blockActivityExpanded,
@@ -602,7 +599,6 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         data-user-prompt-id={userPromptId}
         data-message-context-block={contextBlockKey}
         data-context-block-active={contextBlockActive || undefined}
-        data-message-context-menu-open={contextBlockMenuOpen || undefined}
         onPointerEnter={(event) => {
           if (event.pointerType === "touch") return;
           onContextBlockActiveChange(contextBlockKey ?? null);

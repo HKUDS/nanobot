@@ -29,7 +29,6 @@ describe("desktop hover timestamp", () => {
     fireEvent.click(button);
     const details = await screen.findByRole("dialog");
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    expect(details).not.toHaveAttribute("data-message-block-menu");
     expect(within(details).getByRole("time")).toHaveAttribute("datetime", new Date(completedAt).toISOString());
   });
 

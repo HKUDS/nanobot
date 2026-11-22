@@ -1026,13 +1026,9 @@
   }
 }
 
-.thread-message-row,
-[data-message-block-menu] {
+.thread-message-row {
   --message-block-control-size: 1.75rem;
   --message-block-action-width: 1.75rem;
-}
-
-.thread-message-row {
   --message-column-margin: calc((100% - var(--content-column-width)) / 2);
   padding-left: max(calc(3 * var(--message-block-action-width) + 0.75rem), var(--message-column-margin));
   padding-right: max(3rem, var(--message-column-margin));
@@ -1186,8 +1182,7 @@
     font-size: max(16px, 1rem);
   }
 
-  .thread-message-row,
-  [data-message-block-menu] {
+  .thread-message-row {
     --message-block-control-size: 2.75rem;
     --message-block-action-width: 2rem;
   }

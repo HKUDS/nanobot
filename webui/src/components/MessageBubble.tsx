@@ -130,7 +130,6 @@ export function MessageCopyButton({ message, className }: { message: UIMessage; 
   const { copied, label, onCopy } = useMessageCopy(content);
   if (!content.trim()) return null;
   return <HoverHint content={label} side="top" align="center"><button type="button" data-message-block-copy-action
-    data-assistant-copy-action={message.role === "assistant" || undefined}
     onClick={onCopy} aria-label={label}
     className={cn(
       "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
@@ -236,12 +235,12 @@ export function MessageBlockMenuActions({
     </button>
   );
   return (
-    <div data-message-block-menu-actions className={sheet ? "flex w-full flex-col gap-1" : "flex flex-col items-start"}>
-      <div data-message-block-toolbar className={cn("flex", sheet && "flex-col items-stretch gap-1")}>
+    <div className={sheet ? "flex w-full flex-col gap-1" : "flex flex-col items-start"}>
+      <div className={cn("flex", sheet && "flex-col items-stretch gap-1")}>
         {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
         {showFork ? (
           <HoverHint content={t("message.forkFromHere")}>
-            <button type="button" data-message-block-fork-action data-assistant-fork-action onClick={onForkFromHere}
+            <button type="button" onClick={onForkFromHere}
               aria-label={t("message.forkFromHere")}
               className={cn("inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 sheet && "w-full justify-start gap-2 px-2 text-sm")}>

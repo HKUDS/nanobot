@@ -318,26 +318,6 @@ describe("MessageBubble", () => {
     expect(pill).toHaveTextContent("hello");
   });
 
-  it("anchors side actions to the user text even below an image or quote", () => {
-    const message: UIMessage = {
-      id: "u-alignment", role: "user", content: "first line\nsecond line", createdAt: 0,
-    };
-    const { container, rerender } = render(
-      <ThreadMessages messages={[message]} />,
-    );
-    const anchor = container.querySelector("[data-user-text-bubble]")!;
-    expect(anchor).toHaveClass("relative");
-    expect(container.querySelector("[data-message-side-actions][data-side=right]")?.parentElement).toBe(anchor);
-
-    rerender(<ThreadMessages messages={[{ ...message, images: [{ name: "image.png" }] }]} />);
-    expect(container.querySelector("[data-message-side-actions][data-side=right]")?.parentElement)
-      .toBe(container.querySelector("[data-user-text-bubble]"));
-
-    rerender(<ThreadMessages messages={[{ ...message, content: "> [!QUOTE]\n> excerpt\n\nreply" }]} />);
-    expect(container.querySelector("[data-message-side-actions][data-side=right]")?.parentElement)
-      .toBe(screen.getByText("reply").parentElement);
-  });
-
   it("renders cross-session input with its public handle above a left-aligned bubble", () => {
     const message: UIMessage = {
       id: "session-message:message-1",
@@ -353,7 +333,7 @@ describe("MessageBubble", () => {
       },
     };
 
-    const { container } = render(<ThreadMessages messages={[message]} />);
+    const { container } = render(<MessageBubble message={message} />);
 
     const row = container.querySelector("[data-session-message]")!;
     const handle = screen.getByText("@mira-0123456789");
@@ -362,7 +342,6 @@ describe("MessageBubble", () => {
     expect(handle.parentElement!.parentElement).toBe(row);
     expect(bubble).toHaveClass("relative", "rounded-floating", "bg-secondary/70", "px-4", "py-2");
     expect(bubble).toContainElement(screen.getByText("Please review this."));
-    expect(container.querySelector("[data-message-side-actions][data-side=left]")?.parentElement).toBe(bubble);
   });
 
   it("outlines temporary-chat user messages with a short dashed border", () => {

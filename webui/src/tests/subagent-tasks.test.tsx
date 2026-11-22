@@ -580,6 +580,7 @@ describe("session-owned task UI", () => {
     emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "Bounded task summary" }));
     expect(await within(detail).findByRole("heading", { name: "Findings" })).toBeVisible();
     expect(within(detail).getByRole("table")).toHaveTextContent("ConfigurationPassed");
+    expect(within(detail).queryByRole("button", { name: "New chat from here" })).not.toBeInTheDocument();
     expect(within(detail).getByText("Inspect configuration in the child session")).toBeVisible();
     // Opening and reading details never mutates execution; a fresh view reads the same saved child.
     expect(requestMutation).not.toHaveBeenCalled();
