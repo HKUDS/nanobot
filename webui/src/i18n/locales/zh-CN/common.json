@@ -2523,11 +2523,11 @@
       "edit_session_busy": "会话执行中，请结束后再编辑。",
       "edit_source_changed": "原消息已不可用。你可以先复制草稿，再取消编辑。",
       "edit_special_message": "无法编辑自动化或跨会话发来的消息。",
-      "edit_attachments_unsupported": "暂不支持编辑带附件的消息。",
+      "edit_attachments_unavailable": "原消息的附件不可用。你可以先复制草稿，再取消编辑。",
       "edit_mentions_unsupported": "暂不支持编辑会话、App 或 MCP 提及。",
       "edit_context_unsupported": "暂不支持编辑带引用上下文的消息。",
       "edit_commands_unsupported": "此处不支持编辑或重发命令。",
-      "edit_plain_text_only": "仅支持编辑已发送成功的文字消息。",
+      "edit_plain_text_only": "仅可编辑已发送且含正文或附件的消息。",
       "edit_invalid_request": "编辑位置无效，请取消后重新打开消息。",
       "edit_request_conflict": "此编辑已用其他内容提交。要再次编辑，请取消后重新打开消息。",
       "edit_text_too_large": "编辑内容超过消息文本限制。"

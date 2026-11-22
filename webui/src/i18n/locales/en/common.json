@@ -2523,11 +2523,11 @@
       "edit_session_busy": "Wait for this conversation to finish before editing.",
       "edit_source_changed": "The original message is no longer available. You can copy your draft before canceling.",
       "edit_special_message": "Messages from automations or other topics cannot be edited.",
-      "edit_attachments_unsupported": "Editing messages with attachments is not supported yet.",
+      "edit_attachments_unavailable": "An original attachment is unavailable. You can copy your draft before canceling.",
       "edit_mentions_unsupported": "Editing session, App or MCP mentions is not supported yet.",
       "edit_context_unsupported": "Editing messages with quoted context is not supported yet.",
       "edit_commands_unsupported": "Commands cannot be edited or resent here.",
-      "edit_plain_text_only": "Only sent text messages can be edited.",
+      "edit_plain_text_only": "Only sent messages with text or attachments can be edited.",
       "edit_invalid_request": "The edit position is invalid. Cancel and reopen the message.",
       "edit_request_conflict": "This edit was already submitted with different text. Cancel and reopen the message to edit it again.",
       "edit_text_too_large": "The edited message exceeds the text limit."

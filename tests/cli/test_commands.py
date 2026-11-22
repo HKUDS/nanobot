@@ -111,8 +111,7 @@ class _GatewayAgentContractStub:
     async def discard_session(self, _session_key: str) -> None:
         pass
 
-    async def fork_in_place(self, *_args: object) -> None:
-        pass
+    session_inputs = MagicMock()
 
     @staticmethod
     def mcp_runtime_status() -> dict[str, str]:
@@ -3556,7 +3555,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     kwargs = seen["local_trigger_queue_kwargs"]
     assert seen["webui_subagent_manager"] is agent.subagents
     assert seen["webui_discard_session"] == agent.discard_session
-    assert seen["webui_fork_in_place"] == agent.fork_in_place
+    assert seen["webui_fork_in_place"] == agent.session_inputs.fork_in_place
     assert isinstance(agent_kwargs["provider"].provider, UnconfiguredProvider) is bool(setup_error)
     refreshed_snapshot = agent_kwargs["provider_snapshot_loader"]()
     assert not isinstance(refreshed_snapshot.provider, UnconfiguredProvider)

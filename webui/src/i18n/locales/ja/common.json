@@ -2134,11 +2134,11 @@
       "edit_session_busy": "この会話の処理が完了してから編集してください。",
       "edit_source_changed": "元のメッセージは利用できなくなりました。キャンセルする前に下書きをコピーできます。",
       "edit_special_message": "自動化や他のトピックから送られたメッセージは編集できません。",
-      "edit_attachments_unsupported": "添付ファイル付きのメッセージはまだ編集できません。",
+      "edit_attachments_unavailable": "元のメッセージの添付ファイルを利用できません。キャンセルする前に下書きをコピーできます。",
       "edit_mentions_unsupported": "会話、App、MCP のメンション付きメッセージはまだ編集できません。",
       "edit_context_unsupported": "引用付きのメッセージはまだ編集できません。",
       "edit_commands_unsupported": "ここではコマンドを編集または再送信できません。",
-      "edit_plain_text_only": "送信済みのテキストメッセージのみ編集できます。",
+      "edit_plain_text_only": "本文または添付ファイルがある送信済みのメッセージのみ編集できます。",
       "edit_invalid_request": "編集位置が無効です。キャンセルしてメッセージを開き直してください。",
       "edit_request_conflict": "この編集は別の内容で送信済みです。もう一度編集するには、キャンセルしてメッセージを開き直してください。",
       "edit_text_too_large": "編集したメッセージが文字数制限を超えています。"

@@ -2134,11 +2134,11 @@
       "edit_session_busy": "Hãy đợi cuộc trò chuyện này chạy xong trước khi chỉnh sửa.",
       "edit_source_changed": "Tin nhắn gốc không còn khả dụng. Bạn có thể sao chép bản nháp trước khi hủy.",
       "edit_special_message": "Không thể chỉnh sửa tin nhắn từ tự động hóa hoặc cuộc trò chuyện khác.",
-      "edit_attachments_unsupported": "Chưa hỗ trợ chỉnh sửa tin nhắn có tệp đính kèm.",
+      "edit_attachments_unavailable": "Tệp đính kèm của tin nhắn gốc không còn khả dụng. Bạn có thể sao chép bản nháp trước khi hủy.",
       "edit_mentions_unsupported": "Chưa hỗ trợ chỉnh sửa lượt nhắc đến cuộc trò chuyện, App hoặc MCP.",
       "edit_context_unsupported": "Chưa hỗ trợ chỉnh sửa tin nhắn có nội dung trích dẫn.",
       "edit_commands_unsupported": "Không thể chỉnh sửa hoặc gửi lại lệnh tại đây.",
-      "edit_plain_text_only": "Chỉ có thể chỉnh sửa tin nhắn văn bản đã gửi thành công.",
+      "edit_plain_text_only": "Chỉ có thể chỉnh sửa tin nhắn đã gửi có văn bản hoặc tệp đính kèm.",
       "edit_invalid_request": "Vị trí chỉnh sửa không hợp lệ. Hãy hủy và mở lại tin nhắn.",
       "edit_request_conflict": "Bản chỉnh sửa này đã được gửi với nội dung khác. Hãy hủy và mở lại tin nhắn để chỉnh sửa lần nữa.",
       "edit_text_too_large": "Tin nhắn đã chỉnh sửa vượt quá giới hạn văn bản."

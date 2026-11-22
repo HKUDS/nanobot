@@ -13,7 +13,9 @@ from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.runtime_context import public_history_message
 from nanobot.session.display_history import HistoryFact, HistoryKind
 from nanobot.session.manager import SessionManager
+from nanobot.session.recovery import pending_followups
 from nanobot.session.state import ForkError
+from nanobot.webui.recovery import RecoveryCoordinator
 
 SOURCE_ID = "user:old-1"
 
@@ -63,8 +65,8 @@ async def test_concurrent_fork_retry_runs_once_with_only_the_retained_context(lo
     msg = replacement()
     accepted = AsyncMock()
     await asyncio.gather(
-        loop.fork_in_place(msg, SOURCE_ID, locate, accepted),
-        loop.fork_in_place(replacement(), SOURCE_ID, locate, accepted),
+        loop.session_inputs.fork_in_place(msg, SOURCE_ID, locate, accepted),
+        loop.session_inputs.fork_in_place(replacement(), SOURCE_ID, locate, accepted),
     )
     await drain(loop)
     accepted.assert_awaited_once()
@@ -84,7 +86,7 @@ async def test_execution_lane_busy_is_checked_at_admission(loop):
     msg = replacement()
     async with loop._get_session_lock(msg.session_key):
         with pytest.raises(ForkError) as exc:
-            await loop.fork_in_place(msg, SOURCE_ID, locate, AsyncMock())
+            await loop.session_inputs.fork_in_place(msg, SOURCE_ID, locate, AsyncMock())
     assert exc.value.code == "edit_session_busy"
     loop.provider.chat_stream_with_retry.assert_not_awaited()
 
@@ -98,7 +100,7 @@ async def test_cancelling_admission_observer_still_executes_an_accepted_input(lo
         assert release.wait(5)
         return locate(session, history)
 
-    task = asyncio.create_task(loop.fork_in_place(msg, SOURCE_ID, blocked_locator, AsyncMock()))
+    task = asyncio.create_task(loop.session_inputs.fork_in_place(msg, SOURCE_ID, blocked_locator, AsyncMock()))
     assert await asyncio.to_thread(started.wait, 5)
     task.cancel()
     release.set()
@@ -109,8 +111,12 @@ async def test_cancelling_admission_observer_still_executes_an_accepted_input(lo
     assert (await loop.sessions.state.read(msg.session_key)).messages[-1]["content"] == "new answer"
 
 
-async def test_shutdown_joins_committed_fork_before_worker_snapshot(loop, tmp_path):
+async def test_shutdown_joins_committed_input_and_restart_replays_its_attachment(loop, tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    image = tmp_path / "original.gif"
+    image.write_bytes(b"GIF89a" + bytes(16))
     msg = replacement()
+    msg.media = [str(image)]
     committed, release = asyncio.Event(), asyncio.Event()
 
     async def announce(_session):
@@ -118,7 +124,7 @@ async def test_shutdown_joins_committed_fork_before_worker_snapshot(loop, tmp_pa
         await release.wait()
 
     loop.preserve_inflight_turns_on_shutdown()
-    fork = asyncio.create_task(loop.fork_in_place(msg, SOURCE_ID, locate, announce))
+    fork = asyncio.create_task(loop.session_inputs.fork_in_place(msg, SOURCE_ID, locate, announce))
     async with asyncio.timeout(5):
         await committed.wait()
         closing = asyncio.create_task(loop.aclose())
@@ -130,10 +136,30 @@ async def test_shutdown_joins_committed_fork_before_worker_snapshot(loop, tmp_pa
         await asyncio.gather(fork, closing)
     assert not loop._active_tasks and not loop._pending_queues
     reopened = SessionManager(loop.workspace, sessions_root=tmp_path / "sessions")
-    saved = reopened.read_session_snapshot(msg.session_key)
-    assert saved is not None
-    assert saved.metadata["pending_user_turn"]
-    assert saved.messages[-1]["content"] == msg.content
+    bus = MessageBus()
+    recovery = RecoveryCoordinator(reopened, bus)
+    restarted = AgentLoop(bus=bus, provider=loop.provider, model="test-model", workspace=loop.workspace,
+                          session_manager=reopened, recovery_admission=recovery)
+    try:
+        await recovery.scan()
+        replay = await asyncio.wait_for(bus.consume_inbound(), 5)
+        assert (replay.content, replay.media, replay.timestamp) == (msg.content, msg.media, msg.timestamp)
+        await restarted._enqueue_session_message(replay)
+        await drain(restarted)
+        restarted.provider.chat_stream_with_retry.assert_awaited_once()
+        prompt = restarted.provider.chat_stream_with_retry.await_args.kwargs["messages"]
+        users = [row["content"] for row in prompt if row["role"] == "user"]
+        assert len(users) == 2 and "question-0" in users[0]
+        image_block, caption, *_ = users[1]
+        assert image_block["image_url"]["url"].startswith("data:image/gif;base64,")
+        assert caption == {"type": "text", "text": msg.content}
+        saved = await reopened.state.read(msg.session_key)
+        assert [row["role"] for row in saved.messages] == ["user", "assistant", "user", "assistant"]
+        assert saved.messages[2]["content"][0]["type"] == "image_attachment"
+        assert saved.messages[-1]["content"] == "new answer"
+        assert not pending_followups(saved)
+    finally:
+        await restarted.aclose()
 
 
 async def test_followup_gets_a_worker_when_the_reserved_fork_is_rejected(loop):
@@ -145,7 +171,7 @@ async def test_followup_gets_a_worker_when_the_reserved_fork_is_rejected(loop):
         assert release.wait(5)
         raise ForkError("edit_source_changed")
 
-    fork = asyncio.create_task(loop.fork_in_place(msg, SOURCE_ID, reject_stale_source, AsyncMock()))
+    fork = asyncio.create_task(loop.session_inputs.fork_in_place(msg, SOURCE_ID, reject_stale_source, AsyncMock()))
     followup = InboundMessage(
         channel="websocket", sender_id="webui", chat_id="editing", content="ordinary follow-up",
         metadata={"webui": True, "webui_turn_id": "ordinary-turn", "_wants_stream": True},
@@ -202,7 +228,7 @@ async def test_discarded_turn_child_result_cannot_enter_the_replacement_prompt(l
         )):
             await SubagentTool(loop.subagents).execute(action="create", task="task from discarded turn")
         await asyncio.wait_for(child_started.wait(), 5)
-        await loop.fork_in_place(replacement(), SOURCE_ID, locate, AsyncMock())
+        await loop.session_inputs.fork_in_place(replacement(), SOURCE_ID, locate, AsyncMock())
         await asyncio.wait_for(main_started.wait(), 5)
         if arrival == "after_reply":
             # The replacement must not join children owned by the discarded turn.

@@ -425,13 +425,13 @@ export function MessageBubble({
     const hasMedia = media.length > 0;
     const parsedMessage = parseQuotedUserMessage(message.content);
     const userContent = parsedMessage.content;
-    const hasText = userContent.trim().length > 0;
+    const showTextBubble = !!editor || userContent.trim().length > 0;
     const isSending = message.deliveryStatus === "sending";
     const isFailed = message.deliveryStatus === "failed";
     const processingStatus = message.processingStatus;
     const showProcessingStatus = !temporary && processingStatus === "pending";
-    const mediaEdgeState: PendingEdgeState = !hasText ? edgeState : "solid";
-    const mediaSealEnd = !hasText ? completeSeal : undefined;
+    const mediaEdgeState: PendingEdgeState = showTextBubble ? "solid" : edgeState;
+    const mediaSealEnd = showTextBubble ? undefined : completeSeal;
     const userMedia = hasImages
       ? <ImageGallery images={images} align="right" size="compact" edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
       : hasMedia
@@ -477,10 +477,10 @@ export function MessageBubble({
     );
     return (
       <div className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5">
-        {!hasText ? contextMenu : null}
-        {!hasText ? sendingIndicator : null}
+        {!showTextBubble ? contextMenu : null}
+        {!showTextBubble ? sendingIndicator : null}
         {userMedia ? (
-          !hasText ? (
+          !showTextBubble ? (
             <div className={cn("transition-opacity duration-200 ease-out motion-reduce:transition-none", isSending && "opacity-65")}>
               {userMedia}
             </div>
@@ -492,7 +492,7 @@ export function MessageBubble({
             label={t("thread.composer.quotedContext")}
           />
         ) : null}
-        {hasText ? (
+        {showTextBubble ? (
           <UserTextBubble
             messageId={message.id}
             textEditor={editor?.input}

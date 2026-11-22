@@ -45,7 +45,6 @@ from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import (
     INBOUND_META_MODEL_OPTIONS,
     INBOUND_META_RUNTIME_CONTROL,
-    INBOUND_META_TURN_ID,
     INBOUND_META_USER_SHELL,
     RUNTIME_CONTROL_SESSION_DISCARD,
     InboundMessage,
@@ -107,7 +106,7 @@ from nanobot.session.recovery import (
     restore_runtime_checkpoint,
 )
 from nanobot.session.sqlite_store import SessionConflictError
-from nanobot.session.state import ForkLocator, SessionOperationQueueFullError
+from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.session.summary import (
     SessionSummary,
     SessionSummaryCheckpoint,
@@ -218,6 +217,10 @@ class AgentLoop:
     4. Executes tool calls
     5. Sends responses back
     """
+
+    @property
+    def session_inputs(self) -> SessionInboxes:
+        return self._pending_queues
 
     @property
     def tool_names(self) -> list[str]:
@@ -367,7 +370,10 @@ class AgentLoop:
         # A queue is installed before its single session worker is scheduled.
         # It remains the only admission path until that worker atomically
         # observes the queue empty and removes it.
-        self._pending_queues = SessionInboxes()
+        self._pending_queues = SessionInboxes(
+            bus.admission, self.sessions.state, self._get_session_lock, self._start_session_worker,
+            self._prepare_followup, self._invalidate_session,
+        )
         self._preserve_inflight_turns_on_shutdown = False
         self._cron_turns = CronTurnCoordinator(enqueue=self._enqueue_session_message)
         self._local_trigger_turns = LocalTriggerTurnCoordinator(enqueue=self._enqueue_session_message)
@@ -681,10 +687,7 @@ class AgentLoop:
                 session.metadata.update(SessionModelPreset(
                     selection.base_preset, ModelOptions.parse(msg.metadata[INBOUND_META_MODEL_OPTIONS]),
                 ).metadata_update())
-            if msg.input_persisted:
-                session.messages[-1] = {**session.messages[-1], **extra, "content": content}
-            else:
-                session.add_message("user", content, **extra)
+            session.add_message("user", content, **extra)
             self._mark_pending_user_turn(session)
             followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
             if isinstance(followup_id, str) and followup_id:
@@ -866,8 +869,7 @@ class AgentLoop:
         return sum(1 for task in tasks if not task.done() and not task.cancelling() and task.cancel())
 
     async def _cancel_active_tasks(self, key: str) -> int:
-        with self._pending_queues.controlling(key):
-            await self._pending_queues.wait_for_controls(key, kind="fork")
+        async with self._pending_queues.controlling(key):
             return await self._cancel_session_work(key)
 
     async def _cancel_session_work(self, key: str) -> int:
@@ -911,13 +913,17 @@ class AgentLoop:
 
     async def discard_session(self, key: str) -> None:
         """Stop active work for *key* and forget its cached session."""
-        with self.bus.admission.activity(), self._pending_queues.controlling(key, "discard"):
-            try:
-                await self._pending_queues.wait_for_controls(key, kind="fork")
-                await self.sessions.state.discard(key)
-                await self._cancel_session_work(key)
-            finally:
-                self.discard_session_file_state(key)
+        with self.bus.admission.activity():
+            async with self._pending_queues.controlling(key, discard=True):
+                try:
+                    await self.sessions.state.discard(key)
+                    await self._cancel_session_work(key)
+                finally:
+                    self.discard_session_file_state(key)
+
+    def _invalidate_session(self, key: str) -> None:
+        self.auto_compact.discard_summary(key)
+        self.discard_session_file_state(key)
 
     def discard_session_file_state(self, key: str) -> None:
         """Forget ephemeral file-read state for a reset or removed session."""
@@ -1408,14 +1414,13 @@ class AgentLoop:
         """
         self._preserve_inflight_turns_on_shutdown = True
 
-    async def _journal_pending_message(
-        self,
-        session_key: str,
-        msg: InboundMessage,
-    ) -> InboundMessage:
+    async def _prepare_followup(self, inbox: SessionInbox, msg: InboundMessage) -> InboundMessage | None:
+        if any(coordinator.should_defer(msg) for coordinator in self._automation_turn_coordinators):
+            inbox.defer(msg)
+            return None
         if not self._can_inject_message(msg):
             return msg
-        followup_id = await self.sessions.state.queue_followup(session_key, msg)
+        followup_id = await self.sessions.state.queue_followup(msg.session_key, msg)
         if followup_id is None:
             return msg
         pending_msg = dataclasses.replace(
@@ -1427,70 +1432,9 @@ class AgentLoop:
         )
         return pending_msg
 
-    async def fork_in_place(
-        self, message: InboundMessage, source_id: str, locate: ForkLocator,
-        accepted: Callable[[Session], Awaitable[None]],
-    ) -> None:
-        """Hand the committed fork input to a worker, even if the caller disconnects."""
-        key = message.session_key
-        inboxes = self._pending_queues
-
-        async def admit() -> None:
-            async with inboxes.admission_lock(key):
-                self.bus.admission.check()
-                inboxes.check_admission()
-                lock = self._get_session_lock(key)
-                if not inboxes.idle(key) or lock.locked():
-                    # A busy session may acknowledge a retry but cannot start a fork.
-                    await self.sessions.state.fork_in_place(key, source_id, message, None)
-                    return
-                async with lock:
-                    with inboxes.reserving_fork(key) as inbox:
-                        session = await self.sessions.state.fork_in_place(key, source_id, message, locate)
-                        if session is None:
-                            return
-                        self.auto_compact.discard_summary(key)
-                        self.discard_session_file_state(key)
-                        message.session_generation = session.generation
-                        message.require_existing_session = True
-                        message.input_persisted = True
-                        inbox.put_nowait(message)
-                        try:
-                            await accepted(session)
-                        except Exception:
-                            logger.exception("Unable to announce committed fork for {}", key)
-                        finally:
-                            self._start_session_worker(key, inbox)
-
-        await shield_and_drain(admit())
-
     async def _enqueue_session_message(self, msg: InboundMessage) -> None:
-        async with self._pending_queues.admission_lock(msg.session_key):
-            await self._admit_session_message(msg)
-
-    async def _admit_session_message(self, msg: InboundMessage) -> None:
-        self._pending_queues.check_admission()
-        self.bus.admission.check()
-        session_key = msg.session_key
-        if not self.subagents.accepts_result(msg, session_key):
-            return
-
-        pending = self._pending_queues.get(session_key)
-        if pending is not None:
-            if any(coordinator.should_defer(msg) for coordinator in self._automation_turn_coordinators):
-                pending.defer(msg)
-                return
-            msg = await self._journal_pending_message(session_key, msg)
-            self._pending_queues.check_admission()
-            pending = self._pending_queues.get(session_key)
-        if pending is not None:
-            pending.put_nowait(msg)
-            return
-
-        new_pending = SessionInbox()
-        new_pending.put_nowait(msg)
-        self._pending_queues.install(session_key, new_pending)
-        self._start_session_worker(session_key, new_pending)
+        if self.subagents.accepts_result(msg, msg.session_key):
+            await self._pending_queues.enqueue(msg)
 
     def _start_session_worker(self, session_key: str, inbox: SessionInbox) -> None:
         task = asyncio.create_task(self._run_session_queue(session_key, inbox))
@@ -1698,9 +1642,7 @@ class AgentLoop:
             await self._aclose_unlocked()
 
     async def _aclose_unlocked(self) -> None:
-        self._pending_queues.close_admission()
-        # An admitted fork can still start a worker; join it before taking the snapshot.
-        await self._pending_queues.wait_for_controls(kind="fork")
+        await self._pending_queues.close_admission()
         self._running = False
         errors: list[BaseException] = []
         active_task_groups = getattr(self, "_active_tasks", {})
@@ -2016,7 +1958,6 @@ class AgentLoop:
                 ctx.session = await self.sessions.state.get(ctx.session_key)
         session = ctx.session
         await ctx.delivery.bind_session_generation(session.generation)
-        ctx.input_persisted_early = msg.input_persisted
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools if ctx.tools is not None else self.tools
         if session.policy.disabled_tools:
@@ -2049,8 +1990,7 @@ class AgentLoop:
         if restore_runtime_checkpoint(session) and ctx.commit_session:
             await self.sessions.state.restore_interruption(session)
         if (
-            not msg.input_persisted
-            and RECOVERY_INBOUND_METADATA_KEY not in msg.metadata
+            RECOVERY_INBOUND_METADATA_KEY not in msg.metadata
             and restore_pending_interruption(session)
             and ctx.commit_session
         ):
@@ -2146,14 +2086,6 @@ class AgentLoop:
         ctx.history = await self.runner.prepare_prompt(
             session.get_history, extend_to_user=is_subagent,
         )
-        if ctx.msg.input_persisted:
-            # The admission owner wrote this user tail atomically with a history
-            # replacement. It is fresh input, not a second history occurrence.
-            expected_id = ctx.msg.metadata.get(INBOUND_META_TURN_ID)
-            if not session.messages or session.messages[-1].get(INBOUND_META_TURN_ID) != expected_id:
-                raise SessionConflictError("prepared input is no longer the session tail")
-            if ctx.history and ctx.history[-1].get("role") == "user":
-                ctx.history = ctx.history[:-1]
         stored_state = session.provider_state
         subagent_followup_persisted = False
         if is_subagent:

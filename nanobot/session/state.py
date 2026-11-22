@@ -21,7 +21,6 @@ from nanobot.session.manager import (
     SessionInfo,
     SessionPolicy,
 )
-from nanobot.session.message_metadata import input_history_metadata
 from nanobot.session.sqlite_store import SessionConflictError, SqliteSessionStore
 from nanobot.session.types import PARENT_SESSION_KEY, SessionTypes
 from nanobot.utils.cancellation import shield_and_drain
@@ -1049,6 +1048,8 @@ class SessionState:
         self, key: str, source_id: str, message: InboundMessage, locate: ForkLocator | None,
     ) -> Session | None:
         """Replace an anchored input, or return None for an exact retry. A busy lane may only retry."""
+        from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY, record_pending_followup
+
         receipt = {"turn_id": message.metadata[INBOUND_META_TURN_ID], "source_id": source_id, "text": message.content}
 
         def write() -> Session | None:
@@ -1065,10 +1066,14 @@ class SessionState:
                 raise ForkError("edit_session_busy")
             position, ordinal, entry, new_input = self._store.project_history(key, lambda history: resolve(source, history))
             target = source.fork_prefix(position, exclude_metadata=frozenset(self._generation_exclusions))
-            target.add_message("user", message.content, **input_history_metadata(message))
-            target.metadata[_PENDING_KEY] = True
+            # The display input and its executable envelope share this commit. Normal
+            # input preparation consumes the journal when it writes the model row.
+            followup_id = record_pending_followup(target, message)
+            if followup_id is None:
+                raise ValueError("replacement input cannot be journaled")
             target.metadata[FORK_RECEIPT_KEY] = receipt
             self._store.save_fork(source, target, lambda: [new_input], replace_at=(position, ordinal, entry))
+            message.metadata[PENDING_FOLLOWUP_ID_KEY] = followup_id
             return target
 
         return await self._fork_transaction(key, write)

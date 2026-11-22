@@ -1,18 +1,31 @@
 """Same-session edits use the owner commit, not fork creation followed by send."""
 from __future__ import annotations
 
+import asyncio
+import base64
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.loop import AgentLoop
+from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, InboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.websocket.runtime import WebSocketConfig
+from nanobot.providers.base import GenerationSettings, LLMResponse
+from nanobot.runtime_context import public_history_message
+from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.recovery import pending_followups
 from nanobot.session.state import ForkError
 from nanobot.session.webui_turns import clear_websocket_turns
 from nanobot.webui import transcript
-from nanobot.webui.forking import fork_webui_chat_in_place
+from nanobot.webui.forking import create_webui_chat_fork, fork_webui_chat_in_place
+from nanobot.webui.gateway_services import build_gateway_services
 from nanobot.webui.history import fact_from_record
 
 KEY = "websocket:edit-chat"
@@ -67,8 +80,8 @@ async def test_edit_keeps_the_same_topic_and_prefix_in_both_histories(editing, i
     assert len(await manager.state.list_sessions()) == 1
     assert after.key == before.key and after.created_at == before.created_at
     assert before.metadata.items() <= after.metadata.items()
-    assert after.messages[:-1] == before.messages[:index * 2]
-    assert (after.messages[-1]["content"], after.messages[-1]["input_id"]) == ("replacement", "user:new-edit")
+    assert after.messages == before.messages[:index * 2]
+    assert [(msg.content, msg.metadata["webui_turn_id"]) for msg in pending_followups(after)] == [("replacement", "new-edit")]
 
     live = host.announce_webui_history_replacement.await_args.args[1]
     assert live["events"] == page(manager, limit=40)["events"]
@@ -90,10 +103,7 @@ async def test_fork_at_a_displayed_input_discards_a_later_append(editing, tmp_pa
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
-    from nanobot.bus.queue import MessageBus
-    from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.webui import ws_http
-    from nanobot.webui.gateway_services import build_gateway_services
 
     manager, host = editing
     gateway = build_gateway_services(
@@ -156,7 +166,7 @@ async def test_edit_pre_id_history_uses_the_selected_row_not_its_text(editing):
     assert first["projection_id"] != second["projection_id"]
     await fork_webui_chat_in_place(host, payload(second["projection_id"]))
     after = await manager.state.read(KEY)
-    assert [m["content"] for m in after.messages[-3:]] == ["same question", "first answer", "replacement"]
+    assert [m["content"] for m in after.messages[-2:]] == ["same question", "first answer"]
 
 
 async def test_display_write_failure_leaves_both_histories_intact_after_reopen(editing, tmp_path):
@@ -194,7 +204,6 @@ async def test_discarded_summary_and_provider_continuation_cannot_survive(editin
 
 
 @pytest.mark.parametrize(("extra", "code"), [
-    ({"media": ["image.png"]}, "edit_attachments_unsupported"),
     ({"session_mentions": [{"name": "session"}]}, "edit_mentions_unsupported"),
     ({"_command": True}, "edit_special_message"),
     ({"_runtime_context": {"sources": ["session_mentions"]}}, "edit_mentions_unsupported"),
@@ -209,7 +218,7 @@ async def test_unsupported_metadata_is_explicitly_rejected(editing, extra, code)
         await fork_webui_chat_in_place(host, payload("user:old-1"))
 
 
-@pytest.mark.parametrize("text", ["/new", "! rm anything", "use @editable", "> [!QUOTE]\n> quote\n\nreply"])
+@pytest.mark.parametrize("text", ["", "/new", "! rm anything", "use @editable", "> [!QUOTE]\n> quote\n\nreply"])
 async def test_edit_never_dispatches_control_or_context_syntax(editing, text):
     manager, host = editing
     prepared = "user:old-1"
@@ -232,3 +241,102 @@ async def test_mismatched_display_and_model_input_cannot_truncate_history(editin
         await fork_webui_chat_in_place(host, payload(prepared))
     assert (await manager.state.read(KEY)).messages == before.messages
     assert page(manager)["events"] == rows
+
+
+@pytest.fixture
+async def media_turn(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    manager = SessionManager(workspace, sessions_root=tmp_path / "sessions")
+    provider = MagicMock(generation=GenerationSettings(), aclose=AsyncMock())
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="answer"))
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=workspace, model="test-model", session_manager=manager)
+    gateway = build_gateway_services(
+        config=WebSocketConfig(), bus=loop.bus, session_manager=manager, fork_in_place=loop.session_inputs.fork_in_place,
+        static_dist_path=None, workspace_path=workspace, config_path=tmp_path / "config.json",
+        default_restrict_to_workspace=True, runtime_model_name=None,
+        runtime_surface="browser", runtime_capabilities_overrides=None,
+    )
+    store = gateway.uploads.store
+    async def upload(mime, data):
+        async def chunks():
+            yield data
+        ref = await store.upload(chunks(), owner="browser", mime=mime, size=len(data))
+        return store.commit([ref], owner="browser")[0]
+
+    image = await upload("image/gif", base64.b64decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"))
+    document = await upload("text/plain", b"uploaded notes")
+    borrowed = tmp_path / "local.txt"
+    borrowed.write_text("borrowed notes")
+    paths = [document, str(borrowed), image]
+    scope = {"project_path": str(workspace), "access_mode": "full"}
+    session = await manager.state.get(KEY)
+    session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope
+    await manager.state.prepare_input(session)
+    metadata = {WORKSPACE_SCOPE_METADATA_KEY: scope, INBOUND_META_LOCAL_MEDIA: [str(borrowed)],
+                HISTORY_GENERATION_METADATA_KEY: session.generation, "webui_turn_id": "attached", "webui": True}
+    # Record the display input before the normal worker preprocesses files and images.
+    assert await gateway.transcripts.append_user_message("edit-chat", "", metadata=metadata, media_paths=paths)
+    await loop._process_message(InboundMessage(
+        channel="websocket", chat_id="edit-chat", sender_id="browser", content="", media=paths, metadata=metadata,
+    ))
+    host = SimpleNamespace(gateway=gateway, announce_webui_history_replacement=AsyncMock())
+    try:
+        yield loop, host, paths
+    finally:
+        clear_websocket_turns("edit-chat")
+        await loop.aclose()
+
+
+async def test_edit_retains_original_files_images_and_local_origin(media_turn):
+    loop, host, paths = media_turn
+    document, borrowed, image = paths
+    source = "user:attached"
+    for turn_id, caption in (("captioned", "[Attachment: typed by the user]"), ("uncaptioned", "")):
+        await fork_webui_chat_in_place(host, {
+            **payload(source, caption), "turn_id": turn_id,
+            "media": [{"path": "/untrusted", "url": "/api/media/preview"}], "local_media_paths": ["/untrusted"],
+        })
+        await asyncio.gather(*(task for group in loop._active_tasks.values() for task in group))
+        row = public_history_message((await loop.sessions.state.read(KEY)).messages[0])
+        assert row["media"] == [image] and row[INBOUND_META_LOCAL_MEDIA] == [borrowed]
+        assert row["content"][0]["type"] == "image_attachment"
+        assert row["content"][1]["text"] == (caption + "\n\n" if caption else "") + f"[Attachment: {document}]\n[Attachment: {borrowed}]"
+        event = host.announce_webui_history_replacement.await_args.args[1]["events"][-1]
+        assert event["text"] == caption
+        assert event["media_urls"] == host.gateway.media.augment_transcript_user_media(paths, [borrowed], session_key=KEY)
+        # This backend-only fixture has no WebSocket turn_end dispatcher.
+        clear_websocket_turns("edit-chat")
+        source = f"user:{turn_id}"
+
+
+@pytest.mark.parametrize("loss", ["deleted-upload", "revoked-local-scope"])
+async def test_unavailable_attachment_preserves_both_histories(media_turn, loss):
+    loop, host, paths = media_turn
+    manager = loop.sessions
+    if loss == "deleted-upload":
+        Path(paths[0]).unlink()
+    else:
+        session = await manager.state.get(KEY)
+        session.metadata[WORKSPACE_SCOPE_METADATA_KEY]["access_mode"] = "restricted"
+        await manager.state.prepare_input(session)
+    before = await manager.state.read(KEY)
+    events = page(manager)["events"]
+    with pytest.raises(ForkError, match="edit_attachments_unavailable"):
+        await fork_webui_chat_in_place(host, payload("user:attached"))
+    after = await manager.state.read(KEY)
+    assert (after.generation, after.messages) == (before.generation, before.messages)
+    assert page(manager)["events"] == events
+
+
+async def test_fork_without_original_display_facts_does_not_drop_a_document(editing):
+    manager, host = editing
+    model_only = await manager.state.get("websocket:without-display")
+    model_only.add_message("user", "review\n\n[Attachment: /original.txt]", webui_turn_id="attached")
+    await manager.state.prepare_input(model_only)
+    chat_id, key = await create_webui_chat_fork(manager, source_chat_id="without-display", before_user_index=1)
+    before = await manager.state.read(key)
+    with pytest.raises(ForkError, match="edit_attachments_unavailable"):
+        await fork_webui_chat_in_place(host, {**payload("user:attached"), "chat_id": chat_id})
+    assert (await manager.state.read(key)).generation == before.generation

@@ -601,9 +601,13 @@ describe("ThreadShell", () => {
       client._emitChat(chat_id, { event: "user_message", chat_id, turn_id: "first", starts_turn: true, turn_seq: 1, text: "First question" });
       client._emitChat(chat_id, { event: "turn_end", chat_id, turn_id: "first", turn_seq: 2 });
     });
-    const actions = await openMessageActions("First question");
+    const actions = await findSideActions("First question");
     fireEvent.click(within(actions).getByRole("button", { name: "Edit message" }));
     const editor = screen.getByRole("textbox", { name: "Edit message" });
+    fireEvent.change(editor, { target: { value: "   " } });
+    expect(screen.getByRole("button", { name: "Resend" })).toBeDisabled();
+    fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true });
+    expect(client.requestMutation).not.toHaveBeenCalled();
     fireEvent.change(editor, { target: { value: "Edited question" } });
     fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true });
 
@@ -612,6 +616,36 @@ describe("ThreadShell", () => {
       mode: "replace", chat_id, turn_id: expect.any(String), text: "Edited question", source_id: "user:first",
     });
     expect(screen.getByRole("textbox")).toHaveValue("Unsent follow-up");
+  });
+
+  it.each([
+    { text: "", available: true },
+    { text: "New caption", available: false },
+  ])("resends caption '$text' by source identity (attachment available: $available)", async ({ text, available }) => {
+    const requestMutation = available ? vi.fn().mockResolvedValue({ accepted: true }) : vi.fn().mockRejectedValue(new Error("edit_attachments_unavailable"));
+    const client = Object.assign(makeClient(), { requestMutation });
+    const chat_id = "edit-caption";
+    render(wrap(client, <ThreadShell session={session(chat_id)} title="Attachments" onToggleSidebar={() => {}} />));
+    act(() => {
+      client._emitChat(chat_id, { event: "user_message", chat_id, turn_id: "first", starts_turn: true, turn_seq: 1, text: "Caption",
+        media_urls: [{ kind: "file", url: "/media/notes", name: "notes.pdf" }] });
+      client._emitChat(chat_id, { event: "turn_end", chat_id, turn_id: "first", turn_seq: 2 });
+    });
+    const actions = await findSideActions("Caption");
+    fireEvent.click(within(actions).getByRole("button", { name: "Edit message" }));
+    const editor = screen.getByRole("textbox", { name: "Edit message" });
+    fireEvent.change(editor, { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: "Resend" }));
+    expect(requestMutation).toHaveBeenCalledWith("chat.fork", {
+      mode: "replace", chat_id, turn_id: expect.any(String), text, source_id: "user:first",
+    });
+    if (available) {
+      await waitFor(() => expect(editor).not.toBeInTheDocument());
+    } else {
+      expect(await screen.findByRole("alert")).toHaveTextContent("An original attachment is unavailable");
+      expect(editor).toHaveValue(text);
+      expect(screen.getByRole("button", { name: "notes.pdf" })).toBeVisible();
+    }
   });
 
   it.each(["callback", "cached return"] as const)("keeps closed answer segments in order after %s", async (path) => {
@@ -1104,7 +1138,7 @@ describe("ThreadShell", () => {
     render(<ClientProvider client={client} token="tok">
       <ThreadShell session={session("trace-replaced")} title="Trace replacement" onToggleSidebar={() => {}} />
     </ClientProvider>);
-    fireEvent.click(within(await openMessageActions("old answer")).getByRole("button", { name: /Worked/ }));
+    fireEvent.click(within(await findSideActions("old answer")).getByRole("button", { name: /Worked/ }));
     await waitFor(() => expect(readDetail).toHaveBeenCalled());
     thread = newThread;
     act(() => receive({ event: "history_replaced", chat_id: "trace-replaced", previous_generation: "before", thread }));
@@ -1114,7 +1148,7 @@ describe("ThreadShell", () => {
     expect(screen.getByText("replacement answer")).toBeVisible();
     expect(document.body).not.toHaveTextContent("obsolete suffix");
     if (!screen.queryByRole("button", { name: /Collapse activity details/ })) {
-      fireEvent.click(within(await openMessageActions("replacement answer")).getByRole("button", { name: /Worked/ }));
+      fireEvent.click(within(await findSideActions("replacement answer")).getByRole("button", { name: /Worked/ }));
     }
     await waitFor(() => expect(document.body).toHaveTextContent("current details"));
     expect(document.body).not.toHaveTextContent("obsolete suffix");

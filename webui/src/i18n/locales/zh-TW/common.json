@@ -2133,11 +2133,11 @@
       "edit_session_busy": "請等待此對話執行結束後再編輯。",
       "edit_source_changed": "原訊息已無法使用。你可以先複製草稿，再取消編輯。",
       "edit_special_message": "無法編輯自動化或跨對話傳來的訊息。",
-      "edit_attachments_unsupported": "暫不支援編輯含附件的訊息。",
+      "edit_attachments_unavailable": "原訊息的附件無法使用。你可以先複製草稿，再取消編輯。",
       "edit_mentions_unsupported": "暫不支援編輯含對話、App 或 MCP 提及的訊息。",
       "edit_context_unsupported": "暫不支援編輯含引用內容的訊息。",
       "edit_commands_unsupported": "無法在此編輯或重新傳送命令。",
-      "edit_plain_text_only": "僅支援編輯已成功傳送的文字訊息。",
+      "edit_plain_text_only": "只能編輯已傳送且含有內文或附件的訊息。",
       "edit_invalid_request": "編輯位置無效，請取消並重新開啟這則訊息。",
       "edit_request_conflict": "此編輯已使用其他內容提交。若要再次編輯，請取消後重新開啟訊息。",
       "edit_text_too_large": "編輯後的訊息超過文字限制。"

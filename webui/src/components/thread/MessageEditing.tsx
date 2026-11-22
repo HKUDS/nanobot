@@ -39,6 +39,10 @@ export function useMessageEditing(scope?: string | null) {
   return actions && actions.scope === scope ? actions : null;
 }
 
+function hasEditContent(message: UIMessage, text = message.content): boolean {
+  return !!(text.trim() || message.media?.length || message.images?.length);
+}
+
 function textRestriction(text: string): string | null {
   if (text.trimStart().startsWith("/") || text.trimStart().startsWith("!")) return "edit_commands_unsupported";
   if (/(^|\s)@[\p{L}\p{N}_-]+/u.test(text)) return "edit_mentions_unsupported";
@@ -69,9 +73,8 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
       if (busy) return t("message.editErrors.edit_session_busy");
       if (selected) return t("message.editFinishCurrent");
       if (message.role !== "user" || message.source || message.sessionMessage) return t("message.editErrors.edit_special_message");
-      if (message.media?.length || message.images?.length) return t("message.editErrors.edit_attachments_unsupported");
       if (message.cliApps?.length || message.mcpPresets?.length || message.sessionMentions?.length) return t("message.editErrors.edit_mentions_unsupported");
-      if (!message.content.trim() || message.deliveryStatus === "sending" || message.deliveryStatus === "failed") return t("message.editErrors.edit_plain_text_only");
+      if (!hasEditContent(message) || message.deliveryStatus === "sending" || message.deliveryStatus === "failed") return t("message.editErrors.edit_plain_text_only");
       const restriction = textRestriction(message.content);
       return restriction ? t(`message.editErrors.${restriction}`) : null;
     };
@@ -86,7 +89,7 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
     if (submitting.current) return;
     setDraft(null);
   };
-  const canConfirm = enabled && !busy && draft && !draft.submitting && draft.text.trim() && draft.error !== "edit_source_changed";
+  const canConfirm = enabled && !busy && draft && !draft.submitting && hasEditContent(draft.message, draft.text) && draft.error !== "edit_source_changed";
   const confirm = () => {
     const current = draft;
     if (!chatId || !current || submitting.current) return;

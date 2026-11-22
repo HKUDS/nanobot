@@ -40,6 +40,7 @@ from nanobot.session.session_messages import (
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.webui.history import (
+    MODEL_PROJECTED_INPUT,
     fact_from_record,
     initialize_history,
     record_from_fact,
@@ -659,9 +660,13 @@ def _session_assistant_event(
 
 def session_display_facts(session: Session) -> list[HistoryFact]:
     """Basic projection for a fork whose source has model records but no display facts."""
-    return [fact_from_record(row) for message in session.messages
-            if (row := _session_user_event(session.key, message)
-                or _session_assistant_event(session.key, message)) is not None]
+    facts: list[HistoryFact] = []
+    for message in session.messages:
+        if row := _session_user_event(session.key, message):
+            facts.append(fact_from_record({**row, MODEL_PROJECTED_INPUT: True}))
+        elif row := _session_assistant_event(session.key, message):
+            facts.append(fact_from_record(row))
+    return facts
 
 
 def _session_backfill_turns(

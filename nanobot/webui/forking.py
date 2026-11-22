@@ -7,12 +7,13 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from loguru import logger
 
-from nanobot.bus.events import InboundMessage
+from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, InboundMessage
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     WEBUI_QUOTE_SOURCE,
     public_history_message,
 )
+from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.display_history import HistoryFact, HistoryReader
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager, history_prefix_boundary
@@ -22,7 +23,8 @@ from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     register_queued_websocket_turn_if_idle,
 )
-from nanobot.webui.history import fact_from_record
+from nanobot.webui.attachments import inspect_local_attachment
+from nanobot.webui.history import MODEL_PROJECTED_INPUT, fact_from_record
 from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
 from nanobot.webui.transcript import (
@@ -138,32 +140,91 @@ async def handle_webui_fork_chat(
     )
 
 
-def _plain_fork_text(message: dict[str, Any]) -> str:
-    if message.get("role") != "user" or any(message.get(key) for key in (
+def _check_fork_metadata(message: Mapping[str, Any]) -> None:
+    if any(message.get(key) for key in (
         "_hidden_history", "_command", "session_message", "injected_event", "source", "automation",
         "automation_id", "cron_job_id", "_automation_turn", "_user_shell",
     )):
         raise ForkError("edit_special_message")
-    if any(message.get(key) for key in ("media", "media_paths", "media_urls")):
-        raise ForkError("edit_attachments_unsupported")
     if any(message.get(key) for key in ("cli_apps", "mcp_presets", "session_mentions")):
         raise ForkError("edit_mentions_unsupported")
-    text = public_history_message(message).get("content")
-    if not isinstance(text, str) or not text.strip():
-        raise ForkError("edit_plain_text_only")
     context = message.get(RUNTIME_CONTEXT_HISTORY_META)
     sources: list[str] = cast(dict[str, Any], context).get("sources", []) if isinstance(context, dict) else []
-    if WEBUI_QUOTE_SOURCE in sources or text.startswith("> [!QUOTE]"):
+    if WEBUI_QUOTE_SOURCE in sources:
         raise ForkError("edit_context_unsupported")
     if any(source in sources for source in ("session_mentions", "cli_apps", "mcp_presets")):
         raise ForkError("edit_mentions_unsupported")
     if "session_message" in sources:
         raise ForkError("edit_special_message")
+
+
+def _check_fork_text(text: str) -> None:
+    if text.startswith("> [!QUOTE]"):
+        raise ForkError("edit_context_unsupported")
     if text.lstrip().startswith(("/", "!")):
         raise ForkError("edit_commands_unsupported")
     if re.search(r"(^|\s)@[\w-]+", text):
         raise ForkError("edit_mentions_unsupported")
-    return text
+
+
+def _paths(record: Mapping[str, Any], key: str) -> list[str]:
+    raw = record.get(key, [])
+    if not isinstance(raw, list) or not all(isinstance(p, str) and p for p in cast(list[object], raw)):
+        raise ForkError("edit_attachments_unavailable")
+    return cast(list[str], raw)
+
+
+def _restore_fork_media(
+    gateway: GatewayServices, session: Session, original: dict[str, Any], fact: HistoryFact, message: InboundMessage,
+) -> None:
+    display = fact.content
+    caption = display.get("text")
+    if not isinstance(caption, str):
+        raise ForkError("edit_plain_text_only")
+    _check_fork_text(caption)
+    # A model-only fork may have document references rendered into its text
+    # but no original file list. Ordinary user captions are never interpreted.
+    if display.get(MODEL_PROJECTED_INPUT) and caption.rpartition("\n")[2].startswith("[Attachment: "):
+        raise ForkError("edit_attachments_unavailable")
+    paths = _paths(display, "media_paths")
+    local = _paths(display, INBOUND_META_LOCAL_MEDIA)
+    if (display.get("media_urls") or display.get("media") or original.get("media_urls") or original.get("media_paths")
+            or local != _paths(original, INBOUND_META_LOCAL_MEDIA) or not set(local).issubset(paths)
+            or not set(_paths(original, "media")).issubset(paths)):
+        raise ForkError("edit_attachments_unavailable")
+    if not paths:
+        content = public_history_message(original).get("content")
+        if not isinstance(content, str) or not caption.strip():
+            raise ForkError("edit_plain_text_only")
+        if content != caption:
+            raise ForkError("edit_source_changed")
+        if not message.content.strip():
+            raise ForkError("edit_invalid_request")
+        return
+
+    # The stable input identity ties the model row to the display fact. Only
+    # the latter retains the ordered paths and the caption before preprocessing.
+    if not (fact.turn_id or display.get("input_id")):
+        raise ForkError("edit_attachments_unavailable")
+    store = gateway.uploads.store
+    try:
+        store.check_committed_paths([p for p in paths if p not in local])
+        if local:
+            raw_scope = session.metadata.get(WORKSPACE_SCOPE_METADATA_KEY)
+            fallback = gateway.workspaces.restricted_default_scope()
+            scope = gateway.workspaces.scope_for_indexed_metadata(
+                raw_scope, scope_present=raw_scope is not None, default_scope=fallback,
+            )
+            # Never use the sidebar fallback to authorize a deleted or missing project.
+            if scope is fallback or scope.metadata() != raw_scope or any(
+                inspect_local_attachment(p, scope=scope, limits=store.limits)["path"] != p for p in local
+            ):
+                raise ValueError("local attachment scope or path changed")
+            message.metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
+            message.metadata[INBOUND_META_LOCAL_MEDIA] = local
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise ForkError("edit_attachments_unavailable") from exc
+    message.media = paths
 
 
 async def fork_webui_chat_in_place(
@@ -176,13 +237,13 @@ async def fork_webui_chat_in_place(
         payload.get("chat_id"), payload.get("text"), payload.get("turn_id"), payload.get("source_id"),
     )
     if (payload.get("mode") != "replace" or not is_valid_webui_chat_id(chat_id)
-            or not isinstance(text, str) or not text.strip()
+            or not isinstance(text, str)
             or not isinstance(turn_id, str) or not turn_id or len(turn_id) > 128
             or not isinstance(source_id, str) or not source_id):
         raise ForkError("edit_invalid_request")
     if gateway.ingress.validate_text(text) is not None:
         raise ForkError("edit_text_too_large")
-    _plain_fork_text({"role": "user", "content": text})
+    _check_fork_text(text)
     if gateway.session_manager is None or gateway.fork_in_place is None:
         raise ForkError("edit_unavailable")
     key = webui_session_key(chat_id)
@@ -210,7 +271,7 @@ async def fork_webui_chat_in_place(
         if target is None:
             raise ForkError("edit_source_changed")
         ordinal, position, fact = target
-        original_text = _plain_fork_text({**fact.content, "role": "user", "content": fact.content.get("text")})
+        _check_fork_metadata(fact.content)
         if fact.content.get("input_id") or fact.turn_id:
             matches = (
                 i for i, m in enumerate(session.messages) if m.get("role") == "user" and not is_hidden_history_message(m)
@@ -224,11 +285,15 @@ async def fork_webui_chat_in_place(
         if boundary is None or boundary >= len(session.messages):
             raise ForkError("edit_source_changed")
         original = session.messages[boundary]
-        if (_plain_fork_text(original) != original_text or original.get("webui_turn_id") != fact.turn_id
+        if (original.get("role") != "user" or original.get("webui_turn_id") != fact.turn_id
                 or (original.get("input_id") and original["input_id"] != source_id)):
             raise ForkError("edit_source_changed")
+        _check_fork_metadata(original)
+        _restore_fork_media(gateway, session, original, fact, message)
         retired_turn_ids.extend(history.retired_turn_ids(ordinal, position))
-        event = build_user_transcript_event(chat_id, text)
+        event = build_user_transcript_event(
+            chat_id, text, media_paths=message.media, local_media_paths=message.metadata.get(INBOUND_META_LOCAL_MEDIA),
+        )
         assert event is not None
         gateway.transcripts.prepare_event(chat_id, event, metadata=message.metadata, phase="user")
         event["created_at_ms"] = int(message.timestamp.timestamp() * 1000)
@@ -241,6 +306,7 @@ async def fork_webui_chat_in_place(
         # in SQLite and can be paged by the same cursor as after a reconnect.
         body = await manager.state.project_history(key, lambda history: build_webui_thread_response(
             key, history=history, limit=40,
+            augment_user_media=lambda paths, local: gateway.media.augment_transcript_user_media(paths, local, session_key=key),
             session_messages_loader=lambda: session.messages,
             session_version_loader=lambda: history.session_version,
         ))
