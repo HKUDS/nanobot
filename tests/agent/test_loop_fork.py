@@ -12,16 +12,14 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.runtime_context import public_history_message
 from nanobot.session.display_history import HistoryFact, HistoryKind
-from nanobot.session.history_edit import (
-    HistoryEditError,
-    HistoryEditSource,
-    HistoryEditTarget,
-)
 from nanobot.session.manager import SessionManager
+from nanobot.session.state import ForkError
+
+SOURCE_ID = "user:old-1"
 
 
 @pytest.fixture
-async def edited_loop(tmp_path):
+async def loop(tmp_path):
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
@@ -44,16 +42,15 @@ async def edited_loop(tmp_path):
     await loop.aclose()
 
 
-async def edit(loop):
-    value = await loop.sessions.state.read("websocket:editing")
-    anchor = HistoryEditSource(str(value.revision), "user:old-1")
-    msg = InboundMessage(channel="websocket", sender_id="webui", chat_id="editing", content="modified question",
-                         metadata={"webui": True, "webui_turn_id": "edit-turn", "_wants_stream": True})
-    return msg, anchor
+def replacement():
+    return InboundMessage(
+        channel="websocket", sender_id="webui", chat_id="editing", content="modified question",
+        metadata={"webui": True, "webui_turn_id": "edit-turn", "_wants_stream": True},
+    )
 
 
-def display_replacement(_session, _history):
-    return HistoryEditTarget(2, 1, 0, HistoryFact(HistoryKind.INPUT, {"text": "modified question"}, turn_id="edit-turn"))
+def locate(_session, _history):
+    return 2, 1, 0, HistoryFact(HistoryKind.INPUT, {"text": "modified question"}, turn_id="edit-turn")
 
 
 async def drain(loop):
@@ -62,14 +59,12 @@ async def drain(loop):
         await asyncio.wait_for(asyncio.gather(*tasks), 10)
 
 
-async def test_concurrent_edit_retry_runs_once_with_only_the_retained_context(edited_loop):
-    loop = edited_loop
-    msg, anchor = await edit(loop)
-    retry, _ = await edit(loop)
+async def test_concurrent_fork_retry_runs_once_with_only_the_retained_context(loop):
+    msg = replacement()
     accepted = AsyncMock()
     await asyncio.gather(
-        loop.replace_user_input(msg, anchor, display_replacement, accepted),
-        loop.replace_user_input(retry, anchor, display_replacement, accepted),
+        loop.fork_in_place(msg, SOURCE_ID, locate, accepted),
+        loop.fork_in_place(replacement(), SOURCE_ID, locate, accepted),
     )
     await drain(loop)
     accepted.assert_awaited_once()
@@ -85,26 +80,25 @@ async def test_concurrent_edit_retry_runs_once_with_only_the_retained_context(ed
     assert "pending_user_turn" not in source.metadata
 
 
-async def test_execution_lane_busy_is_checked_at_admission(edited_loop):
-    loop = edited_loop
-    msg, anchor = await edit(loop)
+async def test_execution_lane_busy_is_checked_at_admission(loop):
+    msg = replacement()
     async with loop._get_session_lock(msg.session_key):
-        with pytest.raises(HistoryEditError, match="edit_session_busy"):
-            await loop.replace_user_input(msg, anchor, display_replacement, AsyncMock())
+        with pytest.raises(ForkError) as exc:
+            await loop.fork_in_place(msg, SOURCE_ID, locate, AsyncMock())
+    assert exc.value.code == "edit_session_busy"
     loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
-async def test_cancelling_admission_observer_still_executes_an_accepted_input(edited_loop):
-    loop = edited_loop
-    msg, anchor = await edit(loop)
+async def test_cancelling_admission_observer_still_executes_an_accepted_input(loop):
+    msg = replacement()
     started, release = threading.Event(), threading.Event()
 
-    def blocked_projection(session, history):
+    def blocked_locator(session, history):
         started.set()
         assert release.wait(5)
-        return display_replacement(session, history)
+        return locate(session, history)
 
-    task = asyncio.create_task(loop.replace_user_input(msg, anchor, blocked_projection, AsyncMock()))
+    task = asyncio.create_task(loop.fork_in_place(msg, SOURCE_ID, blocked_locator, AsyncMock()))
     assert await asyncio.to_thread(started.wait, 5)
     task.cancel()
     release.set()
@@ -115,9 +109,8 @@ async def test_cancelling_admission_observer_still_executes_an_accepted_input(ed
     assert (await loop.sessions.state.read(msg.session_key)).messages[-1]["content"] == "new answer"
 
 
-async def test_shutdown_joins_committed_edit_before_worker_snapshot(edited_loop, tmp_path):
-    loop = edited_loop
-    msg, anchor = await edit(loop)
+async def test_shutdown_joins_committed_fork_before_worker_snapshot(loop, tmp_path):
+    msg = replacement()
     committed, release = asyncio.Event(), asyncio.Event()
 
     async def announce(_session):
@@ -125,7 +118,7 @@ async def test_shutdown_joins_committed_edit_before_worker_snapshot(edited_loop,
         await release.wait()
 
     loop.preserve_inflight_turns_on_shutdown()
-    editing = asyncio.create_task(loop.replace_user_input(msg, anchor, display_replacement, announce))
+    fork = asyncio.create_task(loop.fork_in_place(msg, SOURCE_ID, locate, announce))
     async with asyncio.timeout(5):
         await committed.wait()
         closing = asyncio.create_task(loop.aclose())
@@ -134,7 +127,7 @@ async def test_shutdown_joins_committed_edit_before_worker_snapshot(edited_loop,
             assert not closing.done()
         finally:
             release.set()
-        await asyncio.gather(editing, closing)
+        await asyncio.gather(fork, closing)
     assert not loop._active_tasks and not loop._pending_queues
     reopened = SessionManager(loop.workspace, sessions_root=tmp_path / "sessions")
     saved = reopened.read_session_snapshot(msg.session_key)
@@ -143,17 +136,16 @@ async def test_shutdown_joins_committed_edit_before_worker_snapshot(edited_loop,
     assert saved.messages[-1]["content"] == msg.content
 
 
-async def test_followup_gets_a_worker_when_the_reserved_edit_is_rejected(edited_loop):
-    loop = edited_loop
-    msg, anchor = await edit(loop)
+async def test_followup_gets_a_worker_when_the_reserved_fork_is_rejected(loop):
+    msg = replacement()
     checking, release = threading.Event(), threading.Event()
 
     def reject_stale_source(_session, _history):
         checking.set()
         assert release.wait(5)
-        raise HistoryEditError("edit_source_changed")
+        raise ForkError("edit_source_changed")
 
-    editing = asyncio.create_task(loop.replace_user_input(msg, anchor, reject_stale_source, AsyncMock()))
+    fork = asyncio.create_task(loop.fork_in_place(msg, SOURCE_ID, reject_stale_source, AsyncMock()))
     followup = InboundMessage(
         channel="websocket", sender_id="webui", chat_id="editing", content="ordinary follow-up",
         metadata={"webui": True, "webui_turn_id": "ordinary-turn", "_wants_stream": True},
@@ -161,11 +153,12 @@ async def test_followup_gets_a_worker_when_the_reserved_edit_is_rejected(edited_
     try:
         assert await asyncio.to_thread(checking.wait, 5)
         ordinary = asyncio.create_task(loop._enqueue_session_message(followup))
-        await asyncio.sleep(0)  # Let the follow-up reach admission before releasing the edit.
+        await asyncio.sleep(0)  # Let the follow-up reach admission before releasing the fork.
     finally:
         release.set()
-    with pytest.raises(HistoryEditError, match="edit_source_changed"):
-        await editing
+    with pytest.raises(ForkError) as exc:
+        await fork
+    assert exc.value.code == "edit_source_changed"
     await asyncio.wait_for(ordinary, 5)
     await drain(loop)
     saved = await loop.sessions.state.read(msg.session_key)
@@ -175,11 +168,10 @@ async def test_followup_gets_a_worker_when_the_reserved_edit_is_rejected(edited_
 
 
 @pytest.mark.parametrize("arrival", ["during_reply", "after_reply"])
-async def test_discarded_turn_child_result_cannot_enter_the_replacement_prompt(edited_loop, arrival):
+async def test_discarded_turn_child_result_cannot_enter_the_replacement_prompt(loop, arrival):
     from nanobot.agent.tools.context import RequestContext, request_context
     from nanobot.agent.tools.subagent import SubagentTool
 
-    loop = edited_loop
     source = await loop.sessions.state.read("websocket:editing")
     runtime = await loop.runtime_for_session(source)
     child_started, release_child, main_started = asyncio.Event(), asyncio.Event(), asyncio.Event()
@@ -210,8 +202,7 @@ async def test_discarded_turn_child_result_cannot_enter_the_replacement_prompt(e
         )):
             await SubagentTool(loop.subagents).execute(action="create", task="task from discarded turn")
         await asyncio.wait_for(child_started.wait(), 5)
-        msg, anchor = await edit(loop)
-        await loop.replace_user_input(msg, anchor, display_replacement, AsyncMock())
+        await loop.fork_in_place(replacement(), SOURCE_ID, locate, AsyncMock())
         await asyncio.wait_for(main_started.wait(), 5)
         if arrival == "after_reply":
             # The replacement must not join children owned by the discarded turn.

@@ -38,7 +38,7 @@ from nanobot.security.workspace_access import (
     WorkspaceScopeError,
 )
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
-from nanobot.session.history_edit import HistoryEditError
+from nanobot.session.state import ForkError
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -58,8 +58,8 @@ from nanobot.webui.file_preview import (
     file_reference_payload,
 )
 from nanobot.webui.forking import (
+    fork_webui_chat_in_place,
     handle_webui_fork_chat,
-    replace_webui_chat_input,
 )
 from nanobot.webui.gateway_services import GatewayServices
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
@@ -1260,11 +1260,11 @@ class WebUICommandRouter:
                     try:
                         chat_id = payload.get("chat_id")
                         if not is_valid_webui_chat_id(chat_id):
-                            raise HistoryEditError("edit_invalid_request")
+                            raise ForkError("edit_invalid_request")
                         with self._http_router.bus.admission.activity():
                             async with self._message_lock(chat_id), self._outbound.history_lock(chat_id):
-                                result = await replace_webui_chat_input(self, payload)
-                    except HistoryEditError as exc:
+                                result = await fork_webui_chat_in_place(self, payload)
+                    except ForkError as exc:
                         return WebUIRequestResult(status=409, message=exc.code)
                     except RuntimeMaintenanceError:
                         return WebUIRequestResult(

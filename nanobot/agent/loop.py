@@ -87,11 +87,6 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
-from nanobot.session.history_edit import (
-    HistoryEditAccepted,
-    HistoryEditProjection,
-    HistoryEditSource,
-)
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.image_attachments import persist_user_image_blocks
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
@@ -112,7 +107,7 @@ from nanobot.session.recovery import (
     restore_runtime_checkpoint,
 )
 from nanobot.session.sqlite_store import SessionConflictError
-from nanobot.session.state import SessionOperationQueueFullError
+from nanobot.session.state import ForkLocator, SessionOperationQueueFullError
 from nanobot.session.summary import (
     SessionSummary,
     SessionSummaryCheckpoint,
@@ -872,7 +867,7 @@ class AgentLoop:
 
     async def _cancel_active_tasks(self, key: str) -> int:
         with self._pending_queues.controlling(key):
-            await self._pending_queues.wait_for_controls(key, kind="edit")
+            await self._pending_queues.wait_for_controls(key, kind="fork")
             return await self._cancel_session_work(key)
 
     async def _cancel_session_work(self, key: str) -> int:
@@ -918,7 +913,7 @@ class AgentLoop:
         """Stop active work for *key* and forget its cached session."""
         with self.bus.admission.activity(), self._pending_queues.controlling(key, "discard"):
             try:
-                await self._pending_queues.wait_for_controls(key, kind="edit")
+                await self._pending_queues.wait_for_controls(key, kind="fork")
                 await self.sessions.state.discard(key)
                 await self._cancel_session_work(key)
             finally:
@@ -1432,39 +1427,40 @@ class AgentLoop:
         )
         return pending_msg
 
-    async def replace_user_input(
-        self, msg: InboundMessage, source: HistoryEditSource, projection: HistoryEditProjection,
-        accepted: HistoryEditAccepted,
+    async def fork_in_place(
+        self, message: InboundMessage, source_id: str, locate: ForkLocator,
+        accepted: Callable[[Session], Awaitable[None]],
     ) -> None:
-        """Reserve an idle execution lane before committing an in-place history edit."""
-        key = msg.session_key
-        lock = self._get_session_lock(key)
+        """Hand the committed fork input to a worker, even if the caller disconnects."""
+        key = message.session_key
+        inboxes = self._pending_queues
 
         async def admit() -> None:
-            async with self._pending_queues.admission_lock(key):
+            async with inboxes.admission_lock(key):
                 self.bus.admission.check()
-                self._pending_queues.check_admission()
-                if not self._pending_queues.idle(key) or lock.locked():
-                    # A retry of the committed edit still receives its acknowledgement.
-                    await self.sessions.state.replace_user_input(key, source, msg, None)
+                inboxes.check_admission()
+                lock = self._get_session_lock(key)
+                if not inboxes.idle(key) or lock.locked():
+                    # A busy session may acknowledge a retry but cannot start a fork.
+                    await self.sessions.state.fork_in_place(key, source_id, message, None)
                     return
                 async with lock:
-                    with self._pending_queues.reserving_edit(key) as pending:
-                        session = await self.sessions.state.replace_user_input(key, source, msg, projection)
+                    with inboxes.reserving_fork(key) as inbox:
+                        session = await self.sessions.state.fork_in_place(key, source_id, message, locate)
                         if session is None:
                             return
                         self.auto_compact.discard_summary(key)
                         self.discard_session_file_state(key)
-                        msg.session_generation = session.generation
-                        msg.require_existing_session = True
-                        msg.input_persisted = True
-                        pending.put_nowait(msg)
+                        message.session_generation = session.generation
+                        message.require_existing_session = True
+                        message.input_persisted = True
+                        inbox.put_nowait(message)
                         try:
                             await accepted(session)
                         except Exception:
-                            logger.exception("Unable to announce accepted history replacement for {}", key)
+                            logger.exception("Unable to announce committed fork for {}", key)
                         finally:
-                            self._start_session_worker(key, pending)
+                            self._start_session_worker(key, inbox)
 
         await shield_and_drain(admit())
 
@@ -1703,8 +1699,8 @@ class AgentLoop:
 
     async def _aclose_unlocked(self) -> None:
         self._pending_queues.close_admission()
-        # An already admitted edit can still hand its committed input to a new worker.
-        await self._pending_queues.wait_for_controls(kind="edit")
+        # An admitted fork can still start a worker; join it before taking the snapshot.
+        await self._pending_queues.wait_for_controls(kind="fork")
         self._running = False
         errors: list[BaseException] = []
         active_task_groups = getattr(self, "_active_tasks", {})

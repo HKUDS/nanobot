@@ -37,19 +37,12 @@ if TYPE_CHECKING:
 _T = TypeVar("_T")
 SESSION_CACHE_MAX_SIZE = 128
 _SESSION_PREVIEW_MAX_CHARS = 120
-_FORK_VOLATILE_METADATA_KEYS = {
-    "_stopped_at_iteration_limit",
-    PARENT_SESSION_KEY,
-    SESSION_TYPE_KEY,
-    "pending_user_turn",
-    "pending_user_followups",
-    "runtime_checkpoint",
-    "history_edit_receipt",
-    "session_handle",
-    "webui_recovery",
-    "title",
-    "title_user_edited",
+FORK_RECEIPT_KEY = "history_edit_receipt"
+_FORK_HISTORY_KEYS = {
+    "_stopped_at_iteration_limit", "webui_recovery",
+    "pending_user_turn", "pending_user_followups", "runtime_checkpoint", FORK_RECEIPT_KEY,
 }
+_FORK_IDENTITY_KEYS = {PARENT_SESSION_KEY, SESSION_TYPE_KEY, "session_handle", "title", "title_user_edited"}
 
 
 def _text_preview(content: object) -> str:
@@ -324,13 +317,34 @@ class Session:
                     entry["content"] = replay_user_image_blocks(cast(list[object], content))
         return out
 
-    def retain_history_prefix(self, boundary: int) -> None:
-        """Keep an already resolved prefix without changing session identity."""
-        self.messages = self.messages[:boundary]
-        if self.last_archived > boundary:
-            self.last_archived = 0
-            self.metadata.pop("_last_summary", None)
-        self.provider_state = None
+    def fork_prefix(
+        self, boundary: int, *, new_key: str | None = None, exclude_metadata: frozenset[str] = frozenset(),
+    ) -> Session:
+        """Start a fresh generation from a resolved model prefix, optionally under a new identity."""
+        if not 0 <= boundary <= len(self.messages):
+            raise ValueError("invalid fork boundary")
+        messages = self.messages[:boundary]
+        excluded = _FORK_HISTORY_KEYS | exclude_metadata
+        if new_key is not None:
+            messages = [public_history_message(message) for message in messages]
+            excluded |= _FORK_IDENTITY_KEYS
+        else:
+            excluded.update(("_last_usage", "request_origin"))
+        archived = self.last_archived
+        if archived > boundary:
+            archived = 0
+            excluded.add("_last_summary")
+        now = datetime.now()
+        return Session(
+            key=self.key if new_key is None else new_key,
+            created_at=self.created_at if new_key is None else now,
+            updated_at=now,
+            metadata=deepcopy({k: v for k, v in self.metadata.items() if k not in excluded}),
+            messages=messages, last_consolidated=archived,
+            policy=self.policy if new_key is None else SessionPolicy(),
+            revision=self.revision if new_key is None else 0,
+            persisted=new_key is None and self.persisted,
+        )
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
@@ -390,20 +404,7 @@ def fork_session(
     boundary = history_prefix_boundary(source, before_user_index)
     if boundary is None:
         return None
-    now = datetime.now()
-    target = Session(
-        key=target_key,
-        messages=source.messages,
-        created_at=now,
-        updated_at=now,
-        metadata=deepcopy(source.metadata),
-        last_consolidated=source.last_archived,
-    )
-    target.retain_history_prefix(boundary)
-    target.messages = [public_history_message(message) for message in target.messages]
-    for key in _FORK_VOLATILE_METADATA_KEYS | exclude_metadata:
-        target.metadata.pop(key, None)
-    return target
+    return source.fork_prefix(boundary, new_key=target_key, exclude_metadata=exclude_metadata)
 
 
 class SessionManager:
@@ -571,13 +572,9 @@ class SessionManager:
             source = self._store.load(source_key)
             if source is None:
                 return None
-            target = fork_session(
+            return self._store.fork_before_user_index(
                 source, target_key, before_user_index, exclude_metadata=frozenset(self._generation_exclusions),
             )
-            if target is not None:
-                self._store.save(target)
-                self._store.copy_history_prefix(source_key, target, before_user_index)
-            return target
 
         return self._store.run_write(fork)
 

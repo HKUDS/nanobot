@@ -43,7 +43,6 @@ export interface PromptHistoryNavigation {
   prompts: PromptAnchor[];
   window: {
     messages: UIMessage[];
-    sourceRevision?: string | null;
     userMessageOffset: number;
     hasMoreBefore: boolean;
     hasMoreAfter: boolean;
@@ -98,9 +97,7 @@ function projectHistoryWindow(pages: HistoryPage[]): NonNullable<PromptHistoryNa
     if (eventIndex !== undefined) boundary = messages.length + projectWebuiThreadMessages(projectThreadEvents(body.events.slice(0, eventIndex))).length;
     messages.push(...rows);
   }
-  const revision = pages[0]?.body.source_revision;
-  const window = { messages, sourceRevision: pages.every((page) => page.body.source_revision === revision) ? revision : null,
-    userMessageOffset: pages[0]?.body.page?.user_message_offset ?? 0,
+  const window = { messages, userMessageOffset: pages[0]?.body.page?.user_message_offset ?? 0,
     hasMoreBefore: pages[0]?.body.page?.has_more_before === true,
     hasMoreAfter: pages.at(-1)?.body.page?.has_more_after === true,
     forkBoundaryMessageCount: boundary };

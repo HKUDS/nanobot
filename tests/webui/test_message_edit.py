@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nanobot.session.history_edit import HistoryEditError
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.state import ForkError
 from nanobot.session.webui_turns import clear_websocket_turns
 from nanobot.webui import transcript
-from nanobot.webui.forking import replace_webui_chat_input
+from nanobot.webui.forking import fork_webui_chat_in_place
 from nanobot.webui.history import fact_from_record
 
 KEY = "websocket:edit-chat"
@@ -36,11 +36,11 @@ async def editing(tmp_path):
     manager.append_history(KEY, facts)
 
     async def submit(message, anchor, projection, accepted):
-        updated = await manager.state.replace_user_input(message.session_key, anchor, message, projection)
+        updated = await manager.state.fork_in_place(message.session_key, anchor, message, projection)
         if updated is not None:
             await accepted(updated)
 
-    gateway = SimpleNamespace(session_manager=manager, replace_user_input=submit,
+    gateway = SimpleNamespace(session_manager=manager, fork_in_place=submit,
                               transcripts=transcript.WebUITranscriptRecorder(manager),
                               ingress=SimpleNamespace(validate_text=lambda _: None))
     yield manager, SimpleNamespace(gateway=gateway, announce_webui_history_replacement=AsyncMock())
@@ -54,19 +54,15 @@ def page(manager, **paging):
     ))
 
 
-def payload(source, text="replacement"):
-    return {"mode": "replace", "chat_id": "edit-chat", "text": text, "turn_id": "new-edit", "source": source}
-
-
-def source_for(manager, index):
-    return {"revision": page(manager, limit=1)["source_revision"], "id": f"user:old-{index}"}
+def payload(source_id, text="replacement"):
+    return {"mode": "replace", "chat_id": "edit-chat", "text": text, "turn_id": "new-edit", "source_id": source_id}
 
 
 @pytest.mark.parametrize("index", [0, 2, 27], ids=["first", "within-turn", "long-prefix"])
 async def test_edit_keeps_the_same_topic_and_prefix_in_both_histories(editing, index):
     manager, host = editing
     before = await manager.state.read(KEY)
-    await replace_webui_chat_input(host, payload(source_for(manager, index)))
+    await fork_webui_chat_in_place(host, payload(f"user:old-{index}"))
     after = await manager.state.read(KEY)
     assert len(await manager.state.list_sessions()) == 1
     assert after.key == before.key and after.created_at == before.created_at
@@ -80,7 +76,6 @@ async def test_edit_keeps_the_same_topic_and_prefix_in_both_histories(editing, i
     cursor = live["page"]["before_cursor"]
     while cursor:
         older = page(manager, limit=40, before=cursor)
-        assert older["source_revision"] == live["source_revision"]
         events = older["events"] + events
         cursor = older["page"]["before_cursor"]
     assert [e["text"] for e in events if e["event"] == "user_message"] == [
@@ -88,7 +83,7 @@ async def test_edit_keeps_the_same_topic_and_prefix_in_both_histories(editing, i
     ]
 
 
-async def test_replay_uses_one_snapshot_and_rejects_an_edit_from_before_concurrent_append(editing, tmp_path, monkeypatch):
+async def test_fork_at_a_displayed_input_discards_a_later_append(editing, tmp_path, monkeypatch):
     import json
     from concurrent.futures import ThreadPoolExecutor
 
@@ -116,10 +111,15 @@ async def test_replay_uses_one_snapshot_and_rejects_an_edit_from_before_concurre
     before = await read()
     build = ws_http.build_webui_thread_response
     writer = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
-    fact = fact_from_record({"event": "user", "turn_id": "later", "text": "later question"})
+    def append_later_input():
+        session = writer.read_session_snapshot(KEY)
+        session.add_message("user", "later question", webui_turn_id="later")
+        writer.save(session)
+        writer.append_history(KEY, [fact_from_record({"event": "user", "turn_id": "later", "text": "later question"})])
+
     with ThreadPoolExecutor(max_workers=1) as pool, monkeypatch.context() as patch:
         def concurrent_build(*args, **kwargs):
-            pool.submit(writer.append_history, KEY, [fact]).result(timeout=5)
+            pool.submit(append_later_input).result(timeout=5)
             return build(*args, **kwargs)
 
         patch.setattr(ws_http, "build_webui_thread_response", concurrent_build)
@@ -132,14 +132,11 @@ async def test_replay_uses_one_snapshot_and_rejects_an_edit_from_before_concurre
     assert changed.status_code == 200
     assert changed.headers["ETag"] != overlapping.headers["ETag"]
     current = json.loads(changed.body)
-    assert current["source_revision"] != old["source_revision"]
     assert current["events"][-1]["text"] == "later question"
     user = next(event for event in old["events"] if event["event"] == "user_message")
-    with pytest.raises(HistoryEditError, match="edit_source_changed"):
-        await replace_webui_chat_input(host, payload({
-            "revision": old["source_revision"], "id": f"user:{user['turn_id']}",
-        }))
-    assert page(manager)["events"][-1]["text"] == "later question"
+    await fork_webui_chat_in_place(host, payload(f"user:{user['turn_id']}"))
+    assert "later question" not in [m["content"] for m in manager.read_session_snapshot(KEY).messages]
+    assert [e["text"] for e in page(manager)["events"] if e["event"] == "user_message"][-1] == "replacement"
 
 
 async def test_edit_pre_id_history_uses_the_selected_row_not_its_text(editing):
@@ -157,21 +154,21 @@ async def test_edit_pre_id_history_uses_the_selected_row_not_its_text(editing):
     latest = page(manager, limit=40)
     first, second = [e for e in latest["events"] if e.get("text") == "same question"]
     assert first["projection_id"] != second["projection_id"]
-    await replace_webui_chat_input(host, payload({"revision": latest["source_revision"], "id": second["projection_id"]}))
+    await fork_webui_chat_in_place(host, payload(second["projection_id"]))
     after = await manager.state.read(KEY)
     assert [m["content"] for m in after.messages[-3:]] == ["same question", "first answer", "replacement"]
 
 
 async def test_display_write_failure_leaves_both_histories_intact_after_reopen(editing, tmp_path):
     manager, host = editing
-    source = source_for(manager, 2)
+    source = "user:old-2"
     before = manager.read_session_snapshot(KEY)
     rows = page(manager)["events"]
     with closing(sqlite3.connect(manager.sessions_dir / "sessions.sqlite3")) as db:
         db.execute("""CREATE TRIGGER reject_replacement BEFORE INSERT ON history_entries
                       BEGIN SELECT RAISE(ABORT, 'display write failed'); END""")
     with pytest.raises(sqlite3.IntegrityError, match="display write failed"):
-        await replace_webui_chat_input(host, payload(source))
+        await fork_webui_chat_in_place(host, payload(source))
     reopened = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
     after = reopened.read_session_snapshot(KEY)
     assert (after.generation, after.messages) == (before.generation, before.messages)
@@ -188,8 +185,7 @@ async def test_discarded_summary_and_provider_continuation_cannot_survive(editin
         payload={"response_id": "discarded-suffix"},
     )
     await manager.state.prepare_input(source)
-    prepared = source_for(manager, 1)
-    await replace_webui_chat_input(host, payload(prepared))
+    await fork_webui_chat_in_place(host, payload("user:old-1"))
     value = await manager.state.read(KEY)
     assert value.last_archived == 0
     assert "_last_summary" not in value.metadata
@@ -209,17 +205,17 @@ async def test_unsupported_metadata_is_explicitly_rejected(editing, extra, code)
     source = await manager.state.get(KEY)
     source.messages[2].update(extra)
     await manager.state.prepare_input(source)
-    with pytest.raises(HistoryEditError, match=code):
-        await replace_webui_chat_input(host, payload(source_for(manager, 1)))
+    with pytest.raises(ForkError, match=code):
+        await fork_webui_chat_in_place(host, payload("user:old-1"))
 
 
 @pytest.mark.parametrize("text", ["/new", "! rm anything", "use @editable", "> [!QUOTE]\n> quote\n\nreply"])
 async def test_edit_never_dispatches_control_or_context_syntax(editing, text):
     manager, host = editing
-    prepared = source_for(manager, 1)
+    prepared = "user:old-1"
     before = await manager.state.read(KEY)
-    with pytest.raises(HistoryEditError):
-        await replace_webui_chat_input(host, payload(prepared, text))
+    with pytest.raises(ForkError):
+        await fork_webui_chat_in_place(host, payload(prepared, text))
     assert (await manager.state.read(KEY)).messages == before.messages
 
 
@@ -231,8 +227,8 @@ async def test_mismatched_display_and_model_input_cannot_truncate_history(editin
     await manager.state.prepare_input(session)
     before = await manager.state.read(KEY)
     rows = page(manager)["events"]
-    prepared = source_for(manager, 1)
-    with pytest.raises(HistoryEditError, match="edit_source_changed"):
-        await replace_webui_chat_input(host, payload(prepared))
+    prepared = "user:old-1"
+    with pytest.raises(ForkError, match="edit_source_changed"):
+        await fork_webui_chat_in_place(host, payload(prepared))
     assert (await manager.state.read(KEY)).messages == before.messages
     assert page(manager)["events"] == rows

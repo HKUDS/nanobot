@@ -232,7 +232,7 @@ def read_transcript_lines(session_key: str, *, history: HistoryReader) -> list[d
     return [record_from_fact(fact, session_key) for fact in history.all_facts()]
 
 
-def transcript_edit_target(history: HistoryReader, input_id: str) -> tuple[int, int, HistoryFact] | None:
+def find_fork_input(history: HistoryReader, input_id: str) -> tuple[int, int, HistoryFact] | None:
     if entry := next(history.inputs_by_id(input_id), None):
         return entry
     # Before durable input IDs, replay identified a user by turn or its position in the transcript.
@@ -1532,8 +1532,6 @@ def build_webui_thread_response(
             )
         events = [event for event in events if event["event"] != "model_request"]
     replay_stats.replay_ms += int((time.perf_counter() - replay_started) * 1000)
-    if session_version_loader is not None:
-        payload["source_revision"] = prompt_index_revision(session_key, session_version_loader(), history=history)
     payload["projection"] = "events"
     payload["events"] = events
     page["loaded_event_count"] = len(events)

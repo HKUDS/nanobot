@@ -21,6 +21,7 @@ from nanobot.session.manager import (
     SessionInfo,
     SessionMetadataPayload,
     SessionPayload,
+    fork_session,
     message_preview_text,
     metadata_title,
 )
@@ -447,17 +448,6 @@ class SqliteSessionStore:
         session.revision += 1
         session.persisted = True
 
-    def replace_generation(self, session: Session, *, previous_generation: str, message_start: int) -> None:
-        """Rotate the lifecycle without recreating identity or deleting the row."""
-        with self.transaction() as db:
-            changed = db.execute(
-                "UPDATE sessions SET generation=? WHERE key=? AND generation=? AND revision=?",
-                (session.generation, session.key, previous_generation, session.revision),
-            ).rowcount
-            if changed != 1:
-                raise SessionConflictError("session history changed")
-            self.save(session, message_start=message_start)
-
     def save_runtime_checkpoint(self, session: Session) -> None:
         with self.transaction() as db:
             row = db.execute("SELECT generation FROM sessions WHERE key=?", (session.key,)).fetchone()
@@ -734,10 +724,8 @@ class SqliteSessionStore:
                 db.execute("UPDATE history_heads SET revision=revision+1 WHERE session_key=?", (key,))
         return errors
 
-    def replace_history_input(
-        self, key: str, ordinal: int, position: int, fact: HistoryFact, *, expected_generation: str,
-    ) -> None:
-        """Replace an anchored display suffix and rebuild its paging/sidebar summaries."""
+    def _truncate_display_history(self, key: str, ordinal: int, position: int) -> None:
+        """Drop a display suffix and rebuild its paging/sidebar summaries before appending."""
         with self.transaction() as db:
             db.execute(
                 """DELETE FROM history_entries WHERE session_key=?
@@ -780,32 +768,49 @@ class SqliteSessionStore:
                 "UPDATE history_heads SET preview=?, user_preview=?, updated_at_ms=? WHERE session_key=?",
                 (preview, user_preview, updated_at_ms, key),
             )
-            self.append_history(key, [fact], expected_generation=expected_generation)
 
-    def copy_history_prefix(self, source_key: str, target: Session, before_input: int) -> bool:
-        """Copy a display prefix alongside its canonical fork, in the caller's transaction."""
-        def select(reader: HistoryReader) -> list[HistoryFact] | None:
-            revision = reader.revision
-            if revision is None or revision[1] < 0:
-                return None
-            copied: list[HistoryFact] = []
-            inputs = 0
-            for fact in reader.all_facts():
-                if fact.kind is HistoryKind.FORK_BOUNDARY:
-                    continue
-                if fact.kind is HistoryKind.INPUT:
-                    if inputs == before_input:
-                        return copied
-                    inputs += 1
-                copied.append(fact)
-            return copied if inputs == before_input else None
+    def save_fork(
+        self, source: Session, target: Session, display_suffix: Callable[[], list[HistoryFact]], *,
+        replace_at: tuple[int, int, int] | None = None,
+    ) -> None:
+        """Commit the model and display branches together; keep retained rows for an in-place fork."""
+        with self.transaction() as db:
+            start = 0
+            if replace_at is not None:
+                start, ordinal, position = replace_at
+                changed = db.execute(
+                    "UPDATE sessions SET generation=? WHERE key=? AND generation=? AND revision=?",
+                    (target.generation, target.key, source.generation, source.revision),
+                ).rowcount
+                if changed != 1:
+                    raise SessionConflictError("session history changed")
+                self._truncate_display_history(target.key, ordinal, position)
+            self.save(target, message_start=start)
+            if facts := display_suffix():
+                self.append_history(target.key, facts, expected_generation=target.generation)
 
-        facts = self.project_history(source_key, select)
-        if facts is None:
-            return False
-        facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
-        self.append_history(target.key, facts, expected_generation=target.generation)
-        return True
+    def fork_before_user_index(
+        self, source: Session, target_key: str, before_user_index: int, *, exclude_metadata: frozenset[str],
+        title: str | None = None, history_projection: Callable[[Session], list[HistoryFact]] | None = None,
+    ) -> Session | None:
+        """Materialize a new fork within the transaction that loaded its source."""
+        target = fork_session(source, target_key, before_user_index, exclude_metadata=exclude_metadata)
+        if target is None:
+            return None
+        if title:
+            target.metadata["title"] = title
+
+        def display_suffix() -> list[HistoryFact]:
+            facts = self.project_history(source.key, lambda reader: reader.fork_prefix(before_user_index))
+            if facts is None:
+                if history_projection is None:
+                    return []
+                facts = history_projection(target)
+            facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
+            return facts
+
+        self.save_fork(source, target, display_suffix)
+        return target
 
 
     def archives_imported(self) -> bool:

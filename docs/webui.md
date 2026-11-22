@@ -70,6 +70,8 @@ Each topic in the sidebar keeps its own history, title, project folder, and link
 
 In a saved topic, wait for the reply to finish, then open **Message actions** on one of your plain-text messages and choose **Edit message**. Edit the text directly in the bubble. Below it, **×** cancels without changing the conversation or your composer draft. **✓** resends: it replaces the selected message and everything after it in the same topic, then generates a new reply. It does not undo earlier tool actions such as file changes. To keep the original conversation, use **Fork** instead.
 
+Other tabs open to the same topic update automatically. A message sent before the resend is discarded if it follows the edited message; a message sent afterward continues the updated conversation.
+
 Messages with attachments, quotes, mentions, or commands cannot be edited this way.
 
 ### Conversation groups and panes

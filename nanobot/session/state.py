@@ -7,25 +7,19 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from copy import deepcopy
-from dataclasses import asdict, fields, replace
+from dataclasses import fields, replace
 from datetime import datetime
 from typing import Any, TypeVar, cast
 
-from nanobot.bus.events import InboundMessage
-from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
-from nanobot.session.history_edit import (
-    HistoryEditError,
-    HistoryEditProjection,
-    HistoryEditSource,
-    ordinary_text_error,
-)
+from nanobot.bus.events import INBOUND_META_TURN_ID, InboundMessage
+from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryReader
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import (
+    FORK_RECEIPT_KEY,
     Session,
     SessionIdentity,
     SessionInfo,
     SessionPolicy,
-    fork_session,
 )
 from nanobot.session.message_metadata import input_history_metadata
 from nanobot.session.sqlite_store import SessionConflictError, SqliteSessionStore
@@ -38,6 +32,15 @@ _CHECKPOINT_KEY = "runtime_checkpoint"
 _RESERVED_KEYS = frozenset({_PENDING_KEY, _CHECKPOINT_KEY, "pending_user_followups"})
 _DEFAULT_CAPACITY = 64
 _DEFAULT_WORKERS = 4
+
+
+ForkLocator = Callable[[Session, HistoryReader], tuple[int, int, int, HistoryFact]]
+
+
+class ForkError(ValueError):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
 
 
 class SessionOperationQueueFullError(RuntimeError):
@@ -1031,85 +1034,54 @@ class SessionState:
         if source_key == target_key:
             raise ValueError("new fork requires a different target session")
 
-        def commit() -> Session | None:
-            def write() -> Session | None:
-                source = self._load(source_key)
-                if source is None:
-                    return None
-                target = fork_session(
-                    source, target_key, before_user_index, exclude_metadata=frozenset(self._generation_exclusions),
-                )
-                if target is None:
-                    return None
-                if title:
-                    target.metadata["title"] = title
-                self._commit(target)
-                copied = self._store.copy_history_prefix(source_key, target, before_user_index)
-                if not copied and history_projection is not None:
-                    facts = history_projection(target)
-                    facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
-                    self._store.append_history(target.key, facts, expected_generation=target.generation)
-                return target
+        def write() -> Session | None:
+            source = self._load(source_key)
+            if source is None:
+                return None
+            return self._store.fork_before_user_index(
+                source, target_key, before_user_index, exclude_metadata=frozenset(self._generation_exclusions),
+                title=title, history_projection=history_projection,
+            )
 
+        return await self._fork_transaction((source_key, target_key), write)
+
+    async def fork_in_place(
+        self, key: str, source_id: str, message: InboundMessage, locate: ForkLocator | None,
+    ) -> Session | None:
+        """Replace an anchored input, or return None for an exact retry. A busy lane may only retry."""
+        receipt = {"turn_id": message.metadata[INBOUND_META_TURN_ID], "source_id": source_id, "text": message.content}
+
+        def write() -> Session | None:
+            source = self._load(key, history=locate is not None)
+            if source is None or not source.policy.persist:
+                raise ForkError("edit_source_changed")
+            previous = source.metadata.get(FORK_RECEIPT_KEY)
+            if isinstance(previous, dict) and cast(dict[str, object], previous).get("turn_id") == receipt["turn_id"]:
+                if previous != receipt:
+                    raise ForkError("edit_request_conflict")
+                return None
+            resolve = locate
+            if resolve is None or any(source.metadata.get(name) for name in _RESERVED_KEYS):
+                raise ForkError("edit_session_busy")
+            position, ordinal, entry, new_input = self._store.project_history(key, lambda history: resolve(source, history))
+            target = source.fork_prefix(position, exclude_metadata=frozenset(self._generation_exclusions))
+            target.add_message("user", message.content, **input_history_metadata(message))
+            target.metadata[_PENDING_KEY] = True
+            target.metadata[FORK_RECEIPT_KEY] = receipt
+            self._store.save_fork(source, target, lambda: [new_input], replace_at=(position, ordinal, entry))
+            return target
+
+        return await self._fork_transaction(key, write)
+
+    async def _fork_transaction(self, keys: str | tuple[str, str], write: Callable[[], Session | None]) -> Session | None:
+        def commit() -> Session | None:
             target = self._store.run_write(write)
             if target is None:
                 return None
             self._publish(target)
             return self._draft(target)
-        return await self._execute(
-            (source_key, target_key),
-            commit,
-            operation_name="fork",
-        )
 
-    async def replace_user_input(
-        self, key: str, source: HistoryEditSource, message: InboundMessage,
-        projection: HistoryEditProjection | None,
-    ) -> Session | None:
-        """Commit both histories, or return None for an exact retry. A busy lane may only retry."""
-        from uuid import uuid4
-
-        if reason := ordinary_text_error({"role": "user", "content": message.content}):
-            raise HistoryEditError(reason)
-
-        receipt = {"turn_id": message.metadata["webui_turn_id"], "source": asdict(source), "text": message.content}
-
-        def commit() -> Session | None:
-            def write() -> Session | None:
-                current = self._load(key, history=projection is not None)
-                if current is None or not current.policy.persist:
-                    raise HistoryEditError("edit_source_changed")
-                previous = current.metadata.get("history_edit_receipt")
-                if isinstance(previous, dict) and cast(dict[str, object], previous).get("turn_id") == receipt["turn_id"]:
-                    if previous != receipt:
-                        raise HistoryEditError("edit_request_conflict")
-                    return None
-                resolve = projection
-                if resolve is None or any(current.metadata.get(name) for name in _RESERVED_KEYS):
-                    raise HistoryEditError("edit_session_busy")
-                target = self._store.project_history(key, lambda history: resolve(current, history))
-                previous_generation = current.generation
-                current.retain_history_prefix(target.model_position)
-                for name in (*self._generation_exclusions, "webui_recovery", "_last_usage", "request_origin", "_stopped_at_iteration_limit"):
-                    current.metadata.pop(name, None)
-                current.generation = uuid4().hex
-                current.add_message("user", message.content, **input_history_metadata(message))
-                current.metadata[_PENDING_KEY] = True
-                current.metadata["history_edit_receipt"] = receipt
-                self._store.replace_generation(current, previous_generation=previous_generation, message_start=target.model_position)
-                self._store.replace_history_input(
-                    key, target.turn_ordinal, target.position, target.input,
-                    expected_generation=current.generation,
-                )
-                return current
-
-            current = self._store.run_write(write)
-            if current is None:
-                return None
-            self._publish(current)
-            return self._draft(current)
-
-        return await self._execute(key, commit, operation_name="replace_user_input")
+        return await self._execute(keys, commit, operation_name="fork")
 
     async def delete(
         self,
@@ -1233,7 +1205,7 @@ class SessionState:
                 if old is not None:
                     session.policy = old.policy
                     session.metadata = deepcopy(old.metadata)
-                for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary", "_stopped_at_iteration_limit"):
+                for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary", "_stopped_at_iteration_limit", FORK_RECEIPT_KEY):
                     session.metadata.pop(name, None)
                 for name in self._generation_exclusions:
                     session.metadata.pop(name, None)

@@ -592,30 +592,26 @@ describe("ThreadShell", () => {
     expect(fetch).toHaveBeenCalledTimes(readsBeforeSearch);
   });
 
-  it("cancels an inline edit without changing the saved message or the composer draft", async () => {
-    const client = Object.assign(makeClient(), { requestMutation: vi.fn() });
-    vi.mocked(fetch).mockImplementation(async (input) => (
-      String(input).includes("/webui-thread")
-        ? httpJson({ ...transcriptFromSimpleMessages([
-            { role: "user", content: "Saved question", turnId: "saved-turn" },
-          ]), source_revision: "saved" })
-        : { ok: false, status: 404, json: async () => ({}) }
-    ) as Response);
-    render(wrap(client, <ThreadShell session={session("editable")} title="Editable history"
-      onToggleSidebar={() => {}} />));
-
+  it("resends a live user message by turn identity and leaves the composer draft alone", async () => {
+    const client = Object.assign(makeClient(), { requestMutation: vi.fn().mockResolvedValue({ accepted: true }) });
+    const chat_id = "editable";
+    render(wrap(client, <ThreadShell session={session(chat_id)} title="Editable history" onToggleSidebar={() => {}} />));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Unsent follow-up" } });
-    const actions = await openMessageActions("Saved question");
+    act(() => {
+      client._emitChat(chat_id, { event: "user_message", chat_id, turn_id: "first", starts_turn: true, turn_seq: 1, text: "First question" });
+      client._emitChat(chat_id, { event: "turn_end", chat_id, turn_id: "first", turn_seq: 2 });
+    });
+    const actions = await openMessageActions("First question");
     fireEvent.click(within(actions).getByRole("button", { name: "Edit message" }));
     const editor = screen.getByRole("textbox", { name: "Edit message" });
-    expect(editor).toHaveValue("Saved question");
-    fireEvent.change(editor, { target: { value: "Discard this edit" } });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.change(editor, { target: { value: "Edited question" } });
+    fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true });
 
-    expect(screen.getByText("Saved question")).toBeVisible();
+    await waitFor(() => expect(editor).not.toBeInTheDocument());
+    expect(client.requestMutation).toHaveBeenCalledWith("chat.fork", {
+      mode: "replace", chat_id, turn_id: expect.any(String), text: "Edited question", source_id: "user:first",
+    });
     expect(screen.getByRole("textbox")).toHaveValue("Unsent follow-up");
-    expect(client.requestMutation).not.toHaveBeenCalled();
-    expect(client.sendMessage).not.toHaveBeenCalled();
   });
 
   it.each(["callback", "cached return"] as const)("keeps closed answer segments in order after %s", async (path) => {

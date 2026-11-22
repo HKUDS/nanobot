@@ -60,8 +60,6 @@ export interface ThreadPaging {
   lineage: number;
   hasPendingToolCalls: boolean;
   completedTurnIds: string[];
-  /** Revision of the latest page admitted to this visible projection. */
-  sourceRevision: string | null;
   completionIdsProvided: boolean;
   activeTurnId: string | null;
   historyGeneration: string | null;
@@ -144,7 +142,7 @@ function emptyPaging(): ThreadPaging {
   return { loading: false, loadingOlder: false, error: null, olderError: null,
     beforeCursor: null, hasMoreBefore: null, userMessageOffset: 0,
     forkBoundaryMessageCount: null, truncated: false, version: 0, lineage: 0,
-    hasPendingToolCalls: false, completedTurnIds: [], sourceRevision: null, completionIdsProvided: false, activeTurnId: null, historyGeneration: null };
+    hasPendingToolCalls: false, completedTurnIds: [], completionIdsProvided: false, activeTurnId: null, historyGeneration: null };
 }
 function textKey(text: TextSource): string {
   return JSON.stringify([text.turn, text.phase, text.stream,
@@ -920,11 +918,6 @@ export class ThreadTranscript {
     if (pending && !hasGap) this.pendingFragmentGap = null;
     this.paging = { ...this.paging, loading: false, loadingOlder: false, error: null,
       historyGeneration: generation ?? this.paging.historyGeneration,
-      // An older page cannot authorize replacing a newer, unseen tail. Nor can a
-      // latest page whose candidate rows were withheld by live reconciliation.
-      sourceRevision: read.kind === "older"
-        ? (this.paging.sourceRevision === body?.source_revision ? this.paging.sourceRevision : null)
-        : cut === rows.length ? body?.source_revision ?? null : null,
       olderError: read.kind !== "older" && !reset
         && (preserveFrontier || this.paging.beforeCursor === page?.before_cursor) ? this.paging.olderError : null,
       beforeCursor: preserveFrontier ? this.paging.beforeCursor : page?.before_cursor ?? null,

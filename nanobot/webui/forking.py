@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol, cast
@@ -7,16 +8,15 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage
-from nanobot.runtime_context import public_history_message
-from nanobot.session.display_history import HistoryReader
-from nanobot.session.history_edit import (
-    HistoryEditError,
-    HistoryEditSource,
-    HistoryEditTarget,
-    ordinary_text_error,
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_HISTORY_META,
+    WEBUI_QUOTE_SOURCE,
+    public_history_message,
 )
+from nanobot.session.display_history import HistoryFact, HistoryReader
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager, history_prefix_boundary
+from nanobot.session.state import ForkError
 from nanobot.session.webui_turns import (
     clean_generated_title,
     clear_websocket_turn_if_current,
@@ -28,9 +28,8 @@ from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session
 from nanobot.webui.transcript import (
     build_user_transcript_event,
     build_webui_thread_response,
-    prompt_index_revision,
+    find_fork_input,
     session_display_facts,
-    transcript_edit_target,
 )
 
 if TYPE_CHECKING:
@@ -139,29 +138,53 @@ async def handle_webui_fork_chat(
     )
 
 
-async def replace_webui_chat_input(
+def _plain_fork_text(message: dict[str, Any]) -> str:
+    if message.get("role") != "user" or any(message.get(key) for key in (
+        "_hidden_history", "_command", "session_message", "injected_event", "source", "automation",
+        "automation_id", "cron_job_id", "_automation_turn", "_user_shell",
+    )):
+        raise ForkError("edit_special_message")
+    if any(message.get(key) for key in ("media", "media_paths", "media_urls")):
+        raise ForkError("edit_attachments_unsupported")
+    if any(message.get(key) for key in ("cli_apps", "mcp_presets", "session_mentions")):
+        raise ForkError("edit_mentions_unsupported")
+    text = public_history_message(message).get("content")
+    if not isinstance(text, str) or not text.strip():
+        raise ForkError("edit_plain_text_only")
+    context = message.get(RUNTIME_CONTEXT_HISTORY_META)
+    sources: list[str] = cast(dict[str, Any], context).get("sources", []) if isinstance(context, dict) else []
+    if WEBUI_QUOTE_SOURCE in sources or text.startswith("> [!QUOTE]"):
+        raise ForkError("edit_context_unsupported")
+    if any(source in sources for source in ("session_mentions", "cli_apps", "mcp_presets")):
+        raise ForkError("edit_mentions_unsupported")
+    if "session_message" in sources:
+        raise ForkError("edit_special_message")
+    if text.lstrip().startswith(("/", "!")):
+        raise ForkError("edit_commands_unsupported")
+    if re.search(r"(^|\s)@[\w-]+", text):
+        raise ForkError("edit_mentions_unsupported")
+    return text
+
+
+async def fork_webui_chat_in_place(
     channel: WebUIForkHost, payload: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Confirm a versioned source and replace both histories before execution."""
+    """Keep the prefix before the selected input in this chat and resume from the new text."""
 
     gateway = channel.gateway
-    chat_id, text, turn_id, raw_source = (
-        payload.get("chat_id"), payload.get("text"), payload.get("turn_id"), payload.get("source"),
+    chat_id, text, turn_id, source_id = (
+        payload.get("chat_id"), payload.get("text"), payload.get("turn_id"), payload.get("source_id"),
     )
     if (payload.get("mode") != "replace" or not is_valid_webui_chat_id(chat_id)
             or not isinstance(text, str) or not text.strip()
             or not isinstance(turn_id, str) or not turn_id or len(turn_id) > 128
-            or not isinstance(raw_source, dict)):
-        raise HistoryEditError("edit_invalid_request")
-    fields = cast(dict[str, Any], raw_source)
-    revision, input_id = fields.get("revision"), fields.get("id")
-    if not isinstance(revision, str) or not revision or not isinstance(input_id, str) or not input_id:
-        raise HistoryEditError("edit_invalid_request")
-    source = HistoryEditSource(revision, input_id)
+            or not isinstance(source_id, str) or not source_id):
+        raise ForkError("edit_invalid_request")
     if gateway.ingress.validate_text(text) is not None:
-        raise HistoryEditError("edit_text_too_large")
-    if gateway.session_manager is None or gateway.replace_user_input is None:
-        raise HistoryEditError("edit_unavailable")
+        raise ForkError("edit_text_too_large")
+    _plain_fork_text({"role": "user", "content": text})
+    if gateway.session_manager is None or gateway.fork_in_place is None:
+        raise ForkError("edit_unavailable")
     key = webui_session_key(chat_id)
     manager = gateway.session_manager
     queued_owner = register_queued_websocket_turn_if_idle(chat_id, turn_id)
@@ -172,50 +195,44 @@ async def replace_webui_chat_input(
                   WEBSOCKET_TURN_OWNER_METADATA_KEY: queued_owner},
     )
     if queued_owner is None:
-        await manager.state.replace_user_input(key, source, message, None)
+        await manager.state.fork_in_place(key, source_id, message, None)
         return {"accepted": True, "turn_id": turn_id}
     retired_turn_ids: list[str] = []
     previous_generation = ""
     committed = False
 
-    def projection(session: Session, history: HistoryReader) -> HistoryEditTarget:
-        if prompt_index_revision(key, (session.generation, session.revision), history=history) != source.revision:
-            raise HistoryEditError("edit_source_changed")
+    def locate(session: Session, history: HistoryReader) -> tuple[int, int, int, HistoryFact]:
         nonlocal previous_generation
         previous_generation = session.generation
         if history.has_input(f"user:{turn_id}") or any(m.get("webui_turn_id") == turn_id for m in session.messages):
-            raise HistoryEditError("edit_request_conflict")
-        target = transcript_edit_target(history, source.id)
+            raise ForkError("edit_request_conflict")
+        target = find_fork_input(history, source_id)
         if target is None:
-            raise HistoryEditError("edit_source_changed")
+            raise ForkError("edit_source_changed")
         ordinal, position, fact = target
-        original_text = fact.content.get("text")
-        if reason := ordinary_text_error({**fact.content, "role": "user", "content": original_text}):
-            raise HistoryEditError(reason)
+        original_text = _plain_fork_text({**fact.content, "role": "user", "content": fact.content.get("text")})
         if fact.content.get("input_id") or fact.turn_id:
             matches = (
                 i for i, m in enumerate(session.messages) if m.get("role") == "user" and not is_hidden_history_message(m)
-                and (m.get("input_id") == source.id or (not m.get("input_id") and fact.turn_id and m.get("webui_turn_id") == fact.turn_id))
+                and (m.get("input_id") == source_id or (not m.get("input_id") and fact.turn_id and m.get("webui_turn_id") == fact.turn_id))
             )
             boundary = next(matches, None)
             if next(matches, None) is not None:
-                raise HistoryEditError("edit_source_changed")
+                raise ForkError("edit_source_changed")
         else:
             boundary = history_prefix_boundary(session, history.user_count_before(ordinal, position))
         if boundary is None or boundary >= len(session.messages):
-            raise HistoryEditError("edit_source_changed")
+            raise ForkError("edit_source_changed")
         original = session.messages[boundary]
-        if (public_history_message(original).get("content") != original_text or original.get("webui_turn_id") != fact.turn_id
-                or (original.get("input_id") and original["input_id"] != source.id)):
-            raise HistoryEditError("edit_source_changed")
-        if reason := ordinary_text_error(original):
-            raise HistoryEditError(reason)
+        if (_plain_fork_text(original) != original_text or original.get("webui_turn_id") != fact.turn_id
+                or (original.get("input_id") and original["input_id"] != source_id)):
+            raise ForkError("edit_source_changed")
         retired_turn_ids.extend(history.retired_turn_ids(ordinal, position))
         event = build_user_transcript_event(chat_id, text)
         assert event is not None
         gateway.transcripts.prepare_event(chat_id, event, metadata=message.metadata, phase="user")
         event["created_at_ms"] = int(message.timestamp.timestamp() * 1000)
-        return HistoryEditTarget(boundary, ordinal, position, fact_from_record(event))
+        return boundary, ordinal, position, fact_from_record(event)
 
     async def accepted(session: Session) -> None:
         nonlocal committed
@@ -236,7 +253,7 @@ async def replace_webui_chat_input(
         )
 
     try:
-        await gateway.replace_user_input(message, source, projection, accepted)
+        await gateway.fork_in_place(message, source_id, locate, accepted)
     finally:
         if not committed:
             clear_websocket_turn_if_current(chat_id, queued_owner)

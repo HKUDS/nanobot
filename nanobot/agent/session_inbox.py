@@ -41,7 +41,7 @@ class SessionExecutionClosedError(RuntimeError):
     """Work cannot enter the session dispatcher once it starts shutting down."""
 
 
-_Control = Literal["stop", "discard", "edit"]
+_Control = Literal["stop", "discard", "fork"]
 
 
 class SessionInboxes(Mapping[str, SessionInbox]):
@@ -63,11 +63,11 @@ class SessionInboxes(Mapping[str, SessionInbox]):
         return key not in self and key not in self._controls
 
     @contextmanager
-    def reserving_edit(self, key: str) -> Generator[SessionInbox]:
+    def reserving_fork(self, key: str) -> Generator[SessionInbox]:
         """Under admission_lock, install before yielding; hand off only a committed input."""
         inbox = SessionInbox()
         self.install(key, inbox)
-        with self.controlling(key, "edit"):
+        with self.controlling(key, "fork"):
             try:
                 yield inbox
             finally:

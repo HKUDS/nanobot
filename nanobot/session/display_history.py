@@ -325,6 +325,23 @@ class HistoryReader:
         ):
             yield int(row[0]), int(row[1]), HistoryFact.decode(row[2])
 
+    def fork_prefix(self, before_input: int) -> list[HistoryFact] | None:
+        """Read the portable prefix before a visible input, or None if model projection is needed."""
+        if self.revision is None or self.revision[1] < 0:
+            return None
+        facts: list[HistoryFact] = []
+        inputs = 0
+        for kind, record in self._db.execute(
+            """SELECT kind, record FROM history_entries WHERE session_key=? AND kind!=?
+               ORDER BY turn_ordinal, position""", (self.key, HistoryKind.FORK_BOUNDARY),
+        ):
+            if kind == HistoryKind.INPUT:
+                if inputs == before_input:
+                    return facts
+                inputs += 1
+            facts.append(HistoryFact.decode(record))
+        return facts if inputs == before_input else None
+
     def all_facts(self) -> list[HistoryFact]:
         return [HistoryFact.decode(row[0]) for row in self._db.execute(
             "SELECT record FROM history_entries WHERE session_key=? ORDER BY turn_ordinal, position",
