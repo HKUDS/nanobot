@@ -58,8 +58,7 @@ interface MessageBubbleProps {
   slashCommands?: SlashCommand[];
   onOpenFilePreview?: (path: string) => void;
   contextMenu?: ReactNode;
-  /** Edit ordinary user text in its existing bubble surface. */
-  textEditor?: ReactNode;
+  editor?: { input: ReactNode; actions: ReactNode };
 }
 
 function ForkArrowIcon({ className }: { className?: string }) {
@@ -448,7 +447,7 @@ export function MessageBubble({
   slashCommands = [],
   onOpenFilePreview,
   contextMenu,
-  textEditor,
+  editor,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const mentionCliApps = useMemo(
@@ -531,14 +530,8 @@ export function MessageBubble({
         sessionMentions={message.sessionMentions}
       />
     );
-    const editing = textEditor != null;
     return (
-      <div
-        className={cn(
-          "group relative ml-auto flex max-w-[min(85%,36rem)] flex-col items-end gap-1.5",
-          editing ? "w-full" : "w-fit",
-        )}
-      >
+      <div className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5">
         {!hasText ? contextMenu : null}
         {userMedia}
         {quotedContext ? (
@@ -550,7 +543,7 @@ export function MessageBubble({
         {hasText ? (
           <UserTextBubble
             messageId={message.id}
-            textEditor={textEditor}
+            textEditor={editor?.input}
             contentKey={userContent}
             temporary={temporary}
             showProcessingStatus={showProcessingStatus}
@@ -561,6 +554,7 @@ export function MessageBubble({
             {messageText}
           </UserTextBubble>
         ) : null}
+        {editor?.actions}
         {!showDeliveryStatus && showProcessingStatus ? (
           <span role="status" className="sr-only">
             {t("message.delivery.waiting")}
@@ -765,7 +759,7 @@ function UserTextBubble({
       data-user-text-bubble
       data-user-message-collapsible={isCollapsible ? "true" : undefined}
       data-user-message-collapsed={isCollapsed ? "true" : undefined}
-      className={cn("relative ml-auto max-w-full min-w-0", editing ? "w-full" : "w-fit")}
+      className="relative ml-auto w-fit max-w-full min-w-0"
     >
       {contextMenu}
       <div
@@ -777,14 +771,11 @@ function UserTextBubble({
         data-temporary-message={temporary ? "true" : undefined}
         data-pending-edge={edgeState !== "solid" ? edgeState : undefined}
         className={cn(
-          "relative ml-auto max-w-full min-w-0 rounded-floating px-4",
-          editing ? "w-full py-3" : "w-fit py-2",
+          "relative ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
           "text-left text-reading whitespace-pre-wrap [overflow-wrap:anywhere]",
           temporary
             ? "border border-dashed border-muted-foreground/40 bg-transparent"
-            : editing
-              ? "user-message-surface bg-card ring-1 ring-border focus-within:ring-2 focus-within:ring-ring/50"
-              : "user-message-surface bg-secondary/70",
+            : "user-message-surface bg-secondary/70",
           showProcessingStatus && "user-message-surface-dashed",
           isCollapsible && "user-message-collapsible",
         )}

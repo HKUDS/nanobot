@@ -1558,7 +1558,7 @@ describe("MessageBubble", () => {
       expect(clip.style.height).toBe("304px");
 
       // The editor and its submit controls must not inherit the collapsed text clip.
-      rerender(<MessageBubble message={message} textEditor={<textarea defaultValue={content} />} />);
+      rerender(<MessageBubble message={message} editor={{ input: <textarea defaultValue={content} />, actions: null }} />);
       expect(screen.getByRole("textbox")).toHaveValue(content);
       expect(screen.getByRole("textbox").closest("[data-user-message-clip]")).toBeNull();
       expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();

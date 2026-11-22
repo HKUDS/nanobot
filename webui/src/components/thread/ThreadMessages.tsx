@@ -10,7 +10,7 @@ import {
 } from "@/components/thread/AgentActivityCluster";
 import { sameHistoryRowIdentity, type HistoryRowIdentity, type HistoryRowSource } from "@/components/thread/history-row-identity";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
-import { InlineMessageEditor, useMessageEditing } from "@/components/thread/MessageEditing";
+import { messageEditorSlots, useMessageEditing } from "@/components/thread/MessageEditing";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -319,7 +319,7 @@ export function ThreadMessages({
         ];
       })]}
       {selected && !editSourceVisible ? <div className={cn("thread-message-row", units.length > 0 && "mt-5")}>
-        <MessageBubble message={selected} textEditor={<InlineMessageEditor sourceMissing />} />
+        <MessageBubble message={selected} editor={messageEditorSlots(true)} />
       </div> : null}
       {afterMessages}
       {pendingActivity ? (
@@ -818,7 +818,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             ) : null}
             <MessageBubble
               message={unit.message}
-              textEditor={isEditing ? <InlineMessageEditor /> : undefined}
+              editor={isEditing ? messageEditorSlots() : undefined}
               temporary={temporary}
               cliApps={cliApps}
               mcpPresets={mcpPresets}

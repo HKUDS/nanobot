@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Loader2 } from "lucide-react";
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Check, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { HoverHint } from "@/components/ui/hover-hint";
 import { useClient } from "@/providers/ClientProvider";
 import { parseQuotedUserMessage } from "@/lib/user-message-quote";
 import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
@@ -156,12 +157,17 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, onRevie
   }}>{children}</Editor.Provider></Actions.Provider>;
 }
 
-export function InlineMessageEditor({ sourceMissing = false }: { sourceMissing?: boolean }) {
+export function messageEditorSlots(sourceMissing = false) {
+  return {
+    input: <EditInput sourceMissing={sourceMissing} />,
+    actions: <EditActionsRow sourceMissing={sourceMissing} />,
+  };
+}
+
+function EditInput({ sourceMissing }: { sourceMissing: boolean }) {
   const editing = useContext(Editor);
   const { t } = useTranslation();
   const input = useRef<HTMLTextAreaElement>(null);
-  const errorId = useId();
-  const hintId = useId();
   const id = editing?.draft?.message.id;
   useLayoutEffect(() => {
     const el = input.current;
@@ -172,20 +178,11 @@ export function InlineMessageEditor({ sourceMissing = false }: { sourceMissing?:
   }, [id]);
   if (!editing?.draft) return null;
   const { draft, busy, change, cancel, confirm } = editing;
-  const error = busy ? t("message.editErrors.edit_session_busy")
-    : draft.needsReview ? draft.error : sourceMissing ? t("message.editSourceMissing") : draft.error;
-  const loadingRevision = !sourceMissing && !busy && !draft.revision && !draft.error;
-  const pendingAction = draft.submitting || loadingRevision;
-  const showHint = !error && !sourceMissing && !draft.needsReview;
-  return <form data-message-editor className="min-w-0 max-w-full whitespace-normal"
-    onSubmit={(event) => { event.preventDefault(); if (!sourceMissing) confirm(); }}>
-    <div className="grid min-w-0 [text-autospace:no-autospace]">
-      <div aria-hidden
-        className="invisible touch-text-input col-start-1 row-start-1 max-h-[min(45vh,22rem)] overflow-hidden whitespace-pre-wrap [overflow-wrap:anywhere]">
-        {draft.text + "\u200b"}
-      </div>
+  return <div className="relative min-w-[1ch] [text-autospace:no-autospace]">
+      {/* Let literal text size the bubble, including an empty trailing line. */}
+      <div aria-hidden className="invisible">{draft.text + "\u200b"}</div>
       <textarea ref={input} aria-label={t("message.editMessage")} value={draft.text}
-        aria-describedby={error ? errorId : showHint ? hintId : undefined} aria-invalid={!!error}
+        aria-describedby={`edit-feedback-${draft.turnId}`} aria-invalid={busy || sourceMissing || !!draft.error}
         disabled={draft.submitting}
         onChange={(event) => change(event.target.value)}
         onKeyDown={(event) => {
@@ -202,26 +199,39 @@ export function InlineMessageEditor({ sourceMissing = false }: { sourceMissing?:
             if (!sourceMissing) confirm();
           }
         }}
-        className="touch-text-input scrollbar-thin col-start-1 row-start-1 block max-h-[min(45vh,22rem)] min-h-[1.6em] w-full min-w-0 resize-none overflow-y-auto border-0 bg-transparent p-0 [font:inherit] text-inherit outline-none" />
+        className="absolute inset-0 block h-full w-full resize-none overflow-hidden whitespace-pre-wrap border-0 bg-transparent p-0 [font:inherit] text-inherit outline-none [overflow-wrap:anywhere]" />
+  </div>;
+}
+
+function EditActionsRow({ sourceMissing }: { sourceMissing: boolean }) {
+  const editing = useContext(Editor);
+  const { t } = useTranslation();
+  if (!editing?.draft) return null;
+  const { draft, busy, cancel, confirm, retryRead } = editing;
+  const error = busy ? t("message.editErrors.edit_session_busy")
+    : draft.needsReview ? draft.error : sourceMissing ? t("message.editSourceMissing") : draft.error;
+  const pending = draft.submitting || (!sourceMissing && !busy && !draft.revision && !draft.error);
+  const resend = t("message.confirmEditResend");
+  const hint = t("message.editReplaceHint");
+  const feedbackId = `edit-feedback-${draft.turnId}`;
+  return <div className="flex max-w-full flex-col items-end gap-1">
+    <p id={feedbackId} role={error ? "alert" : undefined} className={error ? "text-xs text-destructive" : "sr-only"}>{error || hint}</p>
+    <div className="flex items-center justify-end gap-1">
+      {draft.needsReview || (!sourceMissing && !draft.revision && draft.error) ? <Button type="button" size="sm" variant="ghost" className="touch-target"
+        disabled={!draft.error || busy} aria-busy={!draft.error || undefined} onClick={retryRead}>
+        {t(draft.needsReview ? "message.reviewLatest" : "common.retry")}
+      </Button> : <HoverHint content={`${resend} · ${hint}`} align="end">
+        <Button type="button" variant="icon" size="icon" className="touch-target h-7 w-7" onClick={confirm}
+          aria-label={resend} aria-describedby={feedbackId} aria-busy={pending || undefined} aria-keyshortcuts="Control+Enter Meta+Enter"
+          disabled={sourceMissing || busy || draft.submitting || !draft.revision || !draft.text.trim()}>
+          {pending ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Check className="h-4 w-4" aria-hidden />}
+        </Button>
+      </HoverHint>}
+      <HoverHint content={t("common.cancel")} align="end">
+        <Button type="button" variant="icon" size="icon" className="touch-target h-7 w-7 text-muted-foreground" aria-label={t("common.cancel")} disabled={draft.submitting} onClick={cancel}>
+          <X className="h-4 w-4" aria-hidden />
+        </Button>
+      </HoverHint>
     </div>
-    {error ? <p id={errorId} role="alert" className="mt-2 text-xs leading-5 text-destructive">{error}</p> : null}
-    <div className="mt-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border/50 pt-2">
-      {showHint ? <p id={hintId} className="min-w-0 text-xs leading-5 text-muted-foreground">{t("message.editReplaceHint")}</p> : null}
-      <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
-        <Button type="button" size="sm" variant="ghost" disabled={draft.submitting} onClick={cancel}
-          className="max-md:min-h-11">{t("common.cancel")}</Button>
-        {draft.needsReview || (!sourceMissing && !draft.revision && draft.error) ? <Button type="button" size="sm" className="max-md:min-h-11"
-          disabled={!draft.error || busy} aria-busy={!draft.error || undefined} onClick={editing.retryRead}>
-          {t(draft.needsReview ? "message.reviewLatest" : "common.retry")}
-        </Button> : <Button type="submit" size="sm"
-          aria-busy={pendingAction || undefined}
-          aria-keyshortcuts="Control+Enter Meta+Enter"
-          disabled={sourceMissing || busy || draft.submitting || !draft.revision || !draft.text.trim()}
-          className="max-md:min-h-11">
-          {pendingAction ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
-          {t("message.confirmEditResend")}
-        </Button>}
-      </div>
-    </div>
-  </form>;
+  </div>;
 }

@@ -55,7 +55,7 @@ describe("message editing", () => {
     expect(input.selectionStart).toBe("original question".length);
     expect(input.selectionEnd).toBe("original question".length);
     expect(bubble).toContainElement(input);
-    expect(screen.getByText("Resending replaces this message and everything after it.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Resend" })).toHaveAccessibleDescription("Resending replaces this message and everything after it.");
     expect(onBegin).toHaveBeenCalledTimes(1);
     expect(onBegin).toHaveBeenCalledWith("history-original");
     expect(input).toHaveValue("original question");
