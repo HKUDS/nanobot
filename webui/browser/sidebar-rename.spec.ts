@@ -17,7 +17,10 @@ for (const method of ["Enter", "Save button"] as const) {
     const renamedTopic = sidebar.getByRole("button", { name: "@jaru Renamed topic", exact: true });
     await expect(renamedTopic).toBeFocused();
     await expect(activeTopic).toHaveAttribute("aria-current", "page");
-    await expect(renamedTopic).toHaveCSS("outline-style", method === "Enter" ? "solid" : "none");
+    await expect(renamedTopic).toHaveCSS("outline-style", "none");
+    await expect(renamedTopic.getByText("Renamed topic", { exact: true })).toHaveCSS(
+      "text-decoration-line", method === "Enter" ? "underline" : "none",
+    );
     if (method === "Enter") {
       await page.keyboard.press("Tab");
       await expect(sidebar.getByRole("button", { name: "Topic actions for Renamed topic" })).toBeFocused();

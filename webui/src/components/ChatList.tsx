@@ -81,7 +81,8 @@ import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 const INITIAL_VISIBLE_SESSIONS = 160;
 const VISIBLE_SESSIONS_INCREMENT = 160;
 const ACTION_MENU_CONTENT_CLASS = "w-[11rem] min-w-[11rem] whitespace-nowrap";
-const TOPIC_BUTTON_FOCUS_CLASS = "rounded-md focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-sidebar-muted-foreground";
+const TOPIC_BUTTON_FOCUS_CLASS = "group/topic focus-visible:[outline:none]";
+const TOPIC_TITLE_CLASS = "min-w-0 flex-1 truncate underline-offset-2 group-focus-visible/topic:underline";
 const COLLAPSED_PANE_GROUPS_STORAGE_KEY = "nanobot-webui.collapsed-pane-groups.v1";
 const DETACH_PANE_DROP_TARGET = "__sidebar-standalone__";
 
@@ -1019,7 +1020,7 @@ export const ChatList = memo(function ChatList({
                               ) : null}
                               <span className="relative flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                                 <SidebarSessionHandle handle={s.handle} />
-                                <span className="min-w-0 flex-1 truncate font-normal leading-5">
+                                <span className={cn(TOPIC_TITLE_CLASS, "font-normal leading-5")}>
                                   {title}
                                 </span>
                                 {isPinned ? <PinnedChatIndicator /> : null}
@@ -1501,7 +1502,7 @@ function ActivePaneRows({
                   ) : null}
                   <span className="relative flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                     <SidebarSessionHandle handle={pane.handle} />
-                    <span className="min-w-0 flex-1 truncate">{pane.title}</span>
+                    <span className={TOPIC_TITLE_CLASS}>{pane.title}</span>
                     {isPinned ? <PinnedChatIndicator /> : null}
 
                   </span>
