@@ -10,7 +10,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket.runtime import WebSocketChannel
-from nanobot.command.builtin import cmd_restart
+from nanobot.command.builtin import cmd_new, cmd_restart
 from nanobot.command.router import CommandContext
 from nanobot.config.schema import Config
 from nanobot.session.manager import SessionManager
@@ -27,7 +27,7 @@ def _channel(tmp_path: Path, *, allowed: bool = True, sessions=None):
     bus.publish_inbound = AsyncMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"] if allowed else ["someone-else"]}, bus,
-        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path / "workspace"),
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=sessions.workspace),
     )
     connection = AsyncMock()
     connection.remote_address = ("127.0.0.1", 50123)
@@ -44,15 +44,15 @@ async def _acknowledge_restart(message, monkeypatch):
         ))
 
 
-@pytest.mark.parametrize("settings_control", [False, True], ids=["typed", "settings"])
-async def test_restart_completion_after_gateway_start(history, tmp_path, monkeypatch, settings_control):
+@pytest.mark.parametrize("scenario", ["typed", "settings", "reset"])
+async def test_restart_completion_after_gateway_start(history, tmp_path, monkeypatch, scenario):
     sessions, bus, channel, connection = _channel(tmp_path, sessions=history.sessions)
     chat_id = "restart-chat"
     recovery = {"status": "awaiting_user", "recovery_id": "checkpoint", "reason": "uncertain_tool_state"}
     session = sessions.get_or_create(f"websocket:{chat_id}")
     session.metadata[RECOVERY_METADATA_KEY] = recovery
     sessions.save(session)
-    turn_id = "webui-system:restart" if settings_control else "typed-restart"
+    turn_id = "webui-system:restart" if scenario == "settings" else "typed-restart"
     await channel._dispatch_envelope(connection, "browser", {
         "type": "message", "chat_id": chat_id, "content": "/restart", "webui": True, "turn_id": turn_id,
     })
@@ -74,13 +74,21 @@ async def test_restart_completion_after_gateway_start(history, tmp_path, monkeyp
         attached = _sent_ws_payloads(subscriber)[0]
         assert attached["event"] == "attached"
         assert attached["recovery_state"] == recovery
+        if scenario == "reset":
+            await target._dispatch_envelope(subscriber, "browser", {
+                "type": "message", "chat_id": chat_id, "content": "/new", "webui": True,
+            })
+            assert manager.bus.inbound_size, _sent_ws_payloads(subscriber)
+            reset = await manager.bus.consume_inbound()
+            loop = MagicMock(sessions=fresh, _cancel_active_tasks=AsyncMock())
+            await cmd_new(CommandContext(msg=reset, session=None, key=reset.session_key, raw=reset.content, loop=loop))
         subscriber.send.reset_mock()
 
         task = manager._notify_restart_done_if_needed()
         if task is not None:
             await task
         frames = _sent_ws_payloads(subscriber)
-        if settings_control:
+        if scenario != "typed":
             assert frames == []
             assert history.read(message.session_key) == []
             return

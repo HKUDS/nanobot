@@ -22,6 +22,7 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.display_history import (
     HISTORY_GENERATION_METADATA_KEY,
+    MAX_HISTORY_FACT_BYTES,
     HistoryFact,
     HistoryReader,
 )
@@ -250,6 +251,17 @@ def _record_for_append(obj: dict[str, Any]) -> dict[str, Any]:
     record = dict(obj)
     record["created_at_ms"] = _now_ms()
     return record
+
+
+def command_receipt_fits(event: dict[str, Any], record: dict[str, Any]) -> bool:
+    """Keep optional localization only if both the live frame and the history fact fit."""
+    if len(json.dumps(event, ensure_ascii=False).encode("utf-8")) > MAX_HISTORY_FACT_BYTES:
+        return False
+    try:
+        fact_from_record(_record_for_append(record)).encode()
+    except ValueError:
+        return False
+    return True
 
 
 def append_transcript_object(
@@ -1035,7 +1047,11 @@ def _augment_projected_message(
     cached: bool = False,
 ) -> None:
     if augment_text is not None and projected.get("render_as") != "text":
-        projected["text"] = augment_text(projected["text"])
+        text = projected["text"]
+        projected["text"] = augment_text(text)
+        if projected["text"] != text:
+            # Clients prefer structured receipts to text. Do not override a freshly signed image.
+            projected.pop("command_result", None)
     if augment_media is not None and isinstance(raw_media := record.get("media"), list):
         paths = [path for path in cast(list[object], raw_media) if isinstance(path, str) and path]
         if paths:

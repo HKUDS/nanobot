@@ -28,6 +28,7 @@ from nanobot.channels.base import BaseChannel
 from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
 from nanobot.config_base import Base
 from nanobot.runtime_admission import RuntimeMaintenanceError
+from nanobot.session.display_history import MAX_HISTORY_FACT_BYTES
 from nanobot.webui.gateway_services import GatewayServices
 from nanobot.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
@@ -52,7 +53,8 @@ _LISTENER_RESTART_BACKOFF_S = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
 # Outbound delivery is isolated per connection.  A bounded queue keeps a slow
 # or suspended terminal from retaining an unbounded stream in server memory.
 _OUTBOUND_QUEUE_MAX_FRAMES = 256
-_OUTBOUND_QUEUE_MAX_BYTES = 8 * 1024 * 1024
+# An idle writer can admit one full-size display-history fact.
+_OUTBOUND_QUEUE_MAX_BYTES = MAX_HISTORY_FACT_BYTES
 _OUTBOUND_SEND_TIMEOUT_S = 10.0
 _OUTBOUND_CLOSE_TIMEOUT_S = 1.0
 
