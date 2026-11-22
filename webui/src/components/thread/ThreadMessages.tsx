@@ -636,8 +636,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             />
           )
         ) : (
-          <div className={unit.message.role === "assistant" ? "relative" : undefined}>
-            {unit.message.role === "assistant" && !mobileActions ? blockMenu : null}
+          <div>
             {showBlockContext && blockActivity ? (
               <div className={blockActivityExpanded ? "mb-2" : undefined}>
                 <AgentActivityCluster
@@ -666,7 +665,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
               mcpPresets={mcpPresets}
               slashCommands={slashCommands}
               onOpenFilePreview={onOpenFilePreview}
-              contextMenu={unit.message.role === "user" && !mobileActions ? blockMenu : undefined}
+              contextMenu={!mobileActions ? blockMenu : undefined}
             />
             {mobileActions ? blockMenu : null}
             {unit.message.role === "assistant"

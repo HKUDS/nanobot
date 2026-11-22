@@ -69,6 +69,14 @@ for (const theme of ["light", "dark"] as const) {
         expect(await incoming.first().boundingBox()).toEqual(before);
         const bounds = (await side.boundingBox())!;
         expect(bounds.x + bounds.width).toBeLessThanOrEqual(layout.left);
+        for (const message of [incoming.first(), page.locator("[data-assistant-message]").last()]) {
+          const offset = await message.evaluate((node) => {
+            const firstLine = node.querySelector(".markdown-content p")!;
+            const icon = node.querySelector("[data-message-block-copy-action] svg")!.getBoundingClientRect();
+            return icon.y + icon.height / 2 - (firstLine.getBoundingClientRect().y + parseFloat(getComputedStyle(firstLine).lineHeight) / 2);
+          });
+          expect(Math.abs(offset)).toBeLessThan(1);
+        }
         await copy.hover();
         await expect(side).toHaveCSS("pointer-events", "auto");
       }

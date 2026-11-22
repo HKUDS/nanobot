@@ -1047,7 +1047,7 @@
 
 .message-side-actions {
   position: absolute;
-  top: 0;
+  top: calc(var(--message-text-inset, 0px) + (var(--text-reading-size) * var(--reading-line-height) - var(--message-block-control-size)) / 2);
   z-index: 20;
   display: flex;
   align-items: center;
@@ -1064,8 +1064,9 @@
   right: calc(100% + 0.25rem);
 }
 
-[data-user-text-bubble] > .message-side-actions {
-  top: calc((1rem + var(--text-reading-size) * var(--reading-line-height) - var(--message-block-control-size)) / 2);
+[data-user-text-bubble] > .message-side-actions,
+[data-session-message] [data-theme-surface] > .message-side-actions {
+  --message-text-inset: 0.5rem;
 }
 
 [data-context-block-active] .message-side-actions,
