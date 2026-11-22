@@ -18,8 +18,6 @@ export function TokenUsageModelTrend({ days, modelDays, models }: {
   const { t, i18n } = useTranslation();
   const { display, exact, compact, percent, seconds, date: formatDay } = usageFormats(i18n.language);
   const total = days.reduce((sum, day) => sum + (day.usage?.total_tokens ?? 0), 0);
-  // Group by provider and normalized model, so one model is never split across
-  // `openai-codex/…` and bare ids.
   const modelKey = (provider: string, model: string) => JSON.stringify([provider, normalizeUsageModel(provider, model)]);
   const modelUsage = new Map<string, { cache_read_tokens: number; cache_read_observed_input_tokens: number }>();
   for (const model of models ?? []) {

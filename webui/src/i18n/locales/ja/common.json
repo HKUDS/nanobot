@@ -807,7 +807,7 @@
       "currentModel": "新しい返信に使います。",
       "selectedModelProvider": "選択したモデルによって設定されます。",
       "selectedModelValue": "選択したモデルによって設定されます。",
-      "brandLogos": "設定画面にプロバイダーとアプリのロゴを表示します。\n\n設定で第三者プロバイダーと CLI のロゴを表示します。",
+      "brandLogos": "設定とチャットのアクティビティにブランドロゴを表示します。\n\nMCP のアクティビティには、サーバーが提供するアイコンがあれば表示します。",
       "browserNotifications": "ページがバックグラウンドのときにタスクの状況を通知します。",
       "notificationSound": "返信の終了時に、バックグラウンドでも通知音を鳴らします。",
       "cliAppsCatalog": "nanobot 用の CLI ツールをインストールします。デスクトップアプリは変わりません。\n\nnanobot がこのマシンで使用できるコマンドラインツールをインストールします。デスクトップアプリは変更しません。",
@@ -1247,7 +1247,7 @@
     },
     "observability": {
       "title": "実行の追跡", "configured": "nanobot がトレース認証情報を利用できます。",
-      "environment": "LANGFUSE_SECRET_KEY と LANGFUSE_PUBLIC_KEY を設定して nanobot を再起動してください。", "enable": "追跡を有効化"
+      "environment": "LANGFUSE_SECRET_KEY と LANGFUSE_PUBLIC_KEY を設定して nanobot を再起動してください。", "allow": "Langfuse による追跡を許可", "install": "追跡用パッケージをインストール"
     },
     "legal": {
       "thirdPartyBrands": "製品名、ロゴ、ブランドはそれぞれの所有者に帰属します。使用は識別のみを目的とし、承認を意味するものではありません。"
@@ -2025,68 +2025,6 @@
         "navigateHint": "↑↓ 選択",
         "selectHint": "Enter/Tab 入力",
         "closeHint": "Esc 閉じる",
-        "commands": {
-          "new": {
-            "title": "新しいチャット",
-            "description": "現在のトピックをリセットして、新しく始めます。"
-          },
-          "compact": {
-            "title": "コンテキストを圧縮",
-            "description": "コンテキストを圧縮し、会話を続けます。"
-          },
-          "stop": {
-            "title": "タスクを停止",
-            "description": "このチャットで実行中のタスクを停止します。"
-          },
-          "restart": {
-            "title": "nanobot を再起動",
-            "description": "nanobot のプロセスを再起動します。"
-          },
-          "status": {
-            "title": "ステータスを表示",
-            "description": "実行、プロバイダー、チャンネルの状態を確認します。"
-          },
-          "model": {
-            "title": "モデル",
-            "description": "現在のモデルプリセットを確認・切り替えます。"
-          },
-          "dream": {
-            "title": "Dream を実行",
-            "description": "メモリーを今すぐ整理します。"
-          },
-          "dream_log": {
-            "title": "Dream ログ",
-            "description": "前回の Dream の変更を確認します。"
-          },
-          "dream_restore": {
-            "title": "メモリを復元",
-            "description": "以前の Dream メモリースナップショットに戻します。"
-          },
-          "dream_prompt": {
-            "title": "Dream 設定",
-            "description": "このワークスペースのメモリーを Dream が整理する方法を設定します。"
-          },
-          "goal": {
-            "title": "長期目標",
-            "description": "アシスタントがこの目標に向けて作業を続けます。"
-          },
-          "cancel_goal": {
-            "title": "目標を取り消す",
-            "description": "このチャットの実行中またはブロック中の目標を取り消します。"
-          },
-          "trigger": {
-            "title": "CLI トリガー",
-            "description": "このチャット用の CLI トリガーを作成します。"
-          },
-          "help": {
-            "title": "ヘルプを表示",
-            "description": "使用できるスラッシュコマンドを表示します。"
-          },
-          "pairing": {
-            "title": "ペアリング",
-            "description": "連携のリクエストを管理します。"
-          }
-        },
         "badges": {
           "current": "現在",
           "recent": "最近"
@@ -2432,7 +2370,11 @@
     "automationTriggered": "自動実行"
   },
   "recovery": {
-    "actionFailed": "復元操作に失敗しました。もう一度お試しください。",
+    "details": "詳細",
+    "restart": "タスクが完了する前にゲートウェイが再起動しました",
+    "uncertainTool": "ツールはすでに実行された可能性があります",
+    "interruptedAgain": "タスクが再び中断されました",
+    "actionFailed": "復元操作をもう一度お試しください",
     "interrupted": "タスクが中断されました",
     "completed": "タスクが完了しました",
     "failed": "タスクの復元に失敗しました",
@@ -2574,6 +2516,7 @@
       "body": "このプロジェクトまたはアクセスモードはゲートウェイに拒否されました。既存のプロジェクトまたは別のアクセスモードを選択して、もう一度お試しください。"
     },
     "turnRejected": {
+      "temporaryCommand": "一時チャットで使えるコマンドは /model と /stop のみです。他のコマンドは通常のチャットで使ってください。",
       "title": "メッセージは送信されませんでした",
       "body": "ゲートウェイがこのメッセージを拒否しました。本文または添付ファイルを確認して、もう一度お試しください。"
     },
@@ -2589,6 +2532,8 @@
       "imageInputTitle": "このプリセットでは画像入力がオフです",
       "imageRequestRejectedTitle": "モデルが画像付きのリクエストを拒否しました",
       "imageInputBody": "このリクエストには画像が含まれています。プリセットを確認するか、画像対応のプリセットを使用してください。",
+      "emptyFinalResponseLength": "最終回答の前に出力上限に達しました",
+      "emptyFinalResponse": "モデルから最終回答がありません",
       "unknownTitle": "モデルプロバイダーへのリクエストに失敗しました",
       "bodyWithAttempt": "{{attempts}} 回試行して停止しました。後でもう一度試すか、別のモデルを選んでください。",
       "body": "後でもう一度試すか、別のモデルを選んでください。"

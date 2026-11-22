@@ -266,7 +266,7 @@ export function PaneWorkbench({
     setPreviewPaneKeys(sourcePaneOrder);
   }, [sourcePaneOrder, sourcePaneOrderKey]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (resizeGestureRef.current) return;
     previewSplitRatiosRef.current = splitRatios;
     setPreviewSplitRatios(splitRatios);
@@ -300,18 +300,24 @@ export function PaneWorkbench({
     const previousElementRects = pendingElementRectsRef.current ?? lastElementRectsRef.current;
     pendingRectsRef.current = null;
     pendingElementRectsRef.current = null;
+    // A reused tab-root element is not a shared pane across session navigation.
+    const continuesLayout = [...paneRefs.current.keys()].some(key => previousRects.has(key));
+    if (!continuesLayout) {
+      for (const animation of animationsRef.current.values()) animation.cancel();
+      animationsRef.current.clear();
+    }
     const nextRects = measurePanes();
     const nextElementRects = measurePaneElements();
     const reduceMotion = typeof window.matchMedia === "function"
       && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    if (!reduceMotion) {
+    if (continuesLayout && !reduceMotion) {
       for (const [key, nextRect] of nextRects) {
         const element = paneRefs.current.get(key);
         if (!element) continue;
         const previousRect = previousRects.get(key) ?? previousElementRects.get(element);
         if (!previousRect) {
-          if (previousRects.size === 0 || typeof element.animate !== "function") continue;
+          if (typeof element.animate !== "function") continue;
           const animation = element.animate(
             [
               { opacity: 0, transform: "translateY(5px) scale(0.995)" },
@@ -726,7 +732,7 @@ export function PaneWorkbench({
                   )}
                   style={{
                     ...layoutGeometry.paneStyles[index],
-                    "--session-thread-name": `session-thread-${index}`,
+                    "--session-thread-name": `session-thread-${CSS.escape(pane.key)}`,
                   } as CSSProperties}
                 >
                   {renderPane(pane, {

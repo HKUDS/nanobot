@@ -28,7 +28,12 @@ export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage; enabl
   { id: "storage", page: "image" },
 ];
 
+export const LANGFUSE_TRACING_FIELD: RuntimeConfigField = {
+  group: "observability", path: "agents.defaults.langfuse_enabled", kind: "boolean",
+};
+
 export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
+  LANGFUSE_TRACING_FIELD,
   { group: "identity", path: "agents.defaults.timezone_mode", kind: "toggle", options: ["manual", "auto"] },
   { group: "identity", path: "agents.defaults.timezone", kind: "text", when: { path: "agents.defaults.timezone_mode", value: "manual" } },
   { group: "memory", path: "agents.defaults.dream.enabled", kind: "boolean" },

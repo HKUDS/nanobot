@@ -6,6 +6,7 @@ import re
 import shlex
 import shutil
 import sys
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -151,6 +152,7 @@ class ExecTool(Tool):
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
             session_manager=ctx.exec_session_manager,
+            exec_owner_key=ctx.exec_owner_key,
         )
 
     def __init__(
@@ -170,6 +172,7 @@ class ExecTool(Tool):
         allowed_env_keys: list[str] | None = None,
         session_manager: ExecSessionManager | None = None,
         *,
+        exec_owner_key: Callable[[], str] | None = None,
         max_runtime: int | None = None,
         max_runtime_limit: int | None = None,
         idle_timeout: int = 300,
@@ -217,6 +220,7 @@ class ExecTool(Tool):
         self.sandbox_rw_binds = self._normalize_bind_roots(sandbox_rw_binds)
         self.allowed_env_keys = allowed_env_keys or []
         self._session_manager = session_manager or DEFAULT_EXEC_SESSION_MANAGER
+        self._exec_owner_key = exec_owner_key or current_request_session_key
 
     @property
     def name(self) -> str:
@@ -314,7 +318,9 @@ class ExecTool(Tool):
                 stdin=(asyncio.subprocess.DEVNULL if yield_time_ms is None else asyncio.subprocess.PIPE),
                 idle_timeout=self._exec_config.idle_timeout,
                 idle_action=self._exec_config.idle_action,
-                owner_session_key=current_request_session_key(),
+                # start() registers the launch before yielding, so owner cleanup
+                # either sees it or has already revoked this registry's key.
+                owner_session_key=self._exec_owner_key(),
                 max_output_chars=clamp_session_int(
                     max_output_chars,
                     DEFAULT_MAX_OUTPUT_CHARS,

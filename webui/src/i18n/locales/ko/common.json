@@ -807,7 +807,7 @@
       "currentModel": "새 답변에 사용됩니다.",
       "selectedModelProvider": "선택한 모델에 의해 설정됩니다.",
       "selectedModelValue": "선택한 모델에 의해 설정됩니다.",
-      "brandLogos": "설정에 제공업체와 앱 로고를 표시합니다.\n\n설정에서 타사 제공업체와 CLI 로고를 표시합니다.",
+      "brandLogos": "설정과 채팅 활동에 브랜드 로고를 표시합니다.\n\nMCP 활동에는 서버가 제공하는 아이콘이 있으면 표시합니다.",
       "browserNotifications": "페이지가 백그라운드에 있을 때 작업 상태를 알립니다.",
       "notificationSound": "응답이 끝나면 백그라운드에서도 알림음을 재생합니다.",
       "cliAppsCatalog": "nanobot용 CLI 도구를 설치합니다. 데스크톱 앱은 변경되지 않습니다.\n\nnanobot이 이 컴퓨터에서 사용할 수 있는 명령줄 도구를 설치합니다. 데스크톱 앱은 변경하지 않습니다.",
@@ -1247,7 +1247,7 @@
     },
     "observability": {
       "title": "실행 추적", "configured": "nanobot이 추적 인증 정보을 사용할 수 있습니다.",
-      "environment": "LANGFUSE_SECRET_KEY와 LANGFUSE_PUBLIC_KEY를 설정한 뒤 nanobot을 다시 시작하세요.", "enable": "추적 활성화"
+      "environment": "LANGFUSE_SECRET_KEY와 LANGFUSE_PUBLIC_KEY를 설정한 뒤 nanobot을 다시 시작하세요.", "allow": "Langfuse 추적 허용", "install": "추적 패키지 설치"
     },
     "legal": {
       "thirdPartyBrands": "제품 이름, 로고 및 브랜드는 각 소유자의 자산입니다. 사용은 식별 목적일 뿐 보증이나 제휴를 의미하지 않습니다."
@@ -2025,68 +2025,6 @@
         "navigateHint": "↑↓ 선택",
         "selectHint": "Enter/Tab 입력",
         "closeHint": "Esc 닫기",
-        "commands": {
-          "new": {
-            "title": "새 채팅",
-            "description": "이 주제를 초기화하고 새 주제를 시작합니다."
-          },
-          "compact": {
-            "title": "컨텍스트 압축",
-            "description": "컨텍스트를 압축하고 대화를 계속합니다."
-          },
-          "stop": {
-            "title": "작업 중지",
-            "description": "이 채팅에서 실행 중인 작업을 중지합니다."
-          },
-          "restart": {
-            "title": "nanobot 재시작",
-            "description": "nanobot 프로세스를 재시작합니다."
-          },
-          "status": {
-            "title": "상태 보기",
-            "description": "실행, 제공업체 및 채널 상태를 확인합니다."
-          },
-          "model": {
-            "title": "모델",
-            "description": "현재 모델 프리셋을 확인하거나 전환합니다."
-          },
-          "dream": {
-            "title": "Dream 실행",
-            "description": "메모리를 지금 정리합니다."
-          },
-          "dream_log": {
-            "title": "Dream 로그",
-            "description": "지난 Dream 실행의 변경을 확인합니다."
-          },
-          "dream_restore": {
-            "title": "메모리 복원",
-            "description": "이전 Dream 메모리 스냅샷을 복원합니다."
-          },
-          "dream_prompt": {
-            "title": "Dream 설정",
-            "description": "Dream이 이 작업 공간의 메모리를 정리하는 방법을 설정합니다."
-          },
-          "goal": {
-            "title": "장기 목표",
-            "description": "어시스턴트가 이 목표를 향해 계속 작업하게 합니다."
-          },
-          "cancel_goal": {
-            "title": "목표 취소",
-            "description": "이 채팅에서 진행 중이거나 차단된 목표를 취소합니다."
-          },
-          "trigger": {
-            "title": "CLI 트리거",
-            "description": "이 채팅의 CLI 트리거를 만듭니다."
-          },
-          "help": {
-            "title": "도움말 보기",
-            "description": "사용 가능한 슬래시 명령을 표시합니다."
-          },
-          "pairing": {
-            "title": "페어링",
-            "description": "연결 요청을 관리합니다."
-          }
-        },
         "badges": {
           "current": "현재",
           "recent": "최근"
@@ -2432,7 +2370,11 @@
     "automationTriggered": "자동 실행됨"
   },
   "recovery": {
-    "actionFailed": "복구 작업에 실패했습니다. 다시 시도하세요.",
+    "details": "자세히",
+    "restart": "작업을 마치기 전에 게이트웨이가 다시 시작되었습니다",
+    "uncertainTool": "도구가 이미 실행되었을 수 있습니다",
+    "interruptedAgain": "작업이 다시 중단되었습니다",
+    "actionFailed": "복구 작업을 다시 시도하세요",
     "interrupted": "작업이 중단됨",
     "completed": "작업 완료",
     "failed": "작업 복구 실패",
@@ -2574,6 +2516,7 @@
       "body": "게이트웨이가 이 프로젝트 또는 접근 모드를 거부했습니다. 기존 프로젝트나 다른 접근 모드를 선택한 후 다시 시도하세요."
     },
     "turnRejected": {
+      "temporaryCommand": "임시 채팅에서는 /model 및 /stop 명령만 사용할 수 있습니다. 다른 명령은 일반 채팅에서 사용하세요.",
       "title": "메시지가 전송되지 않았습니다",
       "body": "게이트웨이가 이 메시지를 거부했습니다. 텍스트나 첨부 파일을 확인한 후 다시 시도하세요."
     },
@@ -2589,6 +2532,8 @@
       "imageInputTitle": "이 프리셋의 이미지 입력이 꺼져 있습니다",
       "imageRequestRejectedTitle": "모델이 이미지가 포함된 요청을 거부했습니다",
       "imageInputBody": "이 요청에 이미지가 포함되어 있습니다. 프리셋을 확인하거나 이미지를 지원하는 프리셋을 사용하세요.",
+      "emptyFinalResponseLength": "최종 답변 전에 출력 한도에 도달했습니다",
+      "emptyFinalResponse": "모델이 최종 답변을 반환하지 않았습니다",
       "unknownTitle": "모델 제공업체 요청 실패",
       "bodyWithAttempt": "{{attempts}}회 시도 후 중지했습니다. 나중에 다시 시도하거나 다른 모델을 선택하세요.",
       "body": "나중에 다시 시도하거나 다른 모델을 선택하세요."

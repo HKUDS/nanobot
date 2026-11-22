@@ -189,15 +189,9 @@ class AgentRuntimeControl:
         # A valid directory can contain newlines or prompt delimiters. Keep it data.
         root = json.dumps(status.workspace_root, ensure_ascii=False)
         root = root.replace("[", "\\u005b").replace("]", "\\u005d")
-        lines = [
-            f"Current project (JSON path): {root}",
-            (
-                "File access: project and tool-specific allowed paths only."
-                if status.restrict_to_workspace
-                else "File access: no workspace restriction."
-            ),
-            "OS permissions and tool rules still apply.",
-        ]
+        lines = [f"Current project (JSON path): {root}"]
+        if status.restrict_to_workspace:
+            lines.append("File access: project and tool-specific allowed paths only.")
         if self.__target.exec_config.sandbox:
             lines.append(
                 "Shell sandbox configured; extra binds do not grant file-tool access."

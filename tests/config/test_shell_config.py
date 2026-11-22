@@ -2,6 +2,7 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+from agent.session_helpers import make_agent_loop
 from pydantic import ValidationError
 
 from nanobot.agent.tools.shell_config import ExecToolConfig
@@ -188,7 +189,6 @@ def test_exec_runtime_source_precedence_covers_both_canonical_spellings(monkeypa
 
 @pytest.mark.asyncio
 async def test_my_exec_config_reports_configured_timing(tmp_path) -> None:
-    from nanobot.agent.loop import AgentLoop
     from nanobot.agent.tools.self import MyTool
     from nanobot.bus.queue import MessageBus
 
@@ -197,7 +197,7 @@ async def test_my_exec_config_reports_configured_timing(tmp_path) -> None:
     }}})
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(), provider=provider, workspace=tmp_path,
         tools_config=config.tools, model="test-model",
     )

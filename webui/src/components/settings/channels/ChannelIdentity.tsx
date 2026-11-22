@@ -207,10 +207,6 @@ export function channelIsRunning(feature: NanobotFeatureInfo): boolean {
   return feature.runtime_status === "running";
 }
 
-export function channelToggleChecked(feature: NanobotFeatureInfo): boolean {
-  return feature.runtime_status === "running" || feature.runtime_status === "starting";
-}
-
 export function channelStatusLabel(
   feature: NanobotFeatureInfo,
   tx: (key: string, fallback: string) => string,

@@ -8,6 +8,7 @@ from dulwich import porcelain
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import CommandResultEvent
 from nanobot.command.application import build_help_text, builtin_command_palette
 from nanobot.command.builtin import (
     cmd_dream,
@@ -15,6 +16,7 @@ from nanobot.command.builtin import (
     cmd_dream_prompt,
     cmd_dream_restore,
 )
+from nanobot.command.results import message_text
 from nanobot.command.router import CommandContext
 from nanobot.session.manager import SessionManager
 from nanobot.utils.gitstore import CommitInfo
@@ -144,7 +146,10 @@ def _make_dream_prompt_ctx(tmp_path, raw: str = "/dream-prompt", args: str = "")
 
 async def _run_dream_command(ctx: CommandContext) -> OutboundMessage:
     before = asyncio.all_tasks()
+    ctx.loop.schedule_background = asyncio.create_task
     immediate = await cmd_dream(ctx)
+    assert ctx.after_reply is not None
+    ctx.after_reply()
     try:
         await asyncio.gather(*(asyncio.all_tasks() - before))
     finally:
@@ -159,11 +164,16 @@ async def test_dream_no_history_explains_how_to_create_input(tmp_path) -> None:
 
     immediate = await _run_dream_command(ctx)
 
-    assert immediate.content == "Dreaming..."
+    assert message_text(immediate) == "Dreaming..."
     assert immediate.metadata == ctx.msg.metadata
+    assert isinstance(immediate.event, CommandResultEvent)
+    assert immediate.event.command == "/dream" and immediate.event.notification_id is None
     [completion] = bus.outbound
-    assert completion.metadata == {**ctx.msg.metadata, "render_as": "text"}
-    content = completion.content
+    assert completion.metadata == ctx.msg.metadata
+    assert isinstance(completion.event, CommandResultEvent)
+    assert completion.event.command == "/dream"
+    assert completion.event.notification_id and completion.event.notification_id.startswith("command-result:")
+    content = message_text(completion)
     assert "Dream has no conversation history to process yet." in content
     assert "`memory/history.jsonl`" in content
     assert "idle auto-compact" in content
@@ -206,15 +216,15 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
 
     immediate = await _run_dream_command(ctx)
 
-    assert immediate.content == "Dreaming..."
+    assert message_text(immediate) == "Dreaming..."
     assert (immediate.channel, immediate.chat_id) == ("feishu", "chat1")
     assert len(calls) == 1
     assert calls[0][1]["runtime"] is dream_runtime
     assert len(bus.outbound) == 1
     completion = bus.outbound[0]
     assert (completion.channel, completion.chat_id) == ("feishu", "chat1")
-    assert completion.content.startswith("Dream completed")
-    assert progress_sentinel not in completion.content
+    assert message_text(completion).startswith("Dream completed")
+    assert progress_sentinel not in message_text(completion)
 
 
 @pytest.mark.parametrize("command,handler", [("/dream-log", cmd_dream_log), ("/dream-restore", cmd_dream_restore)])
@@ -225,10 +235,7 @@ async def test_dream_inspection_replies_preserve_topic_routing(command, handler,
 
     reply = await handler(ctx)
 
-    assert reply.metadata == {
-        **ctx.msg.metadata,
-        **({"render_as": "text"} if initialized or command == "/dream-log" else {}),
-    }
+    assert reply.metadata == ctx.msg.metadata
 
 
 @pytest.mark.parametrize("completed", [True, False])
@@ -253,11 +260,11 @@ async def test_dream_command_reports_outcome_and_versions_only_real_edits(tmp_pa
     await _run_dream_command(ctx)
 
     if completed:
-        assert "no memory changes" in bus.outbound[0].content
+        assert "no memory changes" in message_text(bus.outbound[0])
         assert store.get_last_dream_cursor() == cursor
         assert store.git.log() == versions
     else:
-        assert "did not complete" in bus.outbound[0].content
+        assert "did not complete" in message_text(bus.outbound[0])
         assert store.get_last_dream_cursor() == 0
         assert store.read_memory() == "A partial update"
         assert store.git.log()[0] != versions[0]
@@ -278,12 +285,26 @@ async def test_dream_log_latest_is_more_user_friendly() -> None:
 
     out = await cmd_dream_log(_make_ctx("/dream-log", git))
 
-    assert "## Dream Update" in out.content
-    assert "Here is the latest Dream memory change." in out.content
-    assert "- Commit: `abcd1234`" in out.content
-    assert "- Changed files: `SOUL.md`" in out.content
-    assert "Use `/dream-restore abcd1234` to undo this change." in out.content
-    assert "```diff" in out.content
+    assert "## Dream Update" in message_text(out)
+    assert "Here is the latest Dream memory change." in message_text(out)
+    assert "- Commit: `abcd1234`" in message_text(out)
+    assert "- Changed files: `SOUL.md`" in message_text(out)
+    assert "Use `/dream-restore abcd1234` to undo this change." in message_text(out)
+    assert "```diff" in message_text(out)
+
+
+@pytest.mark.asyncio
+async def test_dream_log_localizes_summary_without_changing_diff() -> None:
+    commit = CommitInfo(sha="abcd1234", message="dream: edit", timestamp="2026-04-04 12:00")
+    diff = "diff --git a/SOUL.md b/SOUL.md\n+preserve {sha} and trailing spaces  \n\n"
+    ctx = _make_ctx("/dream-log abcd1234", _FakeGit(diff_map={commit.sha: (commit, diff)}), args=commit.sha)
+    ctx.msg.metadata = {"locale": "ja"}
+
+    out = await cmd_dream_log(ctx)
+
+    assert isinstance(out.event, CommandResultEvent) and out.event.command == "/dream-log"
+    assert "選択した" in message_text(out) and f"```diff\n{diff}```" in message_text(out)
+    assert out.event.parts[-1] == {"text": f"```diff\n{diff}```"}
 
 
 @pytest.mark.asyncio
@@ -302,8 +323,8 @@ async def test_dream_log_latest_skips_non_dream_commit() -> None:
 
     out = await cmd_dream_log(_make_ctx("/dream-log", git))
 
-    assert "`abcd1234`" in out.content
-    assert "`bbbb2222`" not in out.content
+    assert "`abcd1234`" in message_text(out)
+    assert "`bbbb2222`" not in message_text(out)
 
 
 @pytest.mark.asyncio
@@ -312,8 +333,8 @@ async def test_dream_log_missing_commit_guides_user() -> None:
 
     out = await cmd_dream_log(_make_ctx("/dream-log deadbeef", git, args="deadbeef"))
 
-    assert "Couldn't find Dream change `deadbeef`." in out.content
-    assert "Use `/dream-restore` to list recent versions" in out.content
+    assert "Couldn't find Dream change `deadbeef`." in message_text(out)
+    assert "Use `/dream-restore` to list recent versions" in message_text(out)
 
 
 @pytest.mark.asyncio
@@ -322,9 +343,9 @@ async def test_dream_log_before_first_run_is_clear() -> None:
 
     out = await cmd_dream_log(_make_ctx("/dream-log", git, last_dream_cursor=0))
 
-    assert "Dream has not run yet." in out.content
-    assert "Run `/dream`" in out.content
-    assert "/dream-prompt" in out.content
+    assert "Dream has not run yet." in message_text(out)
+    assert "Run `/dream`" in message_text(out)
+    assert "/dream-prompt" in message_text(out)
 
 
 @pytest.mark.asyncio
@@ -333,18 +354,18 @@ async def test_dream_log_without_saved_versions_mentions_prompt_command() -> Non
 
     out = await cmd_dream_log(_make_ctx("/dream-log", git))
 
-    assert "Dream memory has no saved versions yet." in out.content
-    assert "/dream-prompt" in out.content
+    assert "Dream memory has no saved versions yet." in message_text(out)
+    assert "/dream-prompt" in message_text(out)
 
 
 @pytest.mark.asyncio
 async def test_dream_prompt_reports_default_prompt(tmp_path) -> None:
     out = await cmd_dream_prompt(_make_dream_prompt_ctx(tmp_path))
 
-    assert "Dream memory instructions: nanobot default" in out.content
-    assert "prompts/dream.md" in out.content
-    assert str(tmp_path) not in out.content
-    assert "/dream-prompt init" in out.content
+    assert "Dream memory instructions: nanobot default" in message_text(out)
+    assert "prompts/dream.md" in message_text(out)
+    assert str(tmp_path) not in message_text(out)
+    assert "/dream-prompt init" in message_text(out)
 
 
 @pytest.mark.asyncio
@@ -354,10 +375,10 @@ async def test_dream_prompt_init_copies_default_prompt(tmp_path) -> None:
     out = await cmd_dream_prompt(ctx)
 
     prompt_file = tmp_path / "prompts" / "dream.md"
-    assert "Created Dream memory instructions" in out.content
-    assert "prompts/dream.md" in out.content
-    assert str(tmp_path) not in out.content
-    assert "fully replaces nanobot's default Dream guide" in out.content
+    assert "Created Dream memory instructions" in message_text(out)
+    assert "prompts/dream.md" in message_text(out)
+    assert str(tmp_path) not in message_text(out)
+    assert "fully replaces nanobot's default Dream guide" in message_text(out)
     assert prompt_file.read_text(encoding="utf-8") == MemoryStore.default_dream_prompt() + "\n"
 
 
@@ -370,9 +391,9 @@ async def test_dream_prompt_init_does_not_overwrite_existing_prompt(tmp_path) ->
 
     out = await cmd_dream_prompt(ctx)
 
-    assert "already exist" in out.content
-    assert "prompts/dream.md" in out.content
-    assert str(tmp_path) not in out.content
+    assert "already exist" in message_text(out)
+    assert "prompts/dream.md" in message_text(out)
+    assert str(tmp_path) not in message_text(out)
     assert prompt_file.read_text(encoding="utf-8") == "custom"
 
 
@@ -385,7 +406,7 @@ async def test_dream_prompt_init_recreates_empty_prompt(tmp_path) -> None:
 
     out = await cmd_dream_prompt(ctx)
 
-    assert "Created Dream memory instructions" in out.content
+    assert "Created Dream memory instructions" in message_text(out)
     assert prompt_file.read_text(encoding="utf-8") == MemoryStore.default_dream_prompt() + "\n"
 
 
@@ -410,13 +431,13 @@ async def test_dream_restore_lists_versions_with_next_steps() -> None:
 
     out = await cmd_dream_restore(_make_ctx("/dream-restore", git))
 
-    assert "## Dream Restore" in out.content
-    assert "Choose a Dream memory version to restore." in out.content
-    assert "`abcd1234` 2026-04-04 12:00 - dream: latest" in out.content
-    assert "`bbbb2222` 2026-04-04 08:00 - dream: older" in out.content
-    assert "backup: workspace" not in out.content
-    assert "Preview a version with `/dream-log <sha>`" in out.content
-    assert "Restore a version with `/dream-restore <sha>`." in out.content
+    assert "## Dream Restore" in message_text(out)
+    assert "Choose a Dream memory version to restore." in message_text(out)
+    assert "`abcd1234` 2026-04-04 12:00 - dream: latest" in message_text(out)
+    assert "`bbbb2222` 2026-04-04 08:00 - dream: older" in message_text(out)
+    assert "backup: workspace" not in message_text(out)
+    assert "Preview a version with `/dream-log <sha>`" in message_text(out)
+    assert "Restore a version with `/dream-restore <sha>`." in message_text(out)
 
 
 @pytest.mark.asyncio
@@ -443,10 +464,10 @@ async def test_dream_restore_success_mentions_files_and_followup() -> None:
 
     out = await cmd_dream_restore(_make_ctx("/dream-restore abcd1234", git, args="abcd1234"))
 
-    assert "Restored Dream memory to the state before `abcd1234`." in out.content
-    assert "- New safety commit: `eeee9999`" in out.content
-    assert "- Restored files: `SOUL.md`, `memory/MEMORY.md`" in out.content
-    assert "Use `/dream-log eeee9999` to inspect the restore diff." in out.content
+    assert "Restored Dream memory to the state before `abcd1234`." in message_text(out)
+    assert "- New safety commit: `eeee9999`" in message_text(out)
+    assert "- Restored files: `SOUL.md`, `memory/MEMORY.md`" in message_text(out)
+    assert "Use `/dream-log eeee9999` to inspect the restore diff." in message_text(out)
     assert git.revert_calls == [("abcd1234", "dream:")]
 
 
@@ -462,8 +483,8 @@ async def test_dream_restore_rejects_non_dream_commit_clearly() -> None:
 
     out = await cmd_dream_restore(_make_ctx("/dream-restore cccc3333", git, args="cccc3333"))
 
-    assert "Only Dream memory versions can be restored." in out.content
-    assert "Use `/dream-restore` to list recent versions." in out.content
+    assert "Only Dream memory versions can be restored." in message_text(out)
+    assert "Use `/dream-restore` to list recent versions." in message_text(out)
     assert git.revert_calls == []
 
 
@@ -502,13 +523,17 @@ async def test_dream_restore_preserves_uncommitted_memory(tmp_path, dirty) -> No
     out = await cmd_dream_restore(ctx)
 
     if dirty is None:
-        assert "Restored Dream memory" in out.content
+        assert "Restored Dream memory" in message_text(out)
         assert store.read_memory() == "before"
         assert store.get_last_dream_cursor() == 1
         assert page.read_bytes() == b"before\n"
     else:
-        assert "Couldn't restore" in out.content
-        assert "Commit or undo your changes" in out.content
+        assert "Couldn't restore" in message_text(out)
+        if dirty == "staged":
+            assert "staged changes" in message_text(out)
+        elif dirty == "deleted":
+            assert "`memory/wiki/known.md`" in message_text(out)
+        assert "Commit or undo your changes" in message_text(out)
         assert store.git.log()[0].sha == sha
         assert store.get_last_dream_cursor() == 3
         assert store.read_memory() == ("user edit" if dirty == "edited" else "current")

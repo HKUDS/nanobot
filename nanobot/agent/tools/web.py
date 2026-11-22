@@ -35,7 +35,7 @@ from nanobot.security.network import (
     PinnedDNSAsyncTransport,
     UnsafeURLRequestError,
     httpx_env_proxy_mounts,
-    validate_url_target,
+    resolve_url_target,
 )
 from nanobot.utils.helpers import build_image_content_blocks
 
@@ -1214,7 +1214,7 @@ class WebFetchTool(Tool):
         url = url.strip(" \t\r\n`\"'")
         extract_mode = kwargs.pop("extractMode", extract_mode)
         max_chars = int(kwargs.pop("maxChars", max_chars) or self.max_chars)
-        is_valid, error_msg = validate_url_target(url)
+        is_valid, error_msg = self._check_target(url)
         if not is_valid:
             return ToolResult.error(json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False))
 
@@ -1242,6 +1242,10 @@ class WebFetchTool(Tool):
             result = await self._fetch_readability(url, extract_mode, max_chars)
         return result
 
+    def _check_target(self, url: str) -> tuple[bool, str]:
+        ok, error, _ = resolve_url_target(url, trust_remote_dns=bool(self.proxy))
+        return ok, error
+
     @asynccontextmanager
     async def _open_page(
         self, url: str, *, timeout: float,
@@ -1255,7 +1259,7 @@ class WebFetchTool(Tool):
                 transport=None if proxy else PinnedDNSAsyncTransport(),
                 mounts=None if proxy else httpx_env_proxy_mounts(),
             ) as client,
-            open_redirected_get(client, url, check_target=validate_url_target) as page,
+            open_redirected_get(client, url, check_target=self._check_target) as page,
         ):
             yield page
 

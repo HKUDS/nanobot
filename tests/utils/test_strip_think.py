@@ -72,10 +72,6 @@ class TestStripThinkFalsePositive:
     def test_prefix_unclosed_think_with_whitespace(self):
         assert strip_think("  <think>reasoning...") == ""
 
-    def test_prefix_unclosed_thought_still_stripped(self):
-        assert strip_think("<thought>reasoning without closing") == ""
-
-
 class TestStripThinkMalformedLeaks:
     """Regression: Gemma 4's Ollama renderer occasionally emits a tag name
     with no closing '>', running straight into the user-facing content

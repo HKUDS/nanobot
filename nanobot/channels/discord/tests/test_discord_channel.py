@@ -22,6 +22,7 @@ from nanobot.channels.discord.runtime import (
     DiscordConfig,
 )
 from nanobot.command.application import build_help_text
+from nanobot.command_copy import command_text
 from nanobot.config.network import NetworkConfig
 
 
@@ -162,9 +163,11 @@ def _make_interaction(
     channel=None,
     guild_id: int | None = None,
     interaction_id: int = 999,
+    locale: discord.Locale = discord.Locale.american_english,
 ):
     return SimpleNamespace(
         user=SimpleNamespace(id=user_id),
+        locale=locale,
         channel_id=channel_id,
         channel=channel,
         guild_id=guild_id,
@@ -541,7 +544,6 @@ async def test_stop_waits_for_reaction_already_draining(monkeypatch, cleanup_kin
 
 @pytest.mark.asyncio
 async def test_on_message_ignores_self_messages() -> None:
-    # Self-loop guard: messages from this bot's own account must be dropped (#3217).
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     channel._bot_user_id = "999"
     handled: list[dict] = []
@@ -554,7 +556,6 @@ async def test_on_message_ignores_self_messages() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_accepts_messages_from_other_bots() -> None:
-    # Multi-agent setups: messages from OTHER bots must be processed, not dropped (#3217).
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     channel._bot_user_id = "999"
     handled: list[dict] = []
@@ -1069,6 +1070,32 @@ async def test_send_delta_stream_end_splits_oversized_reply(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_native_menu_sync_payload_localizes_descriptions_but_keeps_command_syntax() -> None:
+    channel = DiscordChannel(DiscordConfig(), MessageBus())
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
+    await client.setup_hook()
+    tree = client.tree
+    locales = {"zh-CN", "zh-TW", "fr", "es-ES", "es-419", "pt-BR", "vi", "ja", "ko", "id"}
+    for cmd in tree.get_commands():
+        payload = await cmd.get_translated_payload(tree, tree.translator)
+        key = f"palette.{cmd.name}.description"
+        assert payload["description"] == command_text(key, "en")
+        translations = payload["description_localizations"]
+        assert {tag: translations[tag] for tag in locales} == {tag: command_text(key, tag) for tag in locales}
+        assert "de" not in translations  # Discord uses the base description.
+        assert payload["name_localizations"] == {}
+        options = payload["options"]
+        if cmd.name in {"model", "trigger"}:
+            option, = options
+            assert option["name"] == ("preset" if cmd.name == "model" else "name")
+            assert not option.get("name_localizations")
+            key = "native.presetDescription" if cmd.name == "model" else "native.triggerNameDescription"
+            assert option["description_localizations"]["ja"] == command_text(key, "ja")
+        else:
+            assert options == []
+
+
+@pytest.mark.asyncio
 async def test_slash_new_forwards_when_user_is_allowlisted() -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["123"]), MessageBus())
     handled: list[dict] = []
@@ -1078,15 +1105,16 @@ async def test_slash_new_forwards_when_user_is_allowlisted() -> None:
 
     channel._handle_message = capture_handle  # type: ignore[method-assign]
     client = DiscordBotClient(channel, intents=discord.Intents.none())
-    interaction = _make_interaction(user_id=123, channel_id=456, interaction_id=321)
+    interaction = _make_interaction(user_id=123, channel_id=456, interaction_id=321, locale=discord.Locale.taiwan_chinese)
 
     new_cmd = client.tree.get_command("new")
     assert new_cmd is not None
     await new_cmd.callback(interaction)
 
-    assert interaction.response.messages == [{"content": "Processing /new...", "ephemeral": True}]
+    assert interaction.response.messages == [{"content": "正在處理 /new…", "ephemeral": True}]
     assert len(handled) == 1
     assert handled[0]["content"] == "/new"
+    assert handled[0]["metadata"]["locale"] == "zh-TW"
     assert handled[0]["sender_id"] == "123"
     assert handled[0]["chat_id"] == "456"
     assert handled[0]["metadata"]["interaction_id"] == "321"
@@ -1168,14 +1196,14 @@ async def test_slash_new_is_blocked_for_disallowed_user() -> None:
 
     channel._handle_message = capture_handle  # type: ignore[method-assign]
     client = DiscordBotClient(channel, intents=discord.Intents.none())
-    interaction = _make_interaction(user_id=123, channel_id=456)
+    interaction = _make_interaction(user_id=123, channel_id=456, locale=discord.Locale.japanese)
 
     new_cmd = client.tree.get_command("new")
     assert new_cmd is not None
     await new_cmd.callback(interaction)
 
     assert interaction.response.messages == [
-        {"content": "You are not allowed to use this bot.", "ephemeral": True}
+        {"content": command_text("native.denied", "ja"), "ephemeral": True}
     ]
     assert handled == []
 
@@ -1266,14 +1294,14 @@ async def test_slash_help_returns_ephemeral_help_text() -> None:
 
     channel._handle_message = capture_handle  # type: ignore[method-assign]
     client = DiscordBotClient(channel, intents=discord.Intents.none())
-    interaction = _make_interaction()
+    interaction = _make_interaction(locale=discord.Locale.french)
     interaction.command.qualified_name = "help"
 
     help_cmd = client.tree.get_command("help")
     assert help_cmd is not None
     await help_cmd.callback(interaction)
 
-    assert interaction.response.messages == [{"content": build_help_text(), "ephemeral": True}]
+    assert interaction.response.messages == [{"content": build_help_text(locale="fr"), "ephemeral": True}]
     assert handled == []
 
 
@@ -1288,6 +1316,7 @@ async def test_slash_help_respects_allow_channels() -> None:
         channel_id=777,
         channel=_FakeChannel(channel_id=777, parent_id=456),
         guild_id=1,
+        locale=discord.Locale.spain_spanish,
     )
     interaction.command.qualified_name = "help"
 
@@ -1296,7 +1325,7 @@ async def test_slash_help_respects_allow_channels() -> None:
     await help_cmd.callback(interaction)
 
     assert interaction.response.messages == [
-        {"content": "This channel is not allowed for this bot.", "ephemeral": True}
+        {"content": command_text("native.channelDenied", "es"), "ephemeral": True}
     ]
 
 

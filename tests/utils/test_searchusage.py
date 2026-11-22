@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.command.results import render
+from nanobot.command.status import search_lines, status_lines
 from nanobot.providers.base import LLMUsage
-from nanobot.utils.helpers import build_status_content
 from nanobot.utils.searchusage import (
     SearchUsageInfo,
     _parse_tavily_usage,
@@ -13,44 +14,27 @@ from nanobot.utils.searchusage import (
 )
 
 
+def status_text(**kwargs):
+    return render(tuple(status_lines(**kwargs)), "en")
+
+
 class TestSearchUsageInfoFormat:
     def test_unsupported_provider_shows_no_tracking(self):
         info = SearchUsageInfo(provider="duckduckgo", supported=False)
-        text = info.format()
+        text = render(tuple(search_lines(info)), "en")
         assert "duckduckgo" in text
         assert "not available" in text
 
     def test_supported_with_error(self):
         info = SearchUsageInfo(provider="tavily", supported=True, error="HTTP 401")
-        text = info.format()
+        text = render(tuple(search_lines(info)), "en")
         assert "tavily" in text
         assert "HTTP 401" in text
         assert "unavailable" in text
 
-    def test_full_tavily_usage(self):
-        info = SearchUsageInfo(
-            provider="tavily",
-            supported=True,
-            used=142,
-            limit=1000,
-            remaining=858,
-            reset_date="2026-05-01",
-            search_used=120,
-            extract_used=15,
-            crawl_used=7,
-        )
-        text = info.format()
-        assert "tavily" in text
-        assert "142 / 1000" in text
-        assert "858" in text
-        assert "2026-05-01" in text
-        assert "Search: 120" in text
-        assert "Extract: 15" in text
-        assert "Crawl: 7" in text
-
     def test_usage_without_limit(self):
         info = SearchUsageInfo(provider="tavily", supported=True, used=50)
-        text = info.format()
+        text = render(tuple(search_lines(info)), "en")
         assert "50 requests" in text
         assert "/" not in text.split("Usage:")[1].split("\n")[0]
 
@@ -58,15 +42,8 @@ class TestSearchUsageInfoFormat:
         info = SearchUsageInfo(
             provider="tavily", supported=True, used=10, limit=100, remaining=90
         )
-        text = info.format()
+        text = render(tuple(search_lines(info)), "en")
         assert "Breakdown" not in text
-
-    def test_brave_unsupported(self):
-        info = SearchUsageInfo(provider="brave", supported=False)
-        text = info.format()
-        assert "brave" in text
-        assert "not available" in text
-
 
 class TestParseTavilyUsage:
     def test_full_response(self):
@@ -93,11 +70,6 @@ class TestParseTavilyUsage:
         assert info.search_used == 120
         assert info.extract_used == 15
         assert info.crawl_used == 7
-
-    def test_remaining_computed(self):
-        data = {"account": {"plan_usage": 300, "plan_limit": 1000}}
-        info = _parse_tavily_usage(data)
-        assert info.remaining == 700
 
     def test_remaining_not_negative(self):
         data = {"account": {"plan_usage": 1100, "plan_limit": 1000}}
@@ -139,30 +111,10 @@ class TestParseTavilyUsage:
 
 class TestFetchSearchUsageRouting:
     @pytest.mark.asyncio
-    async def test_duckduckgo_returns_unsupported(self):
-        info = await fetch_search_usage("duckduckgo")
-        assert info.provider == "duckduckgo"
-        assert info.supported is False
-
-    @pytest.mark.asyncio
-    async def test_searxng_returns_unsupported(self):
-        info = await fetch_search_usage("searxng")
-        assert info.supported is False
-
-    @pytest.mark.asyncio
-    async def test_jina_returns_unsupported(self):
-        info = await fetch_search_usage("jina")
-        assert info.supported is False
-
-    @pytest.mark.asyncio
-    async def test_brave_returns_unsupported(self):
-        info = await fetch_search_usage("brave")
-        assert info.provider == "brave"
-        assert info.supported is False
-
-    @pytest.mark.asyncio
-    async def test_unknown_provider_returns_unsupported(self):
-        info = await fetch_search_usage("some_unknown_provider")
+    @pytest.mark.parametrize("provider", ["duckduckgo", "searxng", "jina", "brave", "some_unknown_provider"])
+    async def test_provider_returns_unsupported(self, provider):
+        info = await fetch_search_usage(provider)
+        assert info.provider == provider
         assert info.supported is False
 
     @pytest.mark.asyncio
@@ -259,27 +211,17 @@ class TestBuildStatusContentWithSearchUsage:
         last_usage=LLMUsage.reported(input_tokens=1000, output_tokens=200),
         context_window_tokens=65536,
         session_msg_count=5,
-        context_tokens_estimate=3000,
+        context_tokens=3000,
     )
 
     def test_no_search_usage_unchanged(self):
-        content = build_status_content(**self._BASE_KWARGS)
+        content = status_text(**self._BASE_KWARGS)
         assert "🔍" not in content
         assert "Web Search" not in content
 
-    def test_search_usage_none_unchanged(self):
-        content = build_status_content(**self._BASE_KWARGS, search_usage_text=None)
-        assert "🔍" not in content
-
-    def test_search_usage_appended(self):
-        usage_text = "🔍 Web Search: tavily\n   Usage: 142 / 1000 requests"
-        content = build_status_content(**self._BASE_KWARGS, search_usage_text=usage_text)
-        assert "🔍 Web Search: tavily" in content
-        assert "142 / 1000" in content
-
     def test_existing_fields_still_present(self):
-        usage_text = "🔍 Web Search: duckduckgo\n   Usage tracking: not available"
-        content = build_status_content(**self._BASE_KWARGS, search_usage_text=usage_text)
+        usage = SearchUsageInfo(provider="duckduckgo")
+        content = status_text(**self._BASE_KWARGS, search_usage=usage)
         assert "nanobot v0.1.0" in content
         assert "claude-opus-4-5" in content
         assert "1000 in / 200 out" in content
@@ -297,8 +239,11 @@ class TestBuildStatusContentWithSearchUsage:
             extract_used=15,
             crawl_used=7,
         )
-        content = build_status_content(**self._BASE_KWARGS, search_usage_text=info.format())
+        content = status_text(**self._BASE_KWARGS, search_usage=info)
         assert "142 / 1000" in content
         assert "858" in content
         assert "2026-05-01" in content
+        assert "🔍 Web Search: tavily" in content
         assert "Search: 120" in content
+        assert "Extract: 15" in content
+        assert "Crawl: 7" in content

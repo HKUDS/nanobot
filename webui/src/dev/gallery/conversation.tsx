@@ -20,6 +20,7 @@ import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { WorkspaceAccessMenu, WorkspaceProjectPicker } from "@/components/thread/WorkspaceControls";
 import { WebSearchRun } from "@/components/thread/activity/WebSearchRun";
+import { ThreadToastViewport } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import type { StreamError } from "@/lib/nanobot-client";
 import { formatToolCallTrace } from "@/lib/tool-traces";
@@ -249,11 +250,11 @@ function RecoveryPreview() {
   const [action, setAction] = useState("");
   const [visible, setVisible] = useState(true);
   const state: RecoveryState = { recovery_id: `gallery-recovery-${mode}`, status: mode === "unavailable" ? "failed" : mode, can_continue: mode !== "unavailable" };
-  return <div className="space-y-4">
+  return <div className="relative space-y-4 pt-16">
     <StatePicker label={t("previews.recovery.state")} value={mode} options={["awaiting_user", "resuming", "failed", "unavailable"]}
       onChange={(value) => { setMode(value); setVisible(true); setAction(""); }} />
-    {visible ? <RecoveryNotice state={state} onContinue={() => { setVisible(false); setAction("previews.recovery.continued"); return Promise.resolve(); }}
-      onDismiss={() => { setVisible(false); setAction("previews.recovery.dismissed"); return Promise.resolve(); }} /> : null}
+    <ThreadToastViewport>{visible ? <RecoveryNotice state={state} onContinue={() => { setVisible(false); setAction("previews.recovery.continued"); return Promise.resolve(); }}
+      onDismiss={() => { setVisible(false); setAction("previews.recovery.dismissed"); return Promise.resolve(); }} /> : null}</ThreadToastViewport>
     <Button variant="outline" size="sm" onClick={() => { setVisible(true); setAction(""); }}>{t("previews.recovery.reset")}</Button>
     <p role="status" className="text-sm text-muted-foreground">{t(action || "previews.recovery.hint")}</p>
   </div>;
@@ -395,7 +396,7 @@ export const conversationExamples: ComponentExample[] = [
     code: '<ThreadHistoryStatus loading={loading} error={error} onRetry={retry} />' },
   { title: "previews.recovery.title", files: ["thread/RecoveryNotice"], Preview: RecoveryPreview,
     description: "previews.recovery.description", options: "previews.recovery.options",
-    code: '<RecoveryNotice state={recoveryState} onContinue={continueTask} onDismiss={dismissRecovery} />' },
+    code: '<ThreadToastViewport><RecoveryNotice state={recoveryState} onContinue={continueTask} onDismiss={dismissRecovery} /></ThreadToastViewport>' },
   { title: "previews.fallback.title", files: ["thread/ModelFallbackNotice"], Preview: FallbackPreview,
     description: "previews.fallback.description", options: "previews.fallback.options",
     code: '<ModelFallbackNotice model="gpt-4.1" onDismiss={dismiss} onOpenSettings={openModelSettings} />' },

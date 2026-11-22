@@ -986,11 +986,7 @@ class TestResponsesConversationState:
         assert (fallback_instructions, fallback_items) == convert_messages(messages)
 
     def test_replayed_and_delta_reasoning_items_keep_array_content(self):
-        # Regression for PR #5214: token consolidation clears
-        # ``provider_state``, so the next turn converts the full history
-        # (including assistant reasoning) instead of replaying server items.
-        # Both paths must keep reasoning ``content`` as a list - DeepSeek's
-        # Responses gateway rejects the string form with a serde error.
+        # DeepSeek rejects string content for both replayed and newly converted reasoning (#5214).
         prior_items = [
             {
                 "type": "reasoning",

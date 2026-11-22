@@ -10,6 +10,7 @@ import traceback
 import urllib.parse
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import AsyncExitStack, suppress
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
 
 import httpx
@@ -17,6 +18,7 @@ from loguru import logger
 
 from nanobot.agent.tools.base import Schema, Tool, ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
+from nanobot.agent.tools.mcp_metadata import MCPIcon, MCPRuntimeSnapshot, server_icons
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.network import NetworkConfig
 from nanobot.security.network import (
@@ -65,6 +67,9 @@ MCPRuntimeStatus = Literal["connecting", "connected", "failed"]
 
 
 class MCPConnection(Protocol):
+    @property
+    def icons(self) -> list[MCPIcon]: ...
+
     async def aclose(self) -> None: ...
 
 
@@ -93,9 +98,14 @@ async def _close_mcp_connections(connections: Mapping[str, MCPConnection]) -> No
 class _OwnedMCPConnection:
     """Close an MCP transport from the task that originally opened it."""
 
-    def __init__(self, owner: asyncio.Task[None], close_requested: asyncio.Event) -> None:
+    def __init__(self, owner: asyncio.Task[None], close_requested: asyncio.Event, icons: list[MCPIcon]) -> None:
+        self._icons = icons
         self._owner = owner
         self._close_requested = close_requested
+
+    @property
+    def icons(self) -> list[MCPIcon]:
+        return [] if self._owner.done() or self._close_requested.is_set() else self._icons
 
     async def aclose(self) -> None:
         self._close_requested.set()
@@ -267,7 +277,7 @@ async def _probe_http_url(url: str, timeout: float = 3.0, *, proxy: str | None =
     port = parsed.port
     if not port:
         port = 443 if parsed.scheme == "https" else 80
-    ok, _, resolved_ips = resolve_url_target(url)
+    ok, _, resolved_ips = resolve_url_target(url, trust_remote_dns=bool(proxy))
     if not ok:
         return False
     if proxy or env_proxy_applies_to_url(url):
@@ -316,8 +326,8 @@ def _pinned_transport_kwargs(proxy: str | None = None) -> dict[str, Any]:
     return kwargs
 
 
-async def _validate_mcp_request_url(request: httpx.Request) -> None:
-    ok, error = validate_url_target(str(request.url))
+async def _validate_mcp_request_url(request: httpx.Request, *, trust_remote_dns: bool = False) -> None:
+    ok, error = validate_url_target(str(request.url), trust_remote_dns=trust_remote_dns)
     if not ok:
         raise httpx.RequestError(
             f"Blocked unsafe MCP URL {_redact_url(str(request.url))} ({error})",
@@ -985,7 +995,7 @@ async def connect_mcp_servers(
 
     async def open_single_server(
         name: str, cfg: MCPServerConfig, server_stack: AsyncExitStack
-    ) -> bool:
+    ) -> list[MCPIcon] | None:
         try:
             transport_type = cfg.type
             if not transport_type:
@@ -997,10 +1007,15 @@ async def connect_mcp_servers(
                     )
                 else:
                     logger.warning("MCP server '{}': no command or url configured, skipping", name)
-                    return False
+                    return None
 
+            if cfg.use_proxy and transport_type == "stdio":
+                raise ValueError("The shared proxy is available for HTTP and SSE MCP connections")
+            proxy = (network or NetworkConfig()).resolve_proxy(cfg.use_proxy)
+            selected_proxies[name] = proxy
+            check_request = partial(_validate_mcp_request_url, trust_remote_dns=bool(proxy))
             if transport_type in {"sse", "streamableHttp"}:
-                ok, error = validate_url_target(cfg.url)
+                ok, error = validate_url_target(cfg.url, trust_remote_dns=bool(proxy))
                 if not ok:
                     logger.warning(
                         "MCP server '{}': blocked unsafe URL {} ({})",
@@ -1008,12 +1023,8 @@ async def connect_mcp_servers(
                         _redact_url(cfg.url),
                         error,
                     )
-                    return False
+                    return None
 
-            if cfg.use_proxy and transport_type == "stdio":
-                raise ValueError("The shared proxy is available for HTTP and SSE MCP connections")
-            proxy = (network or NetworkConfig()).resolve_proxy(cfg.use_proxy)
-            selected_proxies[name] = proxy
             oauth_auth: httpx.Auth | None = None
             if cfg.auth == "oauth":
                 if transport_type not in {"sse", "streamableHttp"}:
@@ -1021,7 +1032,7 @@ async def connect_mcp_servers(
                         "MCP server '{}': OAuth requires an SSE or Streamable HTTP transport",
                         name,
                     )
-                    return False
+                    return None
                 from nanobot.agent.tools.mcp_oauth import (
                     MCPAuthorizationRequiredError,
                     create_mcp_oauth_auth,
@@ -1035,7 +1046,7 @@ async def connect_mcp_servers(
                     )
                 except MCPAuthorizationRequiredError:
                     logger.info("MCP server '{}': waiting for browser authorization", name)
-                    return False
+                    return None
 
             if transport_type == "stdio":
                 command, args, env = _normalize_windows_stdio_command(
@@ -1053,7 +1064,7 @@ async def connect_mcp_servers(
             elif transport_type == "sse":
                 if not await _probe_http_url(cfg.url, proxy=proxy):
                     logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
-                    return False
+                    return None
 
                 def httpx_client_factory(
                     headers: dict[str, str] | None = None,
@@ -1067,7 +1078,7 @@ async def connect_mcp_servers(
                     }
                     return httpx.AsyncClient(
                         headers=merged_headers or None,
-                        event_hooks={"request": [_validate_mcp_request_url]},
+                        event_hooks={"request": [check_request]},
                         follow_redirects=True,
                         timeout=timeout,
                         auth=auth,
@@ -1085,11 +1096,11 @@ async def connect_mcp_servers(
             elif transport_type == "streamableHttp":
                 if not await _probe_http_url(cfg.url, proxy=proxy):
                     logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
-                    return False
+                    return None
 
                 http_client_kwargs: dict[str, Any] = {
                     "headers": cfg.headers or None,
-                    "event_hooks": {"request": [_validate_mcp_request_url]},
+                    "event_hooks": {"request": [check_request]},
                     "follow_redirects": True,
                     # Read must outlast the tool call itself; otherwise a slow tool
                     # fails with ReadTimeout before tool_timeout is reached.
@@ -1110,7 +1121,7 @@ async def connect_mcp_servers(
                 )
             else:
                 logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
-                return False
+                return None
 
             read = _filter_malformed_mcp_progress_notifications(read, name)
             session = await server_stack.enter_async_context(ClientSession(read, write))
@@ -1248,7 +1259,10 @@ async def connect_mcp_servers(
             logger.info(
                 "MCP server '{}': connected, {} capabilities registered", name, registered_count
             )
-            return True
+            return server_icons(
+                getattr(getattr(initialization, "serverInfo", None), "icons", None),
+                remote_url=None if transport_type == "stdio" else cfg.url,
+            )
 
         except Exception as e:
             hint = ""
@@ -1268,22 +1282,22 @@ async def connect_mcp_servers(
                     "only JSON-RPC to stdout and sends logs/debug output to stderr instead."
                 )
             _log_mcp_connection_failure(name, e, hint, proxy=selected_proxies.get(name))
-            return False
+            return None
 
     async def connect_single_server(
         name: str, cfg: MCPServerConfig
     ) -> tuple[str, MCPConnection | None]:
         loop = asyncio.get_running_loop()
-        ready: asyncio.Future[bool] = loop.create_future()
+        ready: asyncio.Future[list[MCPIcon] | None] = loop.create_future()
         close_requested = asyncio.Event()
 
         async def own_connection() -> None:
             try:
                 async with AsyncExitStack() as stack:
-                    connected = await open_single_server(name, cfg, stack)
+                    icons = await open_single_server(name, cfg, stack)
                     if not ready.done():
-                        ready.set_result(connected)
-                    if connected:
+                        ready.set_result(icons)
+                    if icons is not None:
                         await close_requested.wait()
             except BaseException as exc:
                 if not ready.done():
@@ -1291,9 +1305,8 @@ async def connect_mcp_servers(
                 raise
 
         owner = asyncio.create_task(own_connection(), name=f"mcp:{name}")
-        connection = _OwnedMCPConnection(owner, close_requested)
         try:
-            connected = await ready
+            icons = await ready
         except BaseException as exc:
             close_requested.set()
             owner.cancel()
@@ -1303,7 +1316,8 @@ async def connect_mcp_servers(
                 logger.warning("MCP server '{}': connection cancelled by server/SDK", name)
                 return name, None
             raise
-        if not connected:
+        connection = _OwnedMCPConnection(owner, close_requested, icons or [])
+        if icons is None:
             await connection.aclose()
             return name, None
         return name, connection
@@ -1401,13 +1415,12 @@ class MCPProvider:
     def connected_server_names(self) -> set[str]:
         return set(self._connections)
 
-    def runtime_status(self) -> dict[str, MCPRuntimeStatus]:
-        """Return the latest connection-attempt result for configured servers."""
-        return {
-            name: status
-            for name, status in self._runtime_statuses.items()
-            if name in self._servers
-        }
+    def runtime_snapshot(self) -> MCPRuntimeSnapshot:
+        """Read live display metadata without starting connections or retaining old handles."""
+        return MCPRuntimeSnapshot(
+            statuses={name: status for name, status in self._runtime_statuses.items() if name in self._servers},
+            icons={name: conn.icons for name, conn in self._connections.items()},
+        )
 
     def _set_runtime_status(
         self,

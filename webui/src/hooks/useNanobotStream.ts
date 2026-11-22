@@ -6,7 +6,10 @@ import { useClient } from "@/providers/ClientProvider";
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { ApiError, fetchWebuiThread, fetchWebuiThreadTraceDetail } from "@/lib/api";
 import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
-import { isImageRequestFailure } from "@/lib/model-request-failure";
+import { useTranslation } from "react-i18next";
+import { useToast } from "@/components/ui/toast";
+import { nonModelFailureLine } from "../../../packages/client-events/turn-failure";
+import { emptyFinalMessageKey, resolveModelRequestFailureCopy, isImageRequestFailure } from "@/lib/model-request-failure";
 import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
 import { historyContentSnapshot, sameHistoryContent } from "@/lib/thread-display-projection";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
@@ -161,6 +164,8 @@ export function useNanobotStream(
   dismissStreamError: () => void;
 } {
   const { client, getToken } = useClient();
+  const { i18n } = useTranslation();
+  const showToast = useToast();
   const historyKey = history?.key ?? null;
   const historyChatId = historyKey?.startsWith("websocket:") ? historyKey.slice("websocket:".length) : null;
   const temporary = history?.temporary === true;
@@ -335,6 +340,7 @@ export function useNanobotStream(
           ...message,
           deliveryStatus: "failed" as const,
           deliveryErrorKind: err.kind,
+          deliveryErrorDetail: err.kind === "turn_rejected" ? err.detail : undefined,
         }];
       });
       transcriptRef.current.projection = {
@@ -358,14 +364,7 @@ export function useNanobotStream(
       setExecSourceMessages(nextMessages);
       return nextMessages;
     });
-
-    if (!client.getRunState(chatId).active) {
-      transcriptRef.current.projection = {
-        ...transcriptRef.current.projection,
-        suppressUntilTurnEnd: false,
-      };
-    }
-  }, [chatId, client, discardStreamEvents, setMessages]);
+  }, [chatId, discardStreamEvents, setMessages]);
 
   useEffect(() => client.onError(applyStreamError), [applyStreamError, client]);
 
@@ -652,10 +651,21 @@ export function useNanobotStream(
 
     // A request may start before its acceptance frame reaches this tab.
     const startedInputs = new Set<string>();
+    const notifyFailure = (failure: { failure_kind?: string; failure_error_kind?: string }) => {
+      const emptyFinal = emptyFinalMessageKey(failure.failure_error_kind);
+      const message = failure.failure_kind === "model"
+        ? emptyFinal ? i18n.t(emptyFinal) : resolveModelRequestFailureCopy({ errorKind: failure.failure_error_kind }, i18n.t).title
+        : nonModelFailureLine(failure.failure_kind, i18n.resolvedLanguage ?? i18n.language);
+      showToast?.({ tone: "error", message });
+    };
     const handle = (ev: InboundEvent) => {
       if (ev.event === "history_replaced") {
         startedInputs.clear();
         replaceHistory(ev.thread);
+        return;
+      }
+      if (ev.event === "turn_failure_notice") {
+        notifyFailure(ev);
         return;
       }
       if (ev.event === "error") {
@@ -743,7 +753,7 @@ export function useNanobotStream(
         || ev.event === "stream_end"
       ) setRetryStatus(null);
       if (ev.event === "delta") {
-        if (transcriptRef.current.projection.suppressUntilTurnEnd || transcriptRef.current.represented(ev)) return;
+        if (transcriptRef.current.represented(ev)) return;
         const chunk = typeof ev.text === "string" ? ev.text : "";
         if (!chunk) return;
         enqueueStreamEvent({
@@ -759,7 +769,7 @@ export function useNanobotStream(
       }
 
       if (ev.event === "reasoning_delta") {
-        if (transcriptRef.current.projection.suppressUntilTurnEnd || transcriptRef.current.represented(ev)) return;
+        if (transcriptRef.current.represented(ev)) return;
         const chunk = ev.text;
         if (!chunk) return;
         enqueueStreamEvent({
@@ -774,7 +784,6 @@ export function useNanobotStream(
       if (ev.event === "stream_end") {
         if (transcriptRef.current.represented(ev)) return;
         flushPendingStreamEvents(ev);
-        if (transcriptRef.current.projection.suppressUntilTurnEnd) return;
         if (ev.resuming) {
           return;
         }
@@ -787,7 +796,6 @@ export function useNanobotStream(
       flushPendingStreamEvents();
 
       if (ev.event === "reasoning_end") {
-        if (transcriptRef.current.projection.suppressUntilTurnEnd) return;
         applyProjectionEvent(ev);
         return;
       }
@@ -840,6 +848,7 @@ export function useNanobotStream(
           setGoalState(ev.goal_state);
         }
         setRetryStatus(null);
+        if (ev.outcome === "failed" && ev.failure_kind !== "model") notifyFailure(ev);
         const modelRequestFailed = ev.outcome === "failed" && ev.failure_kind === "model";
         const failureAttempts =
           typeof ev.failure_attempts === "number"
@@ -963,6 +972,8 @@ export function useNanobotStream(
     drainStreamEvents,
     flushPendingStreamEvents,
     isSideChannelEvent,
+    i18n,
+    showToast,
     onTurnEnd,
     onStreamDetach,
     messageCache,

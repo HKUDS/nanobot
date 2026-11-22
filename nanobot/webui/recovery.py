@@ -31,6 +31,7 @@ from nanobot.session.recovery import (
     append_recovery_interruption,
     discard_runtime_checkpoint,
     pending_followups,
+    public_recovery_failure_kind,
     recovery_state_from_metadata,
     request_origin_from_metadata,
     restore_pending_interruption,
@@ -184,7 +185,7 @@ class RecoveryCoordinator:
                 reason="input_rejected" if input_rejected else "model_request_failed",
                 can_continue=not input_rejected and any(message.get("role") == "user" for message in session.messages),
             )
-            result["failure_error_kind"] = failure_error_kind or "unknown"
+            result["failure_error_kind"] = public_recovery_failure_kind(failure_error_kind) or "unknown"
             if reply_preserved:
                 result["reply_preserved"] = True
             await self.sessions.state.restore_interruption(session)

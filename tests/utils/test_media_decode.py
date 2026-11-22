@@ -19,7 +19,8 @@ def test_saves_png_with_correct_extension(tmp_path) -> None:
     result = save_base64_data_url(_data_url(b"fake png"), tmp_path)
     assert result is not None
     assert result.endswith(".png")
-    assert (tmp_path / result.split("/")[-1]).read_bytes() == b"fake png"
+    assert Path(result).parent == tmp_path
+    assert Path(result).read_bytes() == b"fake png"
 
 
 @pytest.mark.parametrize("mime", [
@@ -142,9 +143,3 @@ def test_explicit_max_bytes_overrides_default(tmp_path) -> None:
     payload = b"y" * (9 * 1024 * 1024)
     with pytest.raises(FileSizeExceededError, match="8MB limit"):
         save_base64_data_url(_data_url(payload), tmp_path, max_bytes=8 * 1024 * 1024)
-
-
-def test_saved_file_lives_under_media_dir(tmp_path) -> None:
-    result = save_base64_data_url(_data_url(b"ok"), tmp_path)
-    assert result is not None
-    assert result.startswith(str(tmp_path))

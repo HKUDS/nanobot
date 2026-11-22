@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from nanobot.config.schema import Config, ProvidersConfig
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import PROVIDERS, find_by_name
+from nanobot.providers.registry import find_by_name
 
 
 def test_modelscope_config_field_exists() -> None:
@@ -12,10 +12,9 @@ def test_modelscope_config_field_exists() -> None:
 
 
 def test_modelscope_provider_in_registry() -> None:
-    specs = {spec.name: spec for spec in PROVIDERS}
-
-    assert "modelscope" in specs
-    ms = specs["modelscope"]
+    ms = find_by_name("modelscope")
+    assert ms is not None
+    assert ms.name == "modelscope"
     assert ms.backend == "openai_compat"
     assert ms.env_key == "MODELSCOPE_API_KEY"
     assert ms.display_name == "ModelScope"
@@ -23,13 +22,6 @@ def test_modelscope_provider_in_registry() -> None:
     assert ms.default_api_base == "https://api-inference.modelscope.cn/v1"
     assert ms.strip_model_prefixes == ("modelscope",)
     assert ms.thinking_style == "enable_thinking"
-
-
-def test_find_by_name_modelscope() -> None:
-    spec = find_by_name("modelscope")
-
-    assert spec is not None
-    assert spec.name == "modelscope"
 
 
 def test_modelscope_forced_provider_uses_default_api_base() -> None:

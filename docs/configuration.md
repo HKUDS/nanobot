@@ -71,7 +71,7 @@ If the WebUI does not expose the option you need, start from the task below. Mos
 
 ## Shared network proxy
 
-Set one proxy address in **Settings → Advanced → Shared proxy**, then turn on **Use proxy** for each provider, Web access, channel, or remote MCP connection that needs it. The address is used by the gateway, so `127.0.0.1` refers to the machine running nanobot. Restart when Settings requests it. MCP connections can select the proxy before browser sign-in.
+Set one proxy address in **Settings → Advanced → Shared proxy**, then turn on **Use proxy** for each provider, Web access, channel, or remote MCP connection that needs it. The address is used by the gateway, so `127.0.0.1` refers to the machine running nanobot. Restart when Settings requests it. Remote HTTP and SSE MCP connections with **Use proxy** enabled can reach servers whose hostnames only the shared proxy can resolve. Configure that proxy to block destinations the agent should not reach. MCP connections can select the proxy before browser sign-in.
 
 For proxies that require credentials, expand **Authentication (optional)** and enter the username and password, then choose **Save** to apply the address and credentials together. The same editor is available from **Configure proxy** without leaving the current form. Passwords are masked in the interface but remain part of the proxy URL in the local configuration; protect that file. If the address is a whole-URL `${ENV_VAR}` reference, include authentication in the referenced URL.
 
@@ -247,7 +247,7 @@ Internal variables such as `NANOBOT_RESTART_*` and `NANOBOT_PATH_*` are set by n
 
 ## Langfuse Observability
 
-Use Langfuse to trace OpenAI-compatible model calls and Codex OAuth calls. Configure it with environment variables, not `config.json`.
+Use Langfuse to trace OpenAI-compatible model calls and Codex OAuth calls. Keep the credentials and service URL in the environment. In WebUI Settings → System, turn Langfuse off and restart nanobot to stop sending model inputs and outputs without removing the keys. Turn it back on and restart to resume. The switch defaults to on for existing environment-based setups.
 
 Install the optional package in the same Python environment that runs nanobot:
 
@@ -271,7 +271,7 @@ $env:LANGFUSE_PUBLIC_KEY = "pk-lf-..."
 $env:LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
 ```
 
-When `LANGFUSE_SECRET_KEY` is set and the `langfuse` package is installed, tracing is enabled for OpenAI-compatible providers and the Codex OAuth provider (`openai_codex`). If the package is missing, nanobot logs a warning and model calls continue without tracing.
+With the switch on, `LANGFUSE_SECRET_KEY` set, and the `langfuse` package installed, tracing is enabled for OpenAI-compatible providers and the Codex OAuth provider (`openai_codex`). If the package is missing, nanobot logs a warning and model calls continue without tracing.
 
 Use the Langfuse region or self-hosted URL that matches your project. The [Langfuse OpenAI SDK docs](https://langfuse.com/integrations/model-providers/openai-py) use `LANGFUSE_BASE_URL` for cloud regions and self-hosted instances.
 
@@ -1834,7 +1834,7 @@ Set the address in **Settings → Advanced → Shared proxy**, then enable **Use
 > ```
 >
 > </details>
-> Web requests still enforce URL safety checks when using a proxy. Use only trusted proxies: the proxy controls final DNS resolution and outbound access. With **Use proxy** enabled, the shared address takes precedence over environment proxy settings, including `NO_PROXY`.
+> Web requests still enforce URL safety checks when using a proxy. Use only trusted proxies: the proxy controls final DNS resolution and outbound access. With **Use proxy** enabled and a shared proxy configured, `web_fetch` can read links that only the proxy can resolve. Configure the proxy to block destinations the agent should not reach, including private networks. The shared proxy takes precedence over environment proxy settings, including `NO_PROXY`.
 
 ### `tools.web`
 
@@ -2374,6 +2374,8 @@ The model may explicitly request a different hard runtime up to `maxRuntimeLimit
 For existing configurations, `timeout` remains a hard-runtime alias: `"timeout": 60` still stops a command after 60 seconds, and `"timeout": 0` still means no hard deadline. Use either `timeout` or `maxRuntime`, not both.
 
 `exec` waits up to 1 second by default, then returns an active session ID if the command is still running. Use `exec_session` with that ID to read further output, wait, or stop the command; do not launch the command again just because it is still running. `yield_time_ms` changes the initial wait (0–30000 ms), not the command's runtime budget. Omitting it keeps stdin closed; set it explicitly when the command needs interactive input. `exec_session` waits are also bounded by `timeout_ms`, including `until_exit: true`; an expired wait leaves the command running. Direct `!` shell commands still wait for their completed result.
+
+If too many commands are running in the background, starting another may stop the oldest one. Before rerunning it, check what it already changed.
 
 The tool result distinguishes a hard-runtime termination from inactivity. With `idleAction: "report"`, a silent command continues running under its hard-runtime limit. With `idleAction: "terminate"`, inactivity stops the command and the result reports that reason. Both limits apply without polling. Commands are cleaned up when they finish, reach an enforced limit, or their owning session is cancelled or deleted; normal operation does not require manual process management. `yield_time_ms` and an `exec_session` wait timeout only control how long a tool call waits before returning; neither stops the command nor resets its runtime or inactivity clock.
 

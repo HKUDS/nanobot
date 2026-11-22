@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { currentLocale, setAppLanguage } from "@/i18n";
 import { NanobotClient } from "@/lib/nanobot-client";
 import type { SidebarStatePayload } from "@/lib/types";
 
@@ -85,6 +86,25 @@ describe("NanobotClient", () => {
     client.sendMessage("chat", "keep saved options");
     expect(JSON.parse(socket.sent.at(-1)!)).not.toHaveProperty("model_options");
     client.close();
+  });
+
+  it("sends the current language with each slash command on the same connection", async () => {
+    const original = currentLocale();
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    try {
+      for (const locale of ["fr", "zh-CN"] as const) {
+        await setAppLanguage(locale);
+        client.sendMessage("chat", "/help");
+        expect(JSON.parse(socket.sent.at(-1)!)).toMatchObject({ content: "/help", locale });
+      }
+    } finally {
+      client.close();
+      await setAppLanguage(original);
+    }
   });
 
   it("omits model options for Temporary Chats and shell commands", async () => {
@@ -1852,7 +1872,23 @@ describe("NanobotClient", () => {
     expect(client.hasUnsettledRun("chat-scope-control")).toBe(true);
   });
 
-  it("sends large sidebar ordering state as a correlated WebUI request", async () => {
+  it("sends an acknowledged archive command for the selected session keys", async () => {
+    const client = new NanobotClient({
+      url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    const keys = ["websocket:a", "websocket:b"];
+    const pending = client.archiveSessions(keys, true);
+    const request = JSON.parse(lastSocket().sent[0]);
+    expect(request).toEqual({ type: "webui_request", request_id: expect.any(String),
+      action: "sessions.archive", payload: { keys, archived: true } });
+    lastSocket().fakeMessage({ event: "webui_response", request_id: request.request_id, ok: true, result: { ok: true } });
+    await expect(pending).resolves.toEqual({ ok: true });
+  });
+
+  it("sends large sidebar state as a correlated request and delivers its broadcast", async () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -1865,13 +1901,15 @@ describe("NanobotClient", () => {
     const state: SidebarStatePayload = {
       schema_version: 1,
       pinned_keys: [],
-      archived_keys: [],
       session_order: sessionOrder,
       title_overrides: {},
       project_name_overrides: {},
       tags_by_key: {},
       collapsed_groups: {},
-      workbench: { version: 1, tabs: {} },
+      workbench: { version: 1, tabs: {
+        "tab:websocket:a": { explicit: true, title: "Research", paneKeys: ["websocket:a", "websocket:b"],
+          layoutPaneKeys: ["websocket:a", "websocket:b"], splitRatios: [0.5, 0.5], layout: "columns" },
+      } },
       view: {
         density: "comfortable",
         show_archived: false,
@@ -1880,6 +1918,8 @@ describe("NanobotClient", () => {
       updated_at: null,
     };
 
+    const handler = vi.fn();
+    client.onSidebarStateUpdate(handler);
     client.connect();
     lastSocket().fakeOpen();
     const pending = client.setSidebarState(state);
@@ -1905,51 +1945,9 @@ describe("NanobotClient", () => {
       result: state,
     });
     await expect(pending).resolves.toEqual(state);
-  });
-
-  it("delivers backend sidebar state updates to every subscriber", () => {
-    const client = new NanobotClient({
-      url: "ws://test",
-      reconnect: false,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    const handler = vi.fn();
-    const state: SidebarStatePayload = {
-      schema_version: 1,
-      pinned_keys: [],
-      archived_keys: [],
-      session_order: [],
-      title_overrides: {},
-      project_name_overrides: {},
-      tags_by_key: {},
-      collapsed_groups: {},
-      workbench: {
-        version: 1,
-        tabs: {
-          "tab:websocket:a": {
-            explicit: true,
-            title: "Research",
-            paneKeys: ["websocket:a", "websocket:b"],
-            layoutPaneKeys: ["websocket:a", "websocket:b"],
-            splitRatios: [0.5, 0.5],
-            layout: "columns",
-          },
-        },
-      },
-      view: {
-        density: "comfortable",
-        show_archived: false,
-        sort: "updated_desc",
-      },
-      updated_at: "2026-08-11T08:00:00Z",
-    };
-
-    client.onSidebarStateUpdate(handler);
-    client.connect();
-    lastSocket().fakeOpen();
-    lastSocket().fakeMessage({ event: "sidebar_state_updated", state });
-
-    expect(handler).toHaveBeenCalledWith(state);
+    const broadcast = { ...state, updated_at: "2026-08-11T08:00:00Z" };
+    lastSocket().fakeMessage({ event: "sidebar_state_updated", state: broadcast });
+    expect(handler).toHaveBeenCalledWith(broadcast);
   });
 
   it("does not correlate a new-chat scope rejection to an unrelated sent turn", async () => {
@@ -2428,7 +2426,7 @@ describe("NanobotClient", () => {
     });
   });
 
-  it("dispatches session updates globally", () => {
+  it("distinguishes catalog changes from per-session metadata updates", () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -2438,8 +2436,15 @@ describe("NanobotClient", () => {
     const chatHandler = vi.fn();
     client.onSessionUpdate(globalHandler);
     client.onChat("chat-title", chatHandler);
+    const changed = vi.fn();
+    const unsubscribe = client.onSessionsChanged(changed);
     client.connect();
     lastSocket().fakeOpen();
+    lastSocket().fakeMessage({ event: "sessions_changed" });
+    unsubscribe();
+    lastSocket().fakeMessage({ event: "sessions_changed" });
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(globalHandler).not.toHaveBeenCalled();
 
     lastSocket().fakeMessage({
       event: "session_updated",
@@ -2633,7 +2638,7 @@ describe("NanobotClient", () => {
       turn_id: frame.turn_id,
     });
 
-    await expect(pending).resolves.toBeUndefined();
+    await expect(pending).resolves.toMatchObject({ text: "Switched model preset to fast.", turn_id: frame.turn_id });
     expect(chatHandler).toHaveBeenCalledTimes(1);
     expect(chatHandler).toHaveBeenCalledWith(expect.objectContaining({
       text: "normal reply",

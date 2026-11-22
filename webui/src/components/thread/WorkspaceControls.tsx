@@ -1,3 +1,5 @@
+import "./workspace-controls.css";
+
 import { FullAccessIcon, RestrictedAccessIcon, WorkspaceIcon } from "@/components/icons/product-icons";
 import type { HTMLAttributes, ReactElement, RefObject } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";

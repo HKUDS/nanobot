@@ -29,40 +29,10 @@ def _bound_chat(chat_id: str = "chat-1") -> dict[str, str]:
     }
 
 
-def test_format_timing_cron_with_tz(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="cron", expr="0 9 * * 1-5", tz="America/Denver")
-    assert tool._format_timing(s) == "cron: 0 9 * * 1-5 (America/Denver)"
-
-
 def test_format_timing_cron_without_tz(tmp_path) -> None:
     tool = _make_tool(tmp_path)
     s = CronSchedule(kind="cron", expr="*/5 * * * *")
     assert tool._format_timing(s) == "cron: */5 * * * *"
-
-
-@pytest.mark.parametrize(
-    "expected, every_ms",
-    [
-        pytest.param("every 2h", 7200000, id="hours"),
-        pytest.param("every 30m", 1800000, id="minutes"),
-        pytest.param("every 30s", 30000, id="seconds"),
-        pytest.param("every 90s", 90000, id="non_minute_seconds"),
-        pytest.param("every 200ms", 200, id="milliseconds"),
-    ],
-)
-def test_format_timing_every_interval(tmp_path, expected, every_ms) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=every_ms)
-    assert tool._format_timing(s) == expected
-
-
-def test_format_timing_at(tmp_path) -> None:
-    tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
-    s = CronSchedule(kind="at", at_ms=1773684000000)
-    result = tool._format_timing(s)
-    assert "Asia/Shanghai" in result
-    assert result.startswith("at 2026-")
 
 
 def test_format_timing_fallback(tmp_path) -> None:

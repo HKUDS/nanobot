@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.session_helpers import mock_session_manager
+from agent.session_helpers import make_agent_loop, mock_session_manager
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.hook import (
     AgentHook,
@@ -376,7 +376,6 @@ async def test_composite_can_wrap_another_composite():
 
 
 def _make_loop(tmp_path, hooks=None, hook_factories=None):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
@@ -384,12 +383,11 @@ def _make_loop(tmp_path, hooks=None, hook_factories=None):
     provider.get_default_model.return_value = "test-model"
     provider.generation.max_tokens = 4096
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager", side_effect=mock_session_manager), \
-         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr, \
+    with patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr, \
          patch("nanobot.agent.loop.Consolidator"):
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
-        loop = AgentLoop(
+        loop = make_agent_loop(
+            context_builder=MagicMock(workspace=tmp_path), session_manager=mock_session_manager(),
             bus=bus,
             provider=provider,
             workspace=tmp_path,

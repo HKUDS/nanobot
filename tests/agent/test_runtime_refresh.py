@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agent.session_helpers import make_agent_loop
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.queue import MessageBus
@@ -32,7 +34,7 @@ def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
 def test_provider_refresh_updates_runtime_resolver(tmp_path: Path) -> None:
     old_provider = _provider("old-model")
     new_provider = _provider("new-model", max_tokens=456)
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=old_provider,
         workspace=tmp_path,
@@ -58,7 +60,7 @@ def test_provider_refresh_updates_runtime_resolver(tmp_path: Path) -> None:
 def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
     old_provider = _provider("old-model")
     new_provider = _provider("new-model", max_tokens=456)
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=old_provider,
         workspace=tmp_path,
@@ -84,7 +86,7 @@ def test_llm_runtime_surfaces_invalidated_config_errors(tmp_path: Path) -> None:
     def fail_refresh() -> ProviderSnapshot:
         raise ValueError("invalid config")
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=_provider("old-model"),
         workspace=tmp_path,
@@ -126,7 +128,7 @@ def test_same_snapshot_default_clears_preset_and_publishes_update(tmp_path: Path
         signature=("fast-model", "auto", "same-runtime"),
     )
     published: list[tuple[str, str | None]] = []
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=base_provider,
         workspace=tmp_path,
@@ -168,7 +170,7 @@ async def test_named_default_refresh_is_used_by_sessions_without_override(tmp_pa
         ),
     }
     default_snapshot = snapshots["deep"]
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -211,7 +213,7 @@ async def test_config_invalidation_defers_canonical_notification_until_default_r
             model_preset="fast",
         )
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -262,7 +264,7 @@ async def test_config_refresh_publishes_renamed_canonical_preset(tmp_path: Path)
             model_preset=name,
         )
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -293,7 +295,7 @@ def test_next_turn_captures_generation_changed_after_previous_admission(
 ) -> None:
     provider = _provider("test-model")
     provider.generation = GenerationSettings(temperature=0.2, max_tokens=1024)
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -330,6 +332,7 @@ def test_settings_context_window_refreshes_runtime_state(
 
     loop = AgentLoop.from_config(
         config,
+        context_builder=ContextBuilder(config.workspace_path),
         tool_registry=ToolRegistry(),
         provider_snapshot_loader=loader,
     )

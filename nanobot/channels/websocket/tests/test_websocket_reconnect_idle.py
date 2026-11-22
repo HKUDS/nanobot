@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -25,9 +26,11 @@ class _RecordingTransport:
         return (self.connection,)
 
     async def webui_send_raw(
-        self, connection: ServerConnection, raw: str, *, label: str = "",
+        self, connection: ServerConnection, raw: str, *, label: str = "", on_sent: Callable[[], None] | None = None,
     ) -> None:
         self.frames.append(json.loads(raw))
+        if on_sent:
+            on_sent()
 
 
 def _delivery(history, tmp_path) -> tuple[WebUIOutboundDelivery, _RecordingTransport]:

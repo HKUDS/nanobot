@@ -22,6 +22,7 @@ class _ContextTool(Tool):
 
 async def test_registry_injects_request_context_into_legacy_tool():
     tool = _ContextTool()
+    assert isinstance(tool, ContextAware)
     registry = ToolRegistry()
     registry.register(tool)
     ctx = RequestContext(channel="test", chat_id="123", session_key="test:123")
@@ -31,8 +32,3 @@ async def test_registry_injects_request_context_into_legacy_tool():
 
     assert result is ctx
     assert tool.last_ctx is ctx
-
-
-def test_context_tool_is_instance_of_context_aware():
-    tool = _ContextTool()
-    assert isinstance(tool, ContextAware)

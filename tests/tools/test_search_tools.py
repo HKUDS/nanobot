@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, MagicMock
 from zipfile import ZipFile
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.registry import is_tool_error_result
@@ -1079,7 +1079,7 @@ def test_agent_loop_registers_search_backend(tmp_path: Path, monkeypatch, use_rg
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
 
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
 
     assert ("rg" in loop.tools.tool_names) == use_rg
     assert ("find_files" in loop.tools.tool_names) == (not use_rg)

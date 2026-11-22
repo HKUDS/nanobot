@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import importlib.util
 import json
-import os
 import re
 import ssl
 from collections.abc import Awaitable, Callable
@@ -20,6 +19,7 @@ from oauth_cli_kit.storage import FileTokenStorage
 
 from nanobot import __version__
 from nanobot.events import NO_EVENTS
+from nanobot.providers import langfuse as tracing
 from nanobot.providers.base import (
     CONTEXT_SAFETY_BUFFER,
     LLMProvider,
@@ -141,7 +141,9 @@ def _start_codex_langfuse_generation(
     ``find_spec`` can't fail the Codex request itself.
     """
     try:
-        if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
+        if not tracing.requested():
+            return _CodexGenerationTracer(None)
+        if importlib.util.find_spec("langfuse"):
             from langfuse import get_client
 
             langfuse = get_client()
@@ -162,11 +164,10 @@ def _start_codex_langfuse_generation(
             )
             return _CodexGenerationTracer(generation)
 
-        if os.environ.get("LANGFUSE_SECRET_KEY"):
-            logger.warning(
-                "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
-                "run `nanobot plugins enable langfuse` to enable tracing"
-            )
+        logger.warning(
+            "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
+            "run `nanobot plugins enable langfuse` to enable tracing"
+        )
         return _CodexGenerationTracer(None)
     except Exception as exc:
         logger.warning(_LANGFUSE_TRACE_WARNING, exc)

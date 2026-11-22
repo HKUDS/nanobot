@@ -9,14 +9,13 @@ import {
   formatActivityDuration,
 } from "@/components/thread/AgentActivityCluster";
 import { sameHistoryRowIdentity, type HistoryRowIdentity, type HistoryRowSource } from "@/components/thread/history-row-identity";
+import { ThreadDivider } from "@/components/thread/ThreadDivider";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { messageEditorSlots, useMessageEditing } from "@/components/thread/MessageEditing";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useFloatingPortal } from "@/components/ui/floating-portal";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
-import { fmtDateTime, formatMessageHoverTime } from "@/lib/format-time";
 import { leadingDisplayNoopCount, projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
 import { filterThreadDisplayUnits } from "@/lib/thread-display-projection";
 import { withoutSubagentCreateActivity } from "@/lib/subagent-create-activity";
@@ -34,7 +33,6 @@ interface ThreadMessagesProps {
   afterUserMessage?: (message: UIMessage) => ReactNode;
   afterMessages?: ReactNode;
   temporary?: boolean;
-  /** When true, agent turn still in flight — keeps activity timeline expanded. */
   isStreaming?: boolean;
   activeTurnId?: string | null;
   /** Optimistic or canonical active-turn start, in unix seconds. */
@@ -115,7 +113,18 @@ export function ThreadMessages({
   const { t } = useTranslation();
   const { activityMode } = useLocalPreferences();
   const messageListRef = useRef<HTMLDivElement>(null);
-  const mobileActions = useMediaQuery("(max-width: 767px)");
+  const noHover = useMediaQuery("(hover: none)");
+  const [narrowList, setNarrowList] = useState(false);
+  useLayoutEffect(() => {
+    const list = messageListRef.current;
+    if (!list || noHover) return;
+    const measure = (width: number) => setNarrowList(width > 0 && width < 768);
+    measure(list.getBoundingClientRect().width);
+    const observer = new ResizeObserver(([entry]) => measure(entry.contentRect.width));
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [noHover]);
+  const mobileActions = noHover || narrowList;
   const rawUnits = useMemo(() => buildDisplayUnits(messages), [messages]);
   const units = useMemo(() => filterThreadDisplayUnits(rawUnits), [rawUnits]);
   const forkBoundaryAfterUnitIndex = useMemo(() => {
@@ -161,6 +170,7 @@ export function ThreadMessages({
   }, [activityMode]);
   const [activeContextBlockKey, setActiveContextBlockKey] = useState<string | null>(null);
   const [openContextBlockKey, setOpenContextBlockKey] = useState<string | null>(null);
+  if (!mobileActions && openContextBlockKey !== null) setOpenContextBlockKey(null);
   const pointedContextBlockRef = useRef<string | null>(null);
   const setActivityExpanded = useCallback((key: string, expanded: boolean) => {
     onActivityToggle?.();
@@ -196,7 +206,7 @@ export function ThreadMessages({
     ? <div key="thread-prelude" className={cn("flow-root", marginTop)}>{prefix}{preludeInset}{beforeMessages}</div> : null;
 
   return (
-    <div ref={messageListRef} className="flex w-full flex-col">
+    <div ref={messageListRef} data-compact-message-actions={mobileActions || undefined} className="flex w-full flex-col">
       <AssistantSelectionAction
         containerRef={messageListRef}
         onQuoteSelection={onQuoteSelection}
@@ -430,10 +440,8 @@ interface MessageBlockMenuProps {
   message: UIMessage;
   isTurnStreaming: boolean;
   contextBlockKey: string;
-  contextActive: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onContextActiveChange: (key: string | null) => void;
   onForkFromHere?: () => void;
   onEdit?: () => void;
   editDisabledReason?: string | null;
@@ -450,64 +458,43 @@ function MessageBlockMenu({
   message,
   isTurnStreaming,
   contextBlockKey,
-  contextActive,
   open,
   onOpenChange,
-  onContextActiveChange,
   onForkFromHere,
   onEdit,
   editDisabledReason,
   activity,
 }: MessageBlockMenuProps) {
   const { t } = useTranslation();
-  const contentRef = useRef<HTMLDivElement>(null);
-  const editingRef = useRef(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const [triggerHeight, setTriggerHeight] = useState(28);
-  useLayoutEffect(() => {
-    const trigger = triggerRef.current;
-    if (!open || !trigger) return;
-    const measure = () => setTriggerHeight(trigger.getBoundingClientRect().height || 28);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(trigger);
-    return () => observer.disconnect();
-  }, [open]);
-  const contextActiveRef = useRef(contextActive);
-  contextActiveRef.current = contextActive;
+  const portal = useFloatingPortal();
   const label = t("message.actions");
-  const timestamp = message.role === "assistant" && Number.isFinite(message.completedAt)
-    ? message.completedAt
-    : message.createdAt;
-  // Re-evaluated when this message becomes active, including after an overnight idle.
-  const shortTime = mobileActions ? "" : formatMessageHoverTime(timestamp);
-  const fullTime = shortTime ? fmtDateTime(timestamp) : "";
-  const handleMenuOpenChange = (nextOpen: boolean) => {
-    if (nextOpen) editingRef.current = false;
-    onOpenChange(nextOpen);
-  };
+  const editingRef = useRef(false);
   const actions = <MessageBlockMenuActions
     message={message}
     isTurnStreaming={isTurnStreaming}
     onForkFromHere={onForkFromHere ? () => { if (mobileActions) onOpenChange(false); onForkFromHere(); } : undefined}
     activity={activity}
-    onEdit={onEdit ? () => { editingRef.current = true; onOpenChange(false); onEdit(); } : undefined}
+    onEdit={onEdit && mobileActions ? () => {
+      editingRef.current = true;
+      onOpenChange(false);
+      onEdit();
+    } : onEdit}
     editDisabledReason={editDisabledReason}
     sheet={mobileActions}
   />;
   if (mobileActions) {
     return <div data-message-mobile-actions className={cn("mt-1 flex items-center", message.role === "user" ? "me-2 justify-end" : "-ms-2")}>
       <MessageCopyButton message={message} className="h-11 w-8 [&_svg]:h-4 [&_svg]:w-4" />
-      <Dialog open={open} onOpenChange={handleMenuOpenChange}>
+      <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogTrigger asChild>
-          <button ref={triggerRef} type="button" data-message-block-menu-trigger aria-label={label}
+          <button type="button" data-message-block-menu-trigger aria-label={label}
             className="inline-flex h-11 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} aria-hidden />
           </button>
         </DialogTrigger>
-        <DialogContent ref={contentRef} placement="bottom" aria-describedby={undefined}
-          data-message-block-menu data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
+        <DialogContent placement="bottom" portalContainer={portal} aria-describedby={undefined}
+          overlayClassName={portal ? "pointer-events-auto bg-black/25 backdrop-blur-[8px]" : undefined}
+          data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
           className="gap-2 p-4 pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] outline-none"
           onCloseAutoFocus={(event) => {
             const startedEdit = editingRef.current;
@@ -520,93 +507,9 @@ function MessageBlockMenu({
       </Dialog>
     </div>;
   }
-  return (
-    <Popover open={open} onOpenChange={handleMenuOpenChange}>
-      <PopoverTrigger asChild>
-        <button
-          ref={triggerRef}
-          type="button"
-          data-message-block-menu-trigger
-          aria-label={label}
-          className={cn(
-            "message-block-menu-trigger group touch-target absolute -start-[var(--message-block-trigger-offset)] top-0 z-20",
-            "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-control-size)] items-center justify-center text-muted-foreground/70",
-            "transition-[color,opacity] hover:text-foreground focus-visible:outline-none",
-            "motion-reduce:transform-none motion-reduce:transition-none",
-          )}
-        >
-          <span
-            data-message-block-menu-highlight
-            className={cn(
-              "inline-flex h-4 w-7 items-center justify-center rounded-full",
-              "transition-colors",
-              "group-focus-visible:ring-2 group-focus-visible:ring-ring",
-              "motion-reduce:transform-none motion-reduce:transition-none",
-            )}
-          >
-            <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-          </span>
-        </button>
-      </PopoverTrigger>
-      {shortTime && fullTime && typeof timestamp === "number" ? (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <time data-message-hover-time dateTime={new Date(timestamp).toISOString()}
-                tabIndex={0} aria-label={fullTime}
-                className="message-block-hover-time absolute start-[calc(-1*var(--message-block-trigger-offset)-2px)] top-[var(--message-block-control-size)] z-10 w-[calc(var(--message-block-control-size)+4px)] truncate rounded-mark text-center text-[10px] leading-4 tabular-nums text-muted-foreground outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none">
-                {shortTime}
-              </time>
-            </TooltipTrigger>
-            <TooltipContent side="right" align="start" collisionPadding={12}
-              data-message-context-menu-block={contextBlockKey}>{fullTime}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      ) : null}
-      <PopoverContent
-        ref={contentRef}
-        data-message-block-menu
-        data-message-context-menu-block={contextBlockKey}
-        side="bottom"
-        align="end"
-        sideOffset={-triggerHeight}
-        collisionPadding={12}
-        tabIndex={-1}
-        aria-label={label}
-        onKeyDownCapture={(event) => {
-          if (event.key !== "Escape"
-            || !(event.target instanceof Node)
-            || !event.currentTarget.contains(event.target)) return;
-          event.preventDefault();
-          event.stopPropagation();
-          onOpenChange(false);
-        }}
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          contentRef.current?.focus({ preventScroll: true });
-        }}
-        onCloseAutoFocus={(event) => {
-          const startedEdit = editingRef.current;
-          editingRef.current = false;
-          if (startedEdit || !contextActiveRef.current || activity?.expanded) event.preventDefault();
-        }}
-        onPointerEnter={(event) => {
-          if (event.pointerType === "touch") return;
-          onContextActiveChange(contextBlockKey);
-        }}
-        onPointerLeave={(event) => {
-          if (event.pointerType === "touch") return;
-          onContextActiveChange(contextBlockKeyForTarget(event.relatedTarget) ?? null);
-        }}
-        className={cn(
-          "w-max max-w-64 overflow-y-auto outline-none",
-          "shadow-[0_2px_10px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.24)]",
-        )}
-      >
-        {actions}
-      </PopoverContent>
-    </Popover>
-  );
+  return <div data-message-side-actions className="message-side-actions" data-side={message.role === "user" && !message.sessionMessage ? "right" : "left"}>
+    {actions}
+  </div>;
 }
 
 const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
@@ -658,11 +561,14 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   const activityDetailsId = useId();
   const wasEditing = useRef(false);
   useLayoutEffect(() => {
-    if (wasEditing.current && !isEditing) elementRef.current?.querySelector<HTMLElement>("[data-message-block-menu-trigger]")?.focus({ preventScroll: true });
+    if (wasEditing.current && !isEditing) {
+      const trigger = elementRef.current?.querySelector<HTMLButtonElement>(
+        mobileActions ? "[data-message-block-menu-trigger]" : "[data-message-block-edit-action]",
+      );
+      (trigger?.disabled ? trigger.parentElement : trigger)?.focus({ preventScroll: true });
+    }
     wasEditing.current = isEditing;
-  }, [isEditing]);
-  const editMessage = unit.type === "message" && unit.message.role === "user" && editing
-    ? () => editing.begin(unit.message) : undefined;
+  }, [isEditing, mobileActions]);
   const heightRef = useRef(0);
   const [nearViewport, setNearViewport] = useState(true);
   const [interacted, setInteracted] = useState(false);
@@ -683,9 +589,6 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
     observer.observe(element);
     return () => observer.disconnect();
   }, [deferOffscreenRender, interacted]);
-  const onForkFromHere = useCallback(() => {
-    if (forkIndex !== undefined) onForkFromMessage?.(forkIndex);
-  }, [forkIndex, onForkFromMessage]);
   const onBlockActivityExpandedChange = useCallback((expanded: boolean) => {
     if (contextBlockKey !== undefined) {
       onActivityExpandedChange(contextBlockKey, expanded);
@@ -693,12 +596,12 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         const focusTarget = elementRef.current?.querySelector<HTMLElement>(
           expanded
             ? "[data-contextual-activity-collapse]"
-            : "[data-message-block-menu-trigger]",
+            : mobileActions ? "[data-message-block-menu-trigger]" : "[data-message-block-activity-action]",
         );
         focusTarget?.focus({ preventScroll: true });
       }, 0);
     }
-  }, [contextBlockKey, onActivityExpandedChange]);
+  }, [contextBlockKey, mobileActions, onActivityExpandedChange]);
   const activityDurationMs = blockActivity
     ? completedActivityDurationMs(blockActivity.messages, blockActivity.turnLatencyMs)
     : 0;
@@ -720,19 +623,18 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
     onBlockActivityExpandedChange,
     onContextBlockMenuOpenChange,
   ]);
-  const blockMenu = unit.type === "message" && contextBlockKey !== undefined ? (
+  const userEditing = unit.type === "message" && unit.message.role === "user" ? editing : null;
+  const blockMenu = unit.type === "message" && contextBlockKey !== undefined && !isEditing ? (
     <MessageBlockMenu
       mobileActions={mobileActions}
       message={unit.message}
       isTurnStreaming={isTurnStreaming}
       contextBlockKey={contextBlockKey}
-      contextActive={contextBlockActive}
       open={contextBlockMenuOpen}
       onOpenChange={(open) => onContextBlockMenuOpenChange(contextBlockKey, open)}
-      onContextActiveChange={onContextBlockActiveChange}
-      onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
-      onEdit={editMessage}
-      editDisabledReason={contextBlockMenuOpen && editMessage && unit.type === "message" ? editing?.reason(unit.message) : null}
+      onForkFromHere={onForkFromMessage && forkIndex !== undefined ? () => onForkFromMessage(forkIndex) : undefined}
+      onEdit={userEditing ? () => userEditing.begin(unit.message) : undefined}
+      editDisabledReason={userEditing?.reason(unit.message)}
       activity={activityLabel ? {
         label: activityLabel,
         expanded: blockActivityExpanded,
@@ -759,7 +661,6 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         data-user-prompt-id={userPromptId}
         data-message-context-block={contextBlockKey}
         data-context-block-active={contextBlockActive || undefined}
-        data-message-context-menu-open={contextBlockMenuOpen || undefined}
         onPointerEnter={(event) => {
           if (event.pointerType === "touch") return;
           onContextBlockActiveChange(contextBlockKey ?? null);
@@ -793,8 +694,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             />
           )
         ) : (
-          <div className={unit.message.role === "assistant" ? "relative" : undefined}>
-            {unit.message.role === "assistant" && !mobileActions ? blockMenu : null}
+          <div>
             {showBlockContext && blockActivity ? (
               <div className={blockActivityExpanded ? "mb-2" : undefined}>
                 <AgentActivityCluster
@@ -824,9 +724,9 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
               mcpPresets={mcpPresets}
               slashCommands={slashCommands}
               onOpenFilePreview={onOpenFilePreview}
-              contextMenu={unit.message.role === "user" && !mobileActions && !isEditing ? blockMenu : undefined}
+              contextMenu={!mobileActions ? blockMenu : undefined}
             />
-            {mobileActions && !isEditing ? blockMenu : null}
+            {mobileActions ? blockMenu : null}
             {unit.message.role === "assistant"
             && unit.message.kind !== "compaction"
             && contextBlockKey === undefined ? (
@@ -958,10 +858,8 @@ function unitIndexAfterMessageCount(
 
 function ForkBoundaryDivider({ label }: { label: string }) {
   return (
-    <div className="thread-message-row my-5 flex items-center gap-3 text-[11px] text-muted-foreground/80">
-      <span aria-hidden className="h-px flex-1 bg-border/70" />
-      <span className="shrink-0">{label}</span>
-      <span aria-hidden className="h-px flex-1 bg-border/70" />
+    <div className="thread-message-row my-5">
+      <ThreadDivider>{label}</ThreadDivider>
     </div>
   );
 }

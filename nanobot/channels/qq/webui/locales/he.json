@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "מדריך להגדרת QQ",
+    "officialLabel": "מסוף הניהול לבוטים של QQ",
+    "sections": {
+      "credentials": "פרטי גישה בהזנה ידנית",
+      "advanced": "הגדרות מתקדמות"
+    },
+    "fields": {
+      "appId": {
+        "label": "מזהה אפליקציה",
+        "placeholder": "מזהה האפליקציה של הבוט ב־QQ"
+      },
+      "secret": {
+        "label": "מפתח האפליקציה הסודי (App Secret)",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי Open ID בהפרדה בפסיקים"
+      },
+      "msgFormat": {
+        "label": "פורמט הודעה",
+        "choices": {
+          "plain": "טקסט רגיל",
+          "markdown": "Markdown"
+        }
+      },
+      "ackMessage": {
+        "label": "הודעת אישור קבלה"
+      },
+      "mediaDir": {
+        "label": "ספריית מדיה"
+      },
+      "downloadChunkSize": {
+        "label": "גודל מקטע (בתים)"
+      },
+      "downloadMaxBytes": {
+        "label": "מגבלת הורדה (בתים)"
+      },
+      "showCompactionNotices": {
+        "label": "הודעות על דחיסת ההקשר",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "קוד QR לקישור הבוט ב־QQ",
+    "scanTitle": "סריקה באפליקציית QQ בטלפון",
+    "waiting": "בהמתנה לסריקה…",
+    "connected": "הקישור הושלם",
+    "stopped": "הפעולה בוטלה",
+    "connecting": "קוד ה־QR בהכנה…",
+    "scanAgainWarning": "קישור מחדש עלול לשבש את פעולתן של אפליקציות אחרות שמשתמשות בבוט הזה ב־QQ. איפוס מפתח האפליקציה הסודי (App Secret) יבטל את תוקף המפתח הקודם. במקרה כזה יהיה צורך לעדכן את המפתח באפליקציות האלה.",
+    "configured": "מוגדר",
+    "bind": "קישור הבוט ב־QQ",
+    "rebind": "קישור הבוט מחדש",
+    "refresh": "רענון קוד ה־QR",
+    "retry": "ניסיון חוזר",
+    "expired": "פג תוקף קוד ה־QR",
+    "failed": "הקישור נכשל",
+    "cancelFailed": "לא ניתן לבטל",
+    "retrying": "ניסיון חוזר…",
+    "manualSetup": "הזנה ידנית של פרטי הגישה"
+  }
+}

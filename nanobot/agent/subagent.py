@@ -103,12 +103,15 @@ class _SubagentTask:
     suppress_notice: bool = False
     inbox: list[tuple[str, str]] = field(default_factory=list)
     outcome: _SubagentOutcome | None = None
-    exec_manager: ExecSessionManager = field(default_factory=ExecSessionManager)
     cleanup_task: asyncio.Task[int] | None = None
 
     def raise_if_stopping(self) -> None:
         if self.outcome is not None:
             raise asyncio.CancelledError
+
+    def exec_owner_key(self) -> str:
+        self.raise_if_stopping()
+        return self.session.key
 
     def decide(self, outcome: _SubagentOutcome) -> bool:
         """Seal execution once, before cancellation or cleanup can yield."""
@@ -223,6 +226,7 @@ class SubagentManager:
         consolidator: Consolidator,
         network_config: NetworkConfig | None = None,
         session_manager: SessionManager | None = None,
+        exec_session_manager: ExecSessionManager | None = None,
     ):
         if cast(object, consolidator) is None:
             raise TypeError("SubagentManager requires a consolidator")
@@ -271,7 +275,8 @@ class SubagentManager:
         self.consolidator = consolidator
         self._run_slots = asyncio.Semaphore(self.max_concurrent_subagents)
         self.runner = AgentRunner()
-        self._exec_session_manager = ExecSessionManager()
+        self._owns_exec_session_manager = exec_session_manager is None
+        self._exec_session_manager = exec_session_manager or ExecSessionManager()
         self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._tasks: dict[str, _SubagentTask] = {}
         self._terminal_statuses: dict[str, SubagentStatus] = {}
@@ -315,7 +320,9 @@ class SubagentManager:
         if retry and cleanup is not None and cleanup.done():
             record.cleanup_task = None
         if record.cleanup_task is None:
-            record.cleanup_task = asyncio.create_task(record.exec_manager.close_all())
+            record.cleanup_task = asyncio.create_task(
+                self._exec_session_manager.terminate_by_owner(record.session.key)
+            )
             record.cleanup_task.add_done_callback(partial(self._cleanup_done, record))
         return record.cleanup_task
 
@@ -560,7 +567,7 @@ class SubagentManager:
         self,
         *,
         tools_config: ToolsConfig | None = None,
-        exec_manager: ExecSessionManager | None = None,
+        exec_owner_key: Callable[[], str] | None = None,
     ) -> ToolRegistry:
         root = self.workspace
         registry = ToolRegistry()
@@ -569,7 +576,8 @@ class SubagentManager:
             config=cfg,
             network=self.network_config,
             workspace=str(root.resolve()),
-            exec_session_manager=exec_manager or self._exec_session_manager,
+            exec_session_manager=self._exec_session_manager,
+            exec_owner_key=exec_owner_key,
             file_state_store=FileStates(),
             workspace_sandbox=workspace_sandbox_status(
                 restrict_to_workspace=cfg.restrict_to_workspace,
@@ -816,7 +824,7 @@ class SubagentManager:
             cfg = self._subagent_tools_config()
             cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
         # Construct from the agent workspace; the bound scope below supplies the project cwd.
-        tools = self._build_tools(tools_config=cfg, exec_manager=record.exec_manager)
+        tools = self._build_tools(tools_config=cfg, exec_owner_key=record.exec_owner_key)
         system_prompt = self._build_subagent_prompt(workspace=root)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
@@ -888,7 +896,6 @@ class SubagentManager:
                 hook=hook,
                 max_iterations_message="Task stopped at its iteration limit before producing a final response.",
                 finalize_on_max_iterations=False,
-                error_message=None,
                 checkpoint_callback=_on_checkpoint,
                 injection_callback=partial(self._drain_inbox, record),
                 session_key=record.session.key,
@@ -1035,12 +1042,14 @@ class SubagentManager:
                 cleanup.cancelled() or cleanup.exception() is not None
             )
             cleanups.add(self._start_cleanup(record, retry=retry))
-        if self._close_task is None:
-            self._close_task = asyncio.create_task(self._exec_session_manager.close_all())
-        cleanups.add(self._close_task)
-        done, _ = await asyncio.wait(cleanups, timeout=self.CANCEL_WAIT_SECONDS)
-        for task in done:
-            task.result()
+        if self._owns_exec_session_manager:
+            if self._close_task is None:
+                self._close_task = asyncio.create_task(self._exec_session_manager.close_all())
+            cleanups.add(self._close_task)
+        if cleanups:
+            done, _ = await asyncio.wait(cleanups, timeout=self.CANCEL_WAIT_SECONDS)
+            for task in done:
+                task.result()
         if self._tasks:
             logger.warning("Subagent shutdown returned with tasks or cleanup still pending")
 
@@ -1051,7 +1060,9 @@ class SubagentManager:
     @property
     def has_pending_work(self) -> bool:
         """Completed turns may still own exec cleanup, including failed cleanup."""
-        return bool(self._tasks) or self._exec_session_manager.has_pending_work
+        return bool(self._tasks) or (
+            self._owns_exec_session_manager and self._exec_session_manager.has_pending_work
+        )
 
     def get_running_count_by_session(self, session_key: str, *, session_generation: str | None = None) -> int:
         """Count running children, optionally restricted to one parent lifecycle."""

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.tools.image_generation import register_image_generation_tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
@@ -64,7 +64,7 @@ async def test_generate_image_does_not_attach_media_to_final_response(
     config.providers.openrouter.api_key = "sk-or-test"
     tools = ToolRegistry()
     register_image_generation_tool(config, tools, workspace=tmp_path)
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,

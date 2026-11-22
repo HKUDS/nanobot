@@ -13,7 +13,7 @@ const preset: McpPresetInfo = {
   name: "linear", display_name: "Linear", category: "productivity", description: "Preview app",
   docs_url: "https://linear.app", transport: "streamableHttp", requires: "", note: "",
   install_supported: true, installed: true, configured: true, available: true, status: "configured",
-  logo_url: "https://icons.duckduckgo.com/ip3/linear.app.ico", brand_color: "#6D5DF6",
+  icons: [{ src: "https://activity.example/mark.svg", mimeType: "image/svg+xml" }],
   required_fields: [], connection_summary: "Preview only",
 };
 
@@ -45,7 +45,7 @@ export function ActivityLogosFixture({ parameters }: { parameters: URLSearchPara
         <AgentActivityCluster messages={messages(phase)} isTurnStreaming={phase === "start"}
           hasBodyBelow={false} expanded
           cliApps={[fallback ? { ...cliApp, logo_url: null } : cliApp]}
-          mcpPresets={[fallback ? { ...preset, logo_url: "/browser/missing-activity-logo.svg" } : preset]} />
+          mcpPresets={[fallback ? { ...preset, icons: [{ src: "https://activity.example/missing.svg" }] } : preset]} />
       </section>
     ))}
   </main>;

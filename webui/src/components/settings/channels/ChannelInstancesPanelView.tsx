@@ -136,7 +136,7 @@ export function ChannelInstancesPanelView({
         {instances.map((instance) => {
           const expanded = selected?.id === instance.id && editor?.expanded === true;
           const toggling = pendingToggle?.id === instance.id;
-          const checked = toggling ? pendingToggle.checked : instanceToggleChecked(instance);
+          const checked = toggling ? pendingToggle.checked : instance.enabled;
           const instanceSummary = customization.renderInstanceSummary
             ? customization.renderInstanceSummary(instance)
             : instance.id;
@@ -199,7 +199,7 @@ export function ChannelInstancesPanelView({
                     disabled={
                       Boolean(pendingToggle)
                       || savingFields
-                      || !instance.configured
+                      || (!instance.enabled && !instance.configured)
                     }
                     ariaLabel={customization.toggleAriaLabel?.(instance)
                       ?? t("settings.channels.toggleInstance", {
@@ -287,10 +287,6 @@ function channelInstanceDisplayName(instance: NanobotChannelInstanceInfo): strin
   const localName = instance.name?.trim();
   if (localName) return localName;
   return instance.id;
-}
-
-function instanceToggleChecked(instance: NanobotChannelInstanceInfo): boolean {
-  return instance.runtime_status === "running" || instance.runtime_status === "starting";
 }
 
 function ChannelInstanceStatusBadge({

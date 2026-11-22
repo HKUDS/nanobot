@@ -1,0 +1,139 @@
+/* Design tokens based on shadcn/ui's "neutral" palette. */
+@layer base {
+  :root {
+    color-scheme: light;
+    --content-link: #0369a1;
+    --content-link-hover: #075985;
+    --background: 0 0% 100%;
+    --foreground: 240 3% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 3% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 3% 12%;
+    --primary: 240 4% 16%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 240 4% 40%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 73.7% 41.8%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 40 8% 90.5%;
+    --input: 40 8% 90.5%;
+    --ring: 0 0% 3.9%;
+    --inline-token-highlight: #ad450b;
+    --inline-reference-highlight: rgb(244 169 73);
+    --code-comment: #62626b;
+    --code-string: #166534;
+    --code-keyword: #7e22ce;
+    --code-function: #1d4ed8;
+    --code-property: #854d0e;
+    --diff-added: rgb(16 185 129 / 0.09);
+    --diff-added-foreground: #047857;
+    --diff-deleted: rgb(244 63 94 / 0.09);
+    --diff-deleted-foreground: #be123c;
+    --usage-token: 29 86% 56%;
+    --session-handle-lightness: 0.5;
+    --session-handle-chroma: 0.12;
+    --temporary-control-active: #ef8e30;
+    --temporary-foreground: 17 88% 32%;
+    --radius: 0.4375rem;
+    --radius-mark: 0.25rem;
+    --radius-compact: 0.5rem;
+    --radius-control: 0.75rem;
+    --radius-floating: 1.125rem;
+    --radius-panel: 1.375rem;
+    --radius-modal: 2rem;
+    --radius-prominent: 1.75rem;
+    --radius-pill: 9999px;
+    --corner-shape: superellipse(1.5);
+    --sidebar: 40 8% 96.8%;
+    --sidebar-foreground: 0 0% 3.9%;
+    --sidebar-content: 240 3% 30%;
+    --sidebar-muted-foreground: 240 2% 44%;
+    --sidebar-selected: 40 1% 89.4%;
+    --sidebar-accent: 0 0% 95.8%;
+    --sidebar-accent-foreground: 0 0% 9%;
+    --sidebar-border: 40 8% 90.5%;
+    --settings-canvas: var(--background);
+    --settings-surface: 60 6% 96.7%;
+    --automation-view-track: hsl(0 0% 91%);
+    --scrollbar-thumb: hsl(var(--muted-foreground) / 0.26);
+    --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
+    --activity-animation: 2.8s ease-in-out infinite;
+  }
+
+  :root, .reading-typography {
+    --text-reading-size: 16px;
+    --reading-line-height: 1.6;
+    --text-code-size: calc(var(--text-reading-size) * 0.875);
+    --text-code-dense-size: calc(var(--text-reading-size) * 0.75);
+  }
+
+  :root[data-reading-text-size="small"], .reading-typography[data-reading-text-size="small"] {
+    --text-reading-size: 15px;
+  }
+
+  :root[data-reading-text-size="large"], .reading-typography[data-reading-text-size="large"] {
+    --text-reading-size: 18px;
+  }
+
+  :root[data-reading-text-size="custom"], .reading-typography[data-reading-text-size="custom"] {
+    --text-reading-size: var(--custom-reading-size, 18px);
+  }
+
+  .dark {
+    color-scheme: dark;
+    --content-link: #bae6fd;
+    --content-link-hover: #e0f2fe;
+    --background: 0 0% 19%;
+    --foreground: 240 4% 96%;
+    --card: 0 0% 22%;
+    --card-foreground: 240 4% 96%;
+    --popover: var(--card);
+    --popover-foreground: 240 4% 96%;
+    --primary: 240 5% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: var(--card);
+    --secondary-foreground: 0 0% 98%;
+    --muted: var(--card);
+    --muted-foreground: 0 0% 72%;
+    --accent: 0 0% 25%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 93.5% 81.8%;
+    --destructive-foreground: 0 0% 9%;
+    --border: 0 0% 28%;
+    --input: var(--border);
+    --ring: 0 0% 83.1%;
+    --inline-token-highlight: #ef8e30;
+    --inline-reference-highlight: rgb(244 169 73);
+    --code-comment: #c8c8d0;
+    --code-string: #b5d99c;
+    --code-keyword: #e3a5f7;
+    --code-function: #93c5fd;
+    --code-property: #f6c177;
+    --diff-added: rgb(110 231 183 / 0.11);
+    --diff-added-foreground: #6ee7b7;
+    --diff-deleted: rgb(253 164 175 / 0.11);
+    --diff-deleted-foreground: #fda4af;
+    --session-handle-lightness: 0.75;
+    --session-handle-chroma: 0.11;
+    --temporary-control-active: #ef8e30;
+    --temporary-foreground: 32 98% 73%;
+    --sidebar: var(--card);
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-content: 240 3% 84%;
+    --sidebar-muted-foreground: 240 2% 70%;
+    --sidebar-selected: 0 0% 29.8%;
+    --sidebar-accent: var(--background);
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: var(--border);
+    --settings-canvas: var(--background);
+    --settings-surface: var(--card);
+    --automation-view-track: hsl(var(--muted) / 0.65);
+    --scrollbar-thumb: hsl(var(--muted-foreground) / 0.28);
+    --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.44);
+  }
+}

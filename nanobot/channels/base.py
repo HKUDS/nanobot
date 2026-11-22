@@ -4,13 +4,15 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ProgressEvent, TurnFailureNotice
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.turn_notices import turn_failure_notice_text
+from nanobot.command.results import as_text_message
 from nanobot.config.network import NetworkConfig
 from nanobot.pairing import (
     PAIRING_CODE_META_KEY,
@@ -71,6 +73,10 @@ class BaseChannel(ABC):
         except Exception:
             self.logger.exception("Audio transcription failed")
             return ""
+
+    async def send_command_result(self, msg: OutboundMessage) -> Literal["queued"] | None:
+        """Present a command receipt. Buffered adapters return 'queued' and confirm after writing."""
+        await self.send(as_text_message(msg))
 
     async def login(self, force: bool = False) -> bool:
         """
@@ -133,6 +139,13 @@ class BaseChannel(ABC):
         Like ``send``, returning confirms completion of the adapter's work.
         """
         raise NotImplementedError("Channels opting into batching must implement send_batch")
+
+    def format_turn_failure_notice(self, notice: TurnFailureNotice, msg: OutboundMessage) -> str:
+        """Return sendable notice text, using the destination's routing/locale if needed.
+
+        Scheduled delivery persists this projection so retries do not render it again.
+        """
+        return turn_failure_notice_text(notice)
 
     def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
         """Project tool activity once before delivery; override for native UI.

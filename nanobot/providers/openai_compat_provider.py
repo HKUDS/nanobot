@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
+from nanobot.providers import langfuse as tracing
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -153,8 +154,6 @@ async def _managed_chat_stream(chat_stream: Any) -> AsyncGenerator[Any, None]:
 
 
 # Maps ProviderSpec.thinking_style → extra_body builder.
-# Each builder takes a bool (thinking_enabled) and returns the dict to
-# merge into extra_body, keeping the style→wire-format mapping in one place.
 _THINKING_STYLE_MAP: dict[
     str,
     Callable[[bool], dict[str, Any]],
@@ -544,10 +543,11 @@ class OpenAICompatProvider(LLMProvider):
                 return self._client
             global AsyncOpenAI
             if AsyncOpenAI is None:
-                if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
+                trace = tracing.requested()
+                if trace and importlib.util.find_spec("langfuse"):
                     from langfuse.openai import AsyncOpenAI as _AsyncOpenAI
                 else:
-                    if os.environ.get("LANGFUSE_SECRET_KEY"):
+                    if trace:
                         logger.warning(
                             "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
                             "run `nanobot plugins enable langfuse` to enable tracing"
@@ -1251,8 +1251,6 @@ class OpenAICompatProvider(LLMProvider):
             for item in cast(list[object], value):
                 item_map = cls._maybe_mapping(item)
                 if item_map:
-                    # Skip Mistral-style {"type":"thinking","thinking":[...]}
-                    # blocks: their text belongs in reasoning_content.
                     if item_map.get("type") == "thinking":
                         continue
                     text = item_map.get("text")
@@ -1321,7 +1319,6 @@ class OpenAICompatProvider(LLMProvider):
         wire_total = cls._get_nested_int(usage_obj, ("total_tokens",))
 
         cache_read: int | None = None
-        # Try nested paths first (dict), fall back to attribute (SDK object).
         # Priority order ensures the most specific field wins.
         for path in (
             ("prompt_tokens_details", "cached_tokens"),  # OpenAI/Zhipu/MiniMax/Qwen/Mistral/xAI
@@ -1407,15 +1404,11 @@ class OpenAICompatProvider(LLMProvider):
         finish_reason = str(choice0.get("finish_reason") or "stop")
 
         raw_tool_calls: list[object] = []
-        # StepFun: fallback to reasoning field when content is empty
         if not content and msg0.get("reasoning") and self._spec and self._spec.reasoning_as_content:
             content = self._extract_text_content(msg0.get("reasoning"))
         reasoning_content = msg0.get("reasoning_content")
         if reasoning_content is None and msg0.get("reasoning"):
             reasoning_content = self._extract_text_content(msg0.get("reasoning"))
-        # Mistral reasoning models return thinking text inside the content
-        # array; lift it into reasoning_content so the runner records it
-        # under the reasoning trace.
         spec = getattr(self, "_spec", None)
         if reasoning_content is None and getattr(spec, "extract_thinking_blocks", False):
             reasoning_content = self._extract_thinking_content(msg0.get("content"))

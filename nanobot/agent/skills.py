@@ -355,7 +355,7 @@ class SkillsLoader:
         description = meta.get("description") if meta else None
         if isinstance(description, str) and description:
             return description
-        return name  # Fallback to skill name
+        return name
 
     def _strip_frontmatter(self, content: str) -> str:
         if not content.startswith("---"):

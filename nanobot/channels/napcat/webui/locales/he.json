@@ -1,0 +1,41 @@
+{
+  "setup": {
+    "docsLabel": "מדריך להגדרת NapCat",
+    "officialLabel": "תיעוד NapCat",
+    "fields": {
+      "wsUrl": {
+        "label": "כתובת WebSocket",
+        "placeholder": "ws://127.0.0.1:3001"
+      },
+      "accessToken": {
+        "label": "אסימון גישה",
+        "placeholder": "אסימון גישה (לא חובה)"
+      },
+      "groupPolicy": {
+        "label": "כללים לקבוצות",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות",
+          "allowlist": "רשימת מורשים"
+        }
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי QQ בהפרדה בפסיקים"
+      },
+      "groupPolicyOverrides": {
+        "label": "חריגים לכללי הקבוצות (JSON)"
+      },
+      "welcomeNewMembers": {
+        "label": "שליחת ברכה למצטרפים לקבוצה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "maxImageBytes": {
+        "label": "מגבלת גודל תמונה (בתים)"
+      }
+    }
+  }
+}

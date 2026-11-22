@@ -47,6 +47,7 @@ class AgentRunHookContext:
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
     exception: BaseException | None = None
+    failure_error_kind: str | None = None
 
 
 @dataclass(slots=True)
@@ -323,6 +324,7 @@ class SDKCaptureHook(AgentHook):
         self.usage: LLMUsage | None = None
         self.stop_reason: str | None = None
         self.error: str | None = None
+        self.failure_error_kind: str | None = None
         self.tool_events: list[dict[str, str]] = []
         self.had_injections: bool = False
 
@@ -343,3 +345,4 @@ class SDKCaptureHook(AgentHook):
         self.error = context.error
         self.tool_events = list(context.tool_events)
         self.had_injections = context.had_injections
+        self.failure_error_kind = context.failure_error_kind

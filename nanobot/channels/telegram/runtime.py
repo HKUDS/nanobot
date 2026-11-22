@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from pydantic import Field, field_validator, model_validator
 from telegram import (
+    Bot,
     BotCommand,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -34,6 +35,7 @@ from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.application import build_help_text
+from nanobot.command_copy import catalog, command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
@@ -315,7 +317,7 @@ def _markdown_to_telegram_html(text: str) -> str:
     if not text:
         return ""
 
-    # 1. Extract and protect code blocks (preserve content from other processing)
+    # Keep code out of the Markdown substitutions below.
     code_blocks: list[str] = []
     def save_code_block(code: str) -> str:
         code_blocks.append(code)
@@ -356,9 +358,7 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     text = _escape_telegram_html(text)
 
-    # 6. Links [text](url) - must be before bold/italic to handle nested cases.
-    # Park the URL in a placeholder so later inline-formatting passes cannot
-    # rewrite it (e.g. ``__init__.py`` must not become ``<b>init</b>.py``).
+    # Format the link label, but not the URL: e.g. __init__.py must stay literal.
     link_urls: list[str] = []
     def save_link(m: re.Match[str]) -> str:
         link_urls.append(m.group(2).replace('"', "&quot;"))
@@ -369,7 +369,7 @@ def _markdown_to_telegram_html(text: str) -> str:
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
 
-    # 8. Italic _text_ (avoid matching inside words like some_var_name)
+    # Underscores inside identifiers such as some_var_name are not emphasis.
     text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'<i>\1</i>', text)
 
     text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
@@ -569,26 +569,11 @@ class TelegramChannel(BaseChannel):
     display_name = "Telegram"
     uses_shared_proxy = True
 
-    BOT_COMMANDS: list[BotCommand] = [
-        BotCommand("start", "Start the bot"),
-        BotCommand("new", "Start a new conversation"),
-        BotCommand("compact", "Compact this chat's context"),
-        BotCommand("stop", "Stop the current task"),
-        BotCommand("restart", "Restart the bot"),
-        BotCommand("status", "Show bot status"),
-        BotCommand("goal", "Start a sustained objective (long-running task)"),
-        BotCommand("cancel_goal", "Cancel the current goal"),
-        BotCommand("trigger", "Create a named local trigger"),
-        BotCommand("pairing", "Manage DM pairing (approve/deny/list)"),
-        BotCommand("model", "Switch runtime model preset"),
-        BotCommand("skill", "List enabled skills"),
-        BotCommand("dream", "Run Dream memory consolidation now"),
-        BotCommand("dream_log", "Show the latest Dream memory change"),
-        BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
-        BotCommand("dream_prompt", "Tell Dream how to organize memory"),
-        BotCommand("evaluator_prompt", "Customize the heartbeat evaluator prompt"),
-        BotCommand("help", "Show available commands"),
-    ]
+    _MENU_COMMANDS = (
+        "start", "new", "compact", "stop", "restart", "status", "goal", "cancel_goal",
+        "trigger", "pairing", "model", "skill", "dream", "dream-log", "dream-restore",
+        "dream-prompt", "evaluator-prompt", "help",
+    )
 
     # Regex for slash commands routed to AgentLoop via ``_forward_command``.
     # Telegram-safe aliases are normalized before reaching the core router.
@@ -632,6 +617,7 @@ class TelegramChannel(BaseChannel):
         self._last_poll_ok: float = 0.0  # monotonic time of last getUpdates round trip
         self._app_ready = asyncio.Event()  # cleared while the app is being rebuilt
         self._teardown_lock = asyncio.Lock()
+        self._menu_task: asyncio.Task[None] | None = None
 
     def _require_app(self) -> TelegramApplication:
         if self._app is None:
@@ -790,16 +776,11 @@ class TelegramChannel(BaseChannel):
         await self._app.initialize()
         await self._app.start()
 
-        bot_info = await self._app.bot.get_me()
+        bot = self._app.bot
+        bot_info = await bot.get_me()
         self._bot_user_id = getattr(bot_info, "id", None)
         self._bot_username = getattr(bot_info, "username", None)
         self.logger.info("bot @{} connected", bot_info.username)
-
-        try:
-            await self._app.bot.set_my_commands(self.BOT_COMMANDS)
-            self.logger.debug("bot commands registered")
-        except Exception as e:
-            self.logger.warning("Failed to register bot commands: {}", e)
 
         if self.config.mode == "webhook":
             # ``url_path`` is the local HTTP route. ``webhook_url`` is the
@@ -823,6 +804,30 @@ class TelegramChannel(BaseChannel):
             )
 
         self._app_ready.set()
+        self._menu_task = asyncio.create_task(self._register_command_menus(bot))
+
+    async def _register_command_menus(self, bot: Bot) -> None:
+        # setMyCommands accepts two-letter codes, unlike User.language_code. Chinese
+        # has one menu slot, so show both scripts when their descriptions differ.
+        languages: dict[str, list[str]] = {}
+        for locale in catalog()["native.startDescription"]:
+            languages.setdefault(locale.split("-")[0], []).append(locale)
+        for language, locales in languages.items():
+            commands: list[BotCommand] = []
+            for name in self._MENU_COMMANDS:
+                key = "native.startDescription" if name == "start" else f"palette.{name}.description"
+                description = " / ".join(dict.fromkeys(command_text(key, locale) for locale in locales))
+                commands.append(BotCommand(name.replace("-", "_"), description))
+            try:
+                # English is the default menu for users with no matching language.
+                await self._call_with_retry(
+                    bot.set_my_commands, commands, language_code=None if language == "en" else language,
+                )
+            except RetryAfter as e:
+                self.logger.warning("Command menu registration rate limited: {}", self._format_telegram_error(e))
+                return
+            except Exception as e:
+                self.logger.warning("Could not register {} menu: {}", language, self._format_telegram_error(e))
 
     @staticmethod
     def _is_transient_startup_error(exc: Exception) -> bool:
@@ -873,6 +878,11 @@ class TelegramChannel(BaseChannel):
         async with self._teardown_lock:
             app, self._app = self._app, None
             self._app_ready.clear()
+            if self._menu_task is not None:
+                self._menu_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self._menu_task
+                self._menu_task = None
             if not app:
                 return
             for step in (cast(Any, app.updater).stop, app.stop, app.shutdown):
@@ -1220,7 +1230,6 @@ class TelegramChannel(BaseChannel):
             text = msg.content
             if msg.metadata.get("render_as") == "text":
                 text = _telegram_command_text(text)
-            # Fallback: no native keyboard → splice labels into the message so the choices survive.
             if buttons and reply_markup is None:
                 text = f"{text}\n\n{self._buttons_as_text(buttons)}"
 
@@ -1664,9 +1673,7 @@ class TelegramChannel(BaseChannel):
             await self._send_pairing_code_if_private(sender_id, update.message, user)
             return
         await update.message.reply_text(
-            f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
-            "Send me a message and I'll respond!\n"
-            "Type /help to see available commands."
+            command_text("native.welcome", getattr(user, "language_code", None), name=user.first_name)
         )
 
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1677,7 +1684,8 @@ class TelegramChannel(BaseChannel):
         if not self.is_allowed(sender_id):
             await self._send_pairing_code_if_private(sender_id, update.message, user)
             return
-        await update.message.reply_text(_telegram_command_text(build_help_text()))
+        help_text = build_help_text(locale=getattr(user, "language_code", None))
+        await update.message.reply_text(_telegram_command_text(help_text))
 
     @staticmethod
     def _sender_id(user: User) -> str:
@@ -1714,6 +1722,7 @@ class TelegramChannel(BaseChannel):
             "message_id": message.message_id,
             "user_id": user.id,
             "username": user.username,
+            **({"locale": locale} if isinstance(locale := getattr(user, "language_code", None), str) else {}),
             "first_name": user.first_name,
             "is_group": message.chat.type != "private",
             "message_thread_id": getattr(message, "message_thread_id", None),

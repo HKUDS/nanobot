@@ -4,11 +4,8 @@ from nanobot.utils.path import abbreviate_path
 
 
 class TestAbbreviatePathShort:
-    def test_short_path_unchanged(self):
-        assert abbreviate_path("/home/user/file.py") == "/home/user/file.py"
-
     def test_exact_max_len_unchanged(self):
-        assert abbreviate_path("/a/b/c", max_len=7) == "/a/b/c"
+        assert abbreviate_path("/a/b/c", max_len=6) == "/a/b/c"
 
     def test_basename_only(self):
         assert abbreviate_path("file.py") == "file.py"

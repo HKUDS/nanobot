@@ -11,6 +11,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef,
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { FloatingPortalContext } from "@/components/ui/floating-portal";
 import { LoadingRing } from "@/components/ui/loading-ring";
 import { HoverHint } from "@/components/ui/hover-hint";
 import { SubagentThread } from "@/components/thread/SubagentThread";
@@ -65,7 +66,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   const mounted = useRef(true);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
-  const detailPanel = useRef<HTMLDivElement | null>(null);
+  const [detailPanel, setDetailPanel] = useState<HTMLDivElement | null>(null);
   const taskRef = useRef(tasks);
   taskRef.current = tasks;
   const windowScope = { turnIds };
@@ -212,12 +213,12 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   return <TasksContext.Provider value={value}>
       {children}
       <Sheet open={!!selected} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
-        <SheetContent ref={detailPanel} tabIndex={-1}
+        <SheetContent ref={setDetailPanel} tabIndex={-1}
           className="w-[calc(100vw-1rem)] gap-0 p-0 sm:w-[min(32rem,calc(100vw-1rem))] sm:max-w-none"
           closeButtonClassName="right-2 top-2 grid h-11 w-11 place-items-center rounded-full sm:right-3 sm:top-3 sm:h-9 sm:w-9"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
-            detailPanel.current?.focus({ preventScroll: true });
+            if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus({ preventScroll: true });
           }}
           onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -251,8 +252,10 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
               {selected.state === "interrupted" ? <p className="text-muted-foreground">{t("thread.subagents.interruptedHelp")}</p> : null}
               {selected.error ? <p role="alert" className="whitespace-pre-wrap break-words text-destructive">{selected.error}</p> : null}
             </div> : null}
-            <SubagentThread key={`${sessionKey}:${selected.task_id}`} token={token} sessionKey={sessionKey}
-              task={selected} historyEnabled={historyEnabled} isStreaming={isActiveSubagentTask(selected)} />
+            <FloatingPortalContext.Provider value={detailPanel}>
+              <SubagentThread key={`${sessionKey}:${selected.task_id}`} token={token} sessionKey={sessionKey}
+                task={selected} historyEnabled={historyEnabled} isStreaming={isActiveSubagentTask(selected)} />
+            </FloatingPortalContext.Provider>
           </div> : null}
         </SheetContent>
       </Sheet>

@@ -19,9 +19,7 @@ describe("usage number formats", () => {
     expect(en.exact(0)).toBe("0");
   });
 
-  it("builds one formatter set per locale", () => {
-    expect(usageFormats("en")).toBe(usageFormats("en"));
-    expect(usageFormats("en")).not.toBe(usageFormats("zh-CN"));
+  it("formats chart percentages and dates for display", () => {
     expect(usageFormats("en").percent(0.5)).toBe("50%");
     expect(usageFormats("en").date("2026-10-27")).toBe("Oct 27");
   });

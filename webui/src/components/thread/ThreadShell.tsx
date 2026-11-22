@@ -38,8 +38,8 @@ import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { GoalIsland } from "@/components/thread/GoalIsland";
 import { ThreadLoadingSkeleton } from "@/components/thread/ThreadLoadingSkeleton";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
-import { useToast } from "@/components/ui/toast";
-import { isImageRequestFailure, resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
+import { LocalToastViewport, PersistentToast, ThreadToastViewport, ToastProvider, useToast } from "@/components/ui/toast";
+import { emptyFinalMessageKey, isImageRequestFailure, resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
 import { execSessionCommands } from "@/components/thread/activity/exec-session-model";
@@ -51,7 +51,6 @@ import {
   fetchFilePreview,
   fetchFileReferenceMetadata,
   fetchInstalledCliApps,
-  fetchMcpPresets,
   fetchSettings,
   fetchWorkspaces,
   fetchWorkspaceDirectories,
@@ -62,11 +61,9 @@ import {
   installedCliAppsFromPayload,
   isCliAppsPayload,
 } from "@/lib/cli-app-events";
-import {
-  MCP_PRESETS_CHANGED_EVENT,
-  installedMcpPresetsFromPayload,
-  isMcpPresetsPayload,
-} from "@/lib/mcp-preset-events";
+import { McpCatalogContext, useMcpPresetCatalog } from "@/hooks/useMcpPresetCatalog";
+import { installedMcpPresetsFromPayload } from "@/lib/mcp-preset-events";
+import { getToolsCatalog } from "@/lib/tools-catalog-cache";
 import type { StreamError } from "@/lib/nanobot-client";
 import { isLocalAttachment } from "../../../../packages/client-events/attachments";
 import type {
@@ -84,6 +81,7 @@ import type {
 } from "@/lib/types";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
+import { switchModelPreset } from "@/lib/switch-model-preset";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { MessageEditingProvider } from "@/components/thread/MessageEditing";
 import { providerDisplayLabel } from "@/lib/provider-brand";
@@ -345,7 +343,11 @@ function useInstalledSettingItems<Payload, Item>({
   return items;
 }
 
-export function ThreadShell({
+export function ThreadShell(props: ThreadShellProps) {
+  return <ToastProvider scopeKey={props.session?.key ?? null}><ThreadShellContent {...props} /></ToastProvider>;
+}
+
+function ThreadShellContent({
   session,
   sessions = [],
   titleOverrides = EMPTY_TITLE_OVERRIDES,
@@ -458,14 +460,9 @@ export function ThreadShell({
     isPayload: isCliAppsPayload,
     selectItems: installedCliAppsFromPayload,
   });
-  const mcpPresets = useInstalledSettingItems({
-    requestCount: mentionCatalogRequestCount,
-    getToken,
-    eventName: MCP_PRESETS_CHANGED_EVENT,
-    fetchPayload: fetchMcpPresets,
-    isPayload: isMcpPresetsPayload,
-    selectItems: installedMcpPresetsFromPayload,
-  });
+  const toolsCatalog = getToolsCatalog(client, token);
+  const mcpPayload = useMcpPresetCatalog(toolsCatalog, mentionCatalogRequestCount, true);
+  const mcpPresets = useMemo(() => mcpPayload ? installedMcpPresetsFromPayload(mcpPayload) : [], [mcpPayload]);
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
   const [modelFallback, setModelFallback] = useState<{
     chatId: string;
@@ -797,11 +794,12 @@ export function ThreadShell({
   const inspectImagePreset = useMemo(() => onInspectImagePreset
     ? () => onInspectImagePreset(activeModelPreset)
     : onOpenModelSettings, [activeModelPreset, onInspectImagePreset, onOpenModelSettings]);
+  const emptyFinalKey = streamError?.kind === "model_request_failed" && emptyFinalMessageKey(streamError.errorKind);
   const imageRequestError = streamError?.kind === "model_request_failed" && isImageRequestFailure(streamError.errorKind)
     ? streamError
     : null;
   useEffect(() => {
-    if (!imageRequestError) return;
+    if (!messagesReady || !imageRequestError) return;
     showToast?.({
       message: resolveModelRequestFailureCopy(imageRequestError, t).title,
       tone: "error",
@@ -809,7 +807,7 @@ export function ThreadShell({
       action: inspectImagePreset ? { label: t("settings.models.viewPreset"), run: inspectImagePreset } : undefined,
     });
     dismissStreamError();
-  }, [dismissStreamError, imageRequestError, inspectImagePreset, showToast, t]);
+  }, [dismissStreamError, imageRequestError, inspectImagePreset, messagesReady, showToast, t]);
   useEffect(() => {
     setModelFallback(null);
     if (!chatId) return;
@@ -843,12 +841,19 @@ export function ThreadShell({
     sessionKey: session?.key ?? null, preset: activeModelPreset, settings,
     open: modelMenuOpen, disabled: temporary, storedValue: session?.modelOptions,
   });
+  // A receipt for the previous chat must not change the newly opened chat's badge.
+  const modelScope = useRef(0);
+  useLayoutEffect(() => () => { modelScope.current++; }, [client, chatId]);
   const handleModelPresetChange = useCallback((name: string) => {
-    resetModelOptions(name);
-    setLocalModelPreset(name);
-    if (chatId) {
-      void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
-    }
+    const select = (preset: string) => {
+      resetModelOptions(preset);
+      setLocalModelPreset(preset);
+    };
+    if (!chatId) return select(name);
+    const scope = modelScope.current;
+    return switchModelPreset(client, chatId, name).then((preset) => {
+      if (scope === modelScope.current) select(preset);
+    });
   }, [chatId, client, resetModelOptions]);
   const modelPresetOptions = useMemo(
     () => modelPresetOptionsFromSettings(settings),
@@ -1055,26 +1060,23 @@ export function ThreadShell({
       setBooting(true);
       let finish!: (accepted: boolean) => void;
       const delivery = new Promise<boolean>((resolve) => { finish = resolve; });
-      pendingFirstRef.current = {
+      const pending = {
         content, images, options: withWorkspaceScope(options), finish,
         draftKey, draft: draftStore?.get(draftKey, persistDraft),
       };
-      setPendingFirstTargetChatId(null);
-      const newId = await onCreateChat?.(workspaceScope, content, localModelPreset);
-      if (!newId) {
-        pendingFirstRef.current = null;
-        setPendingFirstTargetChatId(null);
-        setBooting(false);
-        return false;
+      let newId;
+      try {
+        newId = await onCreateChat?.(workspaceScope, content, localModelPreset);
+      } finally {
+        if (!newId) setBooting(false);
       }
-      moveModelOptionsToSession(`websocket:${newId}`, pendingFirstRef.current?.options?.modelOptions);
-      if (localModelPreset) {
-        await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
-      }
+      if (!newId) return false;
+      pendingFirstRef.current = pending;
+      moveModelOptionsToSession(`websocket:${newId}`, pending.options?.modelOptions);
       setPendingFirstTargetChatId(newId);
       return delivery;
     },
-    [booting, client, draftKey, draftStore, localModelPreset, moveModelOptionsToSession, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
+    [booting, draftKey, draftStore, localModelPreset, moveModelOptionsToSession, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
   );
 
   const inspectAttachment = useCallback(async (path: string) => {
@@ -1087,8 +1089,8 @@ export function ThreadShell({
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
-      if (content.trim() === "/cancel_goal" && options?.sideChannel) {
-        return cancelGoal().then(() => true);
+      if (content.trim() === "/cancel_goal" && options?.sideChannel && client.status !== "open") {
+        return Promise.reject(new Error(t("thread.composer.cancelGoalOffline")));
       }
       setRestoredFirstDraft((current) => current?.chatId === chatId ? { ...current, error: "" } : current);
       const submitted = send(content, images, withWorkspaceScope(options));
@@ -1103,7 +1105,7 @@ export function ThreadShell({
       }
       return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
     },
-    [cancelGoal, chatId, send, withWorkspaceScope],
+    [chatId, client, send, t, withWorkspaceScope],
   );
 
   const loadTemporaryFilePreview = useCallback((path: string) =>
@@ -1220,17 +1222,7 @@ export function ThreadShell({
           onDismiss={() => setModelFallback((current) => current && { ...current, dismissed: true })}
         />
       ) : null}
-      {recoveryState ? (
-        <RecoveryNotice
-          state={recoveryState}
-          onContinue={continueRecovery}
-          onDismiss={dismissRecovery}
-          onOpenSettings={onOpenModelSettings}
-          onInspectImagePreset={inspectImagePreset}
-          imageInputBlocked={imageInputBlocked}
-        />
-      ) : null}
-      {streamError && !imageRequestError && !hasInlineDeliveryError(messages, streamError) ? (
+      {streamError && !emptyFinalKey && !imageRequestError && !hasInlineDeliveryError(messages, streamError) ? (
         <StreamErrorNotice
           error={streamError}
           onDismiss={dismissStreamError}
@@ -1445,12 +1437,21 @@ export function ThreadShell({
           resolve={previewSessionKey ? resolveFilePreviewAvailability : undefined}
         >
           <FileActionsProvider value={previewSessionKey ? fileActions : undefined}>
-          <MessageEditingProvider chatId={chatId} busy={turnActive}
-            onBegin={anchorMessageEdit} onReviewLatest={promptNavigation.latest}
-            enabled={!temporary && messagesReady && historyKey === `websocket:${chatId}`}>
+          <McpCatalogContext.Provider value={toolsCatalog}>
+            <MessageEditingProvider chatId={chatId} busy={turnActive}
+              onBegin={anchorMessageEdit} onReviewLatest={promptNavigation.latest}
+              enabled={!temporary && messagesReady && historyKey === `websocket:${chatId}`}>
           <ExecSessionCommandsContext.Provider value={sessionCommands}>
           <ThreadViewport
             ref={viewportRef}
+            toastViewport={<ThreadToastViewport>
+              {messagesReady && (recoveryNeedsDecision && recoveryState ? (
+                <RecoveryNotice key={chatId} state={recoveryState} onContinue={continueRecovery} onDismiss={dismissRecovery}
+                  onOpenSettings={onOpenModelSettings} onInspectImagePreset={inspectImagePreset} imageInputBlocked={imageInputBlocked} />
+              ) : emptyFinalKey ? (
+                <PersistentToast tone="error" message={t(emptyFinalKey)} secondaryAction={{ label: t("recovery.dismiss"), run: dismissStreamError }} />
+              ) : null)}
+            </ThreadToastViewport>}
             messages={displayMessages}
             messagesKey={messagesKey}
             navigation={promptNavigation}
@@ -1487,7 +1488,8 @@ export function ThreadShell({
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
           </ExecSessionCommandsContext.Provider>
-          </MessageEditingProvider>
+            </MessageEditingProvider>
+          </McpCatalogContext.Provider>
           </FileActionsProvider>
         </FilePreviewAvailabilityProvider>
       </div>
@@ -1518,9 +1520,9 @@ export function ThreadShell({
         )}
       </ComposerUsagePopover>
       {activePreview && previewSessionKey ? (
-        <FileActionsProvider key={previewSessionKey} value={fileActions}>
+        <ToastProvider key={previewSessionKey} scopeKey={previewSessionKey}>
+        <FileActionsProvider value={fileActions}>
         <PreviewPane
-          key={previewSessionKey}
           tabs={visiblePreview.tabs}
           activeId={activePreview.id}
           width={filePreviewWidth}
@@ -1531,6 +1533,7 @@ export function ThreadShell({
           panelRef={previewPanelRef}
           onResizeStart={handleFilePreviewResizeStart}
         >
+          <LocalToastViewport surface="preview" />
           <FilePreviewPanel
             key={activePreview.id}
             sessionKey={previewSessionKey}
@@ -1543,6 +1546,7 @@ export function ThreadShell({
           />
         </PreviewPane>
         </FileActionsProvider>
+        </ToastProvider>
       ) : null}
     </section>
     </SubagentTasksProvider>

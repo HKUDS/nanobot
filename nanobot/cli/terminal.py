@@ -41,6 +41,7 @@ __all__ = [
     "_print_agent_response",
     "_print_cli_progress_line",
     "_print_cli_reasoning",
+    "_print_interactive_line",
     "_print_interactive_response",
     "_read_interactive_input_async",
     "_restore_terminal",
@@ -182,8 +183,6 @@ def _init_prompt_session() -> None:
     _prompt_session = PromptSession(
         history=SafeFileHistory(str(history_file)),
         enable_open_in_editor=False,
-        # Multiline-capable buffer; Enter still submits via the custom key
-        # bindings, while Alt+Enter adds a newline.
         multiline=True,
         key_bindings=_build_cli_key_bindings(),
     )

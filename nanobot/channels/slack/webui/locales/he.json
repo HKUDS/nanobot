@@ -1,0 +1,92 @@
+{
+  "setup": {
+    "docsLabel": "מדריך להגדרת Slack",
+    "officialLabel": "אפליקציות Slack",
+    "actions": {
+      "slack-manifest": "העתקת מניפסט האפליקציה"
+    },
+    "fields": {
+      "appToken": {
+        "label": "אסימון אפליקציה",
+        "placeholder": "xapp-..."
+      },
+      "botToken": {
+        "label": "אסימון גישה של הבוט",
+        "placeholder": "xoxb-..."
+      },
+      "groupPolicy": {
+        "label": "כללים לקבוצות",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות",
+          "allowlist": "רשימת מורשים"
+        }
+      },
+      "mode": {
+        "label": "מצב חיבור",
+        "choices": {
+          "socket": "Socket Mode"
+        }
+      },
+      "webhookPath": {
+        "label": "נתיב Webhook"
+      },
+      "replyInThread": {
+        "label": "מענה בתוך השרשור",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "reactEmoji": {
+        "label": "אימוג׳י לאישור קריאה"
+      },
+      "doneEmoji": {
+        "label": "אימוג׳י לציון סיום הטיפול"
+      },
+      "includeThreadContext": {
+        "label": "הכללת ההקשר מהשרשור",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "threadContextLimit": {
+        "label": "מספר הודעות מרבי להקשר בשרשור"
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים"
+      },
+      "groupAllowFrom": {
+        "label": "ערוצים מורשים"
+      },
+      "groupRequireMention": {
+        "label": "דרישת אזכור של הבוט בערוץ",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "dm_enabled": {
+        "label": "הפעלת הודעות ישירות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "dm_policy": {
+        "label": "הרשאה לשליחת הודעות ישירות",
+        "choices": {
+          "allowlist": "רשימת מורשים",
+          "open": "פתוח לכולם"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "משתמשים המורשים לשלוח הודעות ישירות"
+      },
+      "useProxy": {
+        "label": "שימוש בשרת פרוקסי"
+      }
+    }
+  }
+}

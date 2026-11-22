@@ -438,7 +438,7 @@ Run the agent once and return a `RunResult`.
 |-------|------|---------|-------------|
 | `message` | `str` | *(required)* | The user message to process. |
 | `session_key` | `str` | `"sdk:default"` | Session identifier for conversation isolation. Different keys get independent history. |
-| `channel` | `str` | `"cli"` | Logical channel label used in runtime context. |
+| `channel` | `str` | `"cli"` | Logical channel label. A registered channel can supply its reply format; the SDK default does not request terminal formatting. |
 | `chat_id` | `str` | `"direct"` | Logical chat identifier used in runtime context. |
 | `sender_id` | `str` | `"user"` | Logical sender identifier used in runtime context. |
 | `media` | `list[str] \| None` | `None` | Optional local media paths attached to the message. |
@@ -536,7 +536,8 @@ async with Nanobot.from_config() as bot:
 | `messages` | `list[dict]` | Final message list from the run. |
 | `usage` | `dict[str, int]` | Token usage reported or estimated by the runtime. |
 | `stop_reason` | `str \| None` | Why the run stopped, such as `"completed"` or `"max_iterations"`. |
-| `error` | `str \| None` | Error text when the run failed inside the agent runtime. |
+| `error` | `str \| None` | Diagnostic for the caller when the run failed. Don't display it as an assistant reply. |
+| `failure_error_kind` | `str \| None` | Public category for a model failure, such as `billing`, `server`, or `empty_final_response_length`. Use this to select user-facing copy; `content` is empty on a terminal model failure. |
 | `metadata` | `dict` | Outbound metadata such as latency. |
 
 ## Session, Memory, And Runtime Helpers

@@ -37,9 +37,13 @@ export function SessionMessagesFixture() {
       content: "**Review notes**\n\n- Keep the layout left-aligned.\n- Preserve Markdown and links.\n\n```ts\nconst message = \"" + "long-path/".repeat(30) + "\";\n```\n\n[Release notes](https://example.com/release-notes)",
       sessionMessage: { message_id: "long", session: { id: "handle_fedcba9876543210fedcba9876543210", name: "nori" } },
     },
-    { id: "reply", role: "assistant", content: "Thanks, I will keep those details.", createdAt: 4 },
+    { id: "reply", turnId: "review", role: "assistant", content: "Thanks, I will keep those details.", createdAt: 4 },
+    { ...trace, turnId: "monitor", createdAt: 5 },
+    { id: "trigger", turnId: "monitor", role: "assistant", content: "The scheduled update is ready.", createdAt: 6,
+      source: { kind: "local_trigger", label: "Release monitor" },
+      responseSources: [{ provider: "xai", model: "grok", preset: "Release fallback model", fallback: true }] },
   ];
-  return <main className="mx-auto max-w-3xl px-6 py-8" aria-label="Session messages">
-    <ThreadMessages messages={messages} isStreaming={false} />
+  return <main className="thread-viewport mx-auto max-w-3xl px-6 py-8" aria-label="Session messages">
+    <ThreadMessages messages={messages} isStreaming={false} onForkFromMessage={() => {}} />
   </main>;
 }

@@ -8,13 +8,20 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from loguru import logger
 
-from agent.session_helpers import run_session, save_completed_subagent, visible_message
+from agent.session_helpers import (
+    make_agent_loop,
+    run_session,
+    save_completed_subagent,
+    visible_message,
+)
 from nanobot.agent.context import ContextBuilder, TranscriptInput
+from nanobot.agent.dream import DreamResult
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
+    CommandResultEvent,
     GoalStatusEvent,
     StreamDeltaEvent,
     StreamedResponseEvent,
@@ -23,6 +30,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted, TurnRunStatusChanged
+from nanobot.command.results import message_text
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from nanobot.goal.assembly import install_goal
 from nanobot.providers.base import (
@@ -131,7 +139,7 @@ def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider.estimate_prompt_tokens.return_value = (100, "test")
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
     bus = MessageBus()
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus, provider=provider, workspace=tmp_path, model="test-model",
         builtin_assembly=install_goal,
     )
@@ -266,6 +274,46 @@ async def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("dispatch", ["queued", "inline", "direct"])
+async def test_fast_dream_finishes_after_the_command_acknowledgement(tmp_path, monkeypatch, dispatch):
+    loop = _make_full_loop(tmp_path)
+    msg = InboundMessage("websocket", "user", "chat-1", "/dream")
+
+    async def no_history(*_args, **_kwargs):
+        return DreamResult(had_input=False)
+
+    publish = loop.bus.publish_outbound
+
+    async def slow_delivery(message):
+        # Exercise the race even when both the command and Dream do no I/O.
+        await asyncio.sleep(0)
+        await publish(message)
+
+    async def next_receipt():
+        while True:
+            message = await loop.bus.consume_outbound()
+            if isinstance(message.event, CommandResultEvent):
+                return message
+
+    monkeypatch.setattr("nanobot.agent.dream.run_dream", no_history)
+    monkeypatch.setattr(loop.bus, "publish_outbound", slow_delivery)
+    try:
+        if dispatch == "direct":
+            acknowledgement = await loop.process_direct("/dream")
+        else:
+            if dispatch == "queued":
+                await run_session(loop, msg)
+            else:
+                await loop._dispatch_command_inline(msg, msg.content, loop.commands.dispatch)
+            acknowledgement = await asyncio.wait_for(next_receipt(), timeout=2)
+        completion = await asyncio.wait_for(next_receipt(), timeout=2)
+        assert acknowledgement.event.parts[0]["key"] == "dream.started"
+        assert completion.event.parts[0]["key"] == "dream.no_input"
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.asyncio
 async def test_new_with_bot_suffix_does_not_persist_command(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
 
@@ -279,7 +327,7 @@ async def test_new_with_bot_suffix_does_not_persist_command(tmp_path: Path) -> N
     )
 
     assert response is not None
-    assert response.content == "New session started."
+    assert message_text(response) == "New session started."
     session = loop.sessions.get_or_create("websocket:chat-1")
     assert session.messages == []
 
@@ -315,7 +363,7 @@ async def test_invalid_slash_command_is_rejected_without_calling_provider(
     )
 
     assert response is not None
-    assert response.content == expected
+    assert message_text(response) == expected
     loop.provider.chat_stream_with_retry.assert_not_awaited()
     session = loop.sessions.get_or_create("websocket:chat-1")
     persisted = [
@@ -324,7 +372,7 @@ async def test_invalid_slash_command_is_rejected_without_calling_provider(
     ]
     assert persisted == [
         ("user", content, True),
-        ("assistant", response.content, True),
+        ("assistant", expected, True),
     ]
 
 
@@ -1390,7 +1438,7 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
 
     async def observe_stop_reply(message):
         await publish_outbound(message)
-        if message.metadata.get("message_id") == "stop-attempt" and message.content.startswith("Stopped "):
+        if message.metadata.get("message_id") == "stop-attempt" and message_text(message) == "Stopped.":
             stop_acknowledged.set()
 
     monkeypatch.setattr(loop.bus, "publish_outbound", observe_stop_reply)
@@ -1440,8 +1488,8 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
         outbound = []
         while loop.bus.outbound_size:
             outbound.append(await loop.bus.consume_outbound())
-        stop_responses = [item.content for item in outbound if item.content.startswith("Stopped ")]
-        assert stop_responses == ["Stopped 1 task(s)."]
+        stop_responses = [message_text(item) for item in outbound if message_text(item) == "Stopped."]
+        assert stop_responses == ["Stopped."]
         endings = [item.event for item in outbound if isinstance(item.event, TurnEndEvent)]
         cancelled = [event for event in endings if event.outcome == "cancelled"]
         assert len(cancelled) == 1 and cancelled[0].goal_state["status"] == "active"
@@ -1810,7 +1858,7 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
     stop_ctx = CommandContext(msg=stop_msg, session=None, key=stop_msg.session_key, raw="/stop", loop=loop)
     stop_result = await cmd_stop(stop_ctx)
 
-    assert "Stopped 1 task" in stop_result.content
+    assert message_text(stop_result) == "Stopped."
     assert task.done()
 
     loop.sessions.invalidate("feishu:c4")

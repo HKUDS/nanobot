@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.context_governance import (
     ContextCompactionState,
     ContextGovernanceConfig,
     ContextGovernor,
     ModelRequestState,
 )
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -498,7 +498,7 @@ async def test_compaction_survives_stop_and_session_restore(
             provider_factory=lambda _preset: OpenAICodexProvider(),
         )
         monkeypatch.setattr(LLMProvider, "_sleep_with_heartbeat", AsyncMock())
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(), provider=provider, workspace=tmp_path,
         model=provider.get_default_model(), context_window_tokens=200_000,
     )
@@ -563,7 +563,7 @@ async def test_compaction_survives_stop_and_session_restore(
         assert restore_runtime_checkpoint(restored)
         await sessions.state.finish_turn(restored)
         provider = OpenAICodexProvider()
-        loop = AgentLoop(
+        loop = make_agent_loop(
             bus=MessageBus(), provider=provider, workspace=tmp_path, session_manager=sessions,
             model=provider.default_model, context_window_tokens=200_000,
         )
@@ -602,7 +602,7 @@ async def test_sdk_temporary_compaction_does_not_commit_to_session_owner(transpo
     from nanobot import Nanobot
 
     provider = OpenAICodexProvider()
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(), provider=provider, workspace=tmp_path,
         model=provider.default_model, context_window_tokens=200_000,
     )
@@ -644,8 +644,8 @@ async def test_finalization_compaction_commit_failure_preserves_previous_checkpo
     transport, tmp_path, monkeypatch,
 ):
     provider = OpenAICodexProvider()
-    loop = AgentLoop(
-        bus=MessageBus(), provider=provider, workspace=tmp_path, max_iterations=1,
+    loop = make_agent_loop(
+        bus=MessageBus(), provider=provider, workspace=tmp_path, max_tool_iterations=1,
         model=provider.default_model, context_window_tokens=200_000,
     )
     source = tmp_path / "source.py"

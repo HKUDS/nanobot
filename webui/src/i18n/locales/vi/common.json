@@ -807,7 +807,7 @@
       "currentModel": "Dùng cho câu trả lời mới.",
       "selectedModelProvider": "Được đặt bởi mô hình đã chọn.",
       "selectedModelValue": "Được đặt bởi mô hình đã chọn.",
-      "brandLogos": "Hiện logo nhà cung cấp và ứng dụng trong Thiết lập.\n\nHiển thị logo nhà cung cấp bên thứ ba và CLI trong Cài đặt.",
+      "brandLogos": "Hiện logo thương hiệu trong phần cài đặt và hoạt động trò chuyện.\n\nHoạt động MCP dùng biểu tượng do máy chủ cung cấp nếu có.",
       "browserNotifications": "Nhận thông báo trạng thái tác vụ khi trang này ở nền.",
       "notificationSound": "Phát âm báo khi phản hồi kết thúc, kể cả khi trang ở nền.",
       "cliAppsCatalog": "Cài công cụ CLI cho nanobot; giữ nguyên ứng dụng máy tính.\n\nCài các công cụ dòng lệnh mà nanobot có thể dùng trên máy này. Các ứng dụng trên máy tính không bị thay đổi.",
@@ -1247,7 +1247,7 @@
     },
     "observability": {
       "title": "Theo dõi chạy", "configured": "nanobot đã có thông tin xác thực để ghi lại quá trình xử lý.",
-      "environment": "Đặt LANGFUSE_SECRET_KEY và LANGFUSE_PUBLIC_KEY rồi khởi động lại nanobot.", "enable": "Bật theo dõi"
+      "environment": "Đặt LANGFUSE_SECRET_KEY và LANGFUSE_PUBLIC_KEY rồi khởi động lại nanobot.", "allow": "Cho phép theo dõi bằng Langfuse", "install": "Cài gói hỗ trợ theo dõi"
     },
     "legal": {
       "thirdPartyBrands": "Tên sản phẩm, logo và thương hiệu thuộc về chủ sở hữu tương ứng. Việc sử dụng chỉ nhằm nhận diện và không ngụ ý được xác nhận."
@@ -2025,68 +2025,6 @@
         "navigateHint": "↑↓ Chọn",
         "selectHint": "Enter/Tab Chèn",
         "closeHint": "Esc Đóng",
-        "commands": {
-          "new": {
-            "title": "Cuộc trò chuyện mới",
-            "description": "Đặt lại chủ đề này và bắt đầu chủ đề mới."
-          },
-          "compact": {
-            "title": "Nén ngữ cảnh",
-            "description": "Nén ngữ cảnh và tiếp tục trò chuyện."
-          },
-          "stop": {
-            "title": "Dừng tác vụ",
-            "description": "Dừng tác vụ đang chạy trong trò chuyện này."
-          },
-          "restart": {
-            "title": "Khởi động lại nanobot",
-            "description": "Khởi động lại tiến trình nanobot."
-          },
-          "status": {
-            "title": "Hiển thị trạng thái",
-            "description": "Xem trạng thái chạy, nhà cung cấp và kênh."
-          },
-          "model": {
-            "title": "Mô hình",
-            "description": "Xem hoặc đổi bộ thiết lập mô hình hiện tại."
-          },
-          "dream": {
-            "title": "Chạy Dream",
-            "description": "Sắp xếp bộ nhớ ngay."
-          },
-          "dream_log": {
-            "title": "Nhật ký Dream",
-            "description": "Xem thay đổi từ lần chạy Dream gần nhất."
-          },
-          "dream_restore": {
-            "title": "Khôi phục bộ nhớ",
-            "description": "Khôi phục ảnh chụp bộ nhớ Dream trước đó."
-          },
-          "dream_prompt": {
-            "title": "Thiết lập Dream",
-            "description": "Đặt cách Dream sắp xếp bộ nhớ vùng làm việc này."
-          },
-          "goal": {
-            "title": "Mục tiêu dài hạn",
-            "description": "Để trợ lý tiếp tục làm việc hướng đến mục tiêu này."
-          },
-          "cancel_goal": {
-            "title": "Hủy mục tiêu",
-            "description": "Hủy mục tiêu đang chạy hoặc bị chặn trong cuộc trò chuyện này."
-          },
-          "trigger": {
-            "title": "Kích hoạt CLI",
-            "description": "Tạo kích hoạt CLI cho trò chuyện này."
-          },
-          "help": {
-            "title": "Hiển thị trợ giúp",
-            "description": "Hiện các lệnh slash có thể dùng."
-          },
-          "pairing": {
-            "title": "Ghép nối",
-            "description": "Quản lý yêu cầu ghép."
-          }
-        },
         "badges": {
           "current": "Hiện tại",
           "recent": "Gần đây"
@@ -2432,7 +2370,11 @@
     "automationTriggered": "Tự động kích hoạt"
   },
   "recovery": {
-    "actionFailed": "Khôi phục thất bại. Hãy thử lại.",
+    "details": "Chi tiết",
+    "restart": "Cổng kết nối đã khởi động lại trước khi tác vụ hoàn tất",
+    "uncertainTool": "Công cụ có thể đã chạy",
+    "interruptedAgain": "Tác vụ lại bị gián đoạn",
+    "actionFailed": "Hãy thử khôi phục lại",
     "interrupted": "Tác vụ bị gián đoạn",
     "completed": "Tác vụ đã hoàn tất",
     "failed": "Khôi phục tác vụ thất bại",
@@ -2574,6 +2516,7 @@
       "body": "Gateway đã từ chối dự án hoặc chế độ truy cập này. Chọn dự án hiện có hoặc chế độ truy cập khác rồi thử lại."
     },
     "turnRejected": {
+      "temporaryCommand": "Cuộc trò chuyện tạm thời chỉ hỗ trợ /model và /stop. Hãy dùng các lệnh khác trong cuộc trò chuyện thông thường.",
       "title": "Tin nhắn chưa được gửi",
       "body": "Gateway đã từ chối tin nhắn này. Hãy kiểm tra nội dung hoặc tệp đính kèm rồi thử lại."
     },
@@ -2589,6 +2532,8 @@
       "imageInputTitle": "Đầu vào hình ảnh đã tắt cho cấu hình này",
       "imageRequestRejectedTitle": "Mô hình đã từ chối yêu cầu có hình ảnh",
       "imageInputBody": "Yêu cầu này có hình ảnh. Hãy kiểm tra cấu hình hoặc dùng cấu hình hỗ trợ hình ảnh.",
+      "emptyFinalResponseLength": "Mô hình đã đạt giới hạn đầu ra trước khi đưa ra câu trả lời cuối cùng",
+      "emptyFinalResponse": "Mô hình không trả về câu trả lời cuối cùng",
       "unknownTitle": "Yêu cầu tới nhà cung cấp mô hình không thành công",
       "bodyWithAttempt": "Đã dừng sau {{attempts}} lần thử. Hãy thử lại sau hoặc chọn mô hình khác.",
       "body": "Hãy thử lại sau hoặc chọn mô hình khác."

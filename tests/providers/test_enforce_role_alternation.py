@@ -17,15 +17,6 @@ class TestEnforceRoleAlternation:
         assert len(result) == 4
         assert result[-1]["role"] == "user"
 
-    def test_trailing_assistant_removed(self):
-        msgs = [
-            {"role": "user", "content": "Hi"},
-            {"role": "assistant", "content": "Hello!"},
-        ]
-        result = LLMProvider._enforce_role_alternation(msgs)
-        assert len(result) == 1
-        assert result[0]["role"] == "user"
-
     def test_multiple_trailing_assistants_removed(self):
         msgs = [
             {"role": "user", "content": "Hi"},

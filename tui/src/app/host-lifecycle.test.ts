@@ -3,15 +3,9 @@ import { join } from "node:path"
 import { BoxRenderable, TextareaRenderable } from "@opentui/core"
 import { MockTreeSitterClient, createTestRenderer } from "@opentui/core/testing"
 
-import { NanobotTui, sessionExitMessage, terminalModelFailureLine } from "./app"
+import { NanobotTui, terminalModelFailureLine } from "./app"
 import type { TuiHost } from "../platform/host"
 import { client, occurrences, options, waitUntil } from "./test-support"
-
-test("formats a reusable session ID after exit", () => {
-  expect(sessionExitMessage("resume-chat")).toBe(
-    "Resume with: nanobot agent --session websocket:resume-chat\n",
-  )
-})
 
 test("formats actionable terminal model failures without inventing retries", () => {
   expect(terminalModelFailureLine("billing")).toBe(

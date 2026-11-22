@@ -191,6 +191,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 200
     max_concurrent_subagents: int = Field(default=4, ge=1)
     max_tool_result_chars: int = 16_000
+    langfuse_enabled: bool = True  # Allow tracing with the service's environment credentials.
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
     tool_hint_max_length: int = Field(
         default=40,
@@ -643,7 +644,6 @@ class Config(BaseSettings):
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key or spec.name in legacy_connections:
                     return p, spec.name
 
-        # Check for custom provider by prefix (e.g., "companyProxy/gpt-4").
         # Return the matching provider even when apiBase is missing, so a
         # malformed explicit prefix fails instead of falling through to a
         # different custom provider.

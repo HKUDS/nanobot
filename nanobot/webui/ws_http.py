@@ -15,10 +15,10 @@ import json
 import mimetypes
 import re
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeGuard, TypeVar, cast
 from urllib.parse import parse_qs, unquote, urlsplit, urlunsplit
 
 from loguru import logger
@@ -28,6 +28,7 @@ from websockets.http11 import Response
 
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.agent.subagent_status import SubagentSessionError
+from nanobot.agent.tools.mcp_metadata import MCPRuntimeSnapshot
 from nanobot.command.application import builtin_command_palette
 from nanobot.context_graph import ContextGraph
 from nanobot.runtime_admission import RuntimeMaintenanceError
@@ -98,7 +99,7 @@ from nanobot.webui.mutation import MutationResult
 from nanobot.webui.recovery import RecoveryActionError
 from nanobot.webui.session_automations import serialize_automation_jobs
 from nanobot.webui.session_context import session_context_payload
-from nanobot.webui.session_identity import is_webui_session_key
+from nanobot.webui.session_identity import is_webui_session_key, webui_chat_id
 from nanobot.webui.session_list_index import (
     WEBUI_SESSION_INDEX_INTERNAL_FIELDS,
     indexed_workspace_scope,
@@ -348,7 +349,7 @@ class GatewayHTTPHandler:
         automation_routes: WebUIAutomationRoutes,
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
-        mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
+        mcp_runtime_snapshot: Callable[[], MCPRuntimeSnapshot] | None = None,
         mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         image_generation_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         skill_state_action: Callable[[set[str]], None] | None = None,
@@ -404,7 +405,7 @@ class GatewayHTTPHandler:
             runtime_capabilities=self._capabilities,
             channel_feature_action=channel_feature_action,
             channel_runtime_status=channel_runtime_status,
-            mcp_runtime_status=mcp_runtime_status,
+            mcp_runtime_snapshot=mcp_runtime_snapshot,
             mcp_reload=mcp_reload,
             image_generation_reload=image_generation_reload,
             mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
@@ -456,6 +457,8 @@ class GatewayHTTPHandler:
             with self.bus.admission.activity():
                 if action.startswith("settings."):
                     return await self.settings_routes.dispatch_mutation(connection, headers, action, params)
+                if action == "sessions.archive":
+                    return await self._handle_sessions_archive(payload)
                 if action == "session.delete":
                     key = payload.get("key")
                     if not isinstance(key, str) or not key.strip():
@@ -915,39 +918,45 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         return _http_json_response(session_context_payload(session))
 
+    async def _handle_sessions_archive(self, payload: dict[str, Any]) -> MutationResult:
+        keys, archived = payload.get("keys"), payload.get("archived")
+        if not isinstance(archived, bool):
+            return MutationResult.failure(400, "archived must be a boolean")
+        if not _is_archive_key_list(keys):
+            return MutationResult.failure(400, "keys must be an array of WebUI session keys")
+        if self.session_manager is None:
+            return MutationResult.failure(503, "session manager unavailable")
+        await ensure_webui_archives_imported(self.session_manager.state)
+        await self.session_manager.state.set_archived(keys, archived)
+        return MutationResult.success({"ok": True})
+
     async def _handle_sessions_list(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
             return _http_error(503, "session manager unavailable")
+        values = parse_qs(urlsplit(request.path).query, keep_blank_values=True).get("archived")
+        if values is not None and values not in (["true"], ["false"]):
+            return _http_error(400, "archived must be true or false")
+        archived = None if values is None else values == ["true"]
+        await ensure_webui_archives_imported(self.session_manager.state)
         accept_encoding = _combined_list_header(request.headers, "Accept-Encoding")
 
-        def render(stored: list[dict[str, Any]]) -> Response | None:
-            payload = self._sessions_list_from_snapshot(stored)
-            if payload is None:
-                return None
-            return _http_json_response(payload, accept_encoding=accept_encoding)
+        resolver = SessionHandleResolver(self.session_manager)
 
-        response = await self.session_manager.state.query_metadata(render)
-        if response is None:
-            handles = await SessionHandleResolver(self.session_manager).alist_all_by_key()
+        def render(handles: dict[str, SessionHandle], stored: list[dict[str, Any]]) -> Response:
+            return _http_json_response(self._sessions_list_payload(handles, stored), accept_encoding=accept_encoding)
 
-            def render_allocated(stored: list[dict[str, Any]]) -> Response:
-                return _http_json_response(
-                    self._sessions_list_payload(handles, stored), accept_encoding=accept_encoding,
-                )
+        def snapshot(stored: list[dict[str, Any]]) -> Response | None:
+            handles = resolver.handles_from_metadata(stored, filtered=archived is not None)
+            return render(handles, stored) if handles is not None else None
 
-            response = await self.session_manager.state.query_metadata(render_allocated)
-        return response
-
-    def _sessions_list_from_snapshot(
-        self, stored_sessions: list[dict[str, Any]],
-    ) -> dict[str, Any] | None:
-        assert self.session_manager is not None
-        handles = SessionHandleResolver(self.session_manager).handles_from_metadata(stored_sessions)
-        if handles is None:
-            return None
-        return self._sessions_list_payload(handles, stored_sessions)
+        query = self.session_manager.state.query_metadata
+        response = await query(snapshot, archived=archived)
+        if response is not None:
+            return response
+        handles = await resolver.alist_all_by_key()
+        return await query(lambda stored: render(handles, stored), archived=archived)
 
     def _sessions_list_payload(
         self,
@@ -1658,6 +1667,13 @@ class GatewayHTTPHandler:
             content_type=ctype,
             extra_headers=[("Cache-Control", cache), *extra_headers],
         )
+
+
+def _is_archive_key_list(value: object) -> TypeGuard[list[str]]:
+    return isinstance(value, list) and all(
+        isinstance(key, str) and _API_KEY_RE.fullmatch(key) and webui_chat_id(key)
+        for key in cast(list[object], value)
+    )
 
 
 def _is_websocket_channel_session_key(key: str) -> bool:

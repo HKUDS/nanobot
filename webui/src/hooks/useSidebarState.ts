@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
 import { normalizeWorkbenchState } from "@/components/workbench/workbench-model";
@@ -8,7 +8,6 @@ import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
 const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
   schema_version: 1,
   pinned_keys: [],
-  archived_keys: [],
   session_order: [],
   title_overrides: {},
   project_name_overrides: {},
@@ -87,7 +86,6 @@ function normalizeSidebarState(raw: unknown): SidebarStatePayload {
   return {
     schema_version: 1,
     pinned_keys: uniqueStrings(value.pinned_keys),
-    archived_keys: uniqueStrings(value.archived_keys),
     session_order: uniqueStrings(value.session_order),
     title_overrides: stringMap(value.title_overrides),
     project_name_overrides: stringMap(value.project_name_overrides),
@@ -119,7 +117,6 @@ function pruneMissingSessions(
   return {
     ...state,
     pinned_keys: filterKeys(state.pinned_keys),
-    archived_keys: filterKeys(state.archived_keys),
     session_order: filterKeys(state.session_order),
     title_overrides: filterMap(state.title_overrides),
     tags_by_key: filterMap(state.tags_by_key),
@@ -141,43 +138,32 @@ function withTitleOverride(
   return { ...state, title_overrides: titles };
 }
 
-// Prepare once against the state being saved. Reconcile with any optimistic
-// edits that arrived while this confirmed write was in flight.
-type PrepareSidebarSave = (state: SidebarStatePayload) => (
-  (state: SidebarStatePayload, saved?: SidebarStatePayload) => SidebarStatePayload
-) | null;
-
-type PendingSidebarSave = {
-  prepare: PrepareSidebarSave;
+type PendingRename = {
+  key: string;
+  title: string;
   resolve: () => void;
   reject: (error: unknown) => void;
 };
 
 export function useSidebarState(
   sessions: ChatSummary[],
-  sessionsLoaded: boolean,
-): {
-  state: SidebarStatePayload;
-  loading: boolean;
-  update: (
-    updater: (state: SidebarStatePayload) => SidebarStatePayload,
-  ) => Promise<void>;
-  save: (prepare: PrepareSidebarSave) => Promise<void>;
-  rename: (key: string, title: string) => Promise<void>;
-} {
+  catalogLoaded: boolean,
+) {
   const { client, token } = useClient();
   const tokenRef = useRef(token);
   const stateRef = useRef(DEFAULT_SIDEBAR_STATE);
   const loadedRef = useRef(false);
   const connectionOpenRef = useRef(client.status === "open");
-  const pendingPersistenceRef = useRef<SidebarStatePayload | null>(null);
-  const pendingSavesRef = useRef<PendingSidebarSave[]>([]);
-  const persistenceInFlightRef = useRef(false);
-  const flushPersistenceRef = useRef<() => void>(() => {});
+  const dirty = useRef(false);
+  const renames = useRef<PendingRename[]>([]);
+  const saving = useRef(false);
   const [state, setState] = useState<SidebarStatePayload>(DEFAULT_SIDEBAR_STATE);
   const [loading, setLoading] = useState(true);
   tokenRef.current = token;
-  stateRef.current = state;
+  const publish = useCallback((next: SidebarStatePayload) => {
+    stateRef.current = next;
+    setState(next);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -188,9 +174,8 @@ export function useSidebarState(
       try {
         const loaded = normalizeSidebarState(await fetchSidebarState(tokenRef.current));
         if (cancelled || loadedRef.current) return;
-        stateRef.current = loaded;
         loadedRef.current = true;
-        setState(loaded);
+        publish(loaded);
         setLoading(false);
       } catch {
         if (cancelled || loadedRef.current) return;
@@ -204,124 +189,77 @@ export function useSidebarState(
       cancelled = true;
       clearTimeout(retryTimer);
     };
+  }, [publish]);
+
+  const rejectRenames = useCallback((error: unknown) => {
+    for (const rename of renames.current.splice(0)) rename.reject(error);
   }, []);
 
-  const rejectPendingSaves = useCallback((error: unknown) => {
-    for (const request of pendingSavesRef.current.splice(0)) request.reject(error);
-  }, []);
-
-  const flushPersistence = useCallback(() => {
-    if (
-      !loadedRef.current
-      || persistenceInFlightRef.current
-      || !connectionOpenRef.current
-    ) return;
-
-    const pending = pendingPersistenceRef.current;
-    // Optimistic snapshots must drain before a confirmed edit takes its own snapshot.
-    const request = pending === null ? pendingSavesRef.current.shift() : undefined;
-    const apply = request?.prepare(stateRef.current);
-    const next = apply ? normalizeSidebarState(apply(stateRef.current)) : pending;
-    if (next === null) {
-      if (request) {
-        request.resolve();
-        queueMicrotask(() => flushPersistenceRef.current());
+  const flush = useCallback(async () => {
+    if (saving.current) return;
+    saving.current = true;
+    while (connectionOpenRef.current && (dirty.current || renames.current.length)) {
+      // Flush optimistic preferences first. Only publish a rename after its acknowledgement.
+      const rename = dirty.current ? undefined : renames.current.shift();
+      dirty.current = false;
+      try {
+        const current = stateRef.current;
+        const next = rename ? normalizeSidebarState(withTitleOverride(current, rename.key, rename.title)) : current;
+        const saved = normalizeSidebarState(await client.setSidebarState(next));
+        if (!dirty.current) publish(saved);
+        else if (rename) publish(withTitleOverride(stateRef.current, rename.key, saved.title_overrides[rename.key]));
+        rename?.resolve();
+      } catch (error) {
+        if (rename) rename.reject(error);
+        else {
+          dirty.current = true;
+          rejectRenames(error);
+          break; // Retry preferences on reconnect; never silently retry a rename.
+        }
       }
-      return;
     }
-    pendingPersistenceRef.current = null;
-    persistenceInFlightRef.current = true;
-    void client.setSidebarState(next)
-      .then((saved) => {
-        const canonical = normalizeSidebarState(saved);
-        if (apply && pendingPersistenceRef.current !== null) {
-          const reconciled = apply(stateRef.current, canonical);
-          pendingPersistenceRef.current = reconciled;
-          stateRef.current = reconciled;
-          setState(reconciled);
-        } else if (pendingPersistenceRef.current === null) {
-          stateRef.current = canonical;
-          setState(canonical);
-        }
-        request?.resolve();
-      })
-      .catch((error: unknown) => {
-        if (request) {
-          request.reject(error);
-        } else {
-          if (pendingPersistenceRef.current === null) pendingPersistenceRef.current = next;
-          rejectPendingSaves(error);
-        }
-        // Leave the failed optimistic snapshot queued for reconnection.
-        return !request;
-      })
-      .then((retryOnReconnect) => {
-        persistenceInFlightRef.current = false;
-        if (!retryOnReconnect) flushPersistenceRef.current();
-      });
-  }, [client, rejectPendingSaves]);
-  flushPersistenceRef.current = flushPersistence;
-
-  const persist = useCallback((next: SidebarStatePayload) => {
-    pendingPersistenceRef.current = next;
-    flushPersistence();
-  }, [flushPersistence]);
+    saving.current = false;
+  }, [client, publish, rejectRenames]);
 
   useEffect(() => client.onStatus((status) => {
     connectionOpenRef.current = status === "open";
-    if (status === "open") flushPersistence();
-    else rejectPendingSaves(new Error("WebUI connection is not open"));
-  }), [client, flushPersistence, rejectPendingSaves]);
+    if (connectionOpenRef.current) void flush();
+    else rejectRenames(new Error("WebUI connection is not open"));
+  }), [client, flush, rejectRenames]);
 
   useEffect(() => client.onSidebarStateUpdate((incoming) => {
-    if (
-      persistenceInFlightRef.current
-      || pendingPersistenceRef.current !== null
-    ) return;
-    const loaded = normalizeSidebarState(incoming);
-    stateRef.current = loaded;
+    if (saving.current || dirty.current) return;
     loadedRef.current = true;
-    setState(loaded);
+    publish(normalizeSidebarState(incoming));
     setLoading(false);
-  }), [client]);
+  }), [client, publish]);
 
   const update = useCallback(
-    async (updater: (current: SidebarStatePayload) => SidebarStatePayload) => {
+    (updater: (current: SidebarStatePayload) => SidebarStatePayload) => {
       if (!loadedRef.current) return;
       const next = normalizeSidebarState(updater(stateRef.current));
       if (sameState(next, stateRef.current)) return;
-      stateRef.current = next;
-      setState(next);
-      persist(next);
+      dirty.current = true;
+      publish(next);
+      void flush();
     },
-    [persist],
+    [flush, publish],
   );
 
-  const save = useCallback((prepare: PrepareSidebarSave): Promise<void> => {
+  const rename = useCallback((key: string, title: string): Promise<void> => {
     if (!loadedRef.current) return Promise.reject(new Error("Sidebar state is not loaded"));
     if (!connectionOpenRef.current) {
       return Promise.reject(new Error("WebUI connection is not open"));
     }
     return new Promise<void>((resolve, reject) => {
-      pendingSavesRef.current.push({ prepare, resolve, reject });
-      flushPersistence();
+      renames.current.push({ key: key.trim(), title, resolve, reject });
+      void flush();
     });
-  }, [flushPersistence]);
-
-  const rename = useCallback((rawKey: string, title: string) => {
-    const key = rawKey.trim();
-    return save(() => (current, saved) => withTitleOverride(current, key, saved ? saved.title_overrides[key] : title));
-  }, [save]);
-
-  const pruned = useMemo(() => {
-    if (!sessionsLoaded || loading) return state;
-    return pruneMissingSessions(state, sessions);
-  }, [loading, sessions, sessionsLoaded, state]);
+  }, [flush]);
 
   useEffect(() => {
-    if (!sessionsLoaded || loading || sameState(pruned, state)) return;
-    void update(() => pruned);
-  }, [loading, pruned, sessionsLoaded, state, update]);
+    if (catalogLoaded && !loading) update(current => pruneMissingSessions(current, sessions));
+  }, [loading, sessions, catalogLoaded, state, update]);
 
-  return { state, loading, update, save, rename };
+  return { state, loading, update, rename };
 }

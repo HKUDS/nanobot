@@ -80,7 +80,6 @@ test("the narrow preview is a single tappable row and honors reduced motion", as
   await page.setViewportSize({ width: 360, height: 740 });
   const wheel = page.getByTestId("latest-activity-wheel");
   await expect(wheel).toContainText("brief.md");
-  // Change the system preference while the wheel is already mounted.
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.getByRole("button", { name: "切换主题" }).click();
   const toggle = page.getByRole("button", { name: "正在处理", exact: true });
@@ -149,8 +148,8 @@ test("the elapsed label keeps a compact gap before the collapsed activity", asyn
 test("the activity disclosure stays anchored through resize and expansion", async ({ page }) => {
   for (const width of [960, 360]) {
     await page.setViewportSize({ width, height: 740 });
-    // The responsive action row changes height; measure after that resize commits.
-    await expect(page.locator("[data-message-mobile-actions]")).toHaveCount(width < 768 ? 1 : 0);
+    // The thread stays narrow even in the desktop viewport.
+    await expect(page.locator("[data-message-mobile-actions]")).toBeVisible();
     const mobile = width < 640;
     const toggle = page.getByRole("button", { name: mobile ? /^正在处理/ : /^处理中 \d/ });
     const anchor = toggle.locator(mobile ? "svg.lucide-activity" : "[data-sheen-text]");

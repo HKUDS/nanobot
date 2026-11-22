@@ -103,8 +103,13 @@ async def test_codex_langfuse_missing_package_warns_and_call_still_succeeds(monk
     assert capture.calls == [(LANGFUSE_MISSING_WARNING, ())]
 
 
-async def test_codex_langfuse_disabled_when_env_var_unset(monkeypatch) -> None:
-    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+@pytest.mark.parametrize("enabled", [True, False], ids=["missing-key", "switch-off-with-key"])
+async def test_codex_without_tracing_still_replies(monkeypatch, enabled) -> None:
+    monkeypatch.setattr("nanobot.providers.langfuse.enabled", enabled)
+    if enabled:
+        monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    else:
+        monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret")
     capture = _capture_codex_warnings(monkeypatch)
     _mock_codex_token(monkeypatch)
     find_spec_calls: list[str] = []

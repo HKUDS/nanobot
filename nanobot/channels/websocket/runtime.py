@@ -7,11 +7,11 @@ import json
 import socket
 import ssl
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Self, TypeGuard, cast
+from typing import Any, Literal, Self, TypeGuard, cast
 from urllib.parse import urlsplit, urlunsplit
 from weakref import WeakSet
 
@@ -28,6 +28,7 @@ from nanobot.channels.base import BaseChannel
 from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
 from nanobot.config_base import Base
 from nanobot.runtime_admission import RuntimeMaintenanceError
+from nanobot.session.display_history import MAX_HISTORY_FACT_BYTES
 from nanobot.webui.gateway_services import GatewayServices
 from nanobot.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
@@ -52,7 +53,8 @@ _LISTENER_RESTART_BACKOFF_S = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
 # Outbound delivery is isolated per connection.  A bounded queue keeps a slow
 # or suspended terminal from retaining an unbounded stream in server memory.
 _OUTBOUND_QUEUE_MAX_FRAMES = 256
-_OUTBOUND_QUEUE_MAX_BYTES = 8 * 1024 * 1024
+# An idle writer can admit one full-size display-history fact.
+_OUTBOUND_QUEUE_MAX_BYTES = MAX_HISTORY_FACT_BYTES
 _OUTBOUND_SEND_TIMEOUT_S = 10.0
 _OUTBOUND_CLOSE_TIMEOUT_S = 1.0
 
@@ -323,6 +325,7 @@ class _OutboundFrame:
     raw: str
     utf8_bytes: int
     label: str
+    on_sent: Callable[[], None] | None = None
 
 
 @dataclass(slots=True)
@@ -415,8 +418,9 @@ class WebSocketChannel(BaseChannel):
         raw: str,
         *,
         label: str = "",
+        on_sent: Callable[[], None] | None = None,
     ) -> None:
-        await self._safe_send_to(connection, raw, label=label)
+        await self._safe_send_to(connection, raw, label=label, on_sent=on_sent)
 
     async def webui_dispatch_message(
         self,
@@ -994,6 +998,9 @@ class WebSocketChannel(BaseChannel):
                         close_reason="outbound send failed",
                     )
                     return
+                else:
+                    if frame.on_sent is not None:
+                        frame.on_sent()
                 finally:
                     state.buffered_bytes = max(0, state.buffered_bytes - frame.utf8_bytes)
         finally:
@@ -1061,6 +1068,7 @@ class WebSocketChannel(BaseChannel):
         raw: str,
         *,
         label: str = "",
+        on_sent: Callable[[], None] | None = None,
     ) -> None:
         state = self._connection_outbound.get(connection)
         if state is None or state.closing:
@@ -1083,7 +1091,7 @@ class WebSocketChannel(BaseChannel):
             await asyncio.sleep(0)
             return
         try:
-            state.queue.put_nowait(_OutboundFrame(raw, utf8_bytes, label))
+            state.queue.put_nowait(_OutboundFrame(raw, utf8_bytes, label, on_sent))
         except asyncio.QueueFull:
             self._schedule_connection_retirement(
                 connection,
@@ -1098,6 +1106,10 @@ class WebSocketChannel(BaseChannel):
         self._start_connection_writer(connection, state)
         # Give an idle writer a chance to start without waiting for physical I/O.
         await asyncio.sleep(0)
+
+    async def send_command_result(self, msg: OutboundMessage) -> Literal["queued"]:
+        await self._outbound.send(msg)
+        return "queued"
 
     async def send(self, msg: OutboundMessage) -> None:
         await self._outbound.send(msg)

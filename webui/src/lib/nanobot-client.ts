@@ -1,3 +1,5 @@
+import i18n from "i18next";
+import { resolveInitialLocale } from "../i18n/config";
 import { uploadAttachments, uploadCapability, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments";
 import { DeliveryReceipts } from "../../../packages/client-events/delivery";
 import { decodeNotification } from "../../../packages/client-events/notifications";
@@ -82,6 +84,8 @@ function summarizeInboundWsPayload(ev: InboundEvent): unknown {
   }
   return row;
 }
+
+type SystemCommandReply = Extract<InboundEvent, { event: "message" }> | undefined;
 
 type Unsubscribe = () => void;
 type EventHandler = (ev: InboundEvent) => void;
@@ -206,6 +210,8 @@ function runObservation(event: InboundEvent): RunObservation | null {
     }
     case "goal_status":
       return { ...base, kind: "status", activity: event.status, startedAt: event.started_at };
+    case "turn_failure_notice":
+      return null;
     case "turn_end":
       return { ...base, kind: "completed" };
     case "error":
@@ -246,6 +252,7 @@ export class NanobotClient {
   private receipts = new DeliveryReceipts();
   private statusHandlers = new Set<StatusHandler>();
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
+  private sessionsChangedHandlers = new Set<() => void>();
   private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
   private sidebarStateUpdateHandlers = new Set<SidebarStateUpdateHandler>();
   private runStatusHandlers = new Set<RunStatusHandler>();
@@ -271,7 +278,7 @@ export class NanobotClient {
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingChatRequest: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
-  private pendingSystemCommands = new Map<string, PendingRequest<void>>();
+  private pendingSystemCommands = new Map<string, PendingRequest<SystemCommandReply>>();
   private pendingWebUIRequests = new Map<string, PendingWebUIRequest>();
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
@@ -310,7 +317,7 @@ export class NanobotClient {
     return `${url.protocol}//${url.host}${url.pathname}`;
   }
 
-  /** Swap the URL (e.g. after fetching a fresh token) then reconnect. */
+  /** Set the URL and optional socket factory for the next connection. */
   updateUrl(url: string, socketFactory?: (url: string) => WebSocket): void {
     this.currentUrl = url;
     if (socketFactory) {
@@ -331,6 +338,11 @@ export class NanobotClient {
     return () => {
       this.runtimeModelHandlers.delete(handler);
     };
+  }
+
+  onSessionsChanged(handler: () => void): Unsubscribe {
+    this.sessionsChangedHandlers.add(handler);
+    return () => { this.sessionsChangedHandlers.delete(handler); };
   }
 
   onSessionUpdate(handler: SessionUpdateHandler): Unsubscribe {
@@ -893,6 +905,7 @@ export class NanobotClient {
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,
+      ...(content.trimStart().startsWith("/") ? { locale: i18n.resolvedLanguage || resolveInitialLocale() } : {}),
     };
     if (!this.frameFitsTransport(frame)) {
       if (options?.turnId && isSystemCommandTurnId(options.turnId)) {
@@ -918,10 +931,10 @@ export class NanobotClient {
     return true;
   }
 
-  sendSystemCommand(chatId: string, command: string, timeoutMs = 5_000): Promise<void> {
+  sendSystemCommand(chatId: string, command: string, timeoutMs = 5_000): Promise<SystemCommandReply> {
     const normalized = command.trim();
     const turnId = `${SYSTEM_COMMAND_TURN_PREFIX}${crypto.randomUUID()}`;
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<SystemCommandReply>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingSystemCommands.delete(turnId);
         reject(new Error("system command timed out"));
@@ -939,6 +952,10 @@ export class NanobotClient {
       chat_id: chatId,
       workspace_scope: workspaceScope,
     });
+  }
+
+  archiveSessions(keys: string[], archived: boolean): Promise<{ ok: true }> {
+    return this.requestMutation("sessions.archive", { keys, archived });
   }
 
   setSidebarState(state: SidebarStatePayload): Promise<SidebarStatePayload> {
@@ -1069,7 +1086,7 @@ export class NanobotClient {
           [parsed.detail, parsed.reason].filter(Boolean).join(":") || "server error",
         );
       } else if (parsed.event === "message" || parsed.event === "turn_end") {
-        this.resolveSystemCommand(turnId);
+        this.resolveSystemCommand(turnId, parsed.event === "message" ? parsed : undefined);
       }
       return;
     }
@@ -1142,6 +1159,11 @@ export class NanobotClient {
 
     if (parsed.event === "transcription_error") {
       this.rejectTranscription(parsed.request_id, parsed.detail || "error");
+      return;
+    }
+
+    if (parsed.event === "sessions_changed") {
+      for (const handler of this.sessionsChangedHandlers) handler();
       return;
     }
 
@@ -1281,15 +1303,11 @@ export class NanobotClient {
   }
 
   private emitError(error: StreamError): void {
-    // Isolate subscribers so a throwing handler cannot abort the surrounding
-    // ``handleClose`` flow (which still owes us a reconnect decision + status
-    // update). We deliberately swallow here: error reporting is best-effort
-    // and must never be allowed to compound the failure it's reporting.
     for (const handler of this.errorHandlers) {
       try {
         handler(error);
       } catch {
-        // best-effort: subscriber fault must not stall transport bookkeeping
+        // A failing subscriber must not prevent reconnect after handleClose.
       }
     }
   }
@@ -1322,12 +1340,12 @@ export class NanobotClient {
     }
   }
 
-  private resolveSystemCommand(turnId: string): void {
+  private resolveSystemCommand(turnId: string, reply: SystemCommandReply): void {
     const pending = this.pendingSystemCommands.get(turnId);
     if (!pending) return;
     clearTimeout(pending.timer);
     this.pendingSystemCommands.delete(turnId);
-    pending.resolve();
+    pending.resolve(reply);
   }
 
   private rejectSystemCommand(turnId: string, detail: string): void {

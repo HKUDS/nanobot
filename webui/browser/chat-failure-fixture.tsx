@@ -6,6 +6,7 @@ import { SandboxNotice } from "@/components/thread/SandboxNotice";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
+import { ThreadToastViewport } from "@/components/ui/toast";
 import { useReadingTypography } from "@/hooks/useReadingTypography";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import type { UIMessage } from "@/lib/types";
@@ -27,23 +28,28 @@ export function ChatFailureFixture({ parameters }: { parameters: URLSearchParams
   const settings = () => setAction("settings");
   const gateway = parameters.get("gateway") ?? "bwrap";
   const backend = gateway === "bwrap" || gateway === "seatbelt" ? gateway : null;
-  return <main className="min-h-screen bg-background p-4 text-foreground">
+  const failureKind = parameters.get("reason") ?? "authentication";
+  const threadMessages: UIMessage[] = failureKind.startsWith("empty_final_response")
+    ? [{ id: "question", role: "user", content: "请总结刚才的工具结果。", createdAt: 1_700_000_000_000 }] : messages;
+  const notice = parameters.get("notice") ?? "recovery";
+  return <main className="relative min-h-screen bg-background p-4 text-foreground">
+    {visible && notice === "recovery" && <ThreadToastViewport><RecoveryNotice
+      state={{ recovery_id: "fixture-recovery", status: "awaiting_user", reason: "model_request_failed", failure_error_kind: failureKind }}
+      onContinue={async () => { setVisible(false); setAction("continued"); }}
+      onDismiss={async () => dismiss()}
+      onOpenSettings={settings}
+    /></ThreadToastViewport>}
     <section className="mx-auto max-w-3xl py-8">
-      <ThreadMessages messages={messages} isStreaming={false} />
+      <ThreadMessages messages={threadMessages} isStreaming={false} />
     </section>
     <div className={variant === "hero" ? "thread-composer-stack is-hero" : "thread-composer-stack"}>
-      {visible && (parameters.get("notice") === "stream"
+      {visible && (notice === "stream"
         ? <StreamErrorNotice error={{ kind: "model_request_failed", chatId: "fixture", errorKind: "authentication" }} onDismiss={dismiss} onOpenSettings={settings} />
-        : parameters.get("notice") === "fallback"
+        : notice === "fallback"
         ? <ModelFallbackNotice model="Fallback model" onDismiss={dismiss} onOpenSettings={settings} />
-        : parameters.get("notice") === "sandbox"
+        : notice === "sandbox"
         ? <SandboxNotice issue="missing" backend={backend} onDismiss={dismiss} onOpenSettings={settings} />
-        : <RecoveryNotice
-          state={{ recovery_id: "fixture-recovery", status: "awaiting_user", reason: "model_request_failed", failure_error_kind: "authentication" }}
-          onContinue={async () => { setVisible(false); setAction("continued"); }}
-          onDismiss={async () => dismiss()}
-          onOpenSettings={settings}
-        />)}
+        : null)}
       <ThreadComposer variant={variant} onSend={() => {}} workspaceControlsHidden />
     </div>
     <output aria-label="Fixture action">{action}</output>

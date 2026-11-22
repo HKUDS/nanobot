@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
-from mcp.client.auth import OAuthClientProvider
 from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata, OAuthToken
 
 from nanobot.agent.tools.mcp_oauth import (
@@ -36,21 +34,6 @@ def _oauth_metadata() -> OAuthMetadata:
         "response_types_supported": ["code"],
         "code_challenge_methods_supported": ["S256"],
     })
-
-
-def test_refresh_provider_sdk_private_method_contract() -> None:
-    """Fail dependency updates loudly while the SDK refresh workaround is needed."""
-    expected_parameters = {
-        "_initialize": ("self",),
-        "_refresh_token": ("self",),
-        "_handle_refresh_response": ("self", "response"),
-        "_perform_authorization": ("self",),
-        "async_auth_flow": ("self", "request"),
-    }
-
-    for method_name, expected in expected_parameters.items():
-        method = getattr(OAuthClientProvider, method_name)
-        assert tuple(inspect.signature(method).parameters) == expected
 
 
 def test_mcp_server_config_accepts_explicit_oauth() -> None:

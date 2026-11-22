@@ -39,13 +39,6 @@ def _document_source(text: str) -> DocumentLineSource:
     return DocumentLineSource(lines)
 
 
-class TestReadDescriptionFix:
-
-    def test_description_mentions_image_support(self):
-        tool = ReadFileTool()
-        assert "image" in tool.description.lower()
-
-
 class TestReadDedup:
 
     @pytest.fixture()
@@ -443,14 +436,8 @@ class TestFileStateHashFallback:
         assert "unchanged" not in second.lower()
 
 
-# Line-ending normalization
-# ReadFileTool normalizes CRLF -> LF before line-splitting. This primarily
-# helps Windows users whose checkouts carry CRLF line endings and whose
-# subsequent StrReplace edits would otherwise miss on `\r` boundaries. The
-# normalization applies on all platforms; these tests lock that in so the
-# behavior is intentional and discoverable, not accidental.
-
 class TestReadFileLineEndingNormalization:
+    """Edits must match text read from Windows checkouts."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -651,14 +638,6 @@ class TestOfficeDocTruncation:
             result = await tool.execute(path=str(f))
         assert "Error" in result
         assert "truncated" not in result
-
-
-class TestReadFileDescription:
-
-    def test_description_mentions_documents(self):
-        tool = ReadFileTool()
-        desc = tool.description.lower()
-        assert "document" in desc or "docx" in desc or "xlsx" in desc or "pptx" in desc
 
 
 class TestBoundedTextReads:

@@ -7,7 +7,7 @@ import math
 from collections.abc import Callable, Iterator
 from fractions import Fraction
 from functools import lru_cache
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import regex
 from jsonschema import Draft202012Validator, TypeChecker
@@ -38,8 +38,12 @@ def _multiple_of(
             yield ValidationError(f"{value!r} is not a multiple of {divisor}")
 
 
+class _StringPattern(Protocol):
+    def search(self, text: str, /) -> regex.Match[str] | None: ...
+
+
 @lru_cache(maxsize=128)
-def _pattern(expression: str) -> regex.Pattern[str]:
+def _pattern(expression: str) -> _StringPattern:
     return regex.compile(expression)
 
 

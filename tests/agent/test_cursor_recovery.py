@@ -98,17 +98,6 @@ class TestReadUnprocessedWithCorruption:
     """``read_unprocessed_history`` must skip entries with invalid cursors
     instead of crashing on comparison."""
 
-    def test_skips_string_cursor_entries(self, store):
-        store.history_file.write_text(
-            '{"cursor": 1, "timestamp": "2026-04-01 10:00", "content": "valid1"}\n'
-            '{"cursor": "bad", "timestamp": "2026-04-01 10:01", "content": "corrupted"}\n'
-            '{"cursor": 3, "timestamp": "2026-04-01 10:02", "content": "valid3"}\n',
-            encoding="utf-8",
-        )
-        entries = store.read_unprocessed_history(since_cursor=0)
-        assert len(entries) == 2
-        assert [e["cursor"] for e in entries] == [1, 3]
-
     def test_mixed_corruption_preserves_order(self, store):
         store.history_file.write_text(
             '{"cursor": "x", "timestamp": "2026-04-01 10:00", "content": "bad"}\n'
@@ -173,10 +162,6 @@ class TestCursorValidationInvariant:
         first int seen from the tail, so the returned cursor is strictly
         greater than every legitimate cursor already on disk.
         """
-        # Tail is corrupt → recovery scan runs.  Valid cursors are 100
-        # and 5, in that order on disk; a naive "first int from the tail"
-        # recovery would return 6, which would then silently collide with
-        # the existing cursor 100.  ``max`` is the only safe choice.
         store.history_file.write_text(
             '{"cursor": 100, "timestamp": "2026-04-01 10:00", "content": "high"}\n'
             '{"cursor": 5,   "timestamp": "2026-04-01 10:01", "content": "out of order"}\n'

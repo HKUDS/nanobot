@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
 import { useAppViewport } from "@/hooks/useAppViewport";
+import { setAppLanguage } from "@/i18n";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { ThreadTranscript } from "@/lib/thread-transcript";
 import type { ChatSummary, UIMessage } from "@/lib/types";
@@ -112,11 +113,11 @@ describe("SessionSearchDialog", () => {
     });
     expect(dialog).toHaveClass("max-h-[min(40rem,100%)]");
     expect(screen.getByTestId("session-search-scroll")).toHaveClass("overflow-y-auto");
-    expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
+    expect(screen.getByText("/model fast")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Search" }), {
       target: { value: "model fast" },
     });
-    expect(screen.queryByText("Model chat")).not.toBeInTheDocument();
+    expect(screen.getByText("Model chat")).toBeInTheDocument();
   });
 
   it("finds loaded session handles with or without @ and selects the matching session without requests", () => {
@@ -169,6 +170,25 @@ describe("SessionSearchDialog", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSelect).toHaveBeenCalledWith("websocket:chat-1");
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("searches and previews the same loaded receipt in its original language", async () => {
+    const cache = new ThreadMessageCache(() => false);
+    cache.setLoadedMessages("chat-1", [[{
+      id: "answer", role: "assistant", createdAt: 1, renderAs: "text", content: "Model preset `typo` not found.",
+      sideChannel: true,
+    }]]);
+    render(<SessionSearchDialog open sessions={[session(1)]} activeKey={null} loading={false}
+      messageCache={cache} onOpenChange={() => {}} onSelect={() => {}} />);
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "typo" } });
+    expect(screen.getByText("Model preset `typo` not found.")).toBeVisible();
+    await act(() => setAppLanguage("zh-CN"));
+    expect(screen.getByText("Model preset `typo` not found.")).toBeVisible();
+    fireEvent.change(input, { target: { value: "找不到模型预设" } });
+    expect(screen.queryByText("Chat 1")).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "not found" } });
+    expect(screen.getByText("Chat 1")).toBeVisible();
   });
 
   it("updates an open query for streamed messages and cache eviction without duplicate sessions", () => {

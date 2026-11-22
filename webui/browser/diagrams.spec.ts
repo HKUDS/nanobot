@@ -5,14 +5,14 @@ async function loadedImage(image: Locator) {
   await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true);
 }
 
-test("same-source completion loads a real Pele image only after generation, with source/copy/viewer controls", async ({ page, context }) => {
+test("closing the fence loads a real Pele image while the message streams, with source/copy/viewer controls", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const requests: string[] = [];
   page.on("request", (request) => requests.push(request.url()));
   await page.goto("/browser/fixture.html?case=diagrams&stream");
   await expect(page.getByText("开始：接收用户请求", { exact: false })).toBeVisible();
   expect(requests.some((url) => /pele\.worker|node_modules\/pele\//.test(url))).toBe(false);
-  await page.getByRole("button", { name: "Complete message" }).click();
+  await page.getByRole("button", { name: "Close fence" }).click();
   const block = page.getByTestId("mermaid-block");
   const image = block.locator("img");
   await loadedImage(image);
@@ -140,6 +140,27 @@ test("author directives, links, HTML and external images cannot execute or fetch
     const svg = await block.locator("img").evaluate(async (element: HTMLImageElement) => fetch(element.src).then((response) => response.text()));
     expect(svg).not.toMatch(/<(?:script|image|foreignObject|a)\b/i);
   }
+});
+
+test("the retry icon beside Copy explains the load failure and retries in place", async ({ page }) => {
+  const renderer = "**/MermaidBlock.tsx*";
+  await page.route(renderer, (route) => route.abort());
+  await page.goto("/browser/fixture.html?case=diagrams");
+  const retry = page.getByRole("button", { name: "Couldn't load the diagram renderer. Try again." });
+  await expect(retry).toBeVisible();
+  const copy = page.getByRole("button", { name: "Copy code" });
+  const retryBox = (await retry.boundingBox())!;
+  const copyBox = (await copy.boundingBox())!;
+  expect(retryBox.y).toBe(copyBox.y);
+  const gap = copyBox.x - (retryBox.x + retryBox.width);
+  expect(gap).toBeGreaterThanOrEqual(0);
+  expect(gap).toBeLessThanOrEqual(8);
+  await retry.hover();
+  await expect(page.getByRole("tooltip", { name: "Couldn't load the diagram renderer. Try again." })).toBeVisible();
+  await expect(page.getByText("开始：接收用户请求", { exact: false })).toBeVisible();
+  await page.unroute(renderer);
+  await retry.click();
+  await loadedImage(page.getByTestId("mermaid-block").locator("img"));
 });
 
 test("a real blocked Worker hits its deadline while sibling diagrams finish", async ({ page }) => {

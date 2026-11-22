@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
+from agent.session_helpers import make_agent_loop
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeModelChanged
 from nanobot.config.schema import ModelPresetConfig
@@ -60,7 +60,7 @@ async def test_sessions_run_concurrently_with_isolated_model_presets(tmp_path) -
             signature=(name, preset.model),
         )
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=base,
         workspace=tmp_path,
@@ -113,7 +113,7 @@ async def test_sessions_run_concurrently_with_isolated_model_presets(tmp_path) -
 @pytest.mark.asyncio
 async def test_removed_session_model_preset_falls_back_and_clears_metadata(tmp_path) -> None:
     base = RecordingProvider("base-model")
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=base,
         workspace=tmp_path,
@@ -141,7 +141,7 @@ async def test_async_runtime_resolution_publishes_model_refresh_on_event_loop(
     monkeypatch,
 ) -> None:
     provider = RecordingProvider("base-model")
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="base-model")
+    loop = make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="base-model")
     session = loop.sessions.get_or_create("sdk:runtime-refresh")
     refreshed = LLMRuntime.capture(provider, "updated-model", context_window_tokens=16_000)
     monkeypatch.setattr(loop.runtime_resolver, "admit", lambda: refreshed)
@@ -181,7 +181,7 @@ async def test_streamed_sdk_resolves_session_runtime_after_lock_admission(tmp_pa
             signature=(name, preset.model),
         )
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=base,
         workspace=tmp_path,
@@ -220,7 +220,7 @@ async def test_sdk_custom_model_preset_metadata_does_not_select_runtime(
     custom_value,
 ) -> None:
     base = RecordingProvider("base-model")
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=base,
         workspace=tmp_path,
@@ -261,7 +261,7 @@ async def test_sdk_invalid_internal_model_preset_metadata_fails_explicitly(
     invalid_value,
 ) -> None:
     base = RecordingProvider("base-model")
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=base,
         workspace=tmp_path,

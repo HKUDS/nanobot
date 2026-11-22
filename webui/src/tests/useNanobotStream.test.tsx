@@ -3188,7 +3188,7 @@ describe("useNanobotStream", () => {
     ]);
   });
 
-  it("suppresses redundant stream confirmation after assistant media", () => {
+  it("keeps a streamed confirmation as a separate answer after assistant media", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-img-result", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -3200,12 +3200,6 @@ describe("useNanobotStream", () => {
         chat_id: "chat-img-result",
         text: "image ready",
         media_urls: [{ url: "/api/media/sig/image", name: "generated.png" }],
-      });
-      fake.emit("chat-img-result", {
-        event: "message",
-        chat_id: "chat-img-result",
-        text: "message()",
-        kind: "tool_hint",
       });
       fake.emit("chat-img-result", {
         event: "delta",
@@ -3222,8 +3216,7 @@ describe("useNanobotStream", () => {
       });
     });
 
-    expect(result.current.messages).toHaveLength(1);
-    expect(result.current.messages[0].content).toBe("image ready");
+    expect(result.current.messages.map((row) => row.content)).toEqual(["image ready", "发送成功"]);
     expect(result.current.messages[0].media).toHaveLength(1);
   });
 

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
+from agent.session_helpers import make_agent_loop
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import GoalStatusEvent
 from nanobot.bus.queue import MessageBus
@@ -13,6 +13,7 @@ from nanobot.session import webui_turns as wth
 from nanobot.session.manager import Session
 from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
 from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
+from nanobot.webui.transcript import WebUITranscriptRecorder
 
 
 def _make_loop(tmp_path):
@@ -24,7 +25,7 @@ def _make_loop(tmp_path):
     response = LLMResponse(content="done", tool_calls=[])
     provider.chat_stream_with_retry = AsyncMock(return_value=response)
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus,
         provider=provider,
         workspace=tmp_path,
@@ -49,7 +50,7 @@ async def test_process_direct_websocket_clears_run_status(tmp_path, retire_desti
     loop.turn_delivery_factory.route_admission = WebuiTurnRoutePolicy(loop.sessions).admit
     gateway = MagicMock()
     gateway.session_manager = loop.sessions
-    gateway.transcripts.prepare_and_append = AsyncMock(return_value=True)
+    gateway.transcripts = WebUITranscriptRecorder(loop.sessions)
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         loop.bus,

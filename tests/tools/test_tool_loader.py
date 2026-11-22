@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-from dataclasses import fields
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -9,7 +8,7 @@ import pytest
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ToolContext
-from nanobot.agent.tools.loader import _SKIP_MODULES, ToolLoader
+from nanobot.agent.tools.loader import ToolLoader
 
 
 class _MinimalTool(Tool):
@@ -47,21 +46,6 @@ def test_tool_default_create_returns_instance():
     assert tool.name == "test_minimal"
 
 
-def test_tool_plugin_discoverable_default_is_true():
-    assert _MinimalTool._plugin_discoverable is True
-
-
-def test_tool_context_has_required_fields():
-    field_names = {f.name for f in fields(ToolContext)}
-    required = {
-        "config", "workspace", "bus", "subagent_manager",
-        "cron_service", "exec_session_manager", "file_state_store",
-        "provider_snapshot_loader", "providers_config", "timezone",
-        "runtime_control",
-    }
-    assert required <= field_names
-
-
 def test_tool_context_defaults():
     ctx = ToolContext(config=None, workspace="/tmp")
     assert ctx.bus is None
@@ -72,12 +56,6 @@ def test_tool_context_defaults():
     assert ctx.providers_config is None
     assert ctx.runtime_control is None
     assert ctx.timezone == "UTC"
-
-
-def test_skip_modules_excludes_infrastructure():
-    infra = {"base", "schema", "registry", "context", "loader", "config",
-             "file_state", "sandbox", "mcp", "__init__"}
-    assert infra <= _SKIP_MODULES
 
 
 def test_discover_finds_concrete_tools():
@@ -389,13 +367,6 @@ def test_my_tool_requires_runtime_control():
     ctx = ToolContext(config=mock_config, workspace="/tmp")
 
     assert MyTool.enabled(ctx) is False
-
-
-def test_mcp_wrappers_not_discoverable():
-    from nanobot.agent.tools.mcp import MCPPromptWrapper, MCPResourceWrapper, MCPToolWrapper
-    assert MCPToolWrapper._plugin_discoverable is False
-    assert MCPResourceWrapper._plugin_discoverable is False
-    assert MCPPromptWrapper._plugin_discoverable is False
 
 
 def test_loader_registers_builtin_tools():

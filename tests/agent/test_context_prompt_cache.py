@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.channels.registry import make_reply_format_resolver
 from nanobot.runtime_context import RuntimeContextBlock
 
 
@@ -98,6 +99,7 @@ def test_execution_rules_in_system_prompt(tmp_path) -> None:
     prompt = builder.build_system_prompt()
     assert "clear user request" in prompt
     assert "execution and verification" in prompt
+    assert "Ask for confirmation when an irreversible action requires it" in prompt
 
 
 def test_execution_rules_reach_existing_workspace_soul(tmp_path) -> None:
@@ -149,59 +151,21 @@ def test_scheduling_contract_reaches_fresh_and_legacy_workspaces(tmp_path, legac
     assert agents_path.read_bytes() == original
 
 
-def test_default_soul_template_keeps_execution_policy_in_tool_contract() -> None:
-    soul = (pkg_files("nanobot") / "templates" / "SOUL.md").read_text(encoding="utf-8")
-    contract = (
-        pkg_files("nanobot") / "templates" / "agent" / "tool_contract.md"
-    ).read_text(encoding="utf-8")
+@pytest.mark.parametrize("include_memory", [True, False])
+def test_channel_format_follows_delivery_medium(tmp_path, include_memory) -> None:
+    builder = ContextBuilder(_make_workspace(tmp_path), reply_format_for=make_reply_format_resolver())
 
-    assert "## Execution Rules" not in soul
-    assert "clear user request" not in soul
-    assert "clear user request" in contract
-    assert "execution and verification" in contract
-    assert "Ask for confirmation when an irreversible action requires it" in contract
+    def system(channel: str | None) -> str:
+        return builder.build_system_prompt(channel=channel, include_memory=include_memory)
 
-
-def test_channel_format_hint_telegram(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    prompt = builder.build_system_prompt(channel="telegram")
-    assert "Format Hint" in prompt
-    assert "messaging app" in prompt
-
-
-def test_channel_format_hint_whatsapp(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    prompt = builder.build_system_prompt(channel="whatsapp")
-    assert "Format Hint" in prompt
-    assert "plain text only" in prompt
-
-
-def test_channel_format_hint_absent_for_unknown(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    prompt = builder.build_system_prompt(channel=None)
-    assert "Format Hint" not in prompt
-
-    prompt2 = builder.build_system_prompt(channel="feishu")
-    assert "Format Hint" not in prompt2
-
-
-def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    messages = builder.build_messages(
-        history=[], current_message="hi",
-        channel="telegram",
-    )
-    system = messages[0]["content"]
-    assert "Format Hint" in system
-    assert "messaging app" in system
+    generic = system(None)
+    assert system("feishu") == generic
+    assert system("sms") == system("whatsapp")
+    assert "plain text only" in system("sms")
+    formula = r"use LaTeX with `\(...\)` for inline math and `\[...\]` for display math"
+    websocket = system("websocket")
+    assert websocket.index("## Workspace") < websocket.index(formula) < websocket.index("## External Content")
+    assert formula not in generic
 
 
 @pytest.mark.parametrize("disabled", [False, True])

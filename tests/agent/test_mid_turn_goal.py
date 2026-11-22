@@ -1,13 +1,13 @@
 import asyncio
+from functools import partial
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.session_helpers import stop_loop
+from agent.session_helpers import make_agent_loop, stop_loop
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
-from nanobot.agent.loop import AgentLoop as CoreAgentLoop
 from nanobot.bus.events import InboundMessage
-from nanobot.bus.outbound_events import GoalStatusEvent, TurnEndEvent
+from nanobot.bus.outbound_events import CommandResultEvent, GoalStatusEvent, TurnEndEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.goal.assembly import install_goal
 from nanobot.providers.base import (
@@ -23,9 +23,7 @@ from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import WebuiTurnCoordinator
 
-
-def _assembled_loop(*args, **kwargs):
-    return CoreAgentLoop(*args, builtin_assembly=install_goal, **kwargs)
+_assembled_loop = partial(make_agent_loop, builtin_assembly=install_goal)
 
 
 @pytest.mark.parametrize("command", [
@@ -113,7 +111,9 @@ async def test_scheduled_goal_command_cannot_generate_internal_input(tmp_path):
     try:
         await loop._dispatch_command_inline(msg, msg.content, loop.commands.dispatch)
         response = loop.bus.outbound.get_nowait()
-        assert "only be started by a user" in response.content
+        assert isinstance(response.event, CommandResultEvent)
+        assert response.event.command == "/goal"
+        assert response.event.parts[0]["key"] == "goal.userOnly"
         assert loop._pending_queues == {}
         assert goal_mutation_allowed() is False
         assert (await loop.sessions.state.get(msg.session_key)).messages == []
@@ -131,7 +131,7 @@ async def test_goal_at_iteration_limit_stays_queued_for_a_tool_capable_turn(tmp_
     provider.estimate_prompt_tokens.return_value = (100, "test")
     loop = _assembled_loop(
         bus=MessageBus(), provider=provider, workspace=tmp_path,
-        model="test-model", max_iterations=1,
+        model="test-model", max_tool_iterations=1,
     )
     calls = []
     goal = InboundMessage(
@@ -287,7 +287,7 @@ async def test_goal_checkpoint_failure_finishes_visible_run_without_restarting(t
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content=None, tool_calls=[ToolCallRequest(
         id="list", name="list_dir", arguments={"path": "."},
     )]))
-    loop = _assembled_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model", max_iterations=1)
+    loop = _assembled_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model", max_tool_iterations=1)
     WebuiTurnCoordinator(
         bus=bus, sessions=loop.sessions,
         schedule_background=lambda coro: loop.schedule_background(coro),
@@ -373,7 +373,7 @@ async def test_active_goal_keeps_candidate_history_until_successful_closure(tmp_
 
     provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
     loop = _assembled_loop(bus=bus, provider=provider, workspace=tmp_path,
-                           model="test-model", max_iterations=1)
+                           model="test-model", max_tool_iterations=1)
     loop.runner.run = AsyncMock(wraps=loop.runner.run)
     loop._process_message = AsyncMock(wraps=loop._process_message)
     WebuiTurnCoordinator(
@@ -440,7 +440,7 @@ async def test_replaced_goal_uses_current_objective_for_same_run_prompt(tmp_path
     provider.generation = GenerationSettings()
     provider.estimate_prompt_tokens.return_value = (100, "test")
     loop = _assembled_loop(bus=MessageBus(), provider=provider, workspace=tmp_path,
-                           model="test-model", max_iterations=1)
+                           model="test-model", max_tool_iterations=1)
     session = await loop.sessions.state.get("cli:replacement")
     await loop.sessions.state.update_metadata(session.key, {
         GOAL_STATE_KEY: {"status": "active", "objective": "Old objective."},
@@ -508,7 +508,7 @@ async def test_failed_goal_completion_keeps_running_until_a_successful_block(tmp
         LLMResponse(content="The goal is blocked."),
     ])
     loop = _assembled_loop(bus=MessageBus(), provider=provider, workspace=tmp_path,
-                           model="test-model", max_iterations=4)
+                           model="test-model", max_tool_iterations=4)
     session = await loop.sessions.state.get("cli:failed-goal-update")
     await loop.sessions.state.update_metadata(session.key, {
         GOAL_STATE_KEY: {"status": "active", "objective": "Verify the task."},

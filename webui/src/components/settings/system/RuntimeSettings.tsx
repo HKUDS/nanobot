@@ -10,13 +10,17 @@ import {
   SettingsSectionTitle,
   StatusPill,
 } from "@/components/settings/shared/SettingsControls";
+import type { RuntimeConfigController } from "@/components/settings/system/RuntimeConfigSettings";
+import { LANGFUSE_TRACING_FIELD } from "@/components/settings/system/runtime-config-fields";
 import { Button } from "@/components/ui/button";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { useToast } from "@/components/ui/toast";
 import { getRuntimeHost, isNativeRuntime } from "@/lib/runtime";
 import type { NanobotFeatureInfo, SettingsPayload } from "@/lib/types";
 
 export function RuntimeSettings({
   form,
+  runtimeConfig,
   settings,
   onRestart,
   isRestarting,
@@ -28,6 +32,7 @@ export function RuntimeSettings({
   onInstallCapability,
 }: {
   form: AgentSettingsDraft;
+  runtimeConfig: RuntimeConfigController;
   settings: SettingsPayload;
   onRestart?: () => void;
   isRestarting?: boolean;
@@ -177,7 +182,7 @@ export function RuntimeSettings({
             title="Langfuse"
             description={
               settings.observability?.configured
-                ? undefined
+                ? t("settings.observability.configured")
                 : tx(
                     "settings.observability.environment",
                     "Set LANGFUSE_SECRET_KEY and LANGFUSE_PUBLIC_KEY, then restart nanobot.",
@@ -189,7 +194,7 @@ export function RuntimeSettings({
             ) : langfuseFeature?.installed ? (
               <StatusPill tone={settings.observability?.configured ? "success" : "neutral"}>
                 {settings.observability?.configured
-                  ? tx("settings.values.ready", "Ready")
+                  ? t("settings.values.configured")
                   : tx("settings.values.needsSetup", "Needs setup")}
               </StatusPill>
             ) : (
@@ -205,11 +210,20 @@ export function RuntimeSettings({
                 ) : null}
                 {capabilityAction === "enable:langfuse"
                   ? tx("settings.capabilities.installing", "Installing required packages…")
-                  : tx("settings.observability.enable", "Enable tracing support")}
+                  : t("settings.observability.install")}
               </Button>
             )}
+            <span className="ms-3 inline-flex">
+              <ToggleButton
+                label={t("settings.observability.allow")}
+                checked={runtimeConfig.value(LANGFUSE_TRACING_FIELD.path) === true}
+                disabled={!settings.runtime_config || isRestarting || runtimeConfig.saving === LANGFUSE_TRACING_FIELD.group}
+                onChange={(enabled) => runtimeConfig.change(LANGFUSE_TRACING_FIELD, enabled)}
+              />
+            </span>
           </SettingsRow>
         </SettingsGroup>
+        {runtimeConfig.errors.observability ? <p role="alert" className="mt-2 text-[12px] text-destructive">{runtimeConfig.errors.observability}</p> : null}
         {capabilityError ? <p className="mt-2 text-[12px] text-destructive">{capabilityError}</p> : null}
       </section>
 

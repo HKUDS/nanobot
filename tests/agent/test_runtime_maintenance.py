@@ -11,6 +11,7 @@ import pytest
 from nanobot.agent.runner import AgentRunResult
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.runtime_events import RuntimeModelChanged
+from nanobot.command.results import message_text
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronSchedule
 from nanobot.execution import processes
@@ -384,7 +385,7 @@ async def test_idle_storage_scan_does_not_delay_stop(agent, monkeypatch):
         async with asyncio.timeout(3):
             while True:
                 reply = await agent.bus.consume_outbound()
-                if reply.content == "Stopped 1 task(s).":
+                if message_text(reply) == "Stopped.":
                     break
         assert not consumer.done()
         assert not release_scan.is_set()
@@ -610,16 +611,15 @@ async def test_subagent_execution_and_cleanup_are_both_busy(agent, monkeypatch):
     manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="finished"))
     runtime = LLMRuntime.capture(agent.provider, "test-model", context_window_tokens=4096)
     await manager.spawn("child", runtime=runtime)
-    record = next(iter(manager._tasks.values()))
     cleaning, release = asyncio.Event(), asyncio.Event()
-    original = record.exec_manager.close_all
+    original = agent._exec_session_manager.terminate_by_owner
 
-    async def cleanup():
+    async def cleanup(owner):
         cleaning.set()
         await release.wait()
-        return await original()
+        return await original(owner)
 
-    monkeypatch.setattr(record.exec_manager, "close_all", cleanup)
+    monkeypatch.setattr(agent._exec_session_manager, "terminate_by_owner", cleanup)
     try:
         with pytest.raises(RuntimeBusyError):
             with agent.maintenance():

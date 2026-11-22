@@ -838,7 +838,6 @@ async def test_runner_does_not_retry_blank_policy_terminal(
     finish_reason: str,
 ) -> None:
     from nanobot.agent.runner import AgentRunner
-    from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
@@ -858,7 +857,9 @@ async def test_runner_does_not_retry_blank_policy_terminal(
     ))
 
     assert provider.chat_stream_with_retry.await_count == 1
-    assert result.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
+    assert result.final_content is None
+    assert result.failure_error_kind == "empty_final_response"
+    assert result.messages == [{"role": "user", "content": "do task"}]
     assert result.stop_reason == "empty_final_response"
 
 
@@ -896,9 +897,8 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
 
 
 @pytest.mark.asyncio
-async def test_runner_uses_specific_message_after_empty_finalization_retry():
+async def test_runner_reports_failure_without_fabricating_an_answer_after_empty_finalization():
     from nanobot.agent.runner import AgentRunner
-    from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
     provider = MagicMock(spec=LLMProvider)
 
@@ -918,7 +918,9 @@ async def test_runner_uses_specific_message_after_empty_finalization_retry():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert result.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
+    assert result.final_content is None
+    assert result.failure_error_kind == "empty_final_response"
+    assert result.messages == [{"role": "user", "content": "do task"}]
     assert result.stop_reason == "empty_final_response"
 
 

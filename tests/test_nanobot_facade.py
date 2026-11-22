@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
 from nanobot.nanobot import (
     STREAM_EVENT_REASONING_COMPLETED,
@@ -101,6 +102,8 @@ def test_from_config_creates_instance(tmp_path):
     assert bot._loop is not None
     assert bot._loop.workspace == workspace
     assert bot._loop.sessions.sessions_dir.parent == config_path.parent / "sessions"
+    messages = bot._loop.context.build_messages(history=[], current_message="hi", channel="telegram.work")
+    assert "messaging app" in messages[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -284,33 +287,6 @@ async def test_run_returns_result(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_with_hooks(tmp_path):
-    from nanobot.agent.hook import AgentHook, AgentHookContext, SDKCaptureHook
-    from nanobot.bus.events import OutboundMessage
-
-    config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
-
-    class TestHook(AgentHook):
-        async def before_iteration(self, context: AgentHookContext) -> None:
-            pass
-
-    mock_response = OutboundMessage(
-        channel="cli", chat_id="direct", content="done"
-    )
-    bot._loop.process_direct = AsyncMock(return_value=mock_response)
-
-    result = await bot.run("hi", hooks=[TestHook()])
-
-    assert result.content == "done"
-    assert bot._loop._extra_hooks == []
-    hooks = bot._loop.process_direct.await_args.kwargs["hooks"]
-    assert len(hooks) == 2
-    assert isinstance(hooks[0], SDKCaptureHook)
-    assert isinstance(hooks[1], TestHook)
-
-
-@pytest.mark.asyncio
 async def test_run_hooks_restored_on_error(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
@@ -398,7 +374,6 @@ def test_request_context_preserves_legacy_positional_arguments(tmp_path, generat
 
 @pytest.mark.asyncio
 async def test_run_exposes_attributes_to_context_provider_without_persisting_them(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.agent.tools.context import RequestContext
     from nanobot.bus.queue import MessageBus
     from nanobot.providers.base import LLMResponse
@@ -408,7 +383,7 @@ async def test_run_exposes_attributes_to_context_provider_without_persisting_the
         content="done",
         tool_calls=[],
     ))
-    bot = Nanobot(AgentLoop(
+    bot = Nanobot(make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -446,7 +421,6 @@ async def test_run_exposes_attributes_to_context_provider_without_persisting_the
 @pytest.mark.asyncio
 async def test_persisted_turn_callback_is_best_effort_and_reads_display_safe_session(tmp_path):
     from nanobot import SessionTurnPersisted
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.providers.base import LLMResponse
 
@@ -455,7 +429,7 @@ async def test_persisted_turn_callback_is_best_effort_and_reads_display_safe_ses
         content="saved reply",
         tool_calls=[],
     ))
-    bot = Nanobot(AgentLoop(
+    bot = Nanobot(make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -516,10 +490,9 @@ async def test_persisted_turn_callback_is_best_effort_and_reads_display_safe_ses
 @pytest.mark.asyncio
 async def test_persisted_turn_callback_observes_saved_command_turn(tmp_path):
     from nanobot import SessionTurnPersisted
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
-    bot = Nanobot(AgentLoop(
+    bot = Nanobot(make_agent_loop(
         bus=MessageBus(),
         provider=_fake_provider("test-model"),
         workspace=tmp_path,
@@ -542,7 +515,6 @@ async def test_persisted_turn_callback_observes_saved_command_turn(tmp_path):
 @pytest.mark.asyncio
 async def test_ephemeral_run_does_not_invoke_persisted_turn_callback(tmp_path):
     from nanobot import SessionTurnPersisted
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.providers.base import LLMResponse
 
@@ -551,7 +523,7 @@ async def test_ephemeral_run_does_not_invoke_persisted_turn_callback(tmp_path):
         content="temporary",
         tool_calls=[],
     ))
-    bot = Nanobot(AgentLoop(
+    bot = Nanobot(make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -571,14 +543,13 @@ async def test_ephemeral_run_does_not_invoke_persisted_turn_callback(tmp_path):
 async def test_ephemeral_goal_is_rejected_without_changing_session(
     tmp_path, monkeypatch, existing_session, streamed,
 ):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.goal.assembly import install_goal
 
     provider = _fake_provider("test-model")
     provider.aclose = AsyncMock()
     provider.chat_stream_with_retry = AsyncMock()
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+    loop = make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
                      builtin_assembly=install_goal)
     bot = Nanobot(loop)
     key = "sdk:temporary-goal"
@@ -650,7 +621,6 @@ async def test_sdk_from_config_assembles_goal_for_direct_runs(tmp_path, monkeypa
 
 @pytest.mark.asyncio
 async def test_ephemeral_sdk_turn_cannot_update_a_durable_goal(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.goal.assembly import install_goal
     from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -663,7 +633,7 @@ async def test_ephemeral_sdk_turn_cannot_update_a_durable_goal(tmp_path):
         )]),
         LLMResponse(content="Temporary reply."),
     ])
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+    loop = make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
                      builtin_assembly=install_goal)
     bot = Nanobot(loop)
     session = await loop.sessions.state.get("sdk:existing-goal")
@@ -686,7 +656,6 @@ async def test_ephemeral_sdk_turn_cannot_update_a_durable_goal(tmp_path):
 @pytest.mark.parametrize("operation", ["clear", "delete"])
 async def test_sdk_goal_tool_cannot_write_after_session_generation_changes(tmp_path, operation):
     from nanobot.agent.hook import AgentHook
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.goal.assembly import install_goal
     from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -716,7 +685,7 @@ async def test_sdk_goal_tool_cannot_write_after_session_generation_changes(tmp_p
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content=None, tool_calls=[
         ToolCallRequest(id="create", name="create_goal", arguments={"objective": "Old execution."}),
     ]))
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+    loop = make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
                      builtin_assembly=install_goal)
     bot = Nanobot(loop)
     key = "sdk:generation-check"
@@ -912,7 +881,6 @@ async def test_run_populates_observability_fields(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.providers.base import LLMResponse
 
@@ -923,7 +891,7 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
         tool_calls=[],
         usage=LLMUsage.reported(input_tokens=3, output_tokens=0),
     ))
-    bot = Nanobot(AgentLoop(
+    bot = Nanobot(make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -934,6 +902,28 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
 
     assert result.content == "done"
     assert result.usage == LLMUsage.reported(input_tokens=3, output_tokens=0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_sdk_returns_structured_provider_failure(tmp_path, streamed):
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMProvider, LLMResponse
+
+    provider = MagicMock(spec=LLMProvider, provider_name="test")
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="upstream unavailable", finish_reason="error", error_status_code=503,
+    ))
+    async with Nanobot(make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")) as bot:
+        if streamed:
+            run = await bot.run_streamed("hi")
+            events = [event async for event in run.stream_events()]
+            result = await run.wait()
+            assert events[-1].type == "run.completed" and events[-1].result is result
+        else:
+            result = await bot.run("hi")
+    assert result.content == ""
+    assert (result.stop_reason, result.error, result.failure_error_kind) == ("error", "upstream unavailable", "server")
 
 
 @pytest.mark.asyncio
@@ -1152,29 +1142,27 @@ async def test_run_rejects_multiple_model_selectors(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_user_hooks_still_fire_alongside_capture(tmp_path):
-    from nanobot.agent.hook import AgentHook, AgentHookContext
+async def test_run_captures_snapshot_before_user_hook(tmp_path):
+    from nanobot.agent.hook import AgentHook, AgentRunHookContext
     from nanobot.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    seen_iterations: list[int] = []
-
     class UserHook(AgentHook):
-        async def after_iteration(self, context: AgentHookContext) -> None:
-            seen_iterations.append(context.iteration)
+        async def after_run(self, context: AgentRunHookContext) -> None:
+            context.messages.clear()
 
     async def fake_process_direct(message, *, session_key, hooks):
-        assert len(hooks) == 2, f"expected capture + user hook, got {len(hooks)}"
-        ctx = AgentHookContext(iteration=7, messages=[])
-        for h in hooks:
-            await h.after_iteration(ctx)
+        ctx = AgentRunHookContext(messages=[{"role": "assistant", "content": "ok"}])
+        for hook in hooks:
+            await hook.after_run(ctx)
+        assert ctx.messages == []
         return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
     bot._loop.process_direct = fake_process_direct
-    await bot.run("x", hooks=[UserHook()])
-    assert seen_iterations == [7]
+    result = await bot.run("x", hooks=[UserHook()])
+    assert result.messages == [{"role": "assistant", "content": "ok"}]
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,6 @@ import {
   ChannelLogo,
   ChannelStatusBadge,
   channelStatusLabel,
-  channelToggleChecked,
   localizedChannelDisplayName,
 } from "@/components/settings/channels/ChannelIdentity";
 import { Button } from "@/components/ui/button";
@@ -43,8 +42,8 @@ export function ChannelCatalogRow({
   const alwaysEnabled = feature.capabilities?.includes("always_enabled") ?? false;
   const pendingChecked = actionKey === `enable:${feature.name}` ? true
     : actionKey === `disable:${feature.name}` ? false : null;
-  const ownActionBusy = pendingChecked !== null || actionKey === `install:${feature.name}`;
-  const checked = alwaysEnabled || (pendingChecked ?? channelToggleChecked(feature));
+  const installing = actionKey === `install:${feature.name}`;
+  const checked = alwaysEnabled || (pendingChecked ?? feature.enabled);
   const anyActionBusy = Boolean(actionKey);
   const actionsDisabled = restartRequired || isRestarting;
   const showInstallRestartHint = feature.install_supported && actionsDisabled;
@@ -108,7 +107,7 @@ export function ChannelCatalogRow({
           {channelIdentity}
         </button>
       )}
-      <div className="flex w-11 shrink-0 items-center justify-center">
+      <div className="flex min-w-11 shrink-0 items-center justify-center gap-3">
         {!feature.installed ? (
           <HoverHint enabled={showInstallRestartHint}
             content={t(isRestarting ? "app.system.restarting" : "settings.channels.restartBeforeInstall")}>
@@ -127,7 +126,7 @@ export function ChannelCatalogRow({
                   setInstallHint(false);
                   onAction("enable", feature.name, { installOnly: true, confirmed: true });
                 }}>
-                {ownActionBusy
+                {installing
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
                   : <Download className="h-3.5 w-3.5" aria-hidden />}
                 <span className="sr-only">{tx("settings.channels.install", "Install")}</span>
@@ -147,7 +146,8 @@ export function ChannelCatalogRow({
                 : <RotateCcw className="h-3.5 w-3.5" aria-hidden />}
             </Button>
           </HoverHint>
-        ) : (
+        ) : null}
+        {!feature.restart_pending && (feature.installed || feature.enabled) ? (
           <ToggleButton ref={toggleRef} checked={checked}
             label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             disabled={alwaysEnabled || actionsDisabled || anyActionBusy}
@@ -156,7 +156,7 @@ export function ChannelCatalogRow({
               if (enabled && feature.configured === false) onSelect(toggleRef.current, true);
               else onAction(enabled ? "enable" : "disable", feature.name);
             }} />
-        )}
+        ) : null}
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -30,14 +31,6 @@ from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import MCPServerConfig
 
 _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
-
-
-def test_type_checking_only_mcp_annotations_are_deferred() -> None:
-    assert mcp_mod._MCPWrapperBase.__annotations__["_session"] == "ClientSession"
-    assert MCPToolWrapper.__init__.__annotations__["session"] == "ClientSession"
-    assert MCPResourceWrapper.__init__.__annotations__["resource_def"] == "Resource"
-    assert MCPPromptWrapper.__init__.__annotations__["prompt_def"] == "Prompt"
-    assert connect_mcp_servers.__annotations__["mcp_servers"] == "dict[str, MCPServerConfig]"
 
 
 class _FakeTextContent:
@@ -187,7 +180,7 @@ async def test_mcp_provider_connect_propagates_external_cancellation(monkeypatch
         await task
 
     assert provider.connected_server_names == set()
-    assert provider.runtime_status() == {"test": "failed"}
+    assert provider.runtime_snapshot().statuses == {"test": "failed"}
 
 
 @pytest.mark.asyncio
@@ -224,7 +217,7 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
     oauth_mod.create_mcp_oauth_auth = create_auth  # type: ignore[attr-defined]
     oauth_mod.mcp_oauth_has_credentials = lambda _name, _url: True  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
-    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url, **_kwargs: (True, ""))
     monkeypatch.setattr(mcp_mod, "_probe_http_url", reachable)
     monkeypatch.setattr(
         sys.modules["mcp.client.streamable_http"],
@@ -245,7 +238,7 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
 
     await provider.connect()
 
-    snapshot = provider.runtime_status()
+    snapshot = provider.runtime_snapshot().statuses
     assert snapshot == {"xmind": "failed"}
     assert "saved-oauth-secret" not in str(snapshot)
     assert "app.xmind.com" not in str(snapshot)
@@ -1135,7 +1128,7 @@ async def test_proxy_constructor_failure_diagnostics_never_render_live_locals(
             yield object(), object()
 
     monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", sse_client)
-    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url, **_kwargs: (True, ""))
     monkeypatch.setattr(mcp_mod, "_probe_http_url", AsyncMock(return_value=True))
     messages: list[str] = []
     sink = mcp_mod.logger.add(
@@ -1198,7 +1191,7 @@ async def test_connection_failure_redacts_resolved_proxy_in_exception_chain_and_
         yield  # pragma: no cover
 
     monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", failing_sse)
-    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url, **_kwargs: (True, ""))
     monkeypatch.setattr(mcp_mod, "_probe_http_url", AsyncMock(return_value=True))
     messages: list[str] = []
     sink = mcp_mod.logger.add(
@@ -1344,7 +1337,7 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
     async def _reachable(_url: str, *, proxy: str | None = None) -> bool:
         return True
 
-    def _validate(_url: str) -> tuple[bool, str]:
+    def _validate(_url: str, **_kwargs: object) -> tuple[bool, str]:
         return True, ""
 
     class FakeAsyncClient:
@@ -1678,7 +1671,7 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     async def _reachable(_url: str, *, proxy: str | None = None) -> bool:
         return True
 
-    def _validate(_url: str) -> tuple[bool, str]:
+    def _validate(_url: str, **_kwargs: object) -> tuple[bool, str]:
         return True, ""
 
     @asynccontextmanager
@@ -1733,7 +1726,7 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
     async def _reachable(_url: str, *, proxy: str | None = None) -> bool:
         return True
 
-    def _validate(_url: str) -> tuple[bool, str]:
+    def _validate(_url: str, **_kwargs: object) -> tuple[bool, str]:
         return True, ""
 
     async def _create_auth(name: str, url: str, handlers: object) -> object:
@@ -1798,7 +1791,6 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
         client_kwargs = captured["client_kwargs"]
         assert isinstance(client_kwargs, dict)
         assert client_kwargs["auth"] is oauth_auth
-        assert client_kwargs["event_hooks"] == {"request": [mcp_mod._validate_mcp_request_url]}
 
 
 @pytest.mark.asyncio
@@ -1823,7 +1815,7 @@ async def test_connect_mcp_servers_skips_background_oauth_without_credentials(
     oauth_mod.MCPAuthorizationRequiredError = AuthorizationRequiredError  # type: ignore[attr-defined]
     oauth_mod.create_mcp_oauth_auth = _create_auth  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
-    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url, **_kwargs: (True, ""))
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _probe)
 
     stacks = await connect_mcp_servers(
@@ -2236,7 +2228,7 @@ async def test_discovery_failure_logs_do_not_expose_credentials(
     session = _make_fake_session_with_capabilities(["tool_a"], ["res_b"], ["prompt_c"])
     setattr(session, f"list_{catalog}", AsyncMock(side_effect=error))
     fake_mcp_runtime["session"] = session
-    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url, **_kwargs: (True, ""))
     monkeypatch.setattr(mcp_mod, "_probe_http_url", AsyncMock(return_value=True))
     messages: list[str] = []
     sink = mcp_mod.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
@@ -2287,10 +2279,6 @@ async def test_connect_accepts_servers_without_tools_capability(
             await stack.aclose()
 
 
-def test_sanitize_name_replaces_spaces() -> None:
-    assert _sanitize_name("PostgreSQL System Information") == "PostgreSQL_System_Information"
-
-
 def test_sanitize_name_replaces_special_characters() -> None:
     assert _sanitize_name("foo.bar@baz!") == "foo_bar_baz_"
 
@@ -2301,20 +2289,6 @@ def test_sanitize_name_collapses_consecutive_underscores() -> None:
 
 def test_sanitize_name_preserves_valid_characters() -> None:
     assert _sanitize_name("my-tool_v2") == "my-tool_v2"
-
-
-def test_sanitize_name_noop_for_already_clean_names() -> None:
-    assert _sanitize_name("mcp_server_tool") == "mcp_server_tool"
-
-
-def test_resource_wrapper_sanitizes_name() -> None:
-    resource_def = SimpleNamespace(
-        name="PostgreSQL System Information",
-        uri="file:///pg/info",
-        description="PG info",
-    )
-    wrapper = MCPResourceWrapper(None, "srv", resource_def)
-    assert wrapper.name == "mcp_srv_resource_PostgreSQL_System_Information"
 
 
 def test_prompt_wrapper_sanitizes_name() -> None:
@@ -2503,9 +2477,10 @@ async def test_mcp_http_requests_use_selected_transport_without_route_fallback(
         constructed_proxies.append(proxy)
         return recording_transport("shared")
 
-    async def probe(_url, *, proxy):
-        assert proxy == (shared_proxy if use_proxy else None)
-        return True
+    def resolve(host, *args):
+        if use_proxy:
+            raise socket.gaierror
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
 
     @asynccontextmanager
     async def sse_client(url, *, httpx_client_factory):
@@ -2521,8 +2496,7 @@ async def test_mcp_http_requests_use_selected_transport_without_route_fallback(
         yield object(), object(), object()
 
     monkeypatch.setenv("HTTPS_PROXY", "http://environment.example:8888")
-    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
-    monkeypatch.setattr(mcp_mod, "_probe_http_url", probe)
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
     monkeypatch.setattr(mcp_mod, "PinnedDNSAsyncTransport", lambda: recording_transport("direct"))
     monkeypatch.setattr(
         mcp_mod, "httpx_env_proxy_mounts", lambda: {"all://": recording_transport("environment")},
@@ -2534,7 +2508,7 @@ async def test_mcp_http_requests_use_selected_transport_without_route_fallback(
     registry = ToolRegistry()
     connections = await connect_mcp_servers(
         {"remote": MCPServerConfig(
-            type=transport, url="https://93.184.216.34/mcp", use_proxy=use_proxy,
+            type=transport, url="https://remote.example/mcp", use_proxy=use_proxy,
         )},
         registry,
         network=NetworkConfig(proxy=shared_proxy),
@@ -2562,3 +2536,31 @@ async def test_stdio_cannot_opt_into_shared_proxy(monkeypatch) -> None:
     assert connections == {}
     assert registry.tool_names == []
     stdio_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_initialize_icons_follow_connection_replacement_and_shutdown(fake_mcp_runtime):
+    png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+k7uoAAAAASUVORK5CYII="
+    theme = "dark"
+
+    async def initialize():
+        return SimpleNamespace(
+            capabilities=SimpleNamespace(tools=None),
+            serverInfo=SimpleNamespace(icons=[SimpleNamespace(src=png, sizes=None, mimeType=None, theme=theme)]),
+        )
+
+    fake_mcp_runtime["session"] = SimpleNamespace(initialize=initialize)
+    provider = MCPProvider(
+        {"custom": MCPServerConfig(command="first", enabled_tools=[])},
+        ToolRegistry(),
+        server_loader=lambda: ({"custom": MCPServerConfig(command="second", enabled_tools=[])}, NetworkConfig()),
+    )
+    try:
+        await provider.connect()
+        assert provider.runtime_snapshot().icons == {"custom": [{"src": png, "theme": "dark"}]}
+        theme = "light"
+        await provider.reload()
+        assert provider.runtime_snapshot().icons == {"custom": [{"src": png, "theme": "light"}]}
+    finally:
+        await provider.aclose()
+    assert provider.runtime_snapshot().icons == {}

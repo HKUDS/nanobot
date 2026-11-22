@@ -638,10 +638,13 @@ class SessionState:
         *,
         expected_generation: str | None = None,
         validate_existing: Callable[[Mapping[str, Any]], None] | None = None,
+        on_create: Mapping[str, Any] | None = None,
+        remove: tuple[str, ...] = (),
     ) -> tuple[str, bool]:
         """Open one generation and atomically validate and attach admission metadata."""
         values = deepcopy(dict(updates))
-        if _RESERVED_KEYS.intersection(values):
+        initial = deepcopy(dict(on_create or {}))
+        if _RESERVED_KEYS.intersection((*values, *initial, *remove)):
             raise ValueError("turn state must be changed through turn operations")
 
         def open_session() -> tuple[str, bool]:
@@ -653,7 +656,7 @@ class SessionState:
                         raise SessionConflictError("session does not exist")
                     with self._cache_lock:
                         self._retired.discard(key)
-                    session = Session(key=key)
+                    session = Session(key=key, metadata=initial)
                 elif (
                     expected_generation is not None
                     and session.generation != expected_generation
@@ -661,6 +664,8 @@ class SessionState:
                     raise SessionConflictError("session admission belongs to a replaced session")
                 if not created and validate_existing is not None:
                     validate_existing(session.metadata)
+                for name in remove:
+                    session.metadata.pop(name, None)
                 session.metadata.update(values)
                 header_only = session.policy.persist and session.persisted
                 if header_only:
@@ -873,11 +878,10 @@ class SessionState:
         self._archives_imported = True
         return imported
 
-    async def set_archived_keys(self, keys: Sequence[str]) -> list[str]:
-        values = list(dict.fromkeys(keys))
-        return await self._execute(
-            None, lambda: self._store.set_archived_keys(values), operation_name="set_archived_keys",
-        )
+    async def set_archived(self, keys: Sequence[str], archived: bool) -> None:
+        values = list(keys)
+        if values:
+            await self._execute(values, lambda: self._store.set_archived(values, archived), operation_name="set_archived")
 
     async def typed_session_headers(self, session_type: str) -> list[tuple[str, dict[str, Any]]]:
         return await self._execute(
@@ -904,7 +908,7 @@ class SessionState:
         return await self.query_metadata(lambda rows: rows)
 
     async def query_metadata(
-        self, project: Callable[[list[dict[str, Any]]], _T],
+        self, project: Callable[[list[dict[str, Any]]], _T], *, archived: bool | None = None,
     ) -> _T:
         """Read one committed display snapshot without waiting for active turns.
 
@@ -915,7 +919,7 @@ class SessionState:
         context = copy_context()
 
         def read() -> _T:
-            return context.run(project, self._store.list_metadata())
+            return context.run(project, self._store.list_metadata(archived=archived))
 
         async def query() -> _T:
             return await self._run_operation(read, write=False)
@@ -947,14 +951,14 @@ class SessionState:
 
         def read() -> tuple[dict[str, str], dict[str, str]]:
             return self._store.run_read(
-                lambda: allocate_session_handles(self._store.list_metadata(), self._types),
+                lambda: allocate_session_handles(self._store.list_handle_metadata(), self._types),
             )
 
         def allocate() -> dict[str, str]:
             changed: list[str] = []
 
             def write() -> dict[str, str]:
-                names, updates = allocate_session_handles(self._store.list_metadata(), self._types)
+                names, updates = allocate_session_handles(self._store.list_handle_metadata(), self._types)
                 for key, name in updates.items():
                     if self._store.update_metadata(
                         key,

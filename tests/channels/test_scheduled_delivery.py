@@ -7,8 +7,8 @@ from functools import partial
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.message import MessageTool
@@ -114,11 +114,16 @@ async def test_scheduled_recovery_remains_busy_while_waiting_for_a_send_slot(tmp
         await manager.stop_all()
 
 
-@pytest.mark.parametrize("legacy_message,one_shot,origin", [
-    (False, False, "whatsapp"), (True, False, "whatsapp"), (True, True, "whatsapp"),
-    (True, False, "websocket"),
+@pytest.mark.parametrize("reply_kind,one_shot,origin", [
+    ("final", False, "whatsapp"), ("message_tool", False, "whatsapp"), ("message_tool", True, "whatsapp"),
+    ("message_tool", False, "websocket"), ("empty_final", False, "whatsapp"), ("billing", False, "whatsapp"),
 ])
-async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, monkeypatch, legacy_message, one_shot, origin):
+async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, monkeypatch, reply_kind, one_shot, origin):
+    legacy_message = reply_kind == "message_tool"
+    expected = {
+        "empty_final": "The model reached its output limit before returning a final answer.",
+        "billing": "The model provider has no quota available. Check the provider account's billing and try again.",
+    }.get(reply_kind, "Diagnostic result")
     monkeypatch.setattr(outbox_module, "RETRY_SECONDS", 0)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -135,6 +140,10 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
 
     async def reply(**kwargs):
         calls.append(kwargs)
+        if reply_kind == "empty_final":
+            return LLMResponse(content="", finish_reason="length")
+        if reply_kind == "billing":
+            return LLMResponse(content="Private provider account details", finish_reason="error", error_status_code=402)
         if legacy_message and len(calls) == 1:
             arguments = {"content": "Diagnostic result"}
             if origin == "websocket":
@@ -145,7 +154,7 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
         return LLMResponse(content="Diagnostic result")
 
     provider.chat_stream_with_retry = reply
-    agent = AgentLoop(bus=bus, provider=provider, workspace=workspace,
+    agent = make_agent_loop(bus=bus, provider=provider, workspace=workspace,
                       model="offline-test-model", session_manager=sessions,
                       tools_config=manager.config.tools, cron_service=cron)
     cron.on_job = partial(run_bound_cron_job, agent=agent, cron=cron)
@@ -184,16 +193,31 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
         if one_shot:
             assert cron.list_jobs() == []
         else:
-            assert cron.list_jobs()[0].state.last_status == "ok"
+            state = cron.list_jobs()[0].state
+            if reply_kind in {"empty_final", "billing"}:
+                assert state.last_status == "error"
+                assert state.last_error == ("billing" if reply_kind == "billing" else "empty_final_response_length")
+                record, = (tmp_path / "cron" / "runs").glob("*.json")
+                audit = json.loads(record.read_text(encoding="utf-8"))
+                assert (audit["status"], audit["error"], audit["run_id"]) == (
+                    "error", state.last_error, state.run_history[-1].run_id,
+                )
+            else:
+                assert state.last_status == "ok"
         assert len(whatsapp_rows()) == 1
         assert whatsapp_rows()[0]["status"] == "pending"
+        saved = json.loads(whatsapp_rows()[0]["payload"])
+        assert saved["content"] == expected
+        assert saved["delivery"]["run_id"] == whatsapp_rows()[0]["run_id"]
+        assert saved["delivery"]["session_generation"]
         if origin == "websocket":
-            saved = json.loads(whatsapp_rows()[0]["payload"])
             assert saved["delivery"]["session_key"] == "websocket:source"
             assert saved["metadata"] == {}
         channel._client.send_message.assert_not_called()
         count = len(calls)
-        assert count == (2 if legacy_message else 1)
+        # An output-limited turn may make continuation requests before it fails.
+        if reply_kind != "empty_final":
+            assert count == (2 if legacy_message else 1)
         assert DELIVERY_RUN_META not in json.dumps(calls[0]["messages"])
         assert "Diagnostic result" not in calls[0]["messages"][0]["content"]
         await manager.stop_all()
@@ -202,7 +226,7 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
         channel._connected = True
         await manager._recover_scheduled()
         await drain(manager)
-        channel._client.send_message.assert_awaited_once_with("synthetic", "Diagnostic result")
+        channel._client.send_message.assert_awaited_once_with("synthetic", expected)
         assert whatsapp_rows()[0]["status"] == "sent"
         assert whatsapp_rows()[0]["payload"] is None
         again = make_manager(tmp_path, sessions)
@@ -260,12 +284,15 @@ async def test_legacy_broadcast_has_independent_targets_and_no_foreign_thread_me
 async def test_queue_acceptance_survives_restart_but_inflight_is_unknown(tmp_path):
     manager = make_manager(tmp_path)
     pending, inflight = message(), message(content="second")
+    pending.sent = asyncio.get_running_loop().create_future()
     inflight.chat_id = "other-destination"
     await manager.bus.publish_outbound(pending)
     await manager.bus.publish_outbound(inflight)
     assert manager._outbox.claim(inflight)
     restarted = DeliveryOutbox(manager._outbox.path)
-    assert [msg.delivery_id for msg in restarted.ready()] == [pending.delivery_id]
+    [restored] = restarted.ready()
+    assert restored.delivery_id == pending.delivery_id
+    assert restored.sent is None and not pending.sent.done()
     assert [row["status"] for row in rows(restarted)] == ["pending", "unknown"]
 
 

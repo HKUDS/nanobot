@@ -114,23 +114,11 @@ test("permits channel registry composition through a Vite glob", () => {
   expect(inspect("webui/src/channel-plugins/registry.ts", 'import.meta.glob("../../../nanobot/channels/*/webui/index.{ts,tsx}", { eager: true });')).toEqual([]);
 });
 
-test("includes nested dynamic import locations in diagnostics", () => {
-  expect(inspect("webui/src/lib/model.ts", 'export async function load() {\n  return import("@/components/View");\n}')).toEqual([
-    "webui/src/lib/model.ts:2: [webui-lib] must not import webui/src/components/View",
-  ]);
-});
-
 function run() {
   return Bun.spawnSync([process.execPath, script, "--project", project, "--root", root], {
     cwd: process.cwd(), stdout: "pipe", stderr: "pipe",
   });
 }
-
-test("CLI accepts a repository with valid client and shared dependencies", () => {
-  const result = run();
-  expect(result.exitCode).toBe(0);
-  expect(new TextDecoder().decode(result.stdout)).toContain(`Client import boundaries passed (${project},`);
-});
 
 test("CLI rejects a client violation with its source location", () => {
   const relative = project === "webui" ? "webui/src/lib/model.ts" : "tui/src/client/api.ts";
@@ -138,7 +126,10 @@ test("CLI rejects a client violation with its source location", () => {
   write(relative, `export async function load() {\n  return import("${target}");\n}\n`);
   const result = run();
   expect(result.exitCode).toBe(1);
-  expect(new TextDecoder().decode(result.stderr)).toContain(`${relative}:2:`);
+  const diagnostic = project === "webui"
+    ? "[webui-lib] must not import webui/src/components/View"
+    : "[tui-client] must not import tui/src/app/app";
+  expect(new TextDecoder().decode(result.stderr).trim()).toBe(`${relative}:2: ${diagnostic}`);
 });
 
 test("CLI rejects a shared contract that acquires a UI dependency", () => {
@@ -153,6 +144,7 @@ test("ignores test modules in production source scans", () => {
   write(relative, 'import "../../../webui/src/components/View";\n');
   const result = run();
   expect(result.exitCode).toBe(0);
+  expect(new TextDecoder().decode(result.stdout)).toContain(`Client import boundaries passed (${project},`);
 });
 
 test("checks the actual shared source directory rather than a fixture inventory", () => {

@@ -531,7 +531,7 @@ describe("Automation task list and detail sheet", () => {
       "Every weekday at 9, summarize my open pull requests",
       undefined,
       { intent: "create_automation" },
-      "fast",
+      null,
     );
     await waitFor(() => expect(composer).toHaveValue(""));
   });
@@ -571,20 +571,15 @@ describe("Automation task list and detail sheet", () => {
     expect(screen.getByRole("button", { name: "deep" })).toBeVisible();
   });
 
-  it("uses an automation-specific placeholder", () => {
+  it.each([
+    ["en", "Describe an automation", "What should nanobot automate?"],
+    ["zh-CN", "描述一个自动任务", "想让 nanobot 自动做什么？"],
+  ] as const)("labels the automation creation prompt in %s", async (locale, label, placeholder) => {
+    const language = i18n.language;
+    onTestFinished(async () => { await i18n.changeLanguage(language); });
+    await act(() => i18n.changeLanguage(locale));
     render(<Harness payload={{ jobs: [] }} onStartChat={() => {}} settingsSnapshot={modelSettings} />);
-    expect(screen.getByRole("textbox", { name: "Describe an automation" })).toHaveAttribute(
-      "placeholder",
-      "What should nanobot automate?",
-    );
-  });
-
-  it("uses a short, conversational Chinese creation prompt", async () => {
-    await act(() => i18n.changeLanguage("zh-CN"));
-    render(<Harness payload={{ jobs: [] }} onStartChat={() => {}} settingsSnapshot={modelSettings} />);
-    expect(screen.getByRole("textbox", { name: "描述一个自动任务" })).toHaveAttribute(
-      "placeholder", "想让 nanobot 自动做什么？",
-    );
+    expect(screen.getByRole("textbox", { name: label })).toHaveAttribute("placeholder", placeholder);
   });
 
   it("keeps the complete month grid visible when no personal automations exist", () => {

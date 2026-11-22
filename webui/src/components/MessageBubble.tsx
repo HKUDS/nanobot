@@ -9,9 +9,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Quote, Wrench } from "lucide-react";
+import { Activity, Check, ChevronRight, CircleAlert, Copy, Quote, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DisclosureContent } from "@/components/ui/disclosure";
+import { LoadingRing } from "@/components/ui/loading-ring";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
@@ -33,7 +34,7 @@ import { EditIcon } from "@/components/icons/product-icons";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { formatMessageEndTime } from "@/lib/format-time";
+import { fmtDateTime, formatMessageEndTime, formatMessageHoverTime } from "@/lib/format-time";
 import { toMediaAttachment } from "@/lib/media";
 import { matchingSlashCommand } from "@/lib/slash-command";
 import { parseQuotedUserMessage } from "@/lib/user-message-quote";
@@ -116,22 +117,11 @@ function useMessageCopy(content: string) {
   return { copied, label, onCopy };
 }
 
-function messageCopyContent(message: UIMessage, t: (key: string) => string) {
-  if (message.renderAs === "text") return message.content;
-  return message.role === "assistant" && message.compactReply === "empty"
-    ? t("thread.compaction.empty")
-    : message.role === "assistant" && message.compactReply === "failed"
-      ? t("thread.compaction.failed")
-      : message.content;
-}
-
 export function MessageCopyButton({ message, className }: { message: UIMessage; className?: string }) {
-  const { t } = useTranslation();
-  const content = messageCopyContent(message, t);
+  const content = message.content;
   const { copied, label, onCopy } = useMessageCopy(content);
   if (!content.trim()) return null;
   return <HoverHint content={label} side="top" align="center"><button type="button" data-message-block-copy-action
-    data-assistant-copy-action={message.role === "assistant" || undefined}
     onClick={onCopy} aria-label={label}
     className={cn(
       "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
@@ -171,7 +161,7 @@ export function MessageBlockMenuActions({
   sheet = false,
 }: MessageBlockMenuActionsProps) {
   const { t } = useTranslation();
-  const content = messageCopyContent(message, t);
+  const content = message.content;
   const hasText = content.trim().length > 0;
   const showFork = message.role === "assistant"
     && !message.isStreaming
@@ -184,140 +174,91 @@ export function MessageBlockMenuActions({
     ? message.completedAt
     : message.createdAt;
   const timestampLabel = typeof timestamp === "number" && Number.isFinite(timestamp)
-    ? formatMessageEndTime(timestamp)
+    ? (sheet ? formatMessageEndTime(timestamp) : formatMessageHoverTime(timestamp))
     : "";
   const automationSourceLabel = message.role === "assistant"
     && ["cron", "local_trigger", "trigger"].includes(message.source?.kind ?? "")
     ? message.source?.label?.trim() || t("message.automationSourceFallback")
     : "";
 
+  const fallbackSources = (
+    <FallbackResponseSources
+      sources={message.role === "assistant" ? message.responseSources : undefined}
+      className={cn("min-h-[var(--message-block-control-size)] gap-1", !sheet && "min-w-8 max-w-24 flex-nowrap overflow-x-auto")}
+      badgeClassName={cn("h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]", !sheet && "min-w-8 gap-0.5 px-0")}
+    />
+  );
+  const automation = automationSourceLabel && `${t("message.automationTriggered")} ${automationSourceLabel}`;
+  const time = timestampLabel && (
+    <time data-message-timestamp data-message-hover-time={!sheet || undefined}
+      data-message-created-at={message.role === "user" || undefined}
+      data-assistant-completed-at={message.role === "assistant" && timestamp === message.completedAt || undefined}
+      dateTime={new Date(timestamp).toISOString()} tabIndex={sheet ? undefined : 0}
+      className={cn("tabular-nums", sheet ? "flex min-h-[var(--message-block-control-size)] items-center"
+        : "shrink-0 rounded-mark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}>
+      {timestampLabel}
+    </time>
+  );
+  const activityAction = activity && (
+    <button type="button" data-message-block-activity-action onClick={activity.onToggle}
+      aria-expanded={activity.expanded} aria-controls={activity.controls} aria-label={activity.label}
+      className={cn("inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        sheet && "w-full justify-start gap-2 px-2 text-sm hover:bg-muted/70")}>
+      <Activity className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
+      {sheet ? activity.label : null}
+    </button>
+  );
   return (
-      <div
-        data-message-block-menu-actions
-        className={cn("flex max-w-full flex-col items-start gap-1", sheet ? "w-full" : "w-max")}
-      >
-        {(!sheet && hasText) || showFork || onEdit || activity ? (
-          <div
-            data-message-block-toolbar
-            className={cn("flex w-full flex-wrap gap-x-1 gap-y-1", sheet ? "flex-col items-stretch" : "items-center")}
-          >
-            {(!sheet && hasText) || showFork || onEdit ? (
-              <div className="flex min-h-[var(--message-block-control-size)] items-center gap-0.5">
-                {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
-                {onEdit ? <HoverHint enabled={!sheet} content={editDisabledReason || t("message.editMessage")} side="top" align="center">
-                  <span
-                    className={cn(
-                      sheet ? "w-full" : "inline-flex rounded-control",
-                      !sheet && editDisabledReason && "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    )}
-                    tabIndex={!sheet && editDisabledReason ? 0 : undefined}
-                    aria-label={!sheet && editDisabledReason ? `${t("message.editMessage")}: ${editDisabledReason}` : undefined}
-                  >
-                    <button type="button" data-message-block-edit-action onClick={onEdit}
-                      disabled={!!editDisabledReason} aria-label={t("message.editMessage")}
-                      className={cn(
-                        "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
-                        "text-muted-foreground transition-[color,background-color] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none",
-                        sheet && "w-full justify-start gap-2 px-2 text-sm hover:bg-muted/70 disabled:hover:bg-transparent",
-                      )}>
-                      <EditIcon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
-                      {sheet ? <span>{t("message.editMessage")}</span> : null}
-                    </button>
-                    {sheet && editDisabledReason ? <span className="block px-2 pb-2 text-left text-xs text-muted-foreground">{editDisabledReason}</span> : null}
-                  </span>
-                </HoverHint> : null}
-                {showFork ? (
-                  <HoverHint content={t("message.forkFromHere")} side="top" align="center">
-                      <button
-                        type="button"
-                        data-message-block-fork-action
-                        data-assistant-fork-action
-                        onClick={onForkFromHere}
-                        aria-label={t("message.forkFromHere")}
-                        className={cn(
-                          "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
-                          "text-muted-foreground transition-colors",
-                          "hover:text-foreground",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          "motion-reduce:transform-none",
-                          sheet && "w-full justify-start gap-2 px-2 text-sm",
-                        )}
-                      >
-                        <ForkArrowIcon className="h-3.5 w-3.5" />
-                        {sheet ? <span>{t("message.forkFromHere")}</span> : null}
-                      </button>
-                  </HoverHint>
-                ) : null}
-              </div>
-            ) : null}
-            {activity ? (
-              <button
-                type="button"
-                data-message-block-activity-action
-                onClick={activity.onToggle}
-                aria-expanded={activity.expanded}
-                aria-controls={activity.controls}
-                className={cn(
-                  "group inline-flex min-h-[var(--message-block-control-size)] self-start items-center gap-1.5 whitespace-nowrap",
-                  "text-start text-[11px] leading-4",
-                  "text-muted-foreground transition-colors hover:text-foreground",
-                  "focus-visible:outline-none",
-                  sheet && "w-full gap-2 rounded-control px-2 text-sm hover:bg-muted/70",
-                )}
-              >
-                <span
-                  data-message-block-activity-icon
-                  className={cn(
-                    "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] shrink-0 items-center justify-center rounded-control",
-                    "transition-colors",
-                    "group-focus-visible:ring-2 group-focus-visible:ring-ring",
-                    "motion-reduce:transform-none",
-                    sheet && "w-3.5",
-                  )}
-                >
-                  <Activity className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
-                </span>
-                <span>{activity.label}</span>
+    <div className={sheet ? "flex w-full flex-col gap-1" : "flex min-w-0 flex-col items-start"}>
+      <div className={sheet ? "flex flex-col items-stretch gap-1" : "flex max-w-full items-center"}>
+        {!sheet && hasText ? <MessageCopyButton message={message} className="shrink-0" /> : null}
+        {!sheet && fallbackSources}
+        {onEdit ? (
+          <HoverHint enabled={!sheet} content={editDisabledReason || t("message.editMessage")}>
+            <span
+              className={cn(sheet ? "w-full" : "inline-flex rounded-control",
+                !sheet && editDisabledReason && "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+              tabIndex={!sheet && editDisabledReason ? 0 : undefined}
+              aria-label={!sheet && editDisabledReason ? `${t("message.editMessage")}: ${editDisabledReason}` : undefined}
+            >
+              <button type="button" data-message-block-edit-action onClick={onEdit}
+                disabled={!!editDisabledReason} aria-label={t("message.editMessage")}
+                className={cn("inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                  sheet && "w-full justify-start gap-2 px-2 text-sm hover:bg-muted/70 disabled:hover:bg-transparent")}>
+                <EditIcon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+                {sheet ? t("message.editMessage") : null}
               </button>
-            ) : null}
-          </div>
+              {sheet && editDisabledReason ? <span className="block px-2 pb-2 text-left text-xs text-muted-foreground">{editDisabledReason}</span> : null}
+            </span>
+          </HoverHint>
         ) : null}
-        <FallbackResponseSources
-          sources={message.role === "assistant" ? message.responseSources : undefined}
-          className="min-h-[var(--message-block-control-size)] gap-1"
-          badgeClassName="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
-        />
-        {timestampLabel || automationSourceLabel ? (
-          <div
-            data-message-block-metadata
-            className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4 text-muted-foreground", sheet ? "px-2 text-xs" : "text-[10px]")}
-          >
-            {timestampLabel ? (
-              <time
-                data-message-timestamp
-                data-message-created-at={message.role === "user" || undefined}
-                data-assistant-completed-at={
-                  message.role === "assistant" && timestamp === message.completedAt || undefined
-                }
-                dateTime={new Date(timestamp).toISOString()}
-                className="flex min-h-[var(--message-block-control-size)] items-center tabular-nums"
-              >
-                {timestampLabel}
-              </time>
-            ) : null}
-            {automationSourceLabel ? (
-              <span
-                data-automation-trigger
-                className="flex min-h-[var(--message-block-control-size)] flex-wrap items-baseline gap-x-2 break-words"
-              >
-                <span>{t("message.automationTriggered")}</span>{" "}
-                <span>{automationSourceLabel}</span>
-              </span>
-            ) : null}
-          </div>
+        {showFork ? (
+          <HoverHint content={t("message.forkFromHere")}>
+            <button type="button" onClick={onForkFromHere}
+              aria-label={t("message.forkFromHere")}
+              className={cn("inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                sheet && "w-full justify-start gap-2 px-2 text-sm")}>
+              <ForkArrowIcon className="h-3.5 w-3.5" />
+              {sheet ? t("message.forkFromHere") : null}
+            </button>
+          </HoverHint>
         ) : null}
+        {activityAction && !sheet ? <HoverHint content={activity.label}>{activityAction}</HoverHint> : activityAction}
       </div>
+      {sheet && fallbackSources}
+      {(time || automation) && (
+        <div data-message-block-metadata className={cn("leading-4 text-muted-foreground", sheet
+          ? "mt-0.5 w-full border-t border-border/45 px-2 pt-1 text-xs"
+          : "flex max-w-full items-center gap-1 ps-[calc((var(--message-block-action-width)-0.875rem)/2)] text-[10px]")}>
+          {time && !sheet ? <HoverHint content={fmtDateTime(timestamp)}>{time}</HoverHint> : time}
+          {automation && (sheet
+            ? <span data-automation-trigger className="flex min-h-[var(--message-block-control-size)] items-center break-words">{automation}</span>
+            : <HoverHint content={automationSourceLabel}>
+                <span data-automation-trigger tabIndex={0} className="truncate rounded-mark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("message.automationTriggered")}</span>
+              </HoverHint>)}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -352,22 +293,17 @@ function deliveryErrorCopy(
 function UserDeliveryStatus({
   status,
   errorKind,
+  errorDetail,
 }: {
   status: MessageDeliveryStatus | undefined;
   errorKind: MessageDeliveryErrorKind | undefined;
+  errorDetail?: string;
 }) {
   const { t } = useTranslation();
-  if (status !== "sending" && status !== "failed") return null;
-  if (status === "sending") {
-    return (
-      <span
-        role="status"
-        className="inline-flex items-center gap-1 text-[12px] leading-none text-muted-foreground"
-      >
-        <Clock3 className="h-3.5 w-3.5" aria-hidden />
-        {t("message.delivery.sending")}
-      </span>
-    );
+  if (status !== "failed") return null;
+
+  if (errorDetail === "temporary_chat_command_rejected") {
+    return <span role="alert" className="text-[12px] text-destructive">{t("errors.turnRejected.temporaryCommand")}</span>;
   }
 
   const label = t("message.delivery.failed");
@@ -490,8 +426,8 @@ export function MessageBubble({
     const parsedMessage = parseQuotedUserMessage(message.content);
     const userContent = parsedMessage.content;
     const hasText = userContent.trim().length > 0;
-    const showDeliveryStatus =
-      message.deliveryStatus === "sending" || message.deliveryStatus === "failed";
+    const isSending = message.deliveryStatus === "sending";
+    const isFailed = message.deliveryStatus === "failed";
     const processingStatus = message.processingStatus;
     const showProcessingStatus = !temporary && processingStatus === "pending";
     const mediaEdgeState: PendingEdgeState = !hasText ? edgeState : "solid";
@@ -499,8 +435,17 @@ export function MessageBubble({
     const userMedia = hasImages
       ? <ImageGallery images={images} align="right" size="compact" edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
       : hasMedia
-        ? <MessageMedia media={media} align="right" pending={message.deliveryStatus === "sending"} edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
+        ? <MessageMedia media={media} align="right" pending={isSending} edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
         : null;
+    const sendingIndicator = isSending ? (
+      <span
+        aria-hidden="true"
+        data-sending-indicator
+        className="user-message-sending-indicator pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground/65"
+      >
+        <LoadingRing className="size-3.5" strokeWidth="2.4" />
+      </span>
+    ) : null;
     const quotedContext = parsedMessage.quotedContext;
     const slashCommand = matchingSlashCommand(userContent, slashCommands);
     const bangPrefix = /^(\s*)!/.exec(userContent);
@@ -533,7 +478,14 @@ export function MessageBubble({
     return (
       <div className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5">
         {!hasText ? contextMenu : null}
-        {userMedia}
+        {!hasText ? sendingIndicator : null}
+        {userMedia ? (
+          !hasText ? (
+            <div className={cn("transition-opacity duration-200 ease-out motion-reduce:transition-none", isSending && "opacity-65")}>
+              {userMedia}
+            </div>
+          ) : userMedia
+        ) : null}
         {quotedContext ? (
           <UserQuotedContext
             text={quotedContext}
@@ -546,6 +498,7 @@ export function MessageBubble({
             textEditor={editor?.input}
             contentKey={userContent}
             temporary={temporary}
+            sendingIndicator={sendingIndicator}
             showProcessingStatus={showProcessingStatus}
             edgeState={edgeState}
             onSealEnd={completeSeal}
@@ -555,16 +508,21 @@ export function MessageBubble({
           </UserTextBubble>
         ) : null}
         {editor?.actions}
-        {!showDeliveryStatus && showProcessingStatus ? (
+        {isSending ? (
+          <span role="status" className="sr-only">
+            {t("message.delivery.sending")}
+          </span>
+        ) : !isFailed && showProcessingStatus ? (
           <span role="status" className="sr-only">
             {t("message.delivery.waiting")}
           </span>
         ) : null}
-        {showDeliveryStatus ? (
-            <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
+        {isFailed ? (
+            <div className="flex min-h-6 items-center justify-end gap-1.5 text-muted-foreground">
               <UserDeliveryStatus
                 status={message.deliveryStatus}
                 errorKind={message.deliveryErrorKind}
+                errorDetail={message.deliveryErrorDetail}
               />
             </div>
         ) : null}
@@ -572,7 +530,7 @@ export function MessageBubble({
     );
   }
 
-  const assistantContent = messageCopyContent(message, t);
+  const assistantContent = message.content;
   const empty = assistantContent.trim().length === 0;
   const media = message.media ?? [];
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
@@ -635,6 +593,7 @@ interface UserTextBubbleProps {
   contentKey: string;
   textEditor?: ReactNode;
   temporary: boolean;
+  sendingIndicator: ReactNode;
   showProcessingStatus: boolean;
   edgeState: PendingEdgeState;
   onSealEnd: () => void;
@@ -647,6 +606,7 @@ function UserTextBubble({
   contentKey,
   textEditor,
   temporary,
+  sendingIndicator,
   showProcessingStatus,
   edgeState,
   onSealEnd,
@@ -762,6 +722,7 @@ function UserTextBubble({
       className="relative ml-auto w-fit max-w-full min-w-0"
     >
       {contextMenu}
+      {sendingIndicator}
       <div
         data-user-message-body
         data-editing={editing ? "true" : undefined}
@@ -777,6 +738,8 @@ function UserTextBubble({
             ? "border border-dashed border-muted-foreground/40 bg-transparent"
             : "user-message-surface bg-secondary/70",
           showProcessingStatus && "user-message-surface-dashed",
+          "transition-opacity duration-200 ease-out motion-reduce:transition-none",
+          sendingIndicator && "opacity-65",
           isCollapsible && "user-message-collapsible",
         )}
       >

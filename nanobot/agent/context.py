@@ -1,6 +1,7 @@
 import base64
 import mimetypes
 import platform
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, cast
@@ -18,7 +19,7 @@ from nanobot.runtime_context import (
 )
 from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.session.manager import Session
-from nanobot.session.summary import SessionSummary
+from nanobot.session.summary import SessionSummary, is_empty_summary
 from nanobot.utils.helpers import detect_image_mime, load_bundled_template
 from nanobot.utils.prompt_templates import render_template
 
@@ -73,9 +74,13 @@ class ContextBuilder:
     _SKIPPABLE_DEFAULTS = {"AGENTS.md", "USER.md"}
     _MEMORY_SKILLS = frozenset({"memory"})
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(
+        self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None,
+        *, reply_format_for: Callable[[str], str] | None = None,
+    ):
         self.workspace = workspace
         self.timezone = timezone
+        self._reply_format_for = reply_format_for
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
@@ -131,12 +136,8 @@ class ContextBuilder:
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary, track_source=True))
 
-        if session_summary and session_summary["text"] != "(nothing)":
-            parts.append(
-                "[Archived Context Summary]\n\n"
-                f"Previous conversation summary (last active {session_summary['last_active']}):\n"
-                f"{session_summary['text']}"
-            )
+        if session_summary and not is_empty_summary(session_summary["text"]):
+            parts.append(f"[Archived Context Summary]\n\n{session_summary['text']}")
 
         return "\n\n---\n\n".join(parts)
 
@@ -157,7 +158,7 @@ class ContextBuilder:
             include_memory=include_memory,
             runtime=runtime,
             platform_policy=render_template("agent/platform_policy.md", system=system),
-            channel=channel or "",
+            reply_format=self._reply_format_for(channel) if channel and self._reply_format_for else "",
         )
 
     @staticmethod

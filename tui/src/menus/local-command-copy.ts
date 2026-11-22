@@ -1,0 +1,111 @@
+import type { TuiCommand } from "./command-menu"
+
+type Labels = readonly [title: string, description: string]
+type MenuLabels = Record<TuiCommand["action"], Labels>
+
+// Gateway command labels belong to the shared command catalog. These actions exist only in the TUI.
+const labels: Record<string, MenuLabels> = {
+  "zh-CN": {
+    sessions: ["切换对话", "查找并切换对话"],
+    "new-chat": ["新建对话", "保留当前对话并另开一个对话"],
+    context: ["助手上下文", "查看本次对话会向下一条提示提供什么内容"],
+    usage: ["Token 用量", "查看上下文占用和最近模型调用的输入 Token 数"],
+    diagrams: ["Mermaid 图表", "查看、缩放和复制对话中的图表 (Ctrl+G)"],
+    diff: ["上轮改动", "查看上一轮修改的文件"],
+    branch: ["从回复分支", "从之前已完成的回复继续对话"],
+    detach: ["断开终端", "关闭终端界面，让助手继续运行"],
+    exit: ["退出", "关闭终端界面"],
+  },
+  "zh-TW": {
+    sessions: ["切換對話", "尋找並切換對話"],
+    "new-chat": ["新增對話", "保留目前對話並開始另一個對話"],
+    context: ["助理上下文", "查看這段對話會為下一個提示提供哪些內容"],
+    usage: ["Token 用量", "查看上下文使用量和近期模型呼叫的輸入 Token 數"],
+    diagrams: ["Mermaid 圖表", "檢視、縮放及複製對話中的圖表 (Ctrl+G)"],
+    diff: ["上輪變更", "檢視上一輪變更的檔案"],
+    branch: ["從回覆分支", "從先前已完成的回覆繼續對話"],
+    detach: ["中斷連線", "關閉終端介面，讓助理繼續執行"],
+    exit: ["離開", "關閉終端介面"],
+  },
+  fr: {
+    sessions: ["Conversations", "Rechercher une conversation et y accéder"],
+    "new-chat": ["Nouvelle conversation", "Conserver cette conversation et en commencer une autre"],
+    context: ["Contexte de l’agent", "Voir ce que cette conversation apporte à la prochaine requête"],
+    usage: ["Utilisation des jetons", "Voir l’occupation du contexte et les jetons d’entrée des appels récents"],
+    diagrams: ["Diagrammes Mermaid", "Afficher, agrandir et copier les diagrammes de la conversation (Ctrl+G)"],
+    diff: ["Dernières modifications", "Examiner les fichiers modifiés au dernier tour"],
+    branch: ["Créer une branche", "Repartir d’une réponse précédente terminée"],
+    detach: ["Détacher le terminal", "Fermer le terminal sans arrêter l’agent"],
+    exit: ["Quitter", "Fermer l’interface du terminal"],
+  },
+  ja: {
+    sessions: ["会話の切り替え", "会話を検索して切り替える"],
+    "new-chat": ["新しい会話", "この会話を残して別の会話を始める"],
+    context: ["エージェントのコンテキスト", "この会話から次のプロンプトに含まれる内容を確認する"],
+    usage: ["トークン使用量", "コンテキストの使用量と最近のモデル呼び出しの入力トークン数を表示する"],
+    diagrams: ["Mermaid 図", "会話内の図を表示、拡大縮小、コピーする (Ctrl+G)"],
+    diff: ["直前の変更", "直前のターンで変更されたファイルを確認する"],
+    branch: ["返信から分岐", "以前の完了済みの返信から会話を続ける"],
+    detach: ["切り離す", "エージェントを実行したまま端末画面を閉じる"],
+    exit: ["終了", "端末画面を閉じる"],
+  },
+  ko: {
+    sessions: ["대화 전환", "대화를 찾아 전환합니다"],
+    "new-chat": ["새 대화", "현재 대화를 보관하고 새 대화를 시작합니다"],
+    context: ["에이전트 컨텍스트", "이 대화에서 다음 프롬프트에 포함되는 내용을 확인합니다"],
+    usage: ["토큰 사용량", "컨텍스트 사용량과 최근 모델 호출의 입력 토큰 수를 확인합니다"],
+    diagrams: ["Mermaid 다이어그램", "대화의 다이어그램을 보고 확대·축소하거나 복사합니다 (Ctrl+G)"],
+    diff: ["최근 변경 사항", "마지막 턴에서 변경된 파일을 확인합니다"],
+    branch: ["답변에서 분기", "이전에 완료된 답변부터 대화를 이어갑니다"],
+    detach: ["터미널 분리", "에이전트를 계속 실행한 채 터미널 화면을 닫습니다"],
+    exit: ["종료", "터미널 화면을 닫습니다"],
+  },
+  es: {
+    sessions: ["Conversaciones", "Busca y cambia de conversación"],
+    "new-chat": ["Nueva conversación", "Conserva esta conversación y empieza otra"],
+    context: ["Contexto del agente", "Consulta qué aporta esta conversación a la próxima solicitud"],
+    usage: ["Uso de tokens", "Consulta el uso del contexto y los tokens de entrada de las últimas llamadas al modelo"],
+    diagrams: ["Diagramas Mermaid", "Ve, amplía y copia diagramas de la conversación (Ctrl+G)"],
+    diff: ["Últimos cambios", "Revisa los archivos modificados en el último turno"],
+    branch: ["Crear una rama", "Continúa desde una respuesta anterior completada"],
+    detach: ["Desconectar", "Cierra la interfaz de terminal sin detener el agente"],
+    exit: ["Salir", "Cierra la interfaz de terminal"],
+  },
+  "pt-BR": {
+    sessions: ["Conversas", "Encontre uma conversa e alterne para ela"],
+    "new-chat": ["Nova conversa", "Mantenha esta conversa e comece outra"],
+    context: ["Contexto do agente", "Veja o que esta conversa inclui no próximo prompt"],
+    usage: ["Uso de tokens", "Confira o uso do contexto e os tokens de entrada das chamadas recentes ao modelo"],
+    diagrams: ["Diagramas Mermaid", "Visualize, amplie e copie os diagramas da conversa (Ctrl+G)"],
+    diff: ["Últimas alterações", "Revise os arquivos alterados no último turno"],
+    branch: ["Ramificar conversa", "Continue a partir de uma resposta anterior concluída"],
+    detach: ["Desconectar", "Feche a interface do terminal sem interromper o agente"],
+    exit: ["Sair", "Feche a interface do terminal"],
+  },
+  vi: {
+    sessions: ["Cuộc trò chuyện", "Tìm và chuyển cuộc trò chuyện"],
+    "new-chat": ["Cuộc trò chuyện mới", "Giữ lại cuộc trò chuyện này và bắt đầu cuộc trò chuyện khác"],
+    context: ["Ngữ cảnh tác tử", "Xem nội dung cuộc trò chuyện sẽ đưa vào lời nhắc tiếp theo"],
+    usage: ["Mức dùng token", "Xem dung lượng ngữ cảnh đã dùng và số token đầu vào trong các lần gọi mô hình gần đây"],
+    diagrams: ["Sơ đồ Mermaid", "Xem, thu phóng và sao chép sơ đồ trong cuộc trò chuyện (Ctrl+G)"],
+    diff: ["Thay đổi ở lượt cuối", "Kiểm tra những tệp đã thay đổi ở lượt gần nhất"],
+    branch: ["Tạo nhánh hội thoại", "Tiếp tục từ một câu trả lời đã hoàn tất trước đó"],
+    detach: ["Ngắt kết nối", "Đóng giao diện dòng lệnh nhưng giữ tác tử chạy"],
+    exit: ["Thoát", "Đóng giao diện dòng lệnh"],
+  },
+  id: {
+    sessions: ["Percakapan", "Cari dan beralih ke percakapan lain"],
+    "new-chat": ["Percakapan baru", "Simpan percakapan ini dan mulai percakapan lain"],
+    context: ["Konteks agen", "Lihat isi percakapan yang disertakan dalam prompt berikutnya"],
+    usage: ["Penggunaan token", "Lihat penggunaan konteks dan jumlah token masukan dari panggilan model terakhir"],
+    diagrams: ["Diagram Mermaid", "Lihat, perbesar, dan salin diagram dalam percakapan (Ctrl+G)"],
+    diff: ["Perubahan terakhir", "Periksa perubahan berkas pada giliran terakhir"],
+    branch: ["Cabangkan percakapan", "Lanjutkan dari balasan sebelumnya yang sudah selesai"],
+    detach: ["Putuskan sambungan", "Tutup antarmuka terminal tanpa menghentikan agen"],
+    exit: ["Keluar", "Tutup antarmuka terminal"],
+  },
+}
+
+export function localCommandLabels(command: TuiCommand, locale: string): Labels {
+  return labels[locale]?.[command.action] ?? [command.title, command.description]
+}

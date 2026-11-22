@@ -1,0 +1,112 @@
+{
+  "setup": {
+    "docsLabel": "מדריך להגדרת Mattermost",
+    "officialLabel": "מדריך הבוטים של Mattermost",
+    "fields": {
+      "serverUrl": {
+        "label": "כתובת השרת",
+        "placeholder": "https://mattermost.example.com"
+      },
+      "token": {
+        "label": "אסימון גישה של הבוט",
+        "placeholder": "אסימון הגישה של הבוט ב־Mattermost"
+      },
+      "teamId": {
+        "label": "מזהה צוות",
+        "placeholder": "מזהה צוות (לא חובה)"
+      },
+      "groupPolicy": {
+        "label": "כללים לערוצים",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות",
+          "allowlist": "רשימת מורשים"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "כללים לשרשורים",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות (אין צורך באזכור)",
+          "allowlist": "רשימת מורשים"
+        }
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי משתמשים בהפרדה בפסיקים"
+      },
+      "allowFromMatchMode": {
+        "label": "זיהוי משתמשים לפי",
+        "choices": {
+          "email": "כתובת דוא״ל",
+          "id": "מזהה משתמש",
+          "username": "שם משתמש"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "ערוצים מורשים"
+      },
+      "replyInThread": {
+        "label": "מענה בתוך השרשור",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "includeThreadContext": {
+        "label": "הכללת ההקשר מהשרשור",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "threadContextLimit": {
+        "label": "מספר הודעות מרבי להקשר בשרשור"
+      },
+      "streaming": {
+        "label": "הזרמה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "reactEmoji": {
+        "label": "אימוג׳י לאישור קריאה"
+      },
+      "doneEmoji": {
+        "label": "אימוג׳י לציון סיום הטיפול"
+      },
+      "sendProgress": {
+        "label": "שליחת עדכוני התקדמות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "sendToolHints": {
+        "label": "עדכונים על הפעלת כלים",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "dm_enabled": {
+        "label": "הפעלת הודעות ישירות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "dm_policy": {
+        "label": "הרשאה לשליחת הודעות ישירות",
+        "choices": {
+          "allowlist": "רשימת מורשים",
+          "open": "פתוח לכולם"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "משתמשים המורשים לשלוח הודעות ישירות"
+      }
+    }
+  }
+}

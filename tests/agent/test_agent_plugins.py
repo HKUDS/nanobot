@@ -6,8 +6,8 @@ from threading import Event, Thread
 
 import pytest
 
+from agent.session_helpers import make_agent_loop
 from nanobot.agent import plugins as agent_plugins
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.plugins import (
     AGENT_PLUGIN_MCP_SCHEMA,
     AGENT_PLUGIN_SCHEMA,
@@ -146,9 +146,9 @@ async def test_prompt_snapshot_uses_approved_plugin_bytes_after_replacement(
     set_agent_plugin_enabled(workspace, "demo", True)
     provider = CaptureProvider()
     sessions = SessionManager(workspace, sessions_root=tmp_path / "sessions")
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(), provider=provider, workspace=workspace, session_manager=sessions,
-        model="test", context_window_tokens=64000, max_iterations=1,
+        model="test", context_window_tokens=64000, max_tool_iterations=1,
     )
     loop.context.skills = SkillsLoader(workspace, builtin_skills_dir=builtin)
     reached = Event()

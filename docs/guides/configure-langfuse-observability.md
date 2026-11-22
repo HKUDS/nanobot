@@ -46,7 +46,7 @@ nanobot agent -m "Hello!"
 
 ## Production notes
 
-- Langfuse is configured with environment variables, not `config.json`.
+- Keep the keys and service URL in the environment. To pause or resume tracing, change the Langfuse switch in WebUI Settings → System and restart nanobot.
 - Start services from an environment that exports the same variables.
 - Add tracing after the provider works; it should not be the first setup step.
 - Native providers other than Codex OAuth that do not use the OpenAI-compatible client path may not produce Langfuse traces.

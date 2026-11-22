@@ -11,11 +11,7 @@ DREAM_CURSOR_PATH = Path("memory/.dream_cursor")
 
 
 def get_config_path() -> Path:
-    """Get the configuration file path (lazy import to break circular dependency).
-
-    Delegates to ``nanobot.config.loader.get_config_path`` at call time so
-    that importing this module never triggers a circular import during startup.
-    """
+    """Import the loader lazily to avoid a startup import cycle."""
     from nanobot.config.loader import get_config_path as _loader_get_config_path
     return _loader_get_config_path()
 

@@ -751,7 +751,6 @@ class DingTalkChannel(BaseChannel):
             if ok:
                 continue
             self.logger.error("media send failed for {}", media_ref)
-            # Send visible fallback so failures are observable by the user.
             filename = self._guess_filename(media_ref, self._guess_upload_type(media_ref))
             if not await self._send_markdown_text(
                 token,

@@ -117,6 +117,8 @@ export type InboundEvent =
       chat_id: string
       text: string
       render_as?: "text"
+      side_channel?: true
+      command_result?: unknown
       kind?: "tool_hint" | "progress" | "reasoning"
       tool_events?: ToolProgressEvent[]
       turn_id?: string
@@ -190,6 +192,7 @@ export type OutboundEvent =
       content: string
       turn_id: string
       webui: true
+      locale?: string
       workspace_scope?: WorkspaceScopePayload
       media?: import("../../../packages/client-events/attachments").AttachmentReference[]
       cli_apps?: Array<{ name: string }>
@@ -228,7 +231,7 @@ export type ApiReauthenticator = (
 ) => Promise<GatewayApiConnection>
 
 export interface HistoryMessage {
-  role: "user" | "assistant" | "activity"
+  role: "user" | "assistant" | "activity" | "error"
   content: string
   renderAs?: "text"
   turnId?: string

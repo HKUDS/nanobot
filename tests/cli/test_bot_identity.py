@@ -33,25 +33,17 @@ def test_bot_icon_accepts_empty_string_to_omit() -> None:
 def test_stream_renderer_propagates_bot_name_to_spinner_text(capsys) -> None:
     spinner = ThinkingSpinner(bot_name="mybot")
 
-    # rich.Status keeps the renderable on its internal _renderable attribute;
-    # the spinner text is exposed via its underlying status text.
     rendered = spinner._spinner.status
     assert "mybot is thinking..." in rendered
 
 
-def test_stream_renderer_header_combines_icon_and_name() -> None:
+def test_stream_renderer_header_combines_icon_and_name(capsys) -> None:
     renderer = StreamRenderer(show_spinner=False, bot_name="mybot", bot_icon="🤖")
+    renderer.ensure_header()
+    assert capsys.readouterr().out.splitlines()[-1] == "🤖 mybot"
 
-    assert renderer._bot_name == "mybot"
-    assert renderer._bot_icon == "🤖"
 
-
-def test_stream_renderer_empty_icon_omits_leading_space() -> None:
+def test_stream_renderer_empty_icon_omits_leading_space(capsys) -> None:
     renderer = StreamRenderer(show_spinner=False, bot_name="mybot", bot_icon="")
-
-    header = (
-        f"{renderer._bot_icon} {renderer._bot_name}"
-        if renderer._bot_icon
-        else renderer._bot_name
-    )
-    assert header == "mybot"
+    renderer.ensure_header()
+    assert capsys.readouterr().out.splitlines()[-1] == "mybot"

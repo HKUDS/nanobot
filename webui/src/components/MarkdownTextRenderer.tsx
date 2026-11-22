@@ -16,6 +16,7 @@ import remarkMath from "remark-math";
 import { Streamdown, type Components, type StreamdownProps } from "streamdown";
 import remend from "remend";
 import type { ListItem, Nodes, Root } from "mdast";
+import type { Plugin } from "unified";
 
 import { parseMathAwareMarkdownBlocks } from "@/lib/markdown-streaming-blocks";
 
@@ -166,6 +167,11 @@ function normalizeSafeInlineHtml(children: MarkdownAstNode[]): MarkdownAstNode[]
       node.children = normalizeSafeInlineHtml(node.children);
     }
 
+    if (node.type === "html" && /^<br\s*\/?>$/i.test(node.value ?? "")) {
+      next.push(safeHtmlNode("br", []));
+      continue;
+    }
+
     const tag = htmlTag(node);
     if (!tag || tag.closing || !SAFE_INLINE_HTML_TAGS.has(tag.tag)) {
       next.push(node);
@@ -258,8 +264,23 @@ function remarkSafeHtmlSubset() {
   };
 }
 
+// CommonMark also emits a code node at EOF without a closing fence. Mark only
+// a real closing delimiter, while its code body is still on the compiler stack.
+const remarkClosedMermaidFences: Plugin<[], Root> = function () {
+  const data = this.data();
+  (data.fromMarkdownExtensions ??= []).push({ enter: {
+    codeFencedFenceSequence() {
+      const code = this.stack.at(-2);
+      if (code?.type === "code" && code.lang?.toLowerCase() === "mermaid") {
+        (code.data ??= {}).hProperties = { "data-fence-closed": "true" };
+      }
+    },
+  } });
+};
+
 const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
   remarkCjkFriendly,
+  remarkClosedMermaidFences,
   remarkBreaks,
   [remarkGfm, { singleTilde: false }],
   remarkCjkAutolinks,
@@ -509,13 +530,14 @@ function useFaviconFallback(host: string) {
   };
 }
 
-function codeFenceFromPreChild(value: ReactNode): { code: string; language?: string } | null {
+function codeFenceFromPreChild(value: ReactNode): { code: string; language?: string; closed: boolean } | null {
   if (!isValidElement(value)) return null;
-  const props = value.props as { className?: unknown; children?: ReactNode };
+  const props = value.props as { className?: unknown; children?: ReactNode; "data-fence-closed"?: string };
   if (!("children" in props)) return null;
   const className = typeof props.className === "string" ? props.className : "";
   const language = /language-([^\s]+)/.exec(className)?.[1];
   return {
+    closed: props["data-fence-closed"] === "true",
     code: nodeText(props.children).replace(/\n$/, ""),
     language,
   };
@@ -593,7 +615,7 @@ export default function MarkdownTextRenderer({
         const fence = codeFenceFromPreChild(lone);
         if (fence) {
           return (
-            <MarkdownCodeBlock language={fence.language} code={fence.code} />
+            <MarkdownCodeBlock {...fence} />
           );
         }
         return (

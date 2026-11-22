@@ -2,7 +2,6 @@ import asyncio
 import json
 import time
 import uuid
-from contextlib import suppress
 from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import datetime
@@ -34,6 +33,10 @@ from nanobot.utils.run_records import (
 
 class CronJobSkippedError(Exception):
     """Raised by cron callbacks when a job was intentionally skipped."""
+
+
+class _UnreadableStoreError(RuntimeError):
+    pass
 
 
 def _now_ms() -> int:
@@ -251,19 +254,8 @@ class CronService:
             changed = self._enforce_agent_binding(job) or changed
         return changed
 
-    def _load_jobs(self) -> tuple[list[CronJob], int] | None:
-        """Load jobs from disk.
-
-        Returns:
-            ``(jobs, version)`` tuple on success or when no store file exists
-            (in which case an empty list and version 1 are returned).
-            ``None`` when the store file exists but cannot be parsed; the
-            corrupt file is preserved with a ``.corrupt-<ts>`` suffix so the
-            caller can decide whether to overwrite or bail out.  Returning a
-            sentinel here is important: silently treating a parse error as an
-            empty job list would cause the next ``_save_store`` to wipe every
-            job from disk.
-        """
+    def _load_jobs(self) -> tuple[list[CronJob], int]:
+        """A missing store starts empty; an unreadable store needs manual recovery."""
         jobs: list[CronJob] = []
         version = 1
         if self.store_path.exists():
@@ -275,22 +267,22 @@ class CronService:
                     job = CronJob.from_store_dict(j)
                     _normalize_agent_turn_job(job)
                     jobs.append(job)
-            except Exception:
-                # Preserve the corrupt file for forensic recovery instead of
-                # letting the next save overwrite it with an empty job list.
+            except Exception as load_error:
                 backup = self.store_path.with_suffix(
                     self.store_path.suffix + f".corrupt-{int(time.time())}"
                 )
-                with suppress(OSError):
+                try:
                     self.store_path.rename(backup)
-                logger.exception(
-                    "Failed to load cron store at {}. "
-                    "Corrupt file preserved at {}. "
-                    "Refusing to overwrite to avoid data loss.",
-                    self.store_path,
-                    backup,
+                except OSError as rename_error:
+                    recovery = f"Backup rename failed ({rename_error}); inspect the original path."
+                else:
+                    recovery = f"Inspect the backup at {backup}."
+                message = (
+                    f"Could not load cron store at {self.store_path} (possibly corrupt). "
+                    f"{recovery} Repair or restore jobs.json manually."
                 )
-                return None
+                logger.exception(message)
+                raise _UnreadableStoreError(message) from load_error
         return jobs, version
 
     def _merge_action(self, store: CronStore) -> None:
@@ -337,18 +329,8 @@ class CronService:
                 self._action_path.write_text("", encoding="utf-8")
         return
 
-    def _load_store(self, *, reload_during_execution: bool = False) -> CronStore | None:
-        """Load jobs from disk. Reloads automatically if file was modified externally.
-        - Reload every time because it needs to merge operations on the jobs object from other instances.
-        - During job execution, return the existing store to prevent concurrent
-          _load_store calls (e.g. from list_jobs polling) from replacing it mid-execution.
-          The first execution explicitly reloads once when it takes ownership.
-        - When the on-disk store exists but is unreadable: keep using the
-          previous in-memory ``self._store`` if we already have one (so a
-          transient corruption does not drop live jobs); only the very first
-          load (during ``start``) can return ``None`` to signal an unrecoverable
-          state to the caller.
-        """
+    def _load_store(self, *, reload_during_execution: bool = False) -> CronStore:
+        """Reload external edits between executions without replacing a live or unsaved snapshot."""
         # Never replace state that a previous save failed to persist.  Reloading
         # the older on-disk snapshot here could make an already executed job due
         # again and repeat its side effect.
@@ -356,31 +338,18 @@ class CronService:
             return self._store
         if self._active_executions > 0 and self._store and not reload_during_execution:
             return self._store
-        loaded = self._load_jobs()
-        if loaded is None:
-            # Corrupt store on disk.  Prefer the last good in-memory snapshot
-            # over wiping live jobs; ``_load_jobs`` has already moved the
-            # corrupt file aside with a ``.corrupt-<ts>`` suffix.
-            if self._store is not None:
-                return self._store
-            return None
-        jobs, version = loaded
+        try:
+            jobs, version = self._load_jobs()
+        except _UnreadableStoreError:
+            if self._store is None:
+                raise
+            return self._store
         self._store = CronStore(version=version, jobs=jobs)
         self._merge_action(self._store)
         if self._enforce_store_agent_bindings() and self._should_persist_store():
             self._save_store()
 
         return self._store
-
-    def _require_store(self, *, reload_during_execution: bool = False) -> CronStore:
-        store = self._load_store(reload_during_execution=reload_during_execution)
-        if store is None:
-            raise RuntimeError(
-                f"cron store at {self.store_path} could not be loaded and was preserved "
-                "as a .corrupt-<ts> backup; refusing to operate to avoid overwriting "
-                "scheduled jobs. Inspect the corrupt backup and restore jobs.json manually."
-            )
-        return store
 
     def _save_store(self) -> None:
         if not self._store:
@@ -461,18 +430,11 @@ class CronService:
     async def start(self) -> None:
         """Start the cron service."""
         self._running = True
-        loaded = self._load_store()
-        if loaded is None:
-            # Store file existed but was corrupt and has been preserved with
-            # a ``.corrupt-<ts>`` suffix.  Bail out instead of starting with
-            # an empty store; that would call ``_save_store`` and overwrite
-            # the now-renamed (but still recoverable) data with [].
+        try:
+            self._load_store()
+        except _UnreadableStoreError:
             self._running = False
-            raise RuntimeError(
-                f"cron store at {self.store_path} is corrupt and was preserved; "
-                "refusing to start with an empty job list. "
-                "Inspect the .corrupt-<ts> backup and restore manually."
-            )
+            raise
         self._recompute_next_runs()
         self._save_store()
         self._arm_timer()
@@ -550,10 +512,6 @@ class CronService:
                 return
 
             store = self._load_store(reload_during_execution=reload_store)
-            # If a hot reload found a corrupt store on disk, ``self._store``
-            # may still hold the previous, known-good in-memory snapshot.
-            if store is None:
-                return
 
             now = _now_ms()
             due_jobs = [
@@ -575,10 +533,6 @@ class CronService:
 
             self._save_store()
         except Exception:
-            # A load/persist failure must not kill the scheduler: keep the
-            # in-memory store and retry on the next tick.  This mirrors the
-            # read-path defense in ``_load_jobs`` (``.corrupt-<ts>`` backups);
-            # ``_load_store`` may also persist (agent-binding migrations).
             logger.exception(
                 "Cron: tick failed ({}); "
                 "keeping in-memory state and retrying on next tick",
@@ -600,9 +554,13 @@ class CronService:
             if self.on_job:
                 result = await self.on_job(job)
 
-            job.state.last_status = "ok"
-            job.state.last_error = None
-            logger.info("Cron: job '{}' completed", job.name)
+            job.state.last_error = result.error if isinstance(result, CronRunResult) else None
+            if job.state.last_error:
+                job.state.last_status = "error"
+                logger.warning("Cron: job '{}' failed: {}", job.name, job.state.last_error)
+            else:
+                job.state.last_status = "ok"
+                logger.info("Cron: job '{}' completed", job.name)
 
         except CronJobSkippedError as e:
             job.state.last_status = "skipped"
@@ -640,7 +598,7 @@ class CronService:
 
         if job.schedule.kind == "at":
             if job.delete_after_run:
-                store = self._require_store()
+                store = self._load_store()
                 store.jobs = [item for item in store.jobs if item.id != job.id]
             else:
                 job.enabled = False
@@ -671,7 +629,7 @@ class CronService:
         if not self._running or self._active_executions or self._store_dirty:
             raise CronBindingError("busy", "automation scheduler is busy; try again when tasks finish")
         with self._lock:
-            store = self._require_store()
+            store = self._load_store()
             job = next((j for j in store.jobs if j.id == job_id), None)
             if job is None or not is_bound_cron_job(job):
                 raise CronBindingError("unavailable", "automation has no movable chat")
@@ -693,11 +651,14 @@ class CronService:
             moved.updated_at_ms = max(_now_ms(), job.updated_at_ms + 1)
             try:
                 self._write_store(candidate)
-            except OSError:
+            except OSError as write_error:
                 # Directory fsync can fail after replace. Reconcile that exact
                 # commit instead of claiming that the old binding survived.
-                loaded = self._load_jobs()
-                if loaded is None or loaded[0] != candidate.jobs:
+                try:
+                    jobs, _ = self._load_jobs()
+                except _UnreadableStoreError as load_error:
+                    raise write_error from load_error
+                if jobs != candidate.jobs:
                     raise
                 logger.warning("Cron: binding saved, but directory sync failed for {}", job_id)
             self._store = candidate
@@ -706,7 +667,7 @@ class CronService:
 
     def list_jobs(self, include_disabled: bool = False) -> list[CronJob]:
         """List all jobs."""
-        store = self._require_store()
+        store = self._load_store()
         jobs = store.jobs if include_disabled else [j for j in store.jobs if j.enabled]
         return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float('inf'))
 
@@ -768,7 +729,7 @@ class CronService:
         _normalize_agent_turn_job(job)
         self._enforce_agent_binding(job)
         if self._should_persist_store():
-            store = self._require_store()
+            store = self._load_store()
             store.jobs.append(job)
             self._save_store()
             self._arm_timer()
@@ -780,7 +741,7 @@ class CronService:
 
     def register_system_job(self, job: CronJob) -> CronJob:
         """Register an internal system job (idempotent on restart)."""
-        store = self._require_store()
+        store = self._load_store()
         now = _now_ms()
         existing = next((j for j in store.jobs if j.id == job.id), None)
         persisted_ms = (
@@ -800,7 +761,7 @@ class CronService:
 
     def remove_system_job(self, job_id: str) -> bool:
         """Remove a protected system job during startup reconciliation."""
-        store = self._require_store()
+        store = self._load_store()
         before = len(store.jobs)
         store.jobs = [j for j in store.jobs if j.id != job_id]
         removed = len(store.jobs) < before
@@ -812,7 +773,7 @@ class CronService:
 
     def remove_job(self, job_id: str) -> Literal["removed", "protected", "not_found"]:
         """Remove a job by ID, unless it is a protected system job."""
-        store = self._require_store()
+        store = self._load_store()
         job = next((j for j in store.jobs if j.id == job_id), None)
         if job is None:
             return "not_found"
@@ -837,7 +798,7 @@ class CronService:
 
     def enable_job(self, job_id: str, enabled: bool = True) -> CronJob | None:
         """Enable or disable a job."""
-        store = self._require_store()
+        store = self._load_store()
         for job in store.jobs:
             if job.id == job_id:
                 job.enabled = enabled
@@ -873,7 +834,7 @@ class CronService:
         to update; omit (sentinel ``...``) to leave unchanged.
         Preserve the next occurrence unless the schedule actually changes.
         """
-        store = self._require_store()
+        store = self._load_store()
         job = next((j for j in store.jobs if j.id == job_id), None)
         if job is None:
             return "not_found"
@@ -929,7 +890,7 @@ class CronService:
             # in memory.
             if self._store_dirty:
                 self._save_store()
-            store = self._require_store(reload_during_execution=reload_store)
+            store = self._load_store(reload_during_execution=reload_store)
             for job in store.jobs:
                 if job.id == job_id:
                     if self._is_unbound_agent_job(job):
@@ -949,12 +910,12 @@ class CronService:
 
     def get_job(self, job_id: str) -> CronJob | None:
         """Get a job by ID."""
-        store = self._require_store()
+        store = self._load_store()
         return next((j for j in store.jobs if j.id == job_id), None)
 
     def status(self) -> dict[str, object]:
         """Get service status."""
-        store = self._require_store()
+        store = self._load_store()
         return {
             "enabled": self._running,
             "jobs": len(store.jobs),

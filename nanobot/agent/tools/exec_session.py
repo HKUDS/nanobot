@@ -39,6 +39,7 @@ MAX_OUTPUT_CHARS = 50_000
 
 FinishReason = Literal[
     "exit", "max_runtime", "idle_timeout", "cancelled", "owner_closed", "shutdown", "execution_error",
+    "preempted_capacity",
 ]
 
 
@@ -68,7 +69,7 @@ class _SessionPoll:
 
     @property
     def terminated(self) -> bool:
-        return self.finish_reason in ("cancelled", "owner_closed", "shutdown")
+        return self.finish_reason in ("cancelled", "owner_closed", "shutdown", "preempted_capacity")
 
 
 @dataclass(slots=True)
@@ -183,7 +184,6 @@ class _ExecSession:
         self._execution_error: str | None = None
         self._stdout = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
         self._stderr = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
-        self._lock = asyncio.Lock()
         self._kill_task: asyncio.Task[None] | None = None
         self._stdout_task = asyncio.create_task(self._read_stream(process.stdout, self._stdout))
         self._stderr_task = asyncio.create_task(self._read_stream(process.stderr, self._stderr))
@@ -199,6 +199,10 @@ class _ExecSession:
     @property
     def process(self) -> asyncio.subprocess.Process:
         return self._process_tree.process
+
+    @property
+    def running(self) -> bool:
+        return not self._execution_exited and self._stop_reason is None and self.cleanup_error is None
 
     @property
     def stopping(self) -> bool:
@@ -303,8 +307,7 @@ class _ExecSession:
                 if chunk:
                     self.last_output_at = time.monotonic()
                 text = output_filter.feed(decoder.decode(chunk, final=not chunk))
-                async with self._lock:
-                    buffer.append(text)
+                buffer.append(text)
                 if not chunk:
                     break
         except Exception as exc:
@@ -334,6 +337,12 @@ class _ExecSession:
             await self.process.stdin.wait_closed()
         return None
 
+    async def wait_yield(self, yield_time_ms: int) -> None:
+        if yield_time_ms > 0 and not self._completion_task.done():
+            await asyncio.wait(
+                {self._completion_task}, timeout=min(yield_time_ms, MAX_YIELD_MS) / 1000,
+            )
+
     async def poll(
         self,
         yield_time_ms: int,
@@ -341,18 +350,17 @@ class _ExecSession:
         *,
         stdin_closed: bool = False,
     ) -> _SessionPoll:
-        if yield_time_ms > 0 and not self._completion_task.done():
-            await asyncio.wait(
-                {self._completion_task}, timeout=min(yield_time_ms, MAX_YIELD_MS) / 1000,
-            )
+        await self.wait_yield(yield_time_ms)
         if self._completion_task.done():
             await asyncio.shield(self._completion_task)
         if self.cleanup_error is not None:
             raise RuntimeError(f"session {self.session_id} cleanup failed: {self.cleanup_error}")
 
-        async with self._lock:
-            stdout, stdout_truncated = self._stdout.drain()
-            stderr, stderr_truncated = self._stderr.drain()
+        return self.read_poll(max_output_chars, stdin_closed=stdin_closed)
+
+    def read_poll(self, max_output_chars: int, *, stdin_closed: bool = False) -> _SessionPoll:
+        stdout, stdout_truncated = self._stdout.drain()
+        stderr, stderr_truncated = self._stderr.drain()
 
         output_parts = [stdout] if stdout else []
         if stderr:
@@ -413,20 +421,30 @@ class _ExecSession:
 
 
 class ExecSessionManager:
-    def __init__(self, *, max_sessions: int = 8, result_retention: int = 1800) -> None:
+    """One event loop owns admission, promotion and process-tree cleanup for all owners."""
+
+    def __init__(
+        self, *, max_foreground: int = 8, max_sessions: int = 32, result_retention: int = 1800,
+    ) -> None:
+        if min(max_foreground, max_sessions) < 1:
+            raise ValueError("exec session limits must be positive")
+        self.max_foreground = max_foreground
         self.max_sessions = max_sessions
         self.result_retention = result_retention
+        self._slots = asyncio.Semaphore(max_foreground)
+        self._starting: dict[asyncio.Task[_ExecSession], str | None] = {}
+        self._cancelling: dict[asyncio.Task[_ExecSession], tuple[str | None, FinishReason]] = {}
+        self._foreground: dict[str, _ExecSession] = {}
         self._sessions: dict[str, _ExecSession] = {}
-        self._starting: dict[str, tuple[str | None, asyncio.Task[_ExecSession]]] = {}
-        self._stopping_launches: set[asyncio.Task[_ExecSession]] = set()
-        self._lock = asyncio.Lock()
+        self._retiring: dict[str, asyncio.Task[None]] = {}
+        self._promotion = asyncio.Lock()
         self._closed = False
 
     @property
     def has_pending_work(self) -> bool:
-        """Inspect owned work without polling, terminating or removing sessions."""
+        """Include queued work and cleanup that has not released its slot."""
         return bool(
-            self._lock.locked() or self._starting or self._stopping_launches
+            self._starting or self._cancelling or self._foreground or self._retiring
             or any(s.has_pending_work for s in self._sessions.values())
         )
 
@@ -447,45 +465,76 @@ class ExecSessionManager:
         stdin: int = asyncio.subprocess.PIPE,
         until_exit: bool = False,
     ) -> tuple[str, _SessionPoll]:
-        async with self._lock:
-            if self._closed:
-                raise RuntimeError("exec session manager is closed")
-            self._cleanup_finished_locked()
-            if len(self._sessions) + len(self._starting) >= self.max_sessions:
-                finished = [
-                    (session.finished_at, session_id)
-                    for session_id, session in self._sessions.items()
-                    if session.finished_at is not None
-                ]
-                if not finished:
-                    raise RuntimeError(f"maximum exec sessions reached ({self.max_sessions})")
-                self._sessions.pop(min(finished)[1])
-            session_id = uuid.uuid4().hex[:12]
-            launch = asyncio.create_task(self._launch(
-                session_id=session_id, command=command, cwd=cwd, env=env,
-                timeout=timeout, shell_program=shell_program, login=login,
-                owner_session_key=owner_session_key, idle_timeout=idle_timeout,
-                idle_action=idle_action, stdin=stdin,
-            ))
-            self._starting[session_id] = (owner_session_key, launch)
+        if self._closed:
+            raise RuntimeError("exec session manager is closed")
+        self._prune_results()
+        session_id = uuid.uuid4().hex[:12]
+        launch = asyncio.create_task(self._launch(
+            session_id=session_id, command=command, cwd=cwd, env=env,
+            timeout=timeout, shell_program=shell_program, login=login,
+            owner_session_key=owner_session_key, idle_timeout=idle_timeout,
+            idle_action=idle_action, stdin=stdin,
+        ))
+        self._starting[launch] = owner_session_key
+        launch.add_done_callback(self._launch_done)
         try:
-            session = await launch
-            if until_exit:
-                await session.wait_exit()
-            poll = await session.poll(yield_time_ms, max_output_chars)
-        except asyncio.CancelledError:
-            if launch.done() and not launch.cancelled() and launch.exception() is None:
-                await launch.result().kill("cancelled")
-                async with self._lock:
-                    self._sessions.pop(session_id, None)
+            session = await asyncio.shield(launch)
+            if not until_exit:
+                await session.wait_yield(yield_time_ms)
+                if await self._promote(session):
+                    return session_id, session.read_poll(max_output_chars)
+            await session.wait_exit()
+            self._release_foreground(session_id)
+            return session_id, session.read_poll(max_output_chars)
+        except BaseException:
+            if not launch.done():
+                self._cancel_launch(launch, "cancelled")
+                await self._cancel_launches([launch])
+            if session_id in self._foreground:
+                await asyncio.shield(self._retire(self._foreground[session_id], "cancelled"))
             raise
-        finally:
-            async with self._lock:
-                self._starting.pop(session_id, None)
-        if poll.done:
-            async with self._lock:
-                self._sessions.pop(session_id, None)
-        return session_id, poll
+
+    async def _promote(self, session: _ExecSession) -> bool:
+        def ready() -> bool:
+            return (
+                session.running and time.monotonic() < session.deadline
+                and session.session_id not in self._retiring
+            )
+
+        if not ready():
+            return False
+        async with self._promotion:
+            while ready():
+                active = [s for s in self._sessions.values() if s.has_pending_work]
+                if len(active) < self.max_sessions:
+                    self._sessions[session.session_id] = session
+                    self._release_foreground(session.session_id)
+                    self._prune_results()
+                    return True
+
+                retirement = next(
+                    (self._retiring[s.session_id] for s in active if s.session_id in self._retiring),
+                    None,
+                )
+                if retirement is not None:
+                    await asyncio.shield(retirement)
+                else:
+                    # Join a timeout/explicit stop (or retry failed cleanup) before
+                    # preempting a live tree. kill() preserves the first stop reason.
+                    victim = min(active, key=lambda s: (s.running, s.started_at))
+                    await victim.kill("preempted_capacity")
+            return False
+
+    def _launch_done(self, task: asyncio.Task[_ExecSession]) -> None:
+        self._starting.pop(task, None)
+        self._cancelling.pop(task, None)
+        if not task.cancelled():
+            task.exception()
+
+    def _cancel_launch(self, task: asyncio.Task[_ExecSession], reason: FinishReason) -> None:
+        if task in self._starting:
+            self._cancelling[task] = (self._starting.pop(task), reason)
+            task.cancel()
 
     async def _launch(
         self, *, session_id: str, command: str | list[str], cwd: str,
@@ -493,7 +542,7 @@ class ExecSessionManager:
         login: bool, owner_session_key: str | None, idle_timeout: int,
         idle_action: Literal["report", "terminate"], stdin: int,
     ) -> _ExecSession:
-        session: _ExecSession | None = None
+        await self._slots.acquire()
         try:
             started_at = time.monotonic()
             process_tree = await processes.spawn_process_tree(
@@ -506,23 +555,23 @@ class ExecSessionManager:
                 idle_timeout=idle_timeout, idle_action=idle_action,
                 started_at=started_at,
             )
-            async with self._lock:
-                if self._closed or session_id not in self._starting:
-                    raise RuntimeError("exec session owner closed during startup")
-                self._sessions[session_id] = session
-            return session
         except BaseException:
-            if session is not None:
-                try:
-                    await session.kill("owner_closed")
-                except BaseException:
-                    async with self._lock:
-                        self._sessions[session_id] = session
-                    raise
+            self._slots.release()
             raise
-        finally:
-            async with self._lock:
-                self._starting.pop(session_id, None)
+        self._foreground[session_id] = session
+        task = asyncio.current_task()
+        assert task is not None
+        self._starting.pop(task, None)
+        if task in self._cancelling:
+            # Spawn may return a process even if cancellation raced its handoff.
+            _, reason = self._cancelling.pop(task)
+            await asyncio.shield(self._retire(session, reason))
+            raise asyncio.CancelledError
+        return session
+
+    def _release_foreground(self, session_id: str) -> None:
+        if self._foreground.pop(session_id, None) is not None:
+            self._slots.release()
 
     async def write(
         self,
@@ -535,12 +584,11 @@ class ExecSessionManager:
         max_output_chars: int,
         owner_session_key: str | None = None,
     ) -> _SessionPoll:
-        async with self._lock:
-            self._cleanup_finished_locked()
-            session = self._sessions.get(session_id)
+        self._prune_results()
+        session = self._sessions.get(session_id)
         if session is None:
             raise KeyError(session_id)
-        if session.owner_session_key and session.owner_session_key != owner_session_key:
+        if session.owner_session_key != owner_session_key:
             raise KeyError(session_id)
 
         if chars:
@@ -561,108 +609,94 @@ class ExecSessionManager:
             stdin_closed=stdin_closed,
         )
         if poll.done:
-            async with self._lock:
-                self._sessions.pop(session_id, None)
+            self._sessions.pop(session_id, None)
         return poll
 
     async def list(self, *, owner_session_key: str | None = None) -> list[ExecSessionInfo]:
-        async with self._lock:
-            self._cleanup_finished_locked()
-            now = time.monotonic()
-            return [
-                ExecSessionInfo(
-                    session_id=session_id,
-                    command=session.command,
-                    cwd=session.cwd,
-                    elapsed_s=max(0.0, now - session.started_at),
-                    idle_s=session.output_idle_s(now),
-                    remaining_s=session.remaining_s(now),
-                    returncode=session.process.returncode,
-                    owner_session_key=session.owner_session_key,
-                    idle_timeout=session.idle_timeout,
-                    stopping=session.stopping,
-                    finish_reason=session.finish_reason,
-                    cleanup_error=session.cleanup_error,
-                )
-                for session_id, session in sorted(self._sessions.items())
-                if session.owner_session_key == owner_session_key
-            ]
+        self._prune_results()
+        now = time.monotonic()
+        return [
+            ExecSessionInfo(
+                session_id=session_id,
+                command=session.command,
+                cwd=session.cwd,
+                elapsed_s=max(0.0, now - session.started_at),
+                idle_s=session.output_idle_s(now),
+                remaining_s=session.remaining_s(now),
+                returncode=session.process.returncode,
+                owner_session_key=session.owner_session_key,
+                idle_timeout=session.idle_timeout,
+                stopping=session.stopping,
+                finish_reason=session.finish_reason,
+                cleanup_error=session.cleanup_error,
+            )
+            for session_id, session in sorted(self._sessions.items())
+            if session.owner_session_key == owner_session_key
+        ]
 
     async def close_all(self) -> int:
         """Terminate and remove all active sessions during shutdown."""
-        async with self._lock:
-            self._closed = True
-            sessions: list[_ExecSession] = list(self._sessions.values())
-            launches = [task for _, task in self._starting.values()]
-            self._starting.clear()
-        return await self._stop_owned(sessions, launches, "shutdown")
+        self._closed = True
+        return await self._stop_owned(None, "shutdown")
 
     async def terminate_by_owner(self, owner_session_key: str) -> int:
-        """Terminate all sessions owned by owner_session_key. Returns count."""
-        async with self._lock:
-            victims: list[_ExecSession] = []
-            for s in self._sessions.values():
-                if s.owner_session_key == owner_session_key:
-                    victims.append(s)
-            launches = [
-                task for owner, task in self._starting.values() if owner == owner_session_key
-            ]
-            for sid, (owner, _) in list(self._starting.items()):
-                if owner == owner_session_key:
-                    self._starting.pop(sid)
-        return await self._stop_owned(victims, launches, "owner_closed")
+        """Terminate matching work, including requests awaiting foreground admission."""
+        return await self._stop_owned(owner_session_key, "owner_closed")
 
-    async def _stop_owned(
-        self, sessions: list[_ExecSession], launches: list[asyncio.Task[_ExecSession]],
-        reason: FinishReason,
-    ) -> int:
-        # Removed startup reservations must stay visible until cancellation drains.
-        self._stopping_launches.update(launches)
-        for task in launches:
-            task.add_done_callback(self._stopping_launches.discard)
-        results: list[None | BaseException] = list(await asyncio.gather(
-            *(session.kill(reason) for session in sessions),
-            self._cancel_launches(launches),
-            return_exceptions=True,
-        ))
-        startup_error = results.pop()
-        failures = [
-            (session, result)
-            for session, result in zip(sessions, results, strict=True)
-            if isinstance(result, BaseException)
+    def _retire(self, session: _ExecSession, reason: FinishReason) -> asyncio.Task[None]:
+        sid = session.session_id
+        if sid not in self._retiring:
+            async def stop() -> None:
+                try:
+                    await session.kill(reason)
+                    self._release_foreground(sid)
+                    self._sessions.pop(sid, None)
+                finally:
+                    self._retiring.pop(sid)
+
+            self._retiring[sid] = asyncio.create_task(stop())
+        return self._retiring[sid]
+
+    async def _stop_owned(self, owner: str | None, reason: FinishReason) -> int:
+        shutdown = reason == "shutdown"
+        launches = [task for task, (key, _) in self._cancelling.items() if shutdown or key == owner]
+        for task, key in list(self._starting.items()):
+            if shutdown or key == owner:
+                self._cancel_launch(task, reason)
+                launches.append(task)
+        stops = [
+            self._retire(session, reason)
+            for session in (*self._foreground.values(), *self._sessions.values())
+            if shutdown or session.owner_session_key == owner
         ]
-        async with self._lock:
-            for session, result in zip(sessions, results, strict=True):
-                if not isinstance(result, BaseException):
-                    self._sessions.pop(session.session_id, None)
-        errors = [result for _, result in failures]
-        if isinstance(startup_error, BaseException):
-            errors.append(startup_error)
+        results = await asyncio.shield(asyncio.gather(
+            *stops, self._cancel_launches(launches), return_exceptions=True,
+        ))
+        errors = [result for result in results if isinstance(result, BaseException)]
         if len(errors) == 1:
             raise errors[0]
         if errors:
             raise BaseExceptionGroup("failed to stop owned exec sessions", errors)
-        return len(sessions) + len(launches)
+        return len(stops) + len(launches)
 
     @staticmethod
     async def _cancel_launches(launches: list[asyncio.Task[_ExecSession]]) -> None:
-        for task in launches:
-            task.cancel()
-        results = await asyncio.gather(*launches, return_exceptions=True)
+        results = await asyncio.shield(asyncio.gather(*launches, return_exceptions=True))
         errors = [result for result in results if isinstance(result, Exception)]
         if errors:
             raise ExceptionGroup("failed to cancel exec startup", errors)
 
-    def _cleanup_finished_locked(self) -> None:
-        now = time.monotonic()
-        stale = [
-            session_id
-            for session_id, session in self._sessions.items()
-            if session.finished_at is not None
-            and now - session.finished_at > self.result_retention
-        ]
-        for session_id in stale:
-            self._sessions.pop(session_id)
+    def _prune_results(self) -> None:
+        # Completed results have their own count and age bounds. Never discard a
+        # process tree whose cleanup is unconfirmed, even when its root exited.
+        cutoff = time.monotonic() - self.result_retention
+        finished = sorted(
+            (s.finished_at, sid) for sid, s in self._sessions.items()
+            if s.finished_at is not None and not s.has_pending_work
+        )
+        for index, (finished_at, sid) in enumerate(finished):
+            if finished_at < cutoff or index < len(finished) - self.max_sessions:
+                del self._sessions[sid]
 
 
 DEFAULT_EXEC_SESSION_MANAGER = ExecSessionManager()

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Awaitable, Callable
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.command.results import command_reply, line
 from nanobot.command.spec import BuiltinCommandSpec
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ class CommandExpansion:
     """A transformed input whose original command is persisted by the runtime."""
 
     message: InboundMessage
-    temporary_session_error: str | None = None
+    temporary_session_error: OutboundMessage | None = None
 
 
 def command_text(message: InboundMessage) -> str:
@@ -70,6 +71,9 @@ class CommandContext:
     loop: AgentLoop = field(kw_only=True)
     runtime: LLMRuntime | None = None
     is_user_turn: bool = False
+    record_exchange: bool = True
+    # Start deferred work only once the command acknowledgement has been delivered.
+    after_reply: Callable[[], None] | None = None
 
 
 class CommandRouter:
@@ -193,23 +197,8 @@ class CommandRouter:
             pfx.rstrip().lower() == entered.lower()
             for pfx, _ in self._prefix
         )
-        if accepts_args:
-            content = (
-                f'Invalid command "{entered}". '
-                'Use "/help" to list available commands.'
-            )
-        else:
-            content = (
-                f'Command "{canonical}" does not accept arguments. '
-                f'Did you mean "{canonical}"?'
-            )
-
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content=content,
-            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
-        )
+        result = line("invalid.command", command=entered) if accepts_args else line("invalid.args", command=canonical)
+        return command_reply(ctx.msg, canonical, result)
 
     def _registered_commands(self) -> dict[str, str]:
         commands = [*self._priority, *self._exact]

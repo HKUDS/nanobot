@@ -331,15 +331,6 @@ class TestProgressFiltering:
         assert manager._resolve_bool_override({"sendProgress": False}, "send_progress", True) is False
         assert manager._resolve_bool_override({"send_progress": "false"}, "send_progress", True) is True
 
-    def test_resolve_bool_override_model(self, manager):
-        class FakeSection:
-            send_progress = False
-            send_tool_hints = True
-
-        assert manager._resolve_bool_override(FakeSection(), "send_progress", True) is False
-        assert manager._resolve_bool_override(FakeSection(), "send_tool_hints", False) is True
-        assert manager._resolve_bool_override(FakeSection(), "unknown_key", True) is True
-
     @pytest.mark.asyncio
     async def test_channel_override_can_drop_progress_message(self, manager, bus):
         manager.channels["mock"].send_progress = False

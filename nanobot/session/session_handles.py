@@ -206,16 +206,14 @@ class SessionHandleResolver:
         }
 
     def handles_from_metadata(
-        self, rows: list[dict[str, Any]],
+        self, rows: list[dict[str, Any]], *, filtered: bool = False,
     ) -> dict[str, SessionHandle] | None:
-        """Resolve a detached snapshot, or request allocation through the owner."""
-        names, updates = allocate_session_handles(rows, self._sessions.types)
+        """Validate global names but only build handles for the requested rows."""
+        headers = self._sessions.list_handle_metadata() if filtered and rows else rows
+        names, updates = allocate_session_handles(headers, self._sessions.types)
         if updates:
             return None
-        return {
-            key: session_handle_for_name(key, name)
-            for key, name in names.items()
-        }
+        return {key: session_handle_for_name(key, names[key]) for row in rows if (key := row["key"]) in names}
 
     def handle_for_session(self, session_key: str) -> SessionHandle | None:
         """Offline compatibility API; runtime callers must use ahandle_for_session()."""

@@ -1,3 +1,4 @@
+import { terminalLocale } from "../platform/locale"
 import { uploadAttachments, uploadCapability, isLocalAttachment, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments"
 import { DeliveryReceipts } from "../../../packages/client-events/delivery"
 import { isRecoveryState } from "../../../packages/client-events/notifications"
@@ -196,6 +197,7 @@ export class NanobotClient {
       content,
       turn_id: turnId,
       webui: true,
+      ...(content.trimStart().startsWith("/") ? { locale: terminalLocale() } : {}),
       ...(this.workspaceScope ? { workspace_scope: this.workspaceScope } : {}),
       ...(options.userShell ? { user_shell: true } : {}),
       ...(references?.length ? { media: references } : {}),

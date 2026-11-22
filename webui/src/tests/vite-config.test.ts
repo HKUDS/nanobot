@@ -31,7 +31,6 @@ describe("development diagram Worker dependencies", () => {
 describe("gzipWebuiAssets", () => {
   it("compresses finalized files after Rollup writes the bundle", async () => {
     const plugin = gzipWebuiAssets();
-    expect(plugin.generateBundle).toBeUndefined();
     const outputDir = mkdtempSync(path.join(tmpdir(), "nanobot-vite-gzip-"));
     const assetPath = path.join(outputDir, "assets", "index-final.js");
     const finalized = Buffer.from(

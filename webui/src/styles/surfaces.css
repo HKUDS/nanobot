@@ -1,0 +1,20 @@
+.thread-composer-surface,
+.context-inspector-surface,
+.user-message-surface,
+.side-panel-surface {
+  --composer-shadow-color: 240 10% 16%;
+  --surface-depth-shadow: 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
+  --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), var(--surface-depth-shadow);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+
+.dark .thread-composer-surface,
+.dark .context-inspector-surface,
+.dark .user-message-surface,
+.dark .side-panel-surface {
+  --composer-shadow-color: 240 12% 3%;
+}
+
+@media (forced-colors: active) {
+  .thread-composer-surface, .context-inspector-surface, .user-message-surface, .side-panel-surface { outline: 1px solid CanvasText; }
+}

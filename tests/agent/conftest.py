@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -37,54 +39,19 @@ def make_provider(
     return provider
 
 
-def make_loop(
-    tmp_path: Path,
-    *,
-    model: str = "test-model",
-    context_window_tokens: int = 128_000,
-    session_ttl_minutes: int = 0,
-    tools_config=None,
-    model_presets: dict | None = None,
-    hooks: list | None = None,
-    provider: MagicMock | None = None,
-    patch_deps: bool = False,
-) -> AgentLoop:
-    """Create a real AgentLoop for testing.
-
-    Args:
-        patch_deps: If True, patch ContextBuilder/SessionManager/SubagentManager
-                    during construction (needed when workspace has no real files).
-    """
-    bus = MessageBus()
-    if provider is None:
-        provider = make_provider(default_model=model)
-
-    kwargs = dict(
-        bus=bus,
-        provider=provider,
-        workspace=tmp_path,
-        model=model,
-        context_window_tokens=context_window_tokens,
-        session_ttl_minutes=session_ttl_minutes,
-    )
-    if tools_config is not None:
-        kwargs["tools_config"] = tools_config
-    if model_presets is not None:
-        kwargs["model_presets"] = model_presets
-    if hooks is not None:
-        kwargs["hooks"] = hooks
-
-    if patch_deps:
-        with patch("nanobot.agent.loop.ContextBuilder"), \
-             patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
-            mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
-            return AgentLoop(**kwargs)
-    return AgentLoop(**kwargs)
-
-
 @pytest.fixture
-def loop_factory(tmp_path):
-    """Fixture providing a factory for creating AgentLoop instances."""
-    def _factory(**kwargs):
-        return make_loop(tmp_path, **kwargs)
-    return _factory
+def loop_factory(tmp_path: Path):
+    def create(
+        *, provider: LLMProvider | None = None, session_ttl_minutes: int = 0, patch_deps: bool = False,
+    ) -> AgentLoop:
+        build = partial(
+            make_agent_loop, bus=MessageBus(), workspace=tmp_path, model="test-model", context_window_tokens=128_000,
+            provider=provider if provider is not None else make_provider(), session_ttl_minutes=session_ttl_minutes,
+        )
+        if patch_deps:
+            with patch("nanobot.agent.loop.SubagentManager") as subagents:
+                subagents.return_value.cancel_by_session = AsyncMock(return_value=0)
+                return build(context_builder=MagicMock(workspace=tmp_path))
+        return build()
+
+    return create

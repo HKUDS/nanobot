@@ -165,6 +165,7 @@ async def test_bus_routes_arbitrary_events_and_text_through_one_queue(channel):
     await bus.publish_outbound(text)
     await bus.publish_event(event, channel=channel, chat_id="chat", metadata={"thread": "1"})
     assert await bus.consume_outbound() is text
+    assert text.event is None
     delivered = await bus.consume_outbound()
     assert (delivered.channel, delivered.chat_id) == (channel, "chat")
     assert delivered.event is event

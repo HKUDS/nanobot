@@ -12,6 +12,7 @@ from nanobot.agent.tools.image_generation import register_image_generation_tool
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import Config
+from nanobot.prompt_assembly import build_context_builder
 from nanobot.providers.base import LLMUsage
 from nanobot.sdk.clients import MemoryClient, RuntimeClient, SessionClient
 from nanobot.sdk.runtime import (
@@ -99,8 +100,7 @@ class Nanobot:
         """Create a Nanobot instance from a config file.
 
         Args:
-            config_path: Path to ``config.json``.  Defaults to
-                ``~/.nanobot/config.json``.
+            config_path: Path to ``config.json``. Defaults to the active instance's config.
             workspace: Override the workspace directory from config.
             model: Override the instance default model.
             model_preset: Override the instance default model preset.
@@ -138,6 +138,7 @@ class Nanobot:
             config,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
+            context_builder=build_context_builder(config),
             builtin_assembly=install_goal,
         )
         return cls(loop, config=config, mcp_provider=mcp_provider)

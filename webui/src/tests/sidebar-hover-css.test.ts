@@ -6,20 +6,21 @@ import tailwindcss from "tailwindcss";
 import loadConfig from "tailwindcss/loadConfig";
 import { describe, expect, it } from "vitest";
 
+import { compiledGlobalCss } from "./compiled-global-css";
+
 describe("sidebar touch hover isolation", () => {
   it("shows sidebar actions with roomy targets only for coarse pointers", async () => {
-    const config = loadConfig(resolve(process.cwd(), "tailwind.config.js"));
-    const source = readFileSync(resolve(process.cwd(), "src/globals.css"), "utf8");
-    const result = await postcss([tailwindcss({ ...config, content: [{
-      raw: 'class="sidebar-action-trigger touch-target opacity-0 h-6 w-6"',
-    }] })]).process(source, { from: undefined });
+    const css = await compiledGlobalCss('class="sidebar-action-trigger touch-target opacity-0 h-6 w-6"');
     let hiddenIndex = -1;
     let visibleIndex = -1;
     let index = 0;
     let touchTarget = false;
-    result.root.walkRules((rule) => {
+    css.walkRules((rule) => {
       index++;
-      if (rule.selector === ".opacity-0") hiddenIndex = index;
+      if (rule.selector === ".opacity-0") {
+        hiddenIndex = index;
+        expect(rule.nodes).toContainEqual(expect.objectContaining({ prop: "opacity", value: "0" }));
+      }
       if (rule.selector === ".sidebar-action-trigger") {
         visibleIndex = index;
         expect(rule.parent).toMatchObject({ type: "atrule", name: "media", params: "(pointer: coarse)" });

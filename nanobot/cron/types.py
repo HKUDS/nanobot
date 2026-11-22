@@ -87,6 +87,7 @@ class CronRunResult:
 
     run_id: str
     response: str
+    error: str | None = None
 
 
 @dataclass

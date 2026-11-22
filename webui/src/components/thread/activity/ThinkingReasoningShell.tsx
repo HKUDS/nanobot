@@ -66,7 +66,7 @@ export function ThinkingReasoningShell({
       data-block-context-expanded={contextual && expanded ? true : undefined}
     >
       {showHeader ? <div className={cn(
-        "min-h-7 items-center",
+        "-ms-1.5 min-h-7 items-center",
         compactPreview ? "grid grid-cols-1" : "flex gap-1.5",
       )}>
         {hasDetails ? (
@@ -122,7 +122,7 @@ export function ThinkingReasoningShell({
               <span
                 data-contextual-activity-guide
                 aria-hidden
-                className="pointer-events-none absolute inset-y-1 start-[13px] w-px rounded-full bg-border"
+                className="pointer-events-none absolute inset-y-1 start-[0.4375rem] w-px rounded-full bg-border"
               />
             ) : null}
             <div

@@ -19,6 +19,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.feishu.runtime import FeishuChannel, FeishuConfig
+from nanobot.command.results import command_result, line
 
 
 def _make_feishu_channel(
@@ -675,21 +676,15 @@ async def test_send_new_session_text_suppressed_in_p2p_only() -> None:
     p2p = _make_feishu_channel()
     p2p._send_message_sync = MagicMock()
 
-    await p2p.send(OutboundMessage(
-        channel="feishu",
-        chat_id="ou_alice",
-        content="New session started.",
-        metadata={"chat_type": "p2p"},
+    await p2p.send_command_result(command_result(
+        "feishu", "ou_alice", "/new", line("new.done"), metadata={"chat_type": "p2p", "locale": "zh-CN"}, outcome="session_reset",
     ))
 
     group = _make_feishu_channel()
     group._send_message_sync = MagicMock(return_value="om_text")
 
-    await group.send(OutboundMessage(
-        channel="feishu",
-        chat_id="oc_group",
-        content="New session started.",
-        metadata={"chat_type": "group"},
+    await group.send_command_result(command_result(
+        "feishu", "oc_group", "/new", line("new.done"), metadata={"chat_type": "group", "locale": "zh-CN"}, outcome="session_reset",
     ))
 
     p2p._send_message_sync.assert_not_called()

@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import make_agent_loop
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.registry import ToolRegistry
@@ -25,7 +27,7 @@ def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
 
 def _make_loop(tmp_path, presets=None, active_preset=None):
     provider = _provider("base-model")
-    return AgentLoop(
+    return make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -76,7 +78,7 @@ def test_model_preset_setter_updates_state(tmp_path) -> None:
 
 def test_model_preset_setter_calls_runtime_model_publisher(tmp_path) -> None:
     published: list[tuple[str, str | None]] = []
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=_provider("base-model", max_tokens=123),
         workspace=tmp_path,
@@ -100,7 +102,7 @@ def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
         max_tokens=2048,
         context_window_tokens=200_000,
     )
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=old_provider,
         workspace=tmp_path,
@@ -125,7 +127,7 @@ def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
 
 def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
     preset = ModelPresetConfig(model="openai/gpt-4.1", max_tokens=4096)
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=_provider("base-model", max_tokens=123),
         workspace=tmp_path,
@@ -161,7 +163,7 @@ def test_active_model_preset_survives_unchanged_config_refresh(tmp_path) -> None
         context_window_tokens=32_768,
         signature=("openai/gpt-4.1", "auto", "openai", "sk-old"),
     )
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=base_provider,
         workspace=tmp_path,
@@ -198,7 +200,7 @@ def test_config_model_refresh_clears_active_model_preset(tmp_path) -> None:
         context_window_tokens=32_768,
         signature=("openai/gpt-4.1", "auto", "openai", "sk-old"),
     )
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=base_provider,
         workspace=tmp_path,
@@ -379,7 +381,9 @@ def test_from_config_injects_default_preset(tmp_path) -> None:
     })
     fake_provider = _provider("openai/gpt-4.1")
     with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):
-        loop = AgentLoop.from_config(config, tool_registry=ToolRegistry())
+        loop = AgentLoop.from_config(
+            config, context_builder=ContextBuilder(config.workspace_path), tool_registry=ToolRegistry(),
+        )
     assert loop.model == "openai/gpt-4.1"
     assert loop.model_preset is None
     assert "default" in loop.model_presets
@@ -396,7 +400,9 @@ def test_from_config_static_preset_loader_does_not_enable_hot_reload(tmp_path) -
     })
     fake_provider = _provider("openai/gpt-4.1")
     with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):
-        loop = AgentLoop.from_config(config, tool_registry=ToolRegistry())
+        loop = AgentLoop.from_config(
+            config, context_builder=ContextBuilder(config.workspace_path), tool_registry=ToolRegistry(),
+        )
         default_runtime = loop.runtime_resolver.runtime
         resolved = loop.runtime_resolver.resolve_preset("fast")
     assert resolved.model == "openai/gpt-4.1-mini"

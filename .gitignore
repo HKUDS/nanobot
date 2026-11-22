@@ -5,6 +5,7 @@
 .env
 .web
 .orion
+.nanobot/
 
 docs/superpowers/
 docs/plans/

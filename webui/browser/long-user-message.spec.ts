@@ -113,10 +113,8 @@ test("copies full user message text while collapsed and anchors scroll when coll
   await expect(longBubble).toHaveAttribute("data-user-message-collapsed", "true");
 
   await longUnit.hover();
-  await longUnit.getByRole("button", { name: "Message actions", exact: true }).click();
-  await page.locator("[data-message-block-menu]").getByRole("button", { name: "Copy", exact: true }).click();
+  await longUnit.getByRole("button", { name: "Copy", exact: true }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("Final line sentinel");
-  await page.keyboard.press("Escape");
 
   const toggle = longBubble.locator("[data-user-message-toggle]");
   await toggle.click();

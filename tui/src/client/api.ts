@@ -1,3 +1,4 @@
+import { turnFailureLine } from "../platform/turn-failure"
 import { isRecoveryState } from "../../../packages/client-events/notifications"
 
 import type {
@@ -226,6 +227,9 @@ export async function fetchHistory(
             role: "activity", content: event.text,
             ...(event.tool_events?.length ? { toolEvents: event.tool_events } : {}),
           })
+        } else if (event.side_channel === true) {
+          messages.push({ role: "assistant", content: event.text, forkIndex: userIndex,
+            ...(event.render_as === "text" ? { renderAs: event.render_as } : {}) })
         } else {
           // A final message can repeat the answer already saved by stream_end.
           if (stream && stream.turnId === event.turn_id) {
@@ -251,6 +255,9 @@ export async function fetchHistory(
         })
         break
       case "turn_end":
+        if (event.outcome === "failed") {
+          messages.push({ role: "error", content: turnFailureLine(event), turnId: event.turn_id })
+        }
         stream = null
         lastAnswer = null
         break
@@ -410,7 +417,6 @@ export async function fetchSessions(
     }
   }
   const pinned = new Set(Array.isArray(sidebar.pinned_keys) ? sidebar.pinned_keys : [])
-  const archived = new Set(Array.isArray(sidebar.archived_keys) ? sidebar.archived_keys : [])
   const titles = isRecord(sidebar.title_overrides) ? sidebar.title_overrides : {}
   return (payload.sessions || []).flatMap((value) => {
     if (!isRecord(value) || typeof value.key !== "string" || !value.key.startsWith("websocket:")) {
@@ -441,7 +447,7 @@ export async function fetchSessions(
         : {}),
       ...(isWorkspaceScope(value.workspace_scope) ? { workspaceScope: value.workspace_scope } : {}),
       pinned: pinned.has(value.key),
-      archived: archived.has(value.key),
+      archived: value.archived === true,
     }]
   })
 }

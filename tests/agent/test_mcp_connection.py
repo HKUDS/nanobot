@@ -128,7 +128,7 @@ async def test_owned_mcp_connection_closes_from_its_owner_task():
         tasks["close"] = asyncio.current_task()  # type: ignore[assignment]
 
     owner = asyncio.create_task(own_connection())
-    connection = mcp_runtime._OwnedMCPConnection(owner, close_requested)
+    connection = mcp_runtime._OwnedMCPConnection(owner, close_requested, [])
     await ready.wait()
 
     await connection.aclose()
@@ -155,7 +155,7 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
 
     assert attempts == 2
     assert provider.connected_server_names == set()
-    assert provider.runtime_status() == {"test": "failed"}
+    assert provider.runtime_snapshot().statuses == {"test": "failed"}
 
 
 @pytest.mark.asyncio
@@ -179,7 +179,7 @@ async def test_connect_mcp_does_not_report_failure_before_oauth_authorization(
     await provider.connect()
 
     connect.assert_not_awaited()
-    assert provider.runtime_status() == {}
+    assert provider.runtime_snapshot().statuses == {}
 
 
 @pytest.mark.asyncio
@@ -428,6 +428,7 @@ async def test_reload_timeout_marks_attempted_server_failed_and_allows_retry(
             started.set()
             await asyncio.Event().wait()
         stack = AsyncExitStack()
+        stack.icons = []
         await stack.__aenter__()
         return {name: stack for name in servers}
 
@@ -444,13 +445,13 @@ async def test_reload_timeout_marks_attempted_server_failed_and_allows_retry(
         await asyncio.wait_for(reload_task, timeout=0.01)
 
     assert provider.connected_server_names == set()
-    assert provider.runtime_status() == {"test": "failed"}
+    assert provider.runtime_snapshot().statuses == {"test": "failed"}
 
     result = await provider.reload()
 
     assert result["ok"] is True
     assert provider.connected_server_names == {"test"}
-    assert provider.runtime_status() == {"test": "connected"}
+    assert provider.runtime_snapshot().statuses == {"test": "connected"}
     await provider.aclose()
 
 

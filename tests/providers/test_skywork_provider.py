@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from nanobot.config.schema import Config, ProvidersConfig
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import PROVIDERS, find_by_name
+from nanobot.providers.registry import find_by_name
 
 
 def test_skywork_config_field_exists() -> None:
@@ -12,10 +12,9 @@ def test_skywork_config_field_exists() -> None:
 
 
 def test_skywork_provider_in_registry() -> None:
-    specs = {spec.name: spec for spec in PROVIDERS}
-
-    assert "skywork" in specs
-    skywork = specs["skywork"]
+    skywork = find_by_name("skywork")
+    assert skywork is not None
+    assert skywork.name == "skywork"
     assert skywork.backend == "openai_compat"
     assert skywork.env_key == "SKYWORK_API_KEY"
     assert ("APIFREE_API_KEY", "{api_key}") in skywork.env_extras
@@ -24,13 +23,6 @@ def test_skywork_provider_in_registry() -> None:
     assert skywork.detect_by_base_keyword == "apifree.ai"
     assert skywork.default_api_base == "https://api.apifree.ai/agent/v1"
     assert skywork.supports_max_completion_tokens is False
-
-
-def test_find_by_name_skywork() -> None:
-    spec = find_by_name("skywork")
-
-    assert spec is not None
-    assert spec.name == "skywork"
 
 
 def test_skywork_model_auto_matches_with_default_api_base() -> None:

@@ -8,6 +8,7 @@ from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SessionModelPreset
 from nanobot.session.recovery import recovery_state_from_metadata
+from nanobot.webui.metadata import WEBUI_PRESET_DRAFT_KEY
 
 _WORKSPACE_SCOPE_PRESENT_FIELD = "_workspace_scope_present"
 _WORKSPACE_SCOPE_VALUE_FIELD = "_workspace_scope_value"
@@ -27,13 +28,13 @@ def list_webui_sessions(
     rows: list[dict[str, Any]] = []
     for row in stored:
         metadata = row["metadata"]
-        if not session_manager.types.public_history(metadata):
+        if metadata.get(WEBUI_PRESET_DRAFT_KEY) or not session_manager.types.public_history(metadata):
             continue
         millis = row["history_updated_at_ms"]
         activity = datetime.fromtimestamp(millis / 1000).isoformat() if millis else None
         selection = SessionModelPreset.from_metadata(metadata)
         rows.append({
-            "key": row["key"], "created_at": row["created_at"],
+            "key": row["key"], "created_at": row["created_at"], "archived": bool(row["archived"]),
             "updated_at": _visible_activity_updated_at(row["updated_at"], row["visible_updated_at"], activity),
             "title": row["title"], "preview": row["preview"] or row["history_preview"],
             "model_preset": selection.base_preset,

@@ -807,7 +807,7 @@
       "currentModel": "Utilisé pour les nouvelles réponses.",
       "selectedModelProvider": "Défini par le modèle sélectionné.",
       "selectedModelValue": "Défini par le modèle sélectionné.",
-      "brandLogos": "Affichez les logos des fournisseurs et applications dans les réglages.\n\nAffiche les logos de fournisseurs tiers et CLI dans les Réglages.",
+      "brandLogos": "Affiche les logos dans les réglages et l’activité du chat.\n\nL’activité MCP utilise l’icône fournie par le serveur si elle est disponible.",
       "browserNotifications": "Recevez les notifications des tâches lorsque cette page est en arrière-plan.",
       "notificationSound": "Joue un son à la fin d’une réponse, même en arrière-plan.",
       "cliAppsCatalog": "Installez des outils CLI pour nanobot ; les applications de bureau restent inchangées.\n\nInstalle les outils en ligne de commande que nanobot peut utiliser sur cette machine. Les applications de bureau ne sont pas modifiées.",
@@ -1247,7 +1247,7 @@
     },
     "observability": {
       "title": "Traces d’exécution", "configured": "Les identifiants de traçage sont disponibles pour nanobot.",
-      "environment": "Définissez LANGFUSE_SECRET_KEY et LANGFUSE_PUBLIC_KEY, puis redémarrez nanobot.", "enable": "Activer les traces"
+      "environment": "Définissez LANGFUSE_SECRET_KEY et LANGFUSE_PUBLIC_KEY, puis redémarrez nanobot.", "allow": "Autoriser les traces Langfuse", "install": "Installer le module de traçage"
     },
     "legal": {
       "thirdPartyBrands": "Les noms, logos et marques de produits appartiennent à leurs propriétaires respectifs. Leur utilisation sert uniquement à l'identification et n'implique aucune approbation."
@@ -2025,68 +2025,6 @@
         "navigateHint": "↑↓ Naviguer",
         "selectHint": "Entrée/Tab Insérer",
         "closeHint": "Échap Fermer",
-        "commands": {
-          "new": {
-            "title": "Nouvelle discussion",
-            "description": "Réinitialisez ce sujet et commencez-en un nouveau."
-          },
-          "compact": {
-            "title": "Compacter le contexte",
-            "description": "Compactez le contexte et poursuivez la discussion."
-          },
-          "stop": {
-            "title": "Arrêter la tâche",
-            "description": "Arrêtez la tâche active dans cette discussion."
-          },
-          "restart": {
-            "title": "Redémarrer nanobot",
-            "description": "Redémarrez le processus nanobot."
-          },
-          "status": {
-            "title": "Afficher l’état",
-            "description": "Vérifiez l’état d’exécution, des fournisseurs et des canaux."
-          },
-          "model": {
-            "title": "Modèle",
-            "description": "Consultez ou changez le préréglage de modèle actuel."
-          },
-          "dream": {
-            "title": "Lancer Dream",
-            "description": "Organisez la mémoire maintenant."
-          },
-          "dream_log": {
-            "title": "Journal Dream",
-            "description": "Consultez les modifications de la dernière exécution de Dream."
-          },
-          "dream_restore": {
-            "title": "Restaurer la mémoire",
-            "description": "Restaurez un instantané précédent de la mémoire Dream."
-          },
-          "dream_prompt": {
-            "title": "Réglages Dream",
-            "description": "Définissez comment Dream organise la mémoire de cet espace."
-          },
-          "goal": {
-            "title": "Objectif long terme",
-            "description": "Demandez à l’assistant de poursuivre cet objectif."
-          },
-          "cancel_goal": {
-            "title": "Annuler l’objectif",
-            "description": "Annuler l’objectif actif ou bloqué de cette conversation."
-          },
-          "trigger": {
-            "title": "Déclencheur CLI",
-            "description": "Créez un déclencheur CLI pour cette discussion."
-          },
-          "help": {
-            "title": "Afficher l’aide",
-            "description": "Affichez les commandes slash disponibles."
-          },
-          "pairing": {
-            "title": "Appairage",
-            "description": "Gérez les demandes d’association."
-          }
-        },
         "badges": {
           "current": "Actuel",
           "recent": "Récent"
@@ -2432,7 +2370,11 @@
     "automationTriggered": "Déclenché automatiquement"
   },
   "recovery": {
-    "actionFailed": "La récupération a échoué. Réessayez.",
+    "details": "Détails",
+    "restart": "La passerelle a redémarré avant la fin de la tâche",
+    "uncertainTool": "Un outil a possiblement déjà été exécuté",
+    "interruptedAgain": "La tâche a de nouveau été interrompue",
+    "actionFailed": "Réessayez la récupération",
     "interrupted": "Tâche interrompue",
     "completed": "Tâche terminée",
     "failed": "Échec de la récupération de la tâche",
@@ -2574,6 +2516,7 @@
       "body": "La passerelle a refusé ce projet ou ce mode d’accès. Choisissez un projet existant ou un autre mode d’accès, puis réessayez."
     },
     "turnRejected": {
+      "temporaryCommand": "Seules les commandes /model et /stop sont disponibles dans une discussion temporaire. Pour les autres commandes, utilisez une discussion normale.",
       "title": "Le message n’a pas été envoyé",
       "body": "La passerelle a refusé ce message. Vérifiez le texte ou les pièces jointes, puis réessayez."
     },
@@ -2589,6 +2532,8 @@
       "imageInputTitle": "L’entrée d’images est désactivée pour ce préréglage",
       "imageRequestRejectedTitle": "Le modèle a rejeté la requête avec image",
       "imageInputBody": "Cette requête contient des images. Vérifiez le préréglage ou utilisez-en un qui accepte les images.",
+      "emptyFinalResponseLength": "Limite de sortie atteinte avant la réponse finale",
+      "emptyFinalResponse": "Aucune réponse finale du modèle",
       "unknownTitle": "Échec de la requête au fournisseur du modèle",
       "bodyWithAttempt": "Arrêt après {{attempts}} tentatives. Réessayez plus tard ou choisissez un autre modèle.",
       "body": "Réessayez plus tard ou choisissez un autre modèle."

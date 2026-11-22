@@ -3,6 +3,7 @@
 from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -17,21 +18,28 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
 from nanobot.security.workspace_access import current_tool_workspace
 
-_CURRENT_MESSAGE_SENDS: ContextVar[set[tuple[str, str]] | None] = ContextVar(
-    "message_sends",
-    default=None,
-)
+
+@dataclass(slots=True)
+class MessageReplyReceipt:
+    target: tuple[str, str] | None
+    input_ids: tuple[str, ...]
+    delivered: bool = False
+
+
+_CURRENT_REPLY: ContextVar[MessageReplyReceipt | None] = ContextVar("message_reply", default=None)
 
 
 @contextmanager
-def capture_message_deliveries() -> Generator[set[tuple[str, str]], None, None]:
-    """Record successful MessageTool targets within one agent run."""
-    sends: set[tuple[str, str]] = set()
-    token = _CURRENT_MESSAGE_SENDS.set(sends)
+def capture_message_reply(
+    target: tuple[str, str] | None, input_ids: tuple[str, ...],
+) -> Generator[MessageReplyReceipt, None, None]:
+    """Scope successful reply sends to the tool batch answering these inputs."""
+    receipt = MessageReplyReceipt(target, input_ids)
+    token = _CURRENT_REPLY.set(receipt)
     try:
-        yield sends
+        yield receipt
     finally:
-        _CURRENT_MESSAGE_SENDS.reset(token)
+        _CURRENT_REPLY.reset(token)
 
 
 @tool_parameters(
@@ -219,6 +227,9 @@ class MessageTool(Tool):
                 return ToolResult.error(f"Error: media path is not allowed: {str(e)}")
 
         metadata = dict(default_metadata) if same_target else {}
+        receipt = _CURRENT_REPLY.get()
+        if receipt is not None and receipt.target == (channel, chat_id):
+            metadata["response_input_ids"] = list(receipt.input_ids)
         if message_id:
             metadata["message_id"] = message_id
         if media:
@@ -245,9 +256,8 @@ class MessageTool(Tool):
 
         try:
             await self._send_callback(msg)
-            sends = _CURRENT_MESSAGE_SENDS.get()
-            if sends is not None:
-                sends.add((channel, chat_id))
+            if receipt is not None and receipt.target == (channel, chat_id):
+                receipt.delivered = True
             media_info = f" with {len(media)} attachments" if media else ""
             button_info = (
                 f" with {sum(len(row) for row in button_rows)} button(s)"

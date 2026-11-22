@@ -43,7 +43,6 @@ it("replays short histories at five steps per second and can restart", async () 
 
 it("speeds up longer histories without dropping unpainted snapshots", async () => {
   await start(400);
-  // A delayed first paint does not skip intermediate request states.
   act(() => vi.advanceTimersByTime(350));
   expect(progress()).toBe("1");
   paint();

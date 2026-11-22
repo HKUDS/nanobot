@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { switchModelPreset } from "@/lib/switch-model-preset";
 import { useClient } from "@/providers/ClientProvider";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import {
@@ -19,8 +20,10 @@ import type {
 
 const CHAT_CREATE_TIMEOUT_MS = 60_000;
 
-export function useSessions(): {
+export function useSessions(includeArchived = false): {
   sessions: ChatSummary[];
+  archivedKeys: string[];
+  archivesLoaded: boolean;
   loading: boolean;
   initialLoading: boolean;
   error: string | null;
@@ -38,17 +41,24 @@ export function useSessions(): {
 } {
   const { client, token } = useClient();
   const [sessions, setSessions] = useState<ChatSummary[]>(readReloadSessions);
+  const [archivesLoaded, setArchivesLoaded] = useState(false);
+  const includeArchive = useRef(includeArchived);
+  includeArchive.current = includeArchived;
+  const archivedKeys = useMemo(() => sessions.filter(row => row.archived).map(row => row.key), [sessions]);
   const [loadedOnce, setLoadedOnce] = useState(() => sessions.length > 0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef(token);
+  const failedDraftRef = useRef<{
+    client: typeof client; scope?: WorkspaceScopePayload | null; chatId: string;
+  } | null>(null);
   const optimisticKeysRef = useRef<Set<string>>(new Set());
   const refreshPendingRef = useRef(false);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   tokenRef.current = token;
 
   useEffect(() => {
-    if (sessions.length || !loading) writeReloadCache("sessions", sessions.slice(0, 200));
+    if (sessions.length || !loading) writeReloadCache("activeSessions", sessions.filter(row => !row.archived).slice(0, 200));
   }, [sessions, loading]);
 
   const refresh = useCallback((): Promise<void> => {
@@ -60,7 +70,10 @@ export function useSessions(): {
         while (refreshPendingRef.current) {
           refreshPendingRef.current = false;
           try {
-            const rows = await listSessions(tokenRef.current);
+            // A complete catalog must come from one snapshot: reconciling two filtered reads can mistake a move for deletion.
+            const full = includeArchive.current;
+            const rows = await listSessions(tokenRef.current, full ? undefined : false);
+            setArchivesLoaded(full);
             setLoadedOnce(true);
             const serverKeys = new Set(rows.map((row) => row.key));
             setSessions((prev) => {
@@ -99,19 +112,29 @@ export function useSessions(): {
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+  }, [includeArchived, refresh]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const unsubscribe = client.onSessionUpdate(() => {
+    const scheduleRefresh = () => {
       if (timer !== undefined) return;
       timer = setTimeout(() => {
         timer = undefined;
         void refresh();
       }, 250);
+    };
+    const unsubscribe = client.onSessionUpdate(scheduleRefresh);
+    const unsubscribeArchive = client.onSessionsChanged(scheduleRefresh);
+    let opened = false;
+    const unsubscribeStatus = client.onStatus(status => {
+      if (status !== "open") return;
+      if (opened) scheduleRefresh(); // The window may have missed an archive while disconnected.
+      opened = true;
     });
     return () => {
       clearTimeout(timer);
+      unsubscribeStatus();
+      unsubscribeArchive();
       unsubscribe();
     };
   }, [client, refresh]);
@@ -120,7 +143,17 @@ export function useSessions(): {
     workspaceScope?: WorkspaceScopePayload | null,
     modelPreset?: string | null,
   ): Promise<string> => {
-    const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
+    // Claim the draft for one retry; a concurrent creation must get its own ID.
+    const draft = failedDraftRef.current;
+    failedDraftRef.current = null;
+    const chatId = modelPreset && draft?.client === client
+      && draft.scope?.project_path === workspaceScope?.project_path
+      && draft.scope?.access_mode === workspaceScope?.access_mode
+      ? draft.chatId : await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
+    const preset = modelPreset ? await switchModelPreset(client, chatId, modelPreset).catch((error: unknown) => {
+      if (client.status === "open") failedDraftRef.current = { client, scope: workspaceScope, chatId };
+      throw error;
+    }) : null;
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
     // Optimistic insert; a subsequent refresh will replace it with the
@@ -134,7 +167,7 @@ export function useSessions(): {
         updatedAt: new Date().toISOString(),
         title: "",
         preview: "",
-        modelPreset: modelPreset ?? null,
+        modelPreset: preset,
         workspaceScope: workspaceScope ?? null,
         projectLocked: false,
       },
@@ -194,6 +227,8 @@ export function useSessions(): {
 
   return {
     sessions,
+    archivedKeys,
+    archivesLoaded,
     loading,
     initialLoading: loading && !loadedOnce,
     error,

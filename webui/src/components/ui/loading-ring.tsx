@@ -1,3 +1,5 @@
+import "./loading-ring.css";
+
 import type { SVGProps } from "react";
 
 function synchronizeRing(element: SVGCircleElement | null) {

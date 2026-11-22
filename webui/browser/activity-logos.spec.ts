@@ -5,7 +5,7 @@ const mark = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><ci
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
-  await page.route("https://icons.duckduckgo.com/ip3/linear.app.ico", route => route.fulfill({ contentType: "image/svg+xml", body: tile }));
+  await page.route("https://activity.example/mark.svg", route => route.fulfill({ contentType: "image/svg+xml", body: tile }));
   await page.route("https://cdn.simpleicons.org/blender", route => route.fulfill({ contentType: "image/svg+xml", body: mark }));
   await page.route("**/api/**", route => route.fulfill({ json: {} }));
 });
@@ -14,7 +14,7 @@ for (const width of [1280, 360]) {
   for (const dark of [false, true]) {
     test.describe(`${width}px ${dark ? "dark" : "light"} activity logos`, () => {
       test.use({ viewport: { width, height: 700 } });
-      test("fits brand images directly to the rounded mark while preserving status and alignment", async ({ page }, testInfo) => {
+      test("fits brand images directly to the marker while preserving status and alignment", async ({ page }, testInfo) => {
         await page.goto(`/browser/fixture.html?case=activity-logos${dark ? "&dark" : ""}`);
         for (const phase of ["end", "start", "error"]) {
           const section = page.getByRole("region", { name: phase, exact: true });
@@ -32,8 +32,10 @@ for (const width of [1280, 360]) {
             await expect(logo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
             await expect(logo).toHaveCSS("border-top-width", "0px");
             await expect(logo).toHaveCSS("box-shadow", "none");
-            await expect(logo).toHaveCSS("animation-name", phase === "start" ? "pulse" : "none");
-            expect(await logo.evaluate(node => parseFloat(getComputedStyle(node).borderRadius))).toBeGreaterThan(0);
+            if (id === "activity-cli-logo-blender") {
+              await expect(logo).toHaveCSS("animation-name", phase === "start" ? "pulse" : "none");
+              expect(await logo.evaluate(node => parseFloat(getComputedStyle(node).borderRadius))).toBeGreaterThan(0);
+            }
             positions.push(frame.x);
           }
           expect(positions[0]).toBe(positions[1]);
@@ -49,19 +51,21 @@ for (const width of [1280, 360]) {
 }
 
 test("keeps missing and failed logos identifiable in both themes", async ({ page }) => {
-  await page.route("**/browser/missing-activity-logo.svg", route => route.fulfill({ status: 404, body: "" }));
+  await page.route("https://activity.example/missing.svg", route => route.fulfill({ status: 404, body: "" }));
   await page.goto("/browser/fixture.html?case=activity-logos&fallback");
   for (const dark of [false, true]) {
     if (dark) await page.getByRole("button", { name: "Toggle theme" }).click();
     for (const phase of ["end", "start", "error"]) {
       const section = page.getByRole("region", { name: phase, exact: true });
-      await expect(section.getByTestId("activity-mcp-logo-linear")).toHaveText("L");
-      await expect(section.getByTestId("activity-cli-logo-blender")).toHaveText("B");
-      for (const logo of [section.getByTestId("activity-mcp-logo-linear"), section.getByTestId("activity-cli-logo-blender")]) {
-        await expect(logo).toHaveCSS("width", "16px");
-        await expect(logo).toHaveCSS("color", "rgb(255, 255, 255)");
-        expect(await logo.evaluate(node => getComputedStyle(node).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
-      }
+      const mcp = section.getByTestId("activity-mcp-logo-linear");
+      await expect(mcp.locator('svg[data-product-icon="mcp"]')).toBeVisible();
+      await expect(mcp).toHaveCSS("width", "16px");
+      await expect(mcp).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      const cli = section.getByTestId("activity-cli-logo-blender");
+      await expect(cli).toHaveText("B");
+      await expect(cli).toHaveCSS("width", "16px");
+      await expect(cli).toHaveCSS("color", "rgb(255, 255, 255)");
+      expect(await cli.evaluate(node => getComputedStyle(node).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
     }
   }
 });

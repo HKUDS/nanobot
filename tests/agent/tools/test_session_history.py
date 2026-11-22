@@ -146,7 +146,7 @@ async def test_session_tools_stream_visible_archived_history_with_casefold_and_o
         "role": "user", "content": "Straße automation-secret", AUTOMATION_HISTORY_META: {"kind": "trigger"},
     })
     manager.save(session)
-    manager._store.set_archived_keys([key])
+    manager._store.set_archived([key], True)
 
     with request_context(RequestContext(channel="sdk", chat_id="current", session_key="sdk:current")):
         read = json.loads(await ReadSessionTool(manager).execute(session_key=key, query="STRASSE"))

@@ -54,7 +54,6 @@ ITEM_TOOL_CALL_RESULT = 12
 # MessageType  (1 = inbound from user, 2 = outbound from bot)
 MESSAGE_TYPE_BOT = 2
 
-# MessageState
 MESSAGE_STATE_FINISH = 2
 
 WEIXIN_MAX_MESSAGE_LEN = 1800
@@ -203,7 +202,7 @@ class WeixinConfig(Base):
     cdn_base_url: str = "https://novac2c.cdn.weixin.qq.com/c2c"
     route_tag: str | int | None = None
     token: str = ""  # Manually set token, or obtained via QR login
-    state_dir: str = ""  # Default: ~/.nanobot/weixin/
+    state_dir: str = ""  # Defaults to weixin/ in the active instance's data directory.
     poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S
     # Extra progress messages consume the same undocumented iLink send quota as
     # final replies. Keep them off unless an operator explicitly opts in.
@@ -1973,7 +1972,6 @@ class WeixinChannel(BaseChannel):
                         else 0
                     )
                     if self._is_retryable_http_status(status_code):
-                        # Server-side / retryable HTTP error — same as network.
                         self.logger.exception(
                             "Server error ({} {}) sending media {}",
                             status_code,
@@ -2368,7 +2366,6 @@ class WeixinChannel(BaseChannel):
         )
         cdn_resp.raise_for_status()
 
-        # The download encrypted_query_param comes from CDN response header
         download_param = cdn_resp.headers.get("x-encrypted-param", "")
         if not download_param:
             raise RuntimeError(
@@ -2445,7 +2442,6 @@ def _parse_aes_key(aes_key_b64: str) -> bytes:
     if len(decoded) == 16:
         return decoded
     if len(decoded) == 32 and re.fullmatch(rb"[0-9a-fA-F]{32}", decoded):
-        # hex-encoded key: base64 → hex string → raw bytes
         return bytes.fromhex(decoded.decode("ascii"))
     raise ValueError(
         f"aes_key must decode to 16 raw bytes or 32-char hex string, got {len(decoded)} bytes"

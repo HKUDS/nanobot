@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "מדריך להגדרת Signal",
+    "officialLabel": "המדריך ל־signal-cli",
+    "fields": {
+      "phoneNumber": {
+        "label": "מספר טלפון",
+        "placeholder": "+1234567890"
+      },
+      "daemonHost": {
+        "label": "כתובת שירות signal-cli",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "יציאת שירות signal-cli",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "משתמשים המורשים לשלוח הודעות ישירות",
+        "placeholder": "מספרי טלפון או מזהי UUID"
+      },
+      "group_allowFrom": {
+        "label": "קבוצות מורשות",
+        "placeholder": "מזהי קבוצות"
+      },
+      "groupMessageBufferSize": {
+        "label": "מספר הודעות הקבוצה שנשמרות להקשר"
+      },
+      "attachmentsDir": {
+        "label": "ספריית קבצים מצורפים"
+      },
+      "dm_enabled": {
+        "label": "הפעלת הודעות ישירות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "dm_policy": {
+        "label": "הרשאה לשליחת הודעות ישירות",
+        "choices": {
+          "allowlist": "רשימת מורשים",
+          "open": "פתוח לכולם"
+        }
+      },
+      "group_enabled": {
+        "label": "הפעלת שיחות קבוצתיות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "group_policy": {
+        "label": "גישה בקבוצות",
+        "choices": {
+          "allowlist": "רשימת מורשים",
+          "open": "פתוח לכולם"
+        }
+      },
+      "group_requireMention": {
+        "label": "דרישת אזכור של הבוט בקבוצות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      }
+    }
+  }
+}

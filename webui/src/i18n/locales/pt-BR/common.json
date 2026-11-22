@@ -851,7 +851,7 @@
       "activityMode": "Escolha a exibição padrão dos detalhes da atividade.",
       "fileEditDisplay": "Mostre por padrão a contagem de linhas ou as alterações completas.",
       "codeWrap": "Quebre linhas longas de código para facilitar a leitura.",
-      "brandLogos": "Mostre logos de provedores e apps nos Ajustes.\n\nMostra logotipos de provedores terceiros e de CLIs em Configurações.",
+      "brandLogos": "Mostra logotipos nas configurações e na atividade do chat.\n\nA atividade do MCP usa o ícone fornecido pelo servidor, quando disponível.",
       "browserNotifications": "Receba avisos sobre o estado das tarefas com esta página em segundo plano.",
       "notificationSound": "Toca um som ao terminar uma resposta, mesmo em segundo plano.",
       "maxResults": "Máximo de resultados por busca.",
@@ -1252,7 +1252,8 @@
       "title": "Rastreamento de execução",
       "configured": "As credenciais de rastreamento estão disponíveis para o nanobot.",
       "environment": "Defina LANGFUSE_SECRET_KEY e LANGFUSE_PUBLIC_KEY e reinicie o nanobot.",
-      "enable": "Ativar rastreamento"
+      "allow": "Permitir rastreamento com Langfuse",
+      "install": "Instalar suporte ao rastreamento"
     },
     "apps": {
       "allTypes": "Todos",
@@ -2035,68 +2036,6 @@
           "goalActive": "Objetivo em execução",
           "goalReady": "Iniciar um objetivo sustentado",
           "stopRunning": "Executando agora"
-        },
-        "commands": {
-          "new": {
-            "title": "Nova conversa",
-            "description": "Reinicie este tópico e comece um novo."
-          },
-          "compact": {
-            "title": "Compactar contexto",
-            "description": "Compacte o contexto e continue a conversa."
-          },
-          "stop": {
-            "title": "Parar tarefa",
-            "description": "Pare a tarefa ativa nesta conversa."
-          },
-          "restart": {
-            "title": "Reiniciar nanobot",
-            "description": "Reinicie o processo nanobot."
-          },
-          "status": {
-            "title": "Mostrar status",
-            "description": "Confira o status de execução, provedores e canais."
-          },
-          "model": {
-            "title": "Modelo",
-            "description": "Veja ou troque o preset de modelo atual."
-          },
-          "dream": {
-            "title": "Executar Dream",
-            "description": "Organize a memória agora."
-          },
-          "dream_log": {
-            "title": "Log Dream",
-            "description": "Veja as alterações da última execução do Dream."
-          },
-          "dream_restore": {
-            "title": "Restaurar memória",
-            "description": "Restaure um snapshot anterior da memória Dream."
-          },
-          "dream_prompt": {
-            "title": "Ajustes do Dream",
-            "description": "Defina como Dream organiza a memória deste espaço."
-          },
-          "goal": {
-            "title": "Objetivo de longa duração",
-            "description": "Peça ao assistente para continuar trabalhando neste objetivo."
-          },
-          "cancel_goal": {
-            "title": "Cancelar objetivo",
-            "description": "Cancela o objetivo ativo ou bloqueado desta conversa."
-          },
-          "trigger": {
-            "title": "Gatilho CLI",
-            "description": "Crie um gatilho CLI para esta conversa."
-          },
-          "help": {
-            "title": "Mostrar ajuda",
-            "description": "Mostre os comandos de barra disponíveis."
-          },
-          "pairing": {
-            "title": "Pareamento",
-            "description": "Gerencie solicitações de pareamento."
-          }
         }
       },
       "mentions": {
@@ -2434,7 +2373,11 @@
     }
   },
   "recovery": {
-    "actionFailed": "A recuperação falhou. Tente novamente.",
+    "details": "Detalhes",
+    "restart": "O gateway reiniciou antes de concluir a tarefa",
+    "uncertainTool": "Uma ferramenta pode já ter sido executada",
+    "interruptedAgain": "A tarefa foi interrompida novamente",
+    "actionFailed": "Tente a recuperação novamente",
     "interrupted": "Tarefa interrompida",
     "completed": "Tarefa concluída",
     "failed": "Falha ao recuperar a tarefa",
@@ -2576,6 +2519,7 @@
       "body": "O gateway rejeitou este projeto ou modo de acesso. Escolha um projeto existente ou outro modo de acesso e tente novamente."
     },
     "turnRejected": {
+      "temporaryCommand": "Nos chats temporários, só é possível usar /model e /stop. Para outros comandos, use um chat normal.",
       "title": "A mensagem não foi enviada",
       "body": "O gateway rejeitou esta mensagem. Revise o texto ou os anexos e tente novamente."
     },
@@ -2591,6 +2535,8 @@
       "imageInputTitle": "A entrada de imagens está desativada nesta predefinição",
       "imageRequestRejectedTitle": "O modelo rejeitou a solicitação com imagem",
       "imageInputBody": "Esta solicitação inclui imagens. Confira a predefinição ou use uma que aceite imagens.",
+      "emptyFinalResponseLength": "Limite de saída atingido antes da resposta final",
+      "emptyFinalResponse": "O modelo não deu uma resposta final",
       "unknownTitle": "Falha na solicitação ao provedor do modelo",
       "bodyWithAttempt": "Interrompido após {{attempts}} tentativas. Tente mais tarde ou escolha outro modelo.",
       "body": "Tente mais tarde ou escolha outro modelo."

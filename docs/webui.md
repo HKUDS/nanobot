@@ -62,7 +62,7 @@ On a local macOS desktop, `nanobot webui` adds a Dock shortcut to your running W
 Each topic in the sidebar keeps its own history, title, project folder, and linked automations. Use **New topic** for a fresh context, or **Fork** to branch off an existing conversation without changing the original.
 
 - **Organize:** Drag topics to reorder them, or use **Rename** to edit a title inline.
-- **Bulk actions:** Choose **Select** in a topic's menu to archive or delete multiple topics at once (press `Esc` to exit selection mode). Archived topics stay saved and can be restored from **Show archived**.
+- **Bulk actions:** Choose **Select** in a topic's menu to archive or delete multiple topics at once (press `Esc` to exit selection mode). Archived topics disappear from the ordinary list in every connected window. To bring one back, choose **Show archived** and restore it from its menu. Archiving keeps the conversation history and does not stop running tasks.
 - **Delete with undo:** Deleting a topic hides it with an 8-second **Undo** window. Topics with linked automations pause for confirmation in the toast before starting the undo countdown.
 - **Navigate long conversations:** Use the message rail on wide screens or prompt-summary search in the header to jump directly to earlier messages. Scroll past the top (or pull down on touch devices) to load older history.
 
@@ -128,6 +128,8 @@ Click the context indicator beside the model badge to inspect:
 When a conversation grows long, nanobot summarizes earlier turns while keeping your full chat history visible. You can also run `/compact` anytime (see [Memory](./memory.md)).
 
 ### File and diagram previews
+
+In a streaming reply, a Mermaid block shows source until its closing fence arrives. The visible diagram then renders while the rest of the reply continues. If the renderer fails to load, a retry icon appears next to Copy. Hover over it or focus it to read the error, or click it to render the diagram again without refreshing the chat.
 
 File edits show the path and changed line counts. Change **Settings → Appearance → File edit display** between **Summary**, inline **Diff**, and **Collapsed diff**. Click any filename to open a read-only preview tab (text previews up to 384 KiB; PNG/JPEG/GIF/WebP images up to 8 MiB; Markdown renders with a **Source** toggle; Mermaid diagrams render automatically). Right-click a file reference or tab to copy its path.
 

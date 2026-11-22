@@ -1,0 +1,37 @@
+@layer utilities {
+  .inline-disclosure {
+    --inline-disclosure-duration: 220ms;
+
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .inline-disclosure[data-state="open"] {
+    --inline-disclosure-duration: 240ms;
+
+    grid-template-rows: 1fr;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .inline-disclosure-clip {
+    min-height: 0;
+    overflow: hidden;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .inline-disclosure {
+      transition:
+        grid-template-rows var(--inline-disclosure-duration)
+          cubic-bezier(0.4, 0, 0.2, 1),
+        opacity var(--inline-disclosure-duration) ease-in-out;
+    }
+    .inline-disclosure-content {
+      transform: translateY(-6px);
+      transition: transform var(--inline-disclosure-duration)
+        cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .inline-disclosure[data-state="open"] .inline-disclosure-content {
+      transform: translateY(0);
+    }
+  }
+}

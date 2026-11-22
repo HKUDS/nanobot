@@ -1,3 +1,5 @@
+import { renderCommandResult } from "../../../packages/client-events/command-result"
+import { terminalLocale } from "../platform/locale"
 import { acceptsCompactionPhase } from "../../../packages/client-events/notifications"
 import {
   BoxRenderable,
@@ -133,6 +135,7 @@ export class Transcript {
     displayContent?: string
   }>()
   private readonly userTurnIds = new Set<string>()
+  private readonly failedTurnIds = new Set<string>()
   private wrote = false
   private nextId = 0
   private navigation: TranscriptNavigation = { awayFromBottom: false, unseenOutput: false }
@@ -247,6 +250,7 @@ export class Transcript {
     this.userRows.clear()
     this.userMessages.clear()
     this.userTurnIds.clear()
+    this.failedTurnIds.clear()
     this.wrote = false
     this.nextId = 0
     this.navigation = { awayFromBottom: false, unseenOutput: false }
@@ -262,6 +266,7 @@ export class Transcript {
         this.user(message.content, message.turnId, message.media)
       }
       else if (message.role === "assistant") this.assistant(message.content, message.renderAs)
+      else if (message.role === "error") this.turnFailure(message.content, message.turnId)
       else if (message.fileEdits?.length) this.fileEdits(message.fileEdits)
       else this.progress(message.content, message.toolEvents)
     }
@@ -282,6 +287,8 @@ export class Transcript {
         if (message.turnId) this.userTurnIds.add(message.turnId)
       } else if (message.role === "assistant") {
         this.writeAnswer(message.content, message.renderAs, index++)
+      } else if (message.role === "error") {
+        if (this.turnFailure(message.content, message.turnId, index)) index += 1
       } else {
         const activity = this.createActivity(index++)
         const events: ToolProgressEvent[] = message.fileEdits?.length
@@ -331,6 +338,20 @@ export class Transcript {
     this.writeRole(error ? "×" : "", content, error ? "error" : "muted")
   }
 
+  deliveryFailure(content: string): void {
+    // This notice can arrive mid-stream. Leave the current answer and activity row open.
+    this.noteOutput()
+    this.writeRole("×", content, "error")
+  }
+
+  turnFailure(content: string, turnId?: string, index?: number): boolean {
+    if (turnId && this.failedTurnIds.has(turnId)) return false
+    if (index === undefined) this.notice(content, true)
+    else this.writeRole("×", content, "error", index)
+    if (turnId) this.failedTurnIds.add(turnId)
+    return true
+  }
+
   compaction(compaction: ContextCompaction, index?: number): boolean {
     let entry = this.compactions.get(compaction.id)
     // Hydration can replay a terminal state before an already queued start event.
@@ -350,13 +371,9 @@ export class Transcript {
       this.compactions.set(compaction.id, entry)
     }
     entry.phase = compaction.phase
-    entry.text.content = compaction.phase === "started"
-      ? "  ≋ Compacting conversation…"
-      : compaction.phase === "succeeded"
-        ? "  ✓ Conversation compacted"
-        : compaction.phase === "cancelled"
-          ? "  Conversation compaction cancelled"
-          : "  × Could not compact conversation"
+    const marker = { started: "≋ ", succeeded: "✓ ", cancelled: "", failed: "× " }[compaction.phase]
+    const label = renderCommandResult({ command: "/compact", parts: [{ key: `compact.${compaction.phase}`, values: {} }] }, terminalLocale())
+    entry.text.content = `  ${marker}${label}`
     entry.text.fg = compaction.phase === "failed" ? this.theme.error : this.theme.muted
     return added
   }

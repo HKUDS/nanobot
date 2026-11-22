@@ -26,7 +26,6 @@ import {
   updateMcpServerTools,
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
-import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import type {
   AutomationUpdatePayload,
@@ -372,7 +371,6 @@ export function createSystemSettingsActions({
         const payload = await fetchMcpPresets(getToken());
         setMcpPresets(payload);
         retireMcpProxyDrafts([flow.name]);
-        notifyMcpPresetsChanged(payload);
         setMcpMessage(null);
         setMcpError(null);
       } catch (err) {
@@ -556,9 +554,6 @@ export function createSystemSettingsActions({
       const payload = await runMcpPresetAction(client, action, name, values);
       setMcpPresets(payload);
       applyMcpActionFeedback(payload, action === "test");
-      if (action !== "test") {
-        notifyMcpPresetsChanged(payload);
-      }
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
@@ -616,7 +611,6 @@ export function createSystemSettingsActions({
       if (payload.last_action?.ok !== false) {
         retireMcpProxyDrafts([name]);
       }
-      notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
@@ -642,7 +636,6 @@ export function createSystemSettingsActions({
         const config: { mcpServers?: object } = JSON.parse(mcpConfigImport);
         retireMcpProxyDrafts(Object.keys(config.mcpServers ?? config));
       }
-      notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
@@ -663,7 +656,6 @@ export function createSystemSettingsActions({
       const payload = await updateMcpServerTools(client, name, enabledTools);
       setMcpPresets(payload);
       applyMcpActionFeedback(payload);
-      notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }

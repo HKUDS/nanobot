@@ -6,6 +6,7 @@ WORKDIR /app/webui
 RUN npm ci
 COPY webui/ ./
 COPY packages/client-events/ /app/packages/client-events/
+COPY nanobot/command/locales/ /app/nanobot/command/locales/
 COPY nanobot/channels/ /app/nanobot/channels/
 RUN mkdir -p /app/nanobot/web && npm run build
 
@@ -43,10 +44,7 @@ RUN for channel in $(printf '%s' "$NANOBOT_CHANNELS" | tr ',' ' '); do \
         python -m scripts.install_channel_dependencies "$channel"; \
     done
 
-# Render deploy template (see render.yaml): committed gateway config that wires
-# secrets through ${ANTHROPIC_API_KEY} / ${NANOBOT_WEB_TOKEN} env vars (resolved
-# at startup). Lives in the code dir (/app), not the data dir, so a mounted disk
-# won't shadow it. Only used when RENDER=true; ignored by local runs.
+# Keep the Render template outside the data directory so a mounted disk won't hide it.
 COPY render-config.json ./
 
 RUN useradd -m -u 1000 -s /bin/bash nanobot && \
@@ -56,11 +54,7 @@ RUN useradd -m -u 1000 -s /bin/bash nanobot && \
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
 
-# Start as root so the entrypoint can chown the data dir (on Render, the
-# freshly-mounted root-owned persistent disk) before dropping to the non-root
-# nanobot user via setpriv. The entrypoint drops privileges on every root start
-# and fails closed if it cannot, so the agent never runs as root (see
-# entrypoint.sh).
+# Render mounts its persistent disk as root. entrypoint.sh fixes ownership before dropping privileges.
 USER root
 ENV HOME=/home/nanobot
 # Ensure crash output reaches Render logs (app output is otherwise swallowed on

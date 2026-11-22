@@ -1,0 +1,15 @@
+/* loading.dev Ring, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
+.loading-ring-arc {
+  transform-origin: center;
+  animation: loading-ring-spin 800ms linear infinite;
+}
+
+@keyframes loading-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-ring-arc {
+    animation: none;
+  }
+}

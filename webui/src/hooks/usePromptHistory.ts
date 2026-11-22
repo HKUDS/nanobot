@@ -4,7 +4,6 @@ import { fetchPromptIndex, fetchWebuiThread } from "@/lib/api";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { historyContentSnapshot, projectWebuiThreadMessages, sameHistoryContent } from "@/lib/thread-display-projection";
 import { joinThreadFragments } from "@/lib/thread-page-fragments";
-import { isModelCommandText } from "@/lib/format";
 import { isSystemCommandTurnId } from "@/lib/nanobot-client";
 import type { PromptIndex, ThreadProjectionEvent, UIMessage, WebuiThreadPersistedPayload } from "@/lib/types";
 import { type PromptAnchor, userPromptAnchors } from "@/components/thread/promptNavigation";
@@ -161,7 +160,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
       if (controller.signal.aborted) return;
       if (snapshot === indexSnapshot.current) { setIndexError(null); return; }
       indexSnapshot.current = snapshot;
-      setIndex({ key, prompts: snapshot.prompts.filter((item) => !isSystemCommandTurnId(item.turnId) && !isModelCommandText(item.preview)).map((item, position) => ({ ...item, index: position,
+      setIndex({ key, prompts: snapshot.prompts.filter((item) => !isSystemCommandTurnId(item.turnId)).map((item, position) => ({ ...item, index: position,
         label: item.preview.replace(/\s+/g, " ").slice(0, 80) || `Prompt ${position + 1}`,
       })) });
       setIndexError(null);

@@ -215,63 +215,33 @@ def test_atomic_write_ignores_unsupported_directory_fsync(
     assert list(store_path.parent.glob("*.tmp")) == []
 
 
-def test_load_jobs_preserves_corrupt_store_and_returns_none(
-    tmp_path: Path,
+@pytest.mark.parametrize("rename_denied", [False, True])
+@pytest.mark.asyncio
+async def test_start_reports_where_to_recover_unreadable_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rename_denied: bool,
 ) -> None:
-    """A corrupt ``jobs.json`` must not be silently treated as an empty
-    list.  The loader returns ``None`` and the corrupt file is moved aside
-    with a ``.corrupt-<ts>`` suffix so an operator can recover it."""
-    store_path = tmp_path / "cron" / "jobs.json"
-    store_path.parent.mkdir(parents=True)
-    store_path.write_text("{not valid json", encoding="utf-8")
-
+    store_path = _corrupt_store(tmp_path)
     service = CronService(store_path)
-    assert service._load_jobs() is None
+    if rename_denied:
+        def deny_rename(self: Path, target: Path) -> Path:
+            raise PermissionError("access denied")
 
-    assert not store_path.exists()
-    backups = list(store_path.parent.glob("jobs.json.corrupt-*"))
-    assert len(backups) == 1
-    assert backups[0].read_text(encoding="utf-8") == "{not valid json"
+        monkeypatch.setattr(Path, "rename", deny_rename)
 
+    with pytest.raises(RuntimeError, match="restore jobs.json") as exc_info:
+        await service.start()
 
-def test_start_refuses_to_overwrite_corrupt_store(tmp_path: Path) -> None:
-    """``start`` must abort instead of running ``_save_store`` against an
-    empty in-memory state when the on-disk store is corrupt.  Otherwise the
-    next save would overwrite the (recoverable) corrupt file with an empty
-    job list and the user's jobs would be unrecoverable."""
-    store_path = tmp_path / "cron" / "jobs.json"
-    store_path.parent.mkdir(parents=True)
-    store_path.write_text("{still not json", encoding="utf-8")
-
-    service = CronService(store_path)
-    import asyncio
-
-    with pytest.raises(RuntimeError, match="corrupt"):
-        asyncio.run(service.start())
-
-    assert service._running is False
-
-    backups = list(store_path.parent.glob("jobs.json.corrupt-*"))
-    assert len(backups) == 1
-
-
-def test_load_store_falls_back_to_in_memory_on_corruption_after_start(
-    tmp_path: Path,
-) -> None:
-    """If the store file becomes corrupt *after* a successful start (e.g. a
-    rclone-mounted Drive returns a partial read), the service must keep
-    using its existing in-memory snapshot instead of dropping every job."""
-    service, store_path = _seeded_store(tmp_path)
-    service._load_store()
-    snapshot = service._store
-    assert snapshot is not None and len(snapshot.jobs) == 1
-
-    store_path.write_text("\x00garbage\x00", encoding="utf-8")
-
-    result = service._load_store()
-    assert result is snapshot
-    assert len(result.jobs) == 1
-    assert result.jobs[0].name == "Daily Loving Message"
+    message = str(exc_info.value)
+    assert str(store_path) in message
+    assert not service._running
+    if rename_denied:
+        assert "Backup rename failed" in message
+        assert store_path.read_text(encoding="utf-8") == "{not valid json"
+        assert not list(store_path.parent.glob("jobs.json.corrupt-*"))
+    else:
+        _assert_single_corrupt_backup(store_path)
+        backup, = store_path.parent.glob("jobs.json.corrupt-*")
+        assert str(backup) in message
 
 
 @pytest.mark.parametrize(

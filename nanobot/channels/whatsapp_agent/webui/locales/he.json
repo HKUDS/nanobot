@@ -1,0 +1,78 @@
+{
+  "setup": {
+    "docsLabel": "מדריך להגדרת הסוכן",
+    "officialLabel": "עזרה לסוכנים ב־WhatsApp",
+    "privacyNotice": "השיחות עם הסוכן אינן מוצפנות מקצה לקצה. גם nanobot וגם ספק המודל שהוגדר מעבדים את ההודעות.",
+    "fields": {
+      "token": {
+        "label": "אסימון API",
+        "placeholder": "כדי ליצור את הסוכן ב־WhatsApp, יש לפתוח את ״הגדרות״ ולבחור ב״סוכנים״. לאחר מכן, בשיחה עם הסוכן, יש לפתוח את ״פרטי הצ׳אט״ ולהעתיק את הערך שב״מפתח API״."
+      },
+      "allowFrom": {
+        "label": "שולחים מורשים",
+        "placeholder": "user:1234567890"
+      },
+      "stateDir": {
+        "label": "תיקייה לשמירת נתוני מצב",
+        "placeholder": "~/.nanobot/whatsapp-agent"
+      },
+      "pollTimeout": {
+        "label": "זמן המתנה מרבי בתשאול (שניות)",
+        "placeholder": "25"
+      },
+      "maxMediaMb": {
+        "label": "גודל מדיה מרבי (MB)",
+        "placeholder": "16"
+      },
+      "markRead": {
+        "label": "שליחת אישורי קריאה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "typingIndicator": {
+        "label": "הצגת חיווי הקלדה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "downloadMedia": {
+        "label": "הורדת מדיה נכנסת",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "deleteMediaAfterDownload": {
+        "label": "מחיקת המדיה לאחר ההורדה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "retryAmbiguousSends": {
+        "label": "ניסיון שליחה נוסף כשתוצאת השליחה אינה ידועה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "sendProgress": {
+        "label": "שליחת עדכוני התקדמות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "sendToolHints": {
+        "label": "שליחת עדכונים על הפעלת כלים",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      }
+    }
+  }
+}

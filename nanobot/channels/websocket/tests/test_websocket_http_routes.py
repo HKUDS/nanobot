@@ -2304,8 +2304,10 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
                     "brand_color": "#111827",
                     "required_fields": [],
                     "connection_summary": "",
+                    "icons": [],
                 }
             ],
+            "plugin_server_icons": {},
             "installed_count": 0,
         },
     )
@@ -2321,6 +2323,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         preset_calls.append((action, params.values))
         return {
             "presets": [],
+            "plugin_server_icons": {},
             "installed_count": 1,
             "requires_restart": action != "test",
             "last_action": {"ok": True, "message": f"{action}:{params.values['name']}"},
@@ -2335,6 +2338,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         custom_calls.append((action, params.values))
         return {
             "presets": [],
+            "plugin_server_icons": {},
             "installed_count": 1,
             "requires_restart": True,
             "last_action": {
@@ -2522,8 +2526,8 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         assert updated.status_code == 200
         body = updated.result
         assert body["pinned_keys"] == ["websocket:sidebar"]
-        assert body["archived_keys"] == ["websocket:old"]
-        assert await sm.state.archived_keys() == ["websocket:old"]
+        assert "archived_keys" not in body
+        assert await sm.state.archived_keys() == []
         assert body["session_order"] == ["websocket:old", "websocket:sidebar"]
         assert body["title_overrides"] == {"websocket:sidebar": "Pinned work"}
         assert body["view"]["density"] == "compact"
@@ -2534,7 +2538,7 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         assert persisted["pinned_keys"] == ["websocket:sidebar"]
         assert "archived_keys" not in persisted
         read_back = await _http_get("http://127.0.0.1:29911/api/webui/sidebar-state", headers=auth)
-        assert read_back.json()["archived_keys"] == ["websocket:old"]
+        assert read_back.json() == body
     finally:
         await channel.stop()
         await server_task
@@ -3723,7 +3727,7 @@ async def test_static_rejects_path_traversal(
     server_task = asyncio.create_task(channel.start())
     try:
         resp = await _http_get("http://127.0.0.1:29906/../secret.txt")
-        # Normalized by httpx into /secret.txt → falls back to index.html, not 'classified'.
+        # HTTPX normalizes the path before dispatch; the response must not expose the sibling file.
         assert "classified" not in resp.text
     finally:
         await channel.stop()

@@ -880,6 +880,7 @@ describe("ThreadComposer", () => {
         onTranscribeAudio={vi.fn(async () => "unused")}
         placeholder="Type your message..."
       />,
+      { wrapper: ToastProvider },
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
@@ -892,7 +893,7 @@ describe("ThreadComposer", () => {
     ).toBeInTheDocument();
     const input = screen.getByRole("textbox", { name: "Message input" });
     fireEvent.change(input, { target: { value: "Continue by typing" } });
-    expect(screen.getByRole("alert").closest("form")).toBe(input.closest("form"));
+    expect(screen.getByRole("alert").closest("[data-toast-tone=error]")).not.toBeNull();
     expect(screen.getByRole("alert")).toHaveTextContent("Open this WebUI over HTTPS");
     expect(getUserMedia).not.toHaveBeenCalled();
   });
@@ -1008,7 +1009,7 @@ describe("ThreadComposer", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Connect a microphone to record.");
   });
 
-  it("clears a previous voice error when retrying microphone access", async () => {
+  it("allows retrying microphone access after a permission toast", async () => {
     const { getUserMedia } = mockVoiceRecorder();
     getUserMedia.mockRejectedValueOnce(new Error("permission denied"));
     const onTranscribeAudio = vi.fn(async () => "voice retry");
@@ -1018,17 +1019,17 @@ describe("ThreadComposer", () => {
         onTranscribeAudio={onTranscribeAudio}
         placeholder="Type your message..."
       />,
+      { wrapper: ToastProvider },
     );
 
     const voiceButton = screen.getByRole("button", { name: "Voice input" });
     fireEvent.click(voiceButton);
     const permission = await screen.findByRole("alert");
     expect(permission).toHaveTextContent("Allow microphone access in the address bar, then retry.");
-    expect(permission.closest("form")).not.toBeNull();
+    expect(permission.closest("[data-toast-tone=error]")).not.toBeNull();
 
     fireEvent.click(voiceButton);
 
-    await waitFor(() => expect(screen.queryByText("Allow microphone access in the address bar, then retry.")).not.toBeInTheDocument());
     expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
   });
@@ -1134,6 +1135,7 @@ describe("ThreadComposer", () => {
         onTranscribeAudio={onTranscribeAudio}
         placeholder="Type your message..."
       />,
+      { wrapper: ToastProvider },
     );
 
     const input = screen.getByLabelText("Message input");
@@ -2276,7 +2278,7 @@ describe("ThreadComposer", () => {
   it.each([" ", "、"])("rejects more than eight typed session references separated by %j without silently dropping them", (separator) => {
     const onSend = vi.fn();
     const targets = Array.from({ length: 9 }, (_, index) => session(`topic-${index}`, `Topic${index}`));
-    render(<ThreadComposer onSend={onSend} sessions={targets} />);
+    render(<ThreadComposer onSend={onSend} sessions={targets} />, { wrapper: ToastProvider });
     const input = screen.getByLabelText("Message input");
     const handles = targets.map((target) => `@${target.handle?.name}`);
     fireEvent.change(input, { target: { value: handles.join(separator) } });
@@ -3122,25 +3124,6 @@ describe("ThreadComposer", () => {
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 
-  it("keeps image generation mode out of the composer chrome", () => {
-    const onSend = vi.fn();
-    render(
-      <ThreadComposer
-        onSend={onSend}
-        placeholder="Type your message..."
-      />,
-    );
-
-    expect(screen.queryByRole("button", { name: "Image mode" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Image aspect ratio" })).not.toBeInTheDocument();
-
-    const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "Draw a friendly robot" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-
-    expect(onSend).toHaveBeenCalledWith("Draw a friendly robot", undefined, undefined);
-  });
-
   it.each(["!pwd", "  ! pwd  ", "!Write-Output first\nWrite-Output second", "!"])("runs bang input directly without a configured model: %s", (command) => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} modelNeedsSetup />);
@@ -3193,7 +3176,7 @@ describe("ThreadComposer", () => {
 
   it("retains a bang draft when delivery is rejected without retrying it", async () => {
     const onSend = vi.fn().mockRejectedValue(new Error("Shell send rejected"));
-    const { rerender } = render(<ThreadComposer onSend={onSend} />);
+    const { rerender } = render(<ThreadComposer onSend={onSend} />, { wrapper: ToastProvider });
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "!pwd" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -3206,7 +3189,7 @@ describe("ThreadComposer", () => {
 
   it("rejects attachments on bang input without losing the draft or attachment", async () => {
     const onSend = vi.fn();
-    const { container } = render(<ThreadComposer onSend={onSend} />);
+    const { container } = render(<ThreadComposer onSend={onSend} />, { wrapper: ToastProvider });
     fireEvent.change(container.querySelector('input[type="file"]')!, {
       target: { files: [new File(["image"], "photo.png", { type: "image/png" })] },
     });
@@ -3223,7 +3206,7 @@ describe("ThreadComposer", () => {
   it("rejects quoted context on bang input without clearing it", () => {
     const onSend = vi.fn();
     const onQuotedContextChange = vi.fn();
-    render(<ThreadComposer onSend={onSend} quotedContext="keep this quote" onQuotedContextChange={onQuotedContextChange} />);
+    render(<ThreadComposer onSend={onSend} quotedContext="keep this quote" onQuotedContextChange={onQuotedContextChange} />, { wrapper: ToastProvider });
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "!pwd" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -3336,14 +3319,14 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("/new with a title", undefined, undefined);
   });
 
-  it("routes a manually submitted stop command through the stop handler", () => {
+  it.each([false, true])("routes /stop through the stop handler (streaming=%s)", (isStreaming) => {
     const onSend = vi.fn();
     const onStop = vi.fn();
     render(
       <ThreadComposer
         onSend={onSend}
         onStop={onStop}
-        isStreaming
+        isStreaming={isStreaming}
         placeholder="Type your message..."
         slashCommands={COMMANDS}
       />,

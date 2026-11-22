@@ -48,6 +48,7 @@ interface ThreadViewportProps {
   runStartedAt?: number | null;
   retryStatus?: RetryStatus | null;
   composer?: ReactNode;
+  toastViewport?: ReactNode;
   onComposerLayoutChange?: () => void;
   navigationFrame?: HTMLElement | null;
   emptyState?: ReactNode;
@@ -277,6 +278,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   runStartedAt = null,
   retryStatus = null,
   composer,
+  toastViewport,
   onComposerLayoutChange,
   navigationFrame,
   emptyState,
@@ -1267,6 +1269,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
 
   return (
     <div className="thread-viewport relative flex min-h-0 flex-1 overflow-hidden">
+      {toastViewport}
       <div
         ref={viewportFrameRef}
         className={cn(

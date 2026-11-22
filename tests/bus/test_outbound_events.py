@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
     ContextCompactionEvent,
     ProgressEvent,
@@ -53,17 +52,6 @@ def test_progress_event_lives_on_outbound_message_event_field() -> None:
     assert event.stream_id == "r1"
     assert event.tool_events == tool_events
     assert event.file_edit_events == file_edit_events
-
-
-def test_normal_outbound_message_has_no_runtime_event() -> None:
-    msg = OutboundMessage(channel="websocket", chat_id="chat-1", content="hello")
-
-    assert msg.event is None
-
-
-
-
-
 
 
 def test_replace_outbound_event_keeps_routing_metadata() -> None:

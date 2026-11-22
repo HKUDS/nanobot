@@ -289,7 +289,7 @@ describe("ThreadComposer — attachments", () => {
   it("rejects an oversized document before adding a chip", async () => {
     const file = pdfFile("oversized.pdf", 6 * 1024 * 1024 + 1);
 
-    render(<ThreadComposer onSend={vi.fn()} />);
+    render(<ThreadComposer onSend={vi.fn()} />, { wrapper: ToastProvider });
 
     const input = screen
       .getByLabelText(/message input/i)
@@ -339,6 +339,7 @@ describe("ThreadComposer — attachments", () => {
         onSend={vi.fn()}
         ingressLimits={ingressLimits({ maxTotalBytes: 700 * 1024 })}
       />,
+      { wrapper: ToastProvider },
     );
 
     const input = screen
@@ -363,6 +364,7 @@ describe("ThreadComposer — attachments", () => {
         onSend={onSend}
         ingressLimits={ingressLimits({ maxTextBytes: 4 })}
       />,
+      { wrapper: ToastProvider },
     );
 
     const textarea = screen.getByLabelText(/message input/i);
@@ -720,7 +722,7 @@ describe("local attachment paths and video ingress", () => {
 
   it("explains the size and limit of a rejected browser video without losing the draft", () => {
     const onSend = vi.fn();
-    render(<ThreadComposer onSend={onSend} />);
+    render(<ThreadComposer onSend={onSend} />, { wrapper: ToastProvider });
     const input = screen.getByLabelText(/message input/i);
     fireEvent.change(input, { target: { value: "keep this text" } });
     const file = new File([new Uint8Array(21 * 1024 * 1024)], "large.mp4", { type: "video/mp4" });

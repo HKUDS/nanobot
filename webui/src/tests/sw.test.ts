@@ -108,8 +108,6 @@ function loadSw(noticeStore = new FakeCacheStore()): LoadedSw {
     }),
   };
   const fetchMock = vi.fn();
-  // Execute the plain public/sw.js script inside a controlled scope so the
-  // service worker globals (self/caches/fetch) are fully mocked.
   new Function("self", "caches", "fetch", SW_SCRIPT)(self, caches, fetchMock);
 
   const fire = async (type: string, event: Record<string, unknown> = {}) => {
@@ -255,8 +253,8 @@ function fetchEvent(url: string, init?: RequestInit) {
   return { event, respondWith };
 }
 
-function imageRequest(url: string): Request {
-  const request = new Request(url);
+function imageRequest(url: string, init?: RequestInit): Request {
+  const request = new Request(url, init);
   Object.defineProperty(request, "destination", { value: "image" });
   return request;
 }
@@ -349,6 +347,13 @@ describe("service worker", () => {
     await sw.fire("fetch", crossEvent);
     expect(cross).not.toHaveBeenCalled();
     expect(sw.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("leaves referrerless remote icons to the HTTP cache even at /favicon.ico", async () => {
+    const sw = loadSw();
+    const event = { request: imageRequest("https://docs.example/favicon.ico", { referrerPolicy: "no-referrer" }), respondWith: vi.fn() };
+    await sw.fire("fetch", event);
+    expect(event.respondWith).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -535,8 +540,6 @@ describe("service worker", () => {
     await sw.fire("fetch", onlineEvent);
     const onlineResponse = (await onlineEvent.respondWith.mock.calls[0][0]) as Response;
     expect(await onlineResponse.text()).toContain("assets/index-v3.js");
-    // The prune is fire-and-forget; give its microtasks a chance to settle.
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v1.js`)).toBe(false);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v2.js`)).toBe(false);

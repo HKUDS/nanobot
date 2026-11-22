@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import TurnFailureNotice
 from nanobot.bus.queue import MessageBus
 from nanobot.channels import manager as manager_module
 from nanobot.channels.base import BaseChannel
@@ -21,6 +22,35 @@ def make_manager(*, config_path=None):
     channel.has_pending_delivery = False
     manager.channels["websocket"] = channel
     return manager, channel
+
+
+async def test_scheduled_delivery_admits_the_channels_own_failure_notice(tmp_path):
+    from nanobot.bus.delivery import DeliveryRequest
+
+    manager, channel = make_manager(config_path=tmp_path / "config.json")
+    manager.channels["telegram"] = channel
+    channel.format_turn_failure_notice.return_value = "La réponse a atteint la limite de sortie."
+    notice = TurnFailureNotice(failure_kind="model", failure_error_kind="empty_final_response_length")
+    delivery = DeliveryRequest("run", "telegram:chat", "generation")
+    await manager.bus.publish_outbound(OutboundMessage(
+        "telegram", "chat", "", metadata={"message_thread_id": 42}, event=notice, delivery=delivery,
+    ))
+    # A crash before the dispatcher even starts must recover the channel's presentation.
+    [pending] = manager._outbox.ready()
+    assert (pending.content, pending.event, pending.delivery) == ("La réponse a atteint la limite de sortie.", None, delivery)
+    manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+    try:
+        await wait_until(lambda: not manager.has_pending_delivery)
+        channel.send.assert_awaited_once()
+        msg = channel.send.await_args.args[0]
+        assert (msg.channel, msg.chat_id, msg.metadata) == ("telegram", "chat", {"message_thread_id": 42})
+        assert (msg.content, msg.delivery_id) == (pending.content, pending.delivery_id)
+        channel.format_turn_failure_notice.assert_called_once()
+        original_event, original_msg = channel.format_turn_failure_notice.call_args.args
+        assert original_msg.event is original_event is notice
+        assert original_msg.content == ""
+    finally:
+        await manager.stop_all()
 
 
 async def test_delivery_has_no_idle_gap_between_queue_dispatch_and_send(monkeypatch):
@@ -500,6 +530,7 @@ async def test_restart_notice_does_not_outwait_send_permit_deadline(tmp_path):
             active -= 1
 
     channel.send = AsyncMock(side_effect=send)
+    channel.send_command_result = AsyncMock(side_effect=send)
     manager.channels["probe"] = channel
     try:
         for i in range(manager_module._OUTBOUND_CONCURRENCY):
@@ -528,7 +559,7 @@ async def test_restart_notice_deadline_does_not_cancel_submitted_send(tmp_path):
         started.set()
         await release.wait()
 
-    channel = MagicMock(spec=BaseChannel, is_running=True, send=AsyncMock(side_effect=send))
+    channel = MagicMock(spec=BaseChannel, is_running=True, send_command_result=AsyncMock(side_effect=send))
     manager.channels["probe"] = channel
     task = asyncio.create_task(manager._send_restart_notice_when_started(
         RestartNotice(channel="probe", chat_id="notice", started_at_raw=""), timeout_s=0.05,
@@ -542,7 +573,7 @@ async def test_restart_notice_deadline_does_not_cancel_submitted_send(tmp_path):
         assert not task.done()
         release.set()
         await asyncio.wait_for(task, 1)
-        channel.send.assert_awaited_once()
+        channel.send_command_result.assert_awaited_once()
         assert manager._outbound_sends._value == manager_module._OUTBOUND_CONCURRENCY
     finally:
         task.cancel()

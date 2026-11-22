@@ -5,8 +5,10 @@ from types import SimpleNamespace
 import pytest
 
 from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import CommandResultEvent
 from nanobot.command.application import build_help_text, builtin_command_palette
 from nanobot.command.builtin import cmd_evaluator_prompt
+from nanobot.command.results import message_text
 from nanobot.command.router import CommandContext
 from nanobot.utils.evaluator import default_evaluator_prompt
 
@@ -21,23 +23,25 @@ def _make_ctx(tmp_path, raw: str = "/evaluator-prompt", args: str = "") -> Comma
 async def test_evaluator_prompt_reports_default_prompt(tmp_path) -> None:
     out = await cmd_evaluator_prompt(_make_ctx(tmp_path))
 
-    assert "Heartbeat evaluator prompt: nanobot default" in out.content
-    assert "prompts/evaluator.md" in out.content
-    assert str(tmp_path) not in out.content
-    assert "/evaluator-prompt init" in out.content
+    assert "Heartbeat evaluator prompt: nanobot default" in message_text(out)
+    assert "prompts/evaluator.md" in message_text(out)
+    assert str(tmp_path) not in message_text(out)
+    assert "/evaluator-prompt init" in message_text(out)
 
 
 @pytest.mark.asyncio
 async def test_evaluator_prompt_init_copies_default_prompt(tmp_path) -> None:
     ctx = _make_ctx(tmp_path, "/evaluator-prompt init", "init")
+    ctx.msg.metadata = {"locale": "es"}
 
     out = await cmd_evaluator_prompt(ctx)
 
     prompt_file = tmp_path / "prompts" / "evaluator.md"
-    assert "Created heartbeat evaluator prompt" in out.content
-    assert "prompts/evaluator.md" in out.content
-    assert str(tmp_path) not in out.content
-    assert "evaluate_notification" in out.content
+    assert isinstance(out.event, CommandResultEvent) and out.event.command == "/evaluator-prompt"
+    assert "Se creó" in message_text(out)
+    assert "prompts/evaluator.md" in message_text(out)
+    assert str(tmp_path) not in message_text(out)
+    assert "evaluate_notification" in message_text(out)
     assert prompt_file.read_text(encoding="utf-8") == default_evaluator_prompt() + "\n"
 
 
@@ -50,9 +54,9 @@ async def test_evaluator_prompt_init_does_not_overwrite_existing_prompt(tmp_path
 
     out = await cmd_evaluator_prompt(ctx)
 
-    assert "already exists" in out.content
-    assert "prompts/evaluator.md" in out.content
-    assert str(tmp_path) not in out.content
+    assert "already exists" in message_text(out)
+    assert "prompts/evaluator.md" in message_text(out)
+    assert str(tmp_path) not in message_text(out)
     assert prompt_file.read_text(encoding="utf-8") == "custom"
 
 
@@ -68,8 +72,8 @@ async def test_evaluator_prompt_handles_undecodable_existing_prompt(tmp_path) ->
         _make_ctx(tmp_path, "/evaluator-prompt init", "init")
     )
 
-    assert "Heartbeat evaluator prompt: nanobot default" in status.content
-    assert "already exists" in init.content
+    assert "Heartbeat evaluator prompt: nanobot default" in message_text(status)
+    assert "already exists" in message_text(init)
     assert prompt_file.read_bytes() == original
 
 
@@ -82,7 +86,7 @@ async def test_evaluator_prompt_init_recreates_empty_prompt(tmp_path) -> None:
 
     out = await cmd_evaluator_prompt(ctx)
 
-    assert "Created heartbeat evaluator prompt" in out.content
+    assert "Created heartbeat evaluator prompt" in message_text(out)
     assert prompt_file.read_text(encoding="utf-8") == default_evaluator_prompt() + "\n"
 
 
@@ -94,15 +98,15 @@ async def test_evaluator_prompt_reports_override(tmp_path) -> None:
 
     out = await cmd_evaluator_prompt(_make_ctx(tmp_path))
 
-    assert "Heartbeat evaluator prompt: custom for this workspace" in out.content
-    assert "prompts/evaluator.md" in out.content
+    assert "Heartbeat evaluator prompt: custom for this workspace" in message_text(out)
+    assert "prompts/evaluator.md" in message_text(out)
 
 
 @pytest.mark.asyncio
 async def test_evaluator_prompt_rejects_unknown_args(tmp_path) -> None:
     out = await cmd_evaluator_prompt(_make_ctx(tmp_path, "/evaluator-prompt nope", "nope"))
 
-    assert out.content == "Usage: /evaluator-prompt [init]"
+    assert message_text(out) == "Usage: /evaluator-prompt [init]"
 
 
 def test_evaluator_prompt_command_in_help_and_palette() -> None:

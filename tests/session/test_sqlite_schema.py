@@ -269,11 +269,10 @@ def test_archive_reference_allows_atomic_session_replacement_but_not_orphan_comm
     store.initialize(tmp_path / "workspace")
     original = _session()
     store.save(original)
-    assert store.set_archived_keys([original.key]) == [original.key]
+    store.set_archived([original.key], True)
     with store.transaction(write=False) as db:
         archived_at = db.execute("SELECT archived_at FROM session_archives").fetchone()[0]
-    assert store.set_archived_keys([original.key]) == [original.key]
-    assert store.set_archived_keys([original.key, "chat:missing"]) == [original.key]
+    store.set_archived([original.key, original.key, "chat:missing"], True)
     with store.transaction():
         assert store.delete(original.key, preserve_archive=True)
         store.save(Session(key=original.key))

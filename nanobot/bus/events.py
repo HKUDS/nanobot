@@ -1,5 +1,6 @@
+import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from nanobot.bus.delivery import DeliveryRequest
@@ -17,6 +18,7 @@ OUTBOUND_META_AGENT_UI = "_agent_ui"
 INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
 INBOUND_META_USER_SHELL = "_user_shell"
 INBOUND_META_MODEL_OPTIONS = "_model_options"
+INBOUND_META_MODEL_CONTROL = "_model_control"
 RUNTIME_CONTROL_SESSION_DISCARD = "session_discard"
 
 # Transport-provided turn correlation; the persisted spelling is retained for clients.
@@ -32,7 +34,7 @@ class InboundMessage:
     sender_id: str
     chat_id: str
     content: str
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC).astimezone())
     media: list[str] = field(default_factory=list)  # Media paths or URLs
     metadata: dict[str, Any] = field(default_factory=dict)
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
@@ -73,3 +75,9 @@ class OutboundMessage:
     event: "AgentEvent | None" = None
     delivery: DeliveryRequest | None = None
     delivery_id: str | None = None
+    # Process-local acknowledgement; queue admission is not a completed send.
+    sent: asyncio.Future[None] | None = field(default=None, repr=False, compare=False)
+
+    def confirm_sent(self) -> None:
+        if self.sent is not None and not self.sent.done():
+            self.sent.set_result(None)

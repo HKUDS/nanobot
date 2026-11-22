@@ -100,11 +100,11 @@ import {
   COMPOSER_PLACEHOLDER,
   createAppLayout,
 } from "./layout"
+import { turnFailureLine } from "../platform/turn-failure"
 import {
   connectionStatusText,
   formatElapsed,
   retryStatusLine,
-  terminalModelFailureLine,
   type RenderedRetryStatus,
 } from "./status"
 import {
@@ -777,7 +777,7 @@ export class NanobotTui {
           this.activeLabel = event.kind === "tool_hint" ? "Working" : "Thinking"
           this.transcript.progress(event.text, event.tool_events)
           this.setActive(true)
-        } else if (event.render_as === "text") {
+        } else if (event.side_channel === true || event.render_as === "text") {
           this.transcript.assistant(event.text, event.render_as)
         } else {
           this.finalMessage = event.text
@@ -827,6 +827,9 @@ export class NanobotTui {
         this.setActive(true)
         this.renderActiveStatus()
         return
+      case "turn_failure_notice":
+        this.transcript.deliveryFailure(turnFailureLine(event))
+        return
       case "turn_end":
         if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) return
         if (event.turn_id) {
@@ -836,12 +839,7 @@ export class NanobotTui {
         const failed = event.outcome === "failed"
         this.transcript.finishStream(failed || this.turnHadAnswer ? "" : this.finalMessage)
         if (failed) {
-          this.transcript.notice(
-            event.failure_kind === "model"
-              ? terminalModelFailureLine(event.failure_error_kind, event.failure_attempts)
-              : event.failure_message || "This turn failed and has ended.",
-            true,
-          )
+          this.transcript.turnFailure(turnFailureLine(event), event.turn_id)
         }
         this.transcript.finishActivity()
         if (this.currentFileEdits.length) this.lastFileEdits = this.currentFileEdits
@@ -2325,8 +2323,14 @@ export class NanobotTui {
     if (/^\/model(?:\s|$)/iu.test(content)) this.modelCommandTurns.add(turnId)
     this.clearComposer()
     this.commandMenu.hide()
-    if (!silent && lifecycle !== "stop_active_turn") this.transcript.user(content)
     if (!silent) this.recordPrompt(content)
+    if (lifecycle === "stop_active_turn") {
+      this.restoreQueuedPrompts()
+      if (this.activeTurn) this.status.content = "Stopping…"
+      else this.status.content = this.readyStatus()
+      return
+    }
+    if (!silent) this.transcript.user(content)
 
     if (lifecycle === "finalize_active_turn") {
       this.activeTurnId = null
@@ -2336,10 +2340,6 @@ export class NanobotTui {
       this.turnHadAnswer = false
       this.setActive(false)
       this.status.content = "Resetting chat…"
-    } else if (lifecycle === "stop_active_turn") {
-      this.activeTurnId = null
-      this.setActive(false)
-      this.status.content = "Stopping…"
     } else if (!this.activeTurn) {
       this.status.content = `Running ${content.split(/\s+/u, 1)[0]}…`
     }
@@ -2640,5 +2640,6 @@ export class NanobotTui {
   }
 }
 
-export { sessionExitMessage, terminalModelFailureLine } from "./status"
+export { sessionExitMessage } from "./status"
+export { terminalModelFailureLine } from "../platform/turn-failure"
 export type { AppOptions } from "./types"

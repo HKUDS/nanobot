@@ -1,0 +1,5 @@
+.code-content {
+  --code-foreground: hsl(var(--foreground));
+  --code-background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}

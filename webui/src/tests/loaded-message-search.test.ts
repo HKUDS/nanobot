@@ -25,13 +25,15 @@ describe("loaded message search", () => {
       message("tool-only", "tool"),
       { ...message(""), reasoning: "reasoning-only" },
       { ...message("trace-only"), kind: "trace" as const },
-      { ...message("/model hidden-preset", "user"), turnId: "command" },
-      { ...message("hidden-reply"), turnId: "command" },
+      { ...message("/model hidden-preset", "user"), turnId: "webui-system:picker" },
+      { ...message("hidden-reply"), turnId: "webui-system:picker" },
+      { ...message("/model visible-preset", "user"), turnId: "typed-command" },
       message(`${"旧内容\n".repeat(500)}Visible TOKEN-42 ${"后续内容".repeat(100)}`),
     ]];
     for (const query of ["tool-only", "reasoning-only", "trace-only", "hidden-preset", "hidden-reply"]) {
       expect(findLoadedMessagePreview(groups, query)).toBeUndefined();
     }
+    expect(findLoadedMessagePreview(groups, "visible-preset")).toBe("/model visible-preset");
     const preview = findLoadedMessagePreview(groups, "token-42")!;
     expect(preview).toContain("Visible TOKEN-42");
     expect(preview).toMatch(/^….*…$/);

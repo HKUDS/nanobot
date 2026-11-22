@@ -1,3 +1,5 @@
+import "./pending-edge-overlay.css";
+
 import { useCallback, useEffect, useState } from "react";
 import type { InputProcessingStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";

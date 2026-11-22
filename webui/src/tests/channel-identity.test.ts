@@ -4,7 +4,6 @@ import {
   channelIsRunning,
   channelSetup,
   channelStatusLabel,
-  channelToggleChecked,
 } from "@/components/settings/channels/ChannelIdentity";
 import type { NanobotFeatureInfo } from "@/lib/types";
 
@@ -176,10 +175,8 @@ describe("channel runtime state", () => {
     const unknown = feature({ enabled: true });
 
     expect(channelIsRunning(running)).toBe(true);
-    expect(channelToggleChecked(running)).toBe(true);
     expect(channelStatusLabel(running, tx)).toBe("On");
     expect(channelIsRunning(unknown)).toBe(false);
-    expect(channelToggleChecked(unknown)).toBe(false);
     expect(channelStatusLabel(unknown, tx)).toBe("Not running");
   });
 });

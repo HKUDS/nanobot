@@ -1,13 +1,13 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { fmtDateTime } from "@/lib/format-time";
 
-vi.mock("@/components/MarkdownText", () => ({ MarkdownText: ({ content }: { content: string }) => <p>{content}</p> }));
+vi.mock("@/components/MarkdownText", () => ({ MarkdownText: ({ children }: { children: string }) => <p>{children}</p> }));
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("desktop hover timestamp", () => {
-  it("uses user creation / assistant completion time and exposes the full date on keyboard focus", async () => {
+  it("shows user creation / assistant completion time without opening a panel on click", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 8, 24, 16));
     const createdAt = new Date(2026, 8, 23, 12).getTime();
@@ -16,15 +16,16 @@ describe("desktop hover timestamp", () => {
       { id: "u", role: "user", content: "Question", createdAt },
       { id: "a", role: "assistant", content: "Answer", createdAt, completedAt },
     ]} />);
-    const times = container.querySelectorAll<HTMLTimeElement>("[data-message-hover-time]");
+    const times = container.querySelectorAll<HTMLTimeElement>("[data-message-side-actions] time[data-message-hover-time]");
     expect(times).toHaveLength(2);
     expect(times[0]).toHaveTextContent("9/23");
     expect(times[1]).toHaveTextContent("14:32");
     expect(times[1]).toHaveAttribute("datetime", new Date(completedAt).toISOString());
-    expect(times[1]).toHaveAttribute("aria-label", fmtDateTime(completedAt));
+    fireEvent.click(times[1]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(times[1]).toHaveAttribute("tabindex", "0");
     fireEvent.focus(times[1]);
     expect(await screen.findByRole("tooltip")).toHaveTextContent(fmtDateTime(completedAt));
-    expect(times[1].closest("[data-thread-display-unit]")).toHaveAttribute("data-context-block-active");
   });
 
   it("refreshes the short date when hovering again after midnight", () => {
@@ -46,11 +47,14 @@ describe("desktop hover timestamp", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 8, 24, 16));
     const { container } = render(<ThreadMessages messages={[
-      { id: "a", role: "assistant", content: "Answer", createdAt: new Date(2026, 8, 22).getTime(), completedAt: NaN },
-      { id: "b", role: "assistant", content: "Unknown", createdAt: NaN },
+      { id: "a", role: "assistant", turnId: "first", content: "Answer", createdAt: new Date(2026, 8, 22).getTime(), completedAt: NaN },
+      { id: "b", role: "assistant", turnId: "second", content: "Unknown", createdAt: NaN },
     ]} />);
     const times = container.querySelectorAll("[data-message-hover-time]");
     expect(times).toHaveLength(1);
     expect(times[0]).toHaveTextContent("9/22");
+    const unknown = screen.getByText("Unknown").closest<HTMLElement>("[data-thread-display-unit]")!;
+    expect(within(unknown).getByRole("button", { name: "Copy" })).toBeEnabled();
+    expect(unknown.querySelector('button[aria-haspopup="dialog"]')).toBeNull();
   });
 });

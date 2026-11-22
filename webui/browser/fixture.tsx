@@ -235,7 +235,7 @@ if (fixtureCase === "toast" && parameters.has("lang")) {
   if (previous === null) localStorage.removeItem(LOCALE_STORAGE_KEY);
   else localStorage.setItem(LOCALE_STORAGE_KEY, previous);
 }
-if ((["appearance", "long-user-message", "session-transition", "tools-catalog"].includes(fixtureCase ?? "") || historyPreview) && parameters.has("lang")) {
+if ((["appearance", "chat-failure", "long-user-message", "session-transition", "tools-catalog"].includes(fixtureCase ?? "") || historyPreview) && parameters.has("lang")) {
   await setAppLanguage(normalizeLocale(parameters.get("lang")));
 }
 createRoot(document.getElementById("root")!).render(<TooltipProvider>{fixture}</TooltipProvider>);

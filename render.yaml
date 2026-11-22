@@ -25,12 +25,9 @@ services:
       - key: PORT
         value: 8765
     # Persist sessions, memory, and the WebUI display transcripts across deploys.
-    # The entrypoint copies the config onto this mount, so nanobot's runtime
-    # data_dir (config_path.parent) resolves here too — keeping webui/ (chat
-    # history the UI renders), cron, media, and logs durable, not just session
-    # files. Starter / 1 GB is the lean default; history persistence needs this
-    # disk, not a bigger plan. Note: persistent disks require a paid service
-    # (they are unavailable on Render's free tier).
+    # The config lives on this mount, alongside the session database, cron, media
+    # and logs. History persistence requires a disk, not a larger plan; Render
+    # does not offer persistent disks on its free tier.
     disk:
       name: nanobot-data
       mountPath: /home/nanobot/.nanobot

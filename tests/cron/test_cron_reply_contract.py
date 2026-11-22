@@ -2,8 +2,8 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, current_request_context, request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.bus.queue import MessageBus
@@ -90,7 +90,7 @@ async def test_moved_cron_keeps_reply_send_and_prompt_prefix_contract(tmp_path, 
         return LLMResponse(content="Drink water")
 
     provider.chat_stream_with_retry = reply
-    agent = AgentLoop(bus=bus, provider=provider, workspace=workspace, model="test-model",
+    agent = make_agent_loop(bus=bus, provider=provider, workspace=workspace, model="test-model",
         session_manager=sessions, tools_config=Config().tools, cron_service=cron)
     await cron.start()
     try:
@@ -181,7 +181,7 @@ async def test_saved_cron_separates_source_chat_from_explicit_recipient(tmp_path
         return LLMResponse(content="Report")
 
     provider.chat_stream_with_retry = reply
-    agent = AgentLoop(bus=bus, provider=provider, workspace=workspace, model="test-model",
+    agent = make_agent_loop(bus=bus, provider=provider, workspace=workspace, model="test-model",
                       session_manager=sessions, tools_config=Config().tools, cron_service=cron)
     try:
         await run_bound_cron_job(job, agent=agent, cron=cron)

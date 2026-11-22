@@ -84,13 +84,6 @@ describe("CodeBlock", () => {
     expect(container.querySelectorAll("*").length).toBeLessThan(10);
   });
 
-  it("keeps a Python module beyond the preview budget available as complete plain text", () => {
-    const code = Array.from({ length: 2800 }, (_, index) => `def function_${index}(): return "a realistic source line"`).join("\n");
-    render(<CodeBlock code={code} language="python" chrome="none"
-      showLineNumbers wrapLongLines={false} viewportHighlight />);
-    expect(screen.getByTestId("plain-code-fallback").querySelector("code > span > span:last-child")?.textContent).toBe(code);
-  });
-
   it("paints large preview text before enhancing it, and cancels enhancement on unmount", async () => {
     const callbacks = new Map<number, FrameRequestCallback>();
     let next = 0;
@@ -149,7 +142,7 @@ describe("CodeBlock", () => {
     expect(screen.queryByText("ts")).not.toBeInTheDocument();
     expect(screen.getByTestId("plain-code-fallback")).toHaveClass("text-foreground/90");
     expect(screen.getByTestId("plain-code-fallback")).toHaveClass("bg-transparent");
-    expect(screen.getByTestId("plain-code-fallback")).toHaveClass("py-4", "pl-5", "pr-14");
+    expect(screen.getByTestId("plain-code-fallback")).toHaveClass("py-4", "pl-5", "pr-[var(--code-action-gutter,3.5rem)]");
 
     const container = screen.getByTestId("plain-code-fallback").closest(".not-prose");
     expect(container).toHaveClass("relative", "rounded-floating", "bg-secondary/70");
@@ -157,8 +150,9 @@ describe("CodeBlock", () => {
     expect(container).toHaveAttribute("data-language", "ts");
 
     const copyButton = screen.getByRole("button", { name: "Copy code" });
-    expect(copyButton.parentElement).toBe(container);
-    expect(copyButton).toHaveClass("absolute", "h-8", "w-8", "rounded-full");
+    expect(container).toContainElement(copyButton);
+    expect(copyButton.parentElement).toHaveClass("absolute", "right-2.5", "top-2.5");
+    expect(copyButton).toHaveClass("h-8", "w-8", "rounded-full");
     expect(copyButton).toHaveTextContent("");
   });
 

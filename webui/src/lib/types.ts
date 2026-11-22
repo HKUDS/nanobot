@@ -119,6 +119,7 @@ export interface UIMessage {
   content: string;
   /** Literal output bypasses Markdown and content-based reply recognition. */
   renderAs?: "text";
+  sideChannel?: true;
   /** Invocation-time snapshots, never resolved from today's model presets. */
   responseSources?: ResponseSource[];
   /** Stable input identity, independent of its arrival or execution turn. */
@@ -144,8 +145,6 @@ export interface UIMessage {
   activityKind?: "model";
   /** Context-compaction lifecycle rendered as a standalone channel notice. */
   compaction?: UIContextCompaction;
-  /** Display-only localization marker for fixed /compact command replies. */
-  compactReply?: "empty" | "failed";
   /** User turn: optimistic blob URLs for preview. Replay: placeholder chips. */
   images?: UIImage[];
   media?: UIMediaAttachment[];
@@ -188,6 +187,7 @@ export interface UIMessage {
   /** Live UI hint; not part of the persisted transcript. */
   processingStatus?: InputProcessingStatus;
   deliveryErrorKind?: MessageDeliveryErrorKind;
+  deliveryErrorDetail?: string;
 }
 
 /** Turn-owned telemetry, not a transcript row or body-history source. */
@@ -505,6 +505,7 @@ export interface ModelOptionsCapability {
 }
 
 export interface ChatSummary {
+  archived?: boolean;
   /** Server-side session key, e.g. ``websocket:abcd-...``. */
   key: string;
   /** Local channel + chat_id parts derived from ``key`` for convenience. */
@@ -604,7 +605,6 @@ export interface SidebarViewState {
 export interface SidebarStatePayload {
   schema_version: number;
   pinned_keys: string[];
-  archived_keys: string[];
   session_order: string[];
   title_overrides: Record<string, string>;
   project_name_overrides: Record<string, string>;
@@ -1314,7 +1314,15 @@ interface McpPresetField {
   env_var?: string | null;
 }
 
+export interface McpServerIcon {
+  src: string;
+  mimeType?: string;
+  sizes?: string[];
+  theme?: "light" | "dark";
+}
+
 export interface McpPresetInfo {
+  icons?: McpServerIcon[];
   name: string;
   display_name: string;
   category: string;
@@ -1371,6 +1379,7 @@ export interface McpOAuthFlowPayload {
 }
 
 export interface McpPresetsPayload {
+  plugin_server_icons?: Record<string, McpServerIcon[]>;
   presets: McpPresetInfo[];
   proxy_configured?: boolean;
   installed_count: number;
@@ -1604,6 +1613,7 @@ export type InboundEvent =
       chat_id: string;
       text: string;
       side_channel?: true;
+      command_result?: { command: "/model"; switched_preset: string };
       render_as?: "text";
       reply_to?: string;
       media?: string[];
@@ -1732,6 +1742,7 @@ export type InboundEvent =
       scope?: "metadata" | "thread" | string;
       workspace_scope?: WorkspaceScopePayload;
     }
+  | { event: "sessions_changed" }
   | {
       event: "sidebar_state_updated";
       state: SidebarStatePayload;
@@ -1916,6 +1927,7 @@ export type Outbound =
       type: "message";
       chat_id: string;
       content: string;
+      locale?: string;
       media?: import("../../../packages/client-events/attachments").AttachmentReference[];
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];

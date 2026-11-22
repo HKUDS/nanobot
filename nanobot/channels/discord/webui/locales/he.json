@@ -1,0 +1,57 @@
+{
+  "setup": {
+    "docsLabel": "מדריך להגדרת Discord",
+    "officialLabel": "פורטל המפתחים של Discord",
+    "fields": {
+      "token": {
+        "label": "אסימון גישה של הבוט",
+        "placeholder": "אסימון הגישה של הבוט ב־Discord"
+      },
+      "allowChannels": {
+        "label": "ערוצים מורשים",
+        "placeholder": "מזהי ערוצים בהפרדה בפסיקים"
+      },
+      "groupPolicy": {
+        "label": "כללים לקבוצות",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות",
+          "allowlist": "רשימת מורשים"
+        }
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי משתמשים בהפרדה בפסיקים"
+      },
+      "useProxy": {
+        "label": "שימוש בשרת פרוקסי"
+      },
+      "intents": {
+        "label": "מסכת אירועים (Gateway Intents)"
+      },
+      "readReceiptEmoji": {
+        "label": "אימוג׳י לאישור קריאה"
+      },
+      "workingEmoji": {
+        "label": "אימוג׳י לציון עיבוד ההודעה"
+      },
+      "workingEmojiDelay": {
+        "label": "השהיה לפני הצגת האימוג׳י (שניות)"
+      },
+      "streaming": {
+        "label": "הזרמה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "replyToMessage": {
+        "label": "מענה להודעה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      }
+    }
+  }
+}

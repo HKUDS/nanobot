@@ -137,11 +137,16 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
         StreamDeltaEvent,
         StreamedResponseEvent,
         StreamEndEvent,
+        TurnFailureNotice,
     )
     from nanobot.bus.queue import MessageBus
+    from nanobot.channels.reply_formats import TERMINAL
+    from nanobot.channels.turn_notices import turn_failure_notice_text
     from nanobot.cli import terminal as cli_terminal
     from nanobot.cli.stream import ThinkingSpinner
+    from nanobot.command.results import as_text_message
     from nanobot.cron.service import CronService
+    from nanobot.prompt_assembly import build_context_builder
     from nanobot.providers.factory import make_provider
     from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates
     from nanobot.utils.restart import (
@@ -189,6 +194,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             cron_service=cron,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
+            context_builder=build_context_builder(runtime_config, cli=TERMINAL),
             builtin_assembly=install_goal,
         )
     except ValueError as exc:
@@ -222,26 +228,26 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             reasoning: bool = False,
             **_kwargs: Any,
         ) -> None:
-            ch = agent_loop.channels_config
+            ch = runtime_config.channels
 
             if _kwargs.get("reasoning_end"):
-                if ch and not ch.show_reasoning:
+                if not ch.show_reasoning:
                     reasoning_buffer.clear()
                 else:
                     cli_terminal._flush_cli_reasoning(reasoning_buffer, _thinking, renderer)
                 return
 
             if reasoning:
-                if ch and not ch.show_reasoning:
+                if not ch.show_reasoning:
                     reasoning_buffer.clear()
                     return
                 text = reasoning_buffer.add(content)
                 if text:
                     cli_terminal._print_cli_reasoning(text, _thinking, renderer)
                 return
-            if ch and tool_hint and not ch.send_tool_hints:
+            if tool_hint and not ch.send_tool_hints:
                 return
-            if ch and not tool_hint and not ch.send_progress:
+            if not tool_hint and not ch.send_progress:
                 return
             if tool_hint and tool_events:
                 content = format_tool_event_hints(
@@ -260,14 +266,25 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                     bot_name=runtime_config.agents.defaults.bot_name,
                     bot_icon=runtime_config.agents.defaults.bot_icon,
                 )
-                response = await agent_loop.process_direct(
-                    message,
-                    session_id,
-                    on_progress=_make_progress(renderer),
-                    on_stream=renderer.on_delta,
-                    on_stream_end=renderer.on_end,
-                )
-                if not renderer.streamed:
+                try:
+                    response = await agent_loop.process_direct(
+                        message,
+                        session_id,
+                        on_progress=_make_progress(renderer),
+                        on_stream=renderer.on_delta,
+                        on_stream_end=renderer.on_end,
+                    )
+                except Exception:
+                    # Unlike a bus turn, direct execution can raise before returning a notice.
+                    await renderer.close()
+                    console.print(turn_failure_notice_text(TurnFailureNotice(failure_kind="internal")))
+                    raise typer.Exit(1) from None
+                if response is not None and isinstance(response.event, TurnFailureNotice):
+                    await renderer.close()
+                    console.print(turn_failure_notice_text(response.event))
+                    if response.event.failure_kind == "model":
+                        raise typer.Exit(1)
+                elif not renderer.streamed:
                     await renderer.close()
                     print_kwargs: dict[str, Any] = {}
                     if renderer.header_printed:
@@ -324,10 +341,19 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             reasoning_buffer = cli_terminal._ReasoningBuffer()
 
             async def _consume_outbound() -> None:
+                nonlocal renderer
                 while True:
                     try:
-                        msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+                        msg = as_text_message(await asyncio.wait_for(bus.consume_outbound(), timeout=1.0))
                         event = msg.event
+
+                        if isinstance(event, TurnFailureNotice):
+                            if renderer:
+                                await renderer.close()
+                                renderer = None
+                            await cli_terminal._print_interactive_line(turn_failure_notice_text(event))
+                            turn_done.set()
+                            continue
 
                         if isinstance(event, StreamDeltaEvent):
                             if renderer:
@@ -357,7 +383,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                         if await cli_terminal._maybe_print_interactive_progress(
                             msg,
                             None,
-                            agent_loop.channels_config,
+                            runtime_config.channels,
                             renderer,
                             reasoning_buffer,
                             tool_hint_max_length=runtime_config.agents.defaults.tool_hint_max_length,
@@ -374,6 +400,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                                 render_markdown=markdown,
                                 metadata=msg.metadata,
                             )
+                            msg.confirm_sent()
 
                     except asyncio.TimeoutError:
                         continue
@@ -441,6 +468,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                                     metadata=meta,
                                     **print_kwargs,
                                 )
+                                response_msg.confirm_sent()
                         elif renderer and not renderer.streamed:
                             await renderer.close()
                     except KeyboardInterrupt:

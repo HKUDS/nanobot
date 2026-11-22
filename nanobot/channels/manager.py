@@ -6,22 +6,27 @@ import inspect
 import random
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 from loguru import logger
 
+from nanobot.agent.tools.mcp_metadata import MCPRuntimeSnapshot
 from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
+    CommandResultEvent,
     ProgressEvent,
     RetryWaitEvent,
     RuntimeModelUpdatedEvent,
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
+    TurnFailureNotice,
     replace_outbound_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -34,6 +39,8 @@ from nanobot.channels.contracts import (
     resolve_channel_action_target,
 )
 from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
+from nanobot.channels.turn_notices import turn_failure_notice_text
+from nanobot.command.results import command_result
 from nanobot.config.schema import Config
 from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.security.workspace_policy import resolve_allowed_path
@@ -41,7 +48,7 @@ from nanobot.session.history_edit import HistoryEditSubmit
 from nanobot.utils.restart import (
     RestartNotice,
     consume_restart_notice_from_env,
-    format_restart_completed_message,
+    restart_completed_line,
 )
 
 if TYPE_CHECKING:
@@ -109,7 +116,7 @@ class ChannelManager:
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
-        webui_mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
+        webui_mcp_runtime_snapshot: Callable[[], MCPRuntimeSnapshot] | None = None,
         webui_mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         webui_image_generation_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         webui_skill_state_action: Callable[[set[str]], None] | None = None,
@@ -138,7 +145,7 @@ class ChannelManager:
         self._webui_static_dist = webui_static_dist
         self._webui_runtime_surface = webui_runtime_surface
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
-        self._webui_mcp_runtime_status = webui_mcp_runtime_status
+        self._webui_mcp_runtime_snapshot = webui_mcp_runtime_snapshot
         self._webui_mcp_reload = webui_mcp_reload
         self._webui_image_generation_reload = webui_image_generation_reload
         self._webui_skill_state_action = webui_skill_state_action
@@ -165,7 +172,7 @@ class ChannelManager:
         self._origin_reply_fingerprints: OrderedDict[tuple[str, str, str], str] = OrderedDict()
         self._outbox = DeliveryOutbox(self._config_path.parent / "delivery" / "outbox.sqlite3")
         self._scheduled_deliveries: set[str] = set()
-        self.bus.outbound_recorder = self._record_scheduled
+        self.bus.prepare_outbound = self._prepare_outbound
 
         self._init_channels()
         self._remove_delivery_check: Callable[[], None] | None = (
@@ -226,7 +233,7 @@ class ChannelManager:
                 local_trigger_pending_ids=self._webui_local_trigger_pending_ids,
                 channel_feature_action=self.apply_channel_feature_action,
                 channel_runtime_status=self.get_status,
-                mcp_runtime_status=self._webui_mcp_runtime_status,
+                mcp_runtime_snapshot=self._webui_mcp_runtime_snapshot,
                 mcp_reload=self._webui_mcp_reload,
                 image_generation_reload=self._webui_image_generation_reload,
                 skill_state_action=self._webui_skill_state_action,
@@ -367,8 +374,6 @@ class ChannelManager:
             else:
                 allow = getattr(cfg, "allow_from", None)
             if allow is None:
-                # allowFrom omitted → pairing-only mode.  Unapproved senders
-                # receive a pairing code instead of being silently ignored.
                 logger.info(
                     '"{}" has no allowFrom; unapproved users will receive a pairing code',
                     name,
@@ -660,11 +665,7 @@ class ChannelManager:
         if target is None:
             logger.warning("Restart notice target channel is not enabled: {}", notice.channel)
             return
-        if notice.channel == "websocket":
-            # Reconnect and recovery are already represented by WebSocket
-            # protocol state. A generic restart-complete notice must not
-            # masquerade as a recovery transition and overwrite a real
-            # awaiting-user checkpoint in connected clients.
+        if not notice.should_notify_chat:
             return
 
         while not target.is_running:
@@ -680,11 +681,9 @@ class ChannelManager:
 
         await self._send_with_retry(
             target,
-            OutboundMessage(
-                channel=notice.channel,
-                chat_id=notice.chat_id,
-                content=format_restart_completed_message(notice.started_at_raw),
-                metadata=dict(notice.metadata or {}),
+            command_result(
+                notice.channel, notice.chat_id, "/restart", restart_completed_line(notice.started_at_raw),
+                metadata=notice.metadata, notification_id=f"command-result:{uuid4().hex}",
             ),
             deadline=deadline,
         )
@@ -749,10 +748,15 @@ class ChannelManager:
 
         return False
 
-    def _record_scheduled(self, msg: OutboundMessage) -> None:
+    def _prepare_outbound(self, msg: OutboundMessage) -> OutboundMessage:
+        if isinstance(notice := msg.event, TurnFailureNotice) and msg.channel != "websocket":
+            channel = self.channels.get(msg.channel)
+            text = channel.format_turn_failure_notice(notice, msg) if channel else turn_failure_notice_text(notice)
+            msg = replace(msg, content=text, event=None)
         if msg.delivery is not None:
             with self.bus.admission.activity():
                 self._outbox.record(msg)
+        return msg
 
     @property
     def has_pending_delivery(self) -> bool:
@@ -795,6 +799,7 @@ class ChannelManager:
         if (
             pending is not None
             and msg.delivery_id is None
+            and msg.sent is None and pending[-1].sent is None
             and len(pending) < _OUTBOUND_BATCH_LIMIT
             and channel.can_batch_send(pending[-1], msg) is True
         ):
@@ -1081,6 +1086,9 @@ class ChannelManager:
             await ChannelManager._send_stream_event(channel, msg, event)
         elif isinstance(event, StreamEndEvent):
             await ChannelManager._send_stream_event(channel, msg, event)
+        elif isinstance(event, CommandResultEvent):
+            if await channel.send_command_result(msg) != "queued":
+                msg.confirm_sent()
         elif not isinstance(event, StreamedResponseEvent):
             await channel.send(msg)
 
@@ -1098,8 +1106,8 @@ class ChannelManager:
         )
         non_matching: list[OutboundMessage] = []
 
-        # Only merge consecutive deltas. As soon as we hit any other message,
-        # stop and hand that boundary back to the dispatcher via `pending`.
+        # A matching end event can carry the last text chunk. Leave the first
+        # nonmatching message for the dispatcher to preserve delivery order.
         while True:
             try:
                 next_msg = self.bus.outbound.get_nowait()

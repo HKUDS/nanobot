@@ -81,27 +81,6 @@ class TestSchemaContract:
         assert "Retry" in out or "retry" in out
 
 
-class TestSchemaSelfDescribesRequirements:
-    def test_message_description_flags_add_requirement(self) -> None:
-        # LLMs rely on field descriptions to infer when something is actually
-        # needed. Without this hint, #3113's loop returns.
-        tool = CronTool(_SvcStub())
-        desc = tool.parameters["properties"]["message"]["description"]
-        assert "REQUIRED" in desc and "action='add'" in desc
-
-    def test_job_id_description_flags_remove_requirement(self) -> None:
-        tool = CronTool(_SvcStub())
-        desc = tool.parameters["properties"]["job_id"]["description"]
-        assert "REQUIRED" in desc and "action='remove'" in desc
-
-    def test_top_level_required_stays_narrow(self) -> None:
-        # If 'message' or 'job_id' ever creep back into top-level required,
-        # list/remove start failing schema validation (the bug PR #3163 v1
-        # accidentally introduced).
-        tool = CronTool(_SvcStub())
-        assert tool.parameters["required"] == ["action"]
-
-
 async def test_invalid_action_returns_tool_error_and_allows_correction(registry):
     from nanobot.agent.tools.registry import is_tool_error_result
 

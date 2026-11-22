@@ -26,7 +26,7 @@ from rich.text import Text
 
 from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import CommandResultEvent, ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.contracts import ChannelInstanceSpec
@@ -2423,14 +2423,14 @@ class FeishuChannel(BaseChannel):
                 return
 
             if (
-                msg.content.strip() == "New session started."
+                isinstance(msg.event, CommandResultEvent)
+                and msg.event.outcome == "session_reset"
                 and msg.metadata.get("chat_type") == "p2p"
                 and not msg.media
                 and not msg.buttons
             ):
                 return
 
-            # Determine whether the first message should quote the user's message.
             # Only the very first send (media or text) in this call uses reply; subsequent
             # chunks/media fall back to plain create to avoid redundant quote bubbles.
             # Always target message_id — the Feishu Reply API keeps replies in the
@@ -2496,7 +2496,6 @@ class FeishuChannel(BaseChannel):
                     key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
                     if key:
                         # Feishu's OpenAPI names video messages "media".
-                        # Use "audio" for audio, "media" for video, "file" for documents.
                         # Feishu requires these specific msg_types for inline playback.
                         if ext in self._AUDIO_EXTS:
                             media_type = "audio"
@@ -2718,16 +2717,13 @@ class FeishuChannel(BaseChannel):
                     _NEW_SESSION_DIVIDER_CONTENT,
                 )
 
-            # Build session key for conversation isolation.
-            # If topic_isolation is True: each topic gets its own session via root_id/message_id.
-            # If topic_isolation is False: all messages in group share the same session.
-            # Private chat: no override — same behavior as Telegram/Slack.
             if chat_type == "group":
                 if self.config.topic_isolation:
                     session_key = f"{self.name}:{chat_id}:{root_id or message_id}"
                 else:
                     session_key = f"{self.name}:{chat_id}"
             else:
+                # Private chats use the default session key.
                 session_key = None
 
             reply_to = chat_id if chat_type == "group" else sender_id

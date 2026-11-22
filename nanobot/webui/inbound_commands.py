@@ -16,13 +16,15 @@ from websockets.asyncio.server import ServerConnection
 
 from nanobot.bus.events import (
     INBOUND_META_LOCAL_MEDIA,
+    INBOUND_META_MODEL_CONTROL,
     INBOUND_META_MODEL_OPTIONS,
     INBOUND_META_USER_SHELL,
 )
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.application import builtin_command_starts_agent_turn
-from nanobot.command.builtin import USER_SHELL_COMMAND
+from nanobot.command.builtin import CHAT_UI_COMMAND_REPLACEMENTS, USER_SHELL_COMMAND
+from nanobot.command.router import normalize_command_text
 from nanobot.providers.model_options import ModelOptions, ModelOptionsPayload
 from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.runtime_context import (
@@ -680,6 +682,16 @@ class WebUICommandRouter:
             )
             return
 
+        command = None
+        if envelope.get("webui") is True and content.lstrip().startswith("/"):
+            command = normalize_command_text(content).split(maxsplit=1)[0].lower()
+            if replacement := CHAT_UI_COMMAND_REPLACEMENTS.get(command):
+                await self._transport.webui_send_event(
+                    connection, "error", detail="message_rejected", reason=f"{command} → {replacement}",
+                    **rejection_fields,
+                )
+                return
+
         # A client may retry the same turn after an ACK was lost. Check before
         # resolving already-committed refs; never dispatch that turn twice.
         now = time.monotonic()
@@ -765,17 +777,21 @@ class WebUICommandRouter:
         }
         if envelope.get("webui") is True:
             metadata["webui"] = True
+            locale = envelope.get("locale")
+            if content.lstrip().startswith("/") and isinstance(locale, str) and 0 < len(locale) <= 64:
+                metadata["locale"] = locale
             metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
         trusted_webui = metadata.get("webui") is True and connection in self._webui_connections
         # The settings Restart button uses the existing silent command protocol.
         # Its routing chat ID is not a new conversation or a workspace update.
-        restart_control = (
-            trusted_webui
-            and turn_id is not None
-            and turn_id.startswith(WEBUI_SYSTEM_COMMAND_TURN_PREFIX)
-            and content.strip().lower() == "/restart"
-            and not attachment_order
+        system_command = (
+            trusted_webui and turn_id is not None
+            and turn_id.startswith(WEBUI_SYSTEM_COMMAND_TURN_PREFIX) and not attachment_order
         )
+        restart_control = system_command and content.strip().lower() == "/restart"
+        model_control = system_command and command == "/model"
+        if model_control:
+            metadata[INBOUND_META_MODEL_CONTROL] = True
         if restart_control:
             metadata[WEBUI_RESTART_CONTROL_METADATA_KEY] = True
         is_user_shell = (
@@ -857,6 +873,8 @@ class WebUICommandRouter:
         if temporary_policy is not None:
             self._temporary_chats.register_media(connection, chat_id, [str(item.path) for item in uploaded])
         is_webui = metadata.get("webui") is True
+        stop_control = content.lstrip().startswith("/") and normalize_command_text(content).lower() == "/stop"
+        show_user_message = is_webui and not (model_control or restart_control or stop_control)
         queued_owner = None
         if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
             queued_owner = register_queued_websocket_turn_if_idle(chat_id, turn_id)
@@ -879,6 +897,7 @@ class WebUICommandRouter:
                     lambda: self._workspaces.persist_scope(
                         chat_id,
                         scope,
+                        model_control=model_control,
                         expected_generation=(
                             temporary_policy.session_generation
                             if temporary_policy is not None
@@ -893,7 +912,7 @@ class WebUICommandRouter:
                 session_generation, session_created = admission
             if session_generation is not None:
                 metadata[HISTORY_GENERATION_METADATA_KEY] = session_generation
-            if is_webui and not restart_control and temporary_policy is None:
+            if show_user_message and temporary_policy is None:
                 await self._transcripts.append_user_message(
                     chat_id,
                     content,
@@ -942,9 +961,9 @@ class WebUICommandRouter:
         for attachment, name in zip(media, media_names, strict=False):
             if name:
                 attachment["name"] = name
-        if is_webui and not restart_control:
-            if session_created:
-                await self._outbound.session_updated(chat_id, scope="metadata")
+        if is_webui and not restart_control and session_created:
+            await self._outbound.session_updated(chat_id, scope="metadata")
+        if show_user_message:
             await self.broadcast_user_message(
                 connection,
                 chat_id,
@@ -1310,6 +1329,8 @@ class WebUICommandRouter:
                 if 200 <= response.status_code < 300:
                     if action == "sidebar.update":
                         await self.broadcast_webui_event("sidebar_state_updated", state=response.result)
+                    elif action == "sessions.archive":
+                        await self.broadcast_webui_event("sessions_changed")
                     return WebUIRequestResult(result=response.result)
                 return WebUIRequestResult(status=response.status_code, message=response.message)
         except asyncio.CancelledError:

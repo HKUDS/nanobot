@@ -807,7 +807,7 @@
       "currentModel": "Se usa para nuevas respuestas.",
       "selectedModelProvider": "Definido por el modelo seleccionado.",
       "selectedModelValue": "Definido por el modelo seleccionado.",
-      "brandLogos": "Muestra los logos de proveedores y apps en Ajustes.\n\nMuestra logos de proveedores de terceros y CLI en Ajustes.",
+      "brandLogos": "Muestra los logotipos en los ajustes y en la actividad del chat.\n\nLa actividad de MCP usa el icono del servidor si está disponible.",
       "browserNotifications": "Recibe avisos del estado de las tareas con esta página en segundo plano.",
       "notificationSound": "Reproduce un sonido al terminar una respuesta, incluso en segundo plano.",
       "cliAppsCatalog": "Instala herramientas CLI para nanobot; las apps de escritorio no cambian.\n\nInstala las herramientas de línea de comandos que nanobot puede usar en este equipo. Las aplicaciones de escritorio no se modifican.",
@@ -1247,7 +1247,7 @@
     },
     "observability": {
       "title": "Trazas de ejecución", "configured": "Las credenciales de trazas están disponibles para nanobot.",
-      "environment": "Configura LANGFUSE_SECRET_KEY y LANGFUSE_PUBLIC_KEY y reinicia nanobot.", "enable": "Activar trazas"
+      "environment": "Configura LANGFUSE_SECRET_KEY y LANGFUSE_PUBLIC_KEY y reinicia nanobot.", "allow": "Permitir trazas de Langfuse", "install": "Instalar soporte para trazas"
     },
     "legal": {
       "thirdPartyBrands": "Los nombres, logotipos y marcas de productos pertenecen a sus respectivos propietarios. Su uso es solo identificativo y no implica respaldo."
@@ -2025,68 +2025,6 @@
         "navigateHint": "↑↓ Navegar",
         "selectHint": "Enter/Tab Insertar",
         "closeHint": "Esc Cerrar",
-        "commands": {
-          "new": {
-            "title": "Nuevo chat",
-            "description": "Reinicia este tema y empieza otro."
-          },
-          "compact": {
-            "title": "Compactar contexto",
-            "description": "Compacta el contexto y sigue conversando."
-          },
-          "stop": {
-            "title": "Detener tarea",
-            "description": "Detén la tarea activa de este chat."
-          },
-          "restart": {
-            "title": "Reiniciar nanobot",
-            "description": "Reinicia el proceso nanobot."
-          },
-          "status": {
-            "title": "Mostrar estado",
-            "description": "Consulta el estado de ejecución, proveedores y canales."
-          },
-          "model": {
-            "title": "Modelo",
-            "description": "Consulta o cambia el preajuste de modelo actual."
-          },
-          "dream": {
-            "title": "Ejecutar Dream",
-            "description": "Organiza la memoria ahora."
-          },
-          "dream_log": {
-            "title": "Registro Dream",
-            "description": "Consulta los cambios de la última ejecución de Dream."
-          },
-          "dream_restore": {
-            "title": "Restaurar memoria",
-            "description": "Restaura una instantánea anterior de memoria de Dream."
-          },
-          "dream_prompt": {
-            "title": "Ajustes Dream",
-            "description": "Define cómo organiza Dream la memoria de este espacio."
-          },
-          "goal": {
-            "title": "Objetivo a largo plazo",
-            "description": "Haz que el asistente siga trabajando en este objetivo."
-          },
-          "cancel_goal": {
-            "title": "Cancelar objetivo",
-            "description": "Cancela el objetivo activo o bloqueado de este chat."
-          },
-          "trigger": {
-            "title": "Activador CLI",
-            "description": "Crea un activador CLI para este chat."
-          },
-          "help": {
-            "title": "Mostrar ayuda",
-            "description": "Muestra los comandos de barra disponibles."
-          },
-          "pairing": {
-            "title": "Emparejamiento",
-            "description": "Gestiona las solicitudes de vinculación."
-          }
-        },
         "badges": {
           "current": "Actual",
           "recent": "Reciente"
@@ -2432,7 +2370,11 @@
     "automationTriggered": "Activada automáticamente"
   },
   "recovery": {
-    "actionFailed": "La recuperación falló. Inténtalo de nuevo.",
+    "details": "Detalles",
+    "restart": "La puerta de enlace se reinició antes de terminar la tarea",
+    "uncertainTool": "Es posible que ya se haya ejecutado una herramienta",
+    "interruptedAgain": "La tarea se interrumpió de nuevo",
+    "actionFailed": "Vuelve a intentar la recuperación",
     "interrupted": "Tarea interrumpida",
     "completed": "Tarea completada",
     "failed": "La recuperación de la tarea falló",
@@ -2574,6 +2516,7 @@
       "body": "El gateway rechazó este proyecto o modo de acceso. Elige un proyecto existente u otro modo de acceso e inténtalo de nuevo."
     },
     "turnRejected": {
+      "temporaryCommand": "En los chats temporales solo puedes usar /model y /stop. Para otros comandos, usa un chat normal.",
       "title": "El mensaje no se envió",
       "body": "El gateway rechazó este mensaje. Revisa el texto o los archivos adjuntos e inténtalo de nuevo."
     },
@@ -2589,6 +2532,8 @@
       "imageInputTitle": "La entrada de imágenes está desactivada en este preajuste",
       "imageRequestRejectedTitle": "El modelo rechazó la solicitud con imagen",
       "imageInputBody": "Esta solicitud incluye imágenes. Revisa este preajuste o usa uno compatible con imágenes.",
+      "emptyFinalResponseLength": "El modelo alcanzó el límite de salida antes de responder",
+      "emptyFinalResponse": "El modelo no dio una respuesta final",
       "unknownTitle": "La solicitud al proveedor del modelo falló",
       "bodyWithAttempt": "Se detuvo tras {{attempts}} intentos. Inténtalo más tarde o elige otro modelo.",
       "body": "Inténtalo más tarde o elige otro modelo."

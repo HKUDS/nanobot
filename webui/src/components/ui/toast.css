@@ -7,6 +7,33 @@
   animation: toast-enter 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
+[data-toast-viewport="thread"] {
+  container: thread-toast / inline-size;
+}
+
+/* Keep the two label gaps equal without shrinking either button's hit area. */
+.toast-recovery-actions > :first-child { padding-inline: 0.75rem 0.5rem; }
+.toast-recovery-actions > :last-child { padding-inline: 0.5rem 0.75rem; }
+
+/* A recovery decision must not truncate the reason or push actions offscreen. */
+.toast-card[data-toast-timed="false"][data-toast-tone="error"] [role="alert"] {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@container thread-toast (max-width: 32rem) {
+  .toast-card[data-toast-timed="false"][data-toast-tone="error"]:has([aria-haspopup]) {
+    flex-wrap: wrap;
+    border-radius: var(--radius-panel);
+  }
+  .toast-card[data-toast-timed="false"][data-toast-tone="error"]:has([aria-haspopup]) [role="alert"] {
+    flex: 1 0 calc(100% - 2rem);
+  }
+  .toast-card[data-toast-timed="false"][data-toast-tone="error"] [aria-haspopup] {
+    margin-inline-start: auto;
+  }
+}
+
 .dark .toast-card {
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.18), 0 8px 24px -8px rgb(0 0 0 / 0.45);
 }

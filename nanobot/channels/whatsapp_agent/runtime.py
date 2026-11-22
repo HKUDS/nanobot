@@ -667,8 +667,6 @@ class WhatsAppAgentChannel(BaseChannel):
         import base64
 
         try:
-            # Inbound payloads carry the digest Base64-encoded; the media
-            # metadata endpoint returns the same digest as hex.
             expected = base64.b64decode(media.sha256_base64, validate=True)
         except Exception:
             try:

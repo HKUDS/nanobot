@@ -7,6 +7,7 @@ import pytest
 
 from nanobot.bus.events import InboundMessage
 from nanobot.command.application import build_help_text, register_builtin_commands
+from nanobot.command.results import message_text
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.triggers.local_store import LocalTriggerStore
 
@@ -36,13 +37,13 @@ async def test_trigger_command_creates_session_bound_local_trigger(tmp_path: Pat
     response = await router.dispatch(ctx)
 
     assert response is not None
-    assert "Trigger created: PR review" in response.content
+    assert "Trigger created: PR review" in message_text(response)
     trigger = store.list_for_session("websocket:chat-1")[0]
     assert trigger.name == "PR review"
     assert trigger.channel == "websocket"
     assert trigger.chat_id == "chat-1"
     assert trigger.session_key == "websocket:chat-1"
-    assert f"nanobot trigger {trigger.id} \"message\"" in response.content
+    assert f"nanobot trigger {trigger.id} \"message\"" in message_text(response)
 
 
 @pytest.mark.asyncio
@@ -100,7 +101,7 @@ async def test_trigger_command_without_name_returns_usage_only(tmp_path: Path) -
     response = await router.dispatch(ctx)
 
     assert response is not None
-    assert "Usage: /trigger <name>" in response.content
+    assert "Usage: /trigger <name>" in message_text(response)
     assert store.list_for_session("websocket:chat-1") == []
 
 

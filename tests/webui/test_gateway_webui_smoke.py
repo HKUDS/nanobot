@@ -303,7 +303,6 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             ready = await _recv_until(ws, "ready")
             assert ready["client_id"] == "smoke"
 
-            # An old WebUI can still connect, but cannot start the retired listener.
             await ws.send(json.dumps({
                 "type": "webui_request", "request_id": "old-api-start",
                 "action": "settings.api_service.start",
@@ -328,6 +327,18 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             }))
             answer = await _recv_until(ws, "message")
             assert "Current model: `custom/smoke-model`" in answer["text"]
+            assert "render_as" not in answer  # Keep the model's inline code as Markdown.
+            await _recv_until(ws, "turn_end")
+
+            await ws.send(json.dumps({
+                "type": "message", "chat_id": chat_id, "content": "/help", "webui": True, "turn_id": "help-turn", "locale": "fr",
+            }))
+            help_reply = await _recv_until(ws, "message")
+            assert "Commandes nanobot" in help_reply["text"]
+            assert help_reply["side_channel"] is True
+            assert "/model [preset]" in help_reply["text"] and "/dream-prompt [init]" in help_reply["text"]
+            assert not any(row.startswith("/skill ") for row in help_reply["text"].splitlines())
+            assert help_reply["render_as"] == "text"
             await _recv_until(ws, "turn_end")
 
             await ws.send(json.dumps({
@@ -364,6 +375,11 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         assert any("Current model: `custom/smoke-model`" in text for text in contents)
         assert "!echo shell-ok" in contents
         assert shell["text"] in contents
+        [help_history] = [event for event in thread["events"] if event.get("event") == "message"
+                          and event.get("turn_id") == "help-turn"]
+        assert help_history["text"] == help_reply["text"]
+        assert help_history["render_as"] == "text"
+        assert help_history["side_channel"] is True
         [shell_history] = [event for event in thread["events"] if event.get("event") == "message"
                            and event.get("turn_id") == "shell-turn"]
         assert shell_history["text"] == shell["text"]
@@ -718,7 +734,7 @@ with Path(config).with_name('gateway-stacks.log').open('w') as stacks:
             if stop_during_checkpoint:
                 await asyncio.wait_for(checkpoint_waiting.wait(), 20)
                 await ws.send(json.dumps({"type": "message", "chat_id": chat_id,
-                                          "content": "/stop", "webui": True}))
+                                          "content": "/stop", "webui": True, "turn_id": "stop-e2e"}))
                 end = await receive_until(lambda event: event.get("event") == "turn_end")
                 assert end.get("outcome") == "cancelled"
                 assert end["goal_state"]["status"] == "active"
@@ -736,6 +752,7 @@ with Path(config).with_name('gateway-stacks.log').open('w') as stacks:
                 followup = await receive_until(lambda event: event.get("event") == "turn_end")
                 assert followup.get("turn_id") == "follow-up"
                 assert len(requests) == 17
+                assert not any(event.get("event") == "message" and event.get("turn_id") == "stop-e2e" for event in events)
             else:
                 await asyncio.wait_for(closing_request.wait(), 20)
                 waiting = await receive_until(lambda event: (

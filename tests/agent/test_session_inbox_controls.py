@@ -4,15 +4,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.session_helpers import run_session, stop_loop, visible_message
+from agent.session_helpers import make_agent_loop, run_session, stop_loop, visible_message
 from nanobot.agent.automation_turns import AutomationTurnError
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.session_inbox import SessionInbox
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import CommandResultEvent, TurnFailureNotice
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
+from nanobot.command.results import message_text
 from nanobot.cron.service import CronService
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from nanobot.goal.assembly import install_goal
@@ -39,7 +40,7 @@ async def loop(tmp_path):
     provider.generation = GenerationSettings(max_tokens=100)
     provider.can_resume_conversation_state.return_value = False
     provider.estimate_prompt_tokens.return_value = (100, "test")
-    agent = AgentLoop(
+    agent = make_agent_loop(
         bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
         builtin_assembly=install_goal,
     )
@@ -65,9 +66,9 @@ async def test_idle_new_resets_session_and_accepts_next_message(loop):
         async with asyncio.timeout(5):
             while True:
                 reply = await loop.bus.consume_outbound()
-                if reply.event is None:
+                if isinstance(reply.event, CommandResultEvent) and reply.event.command == "/new":
                     break
-        assert reply.content == "New session started."
+        assert message_text(reply) == "New session started."
         assert (await loop.sessions.state.read(key)).messages == []
 
         await loop.bus.publish_inbound(InboundMessage(
@@ -117,8 +118,8 @@ async def test_message_queued_during_idle_new_runs_in_reset_session(loop):
         async with asyncio.timeout(5):
             while len(replies) < 2:
                 reply = await loop.bus.consume_outbound()
-                if reply.event is None:
-                    replies.append(reply.content)
+                if reply.event is None or (isinstance(reply.event, CommandResultEvent) and reply.event.command == "/new"):
+                    replies.append(message_text(reply))
         assert replies == ["New session started.", "fresh reply"]
         session = await loop.sessions.state.read(key)
         assert any(str(message.get("content", "")).startswith("hello") for message in session.messages)
@@ -154,7 +155,7 @@ async def test_new_during_active_turn_stops_it_and_resets_session(loop):
         async with asyncio.timeout(5):
             while True:
                 reply = await loop.bus.consume_outbound()
-                if reply.event is None and reply.content == "New session started.":
+                if isinstance(reply.event, CommandResultEvent) and reply.event.command == "/new":
                     break
         assert cancelled.is_set()
         assert (await loop.sessions.state.read(key)).messages == []
@@ -225,15 +226,15 @@ async def test_rejected_input_does_not_stop_other_sessions(loop, monkeypatch, re
         async with asyncio.timeout(5):
             while True:
                 message = await loop.bus.consume_outbound()
-                if message.chat_id == chat_id and message.event is None:
+                if message.chat_id == chat_id and (message.event is None or isinstance(message.event, TurnFailureNotice)):
                     return message
 
     original_list = loop.sessions._store.list_metadata
 
-    def blocked_list():
+    def blocked_list(**filters):
         readers_started.set()
         assert release_readers.wait(5)
-        return original_list()
+        return original_list(**filters)
 
     loop.provider.chat_stream_with_retry = chat
     if rejection == "idle":
@@ -273,7 +274,8 @@ async def test_rejected_input_does_not_stop_other_sessions(loop, monkeypatch, re
                 metadata={"webui": True}, session_generation=session.generation,
             )
             await loop.bus.publish_inbound(rejected)
-            assert (await reply("busy")).content == "Sorry, I encountered an error."
+            notice = await reply("busy")
+            assert (notice.event, notice.content) == (TurnFailureNotice("internal"), "")
         assert not run_task.done()
 
         release_readers.set()
@@ -311,6 +313,21 @@ def _automation_message(kind: str, name: str) -> InboundMessage:
     return InboundMessage(
         channel="websocket", sender_id=kind, chat_id="test", content=name, metadata=metadata,
     )
+
+
+async def test_cron_failure_completes_even_if_its_notice_cannot_be_queued(loop):
+    msg = _automation_message("cron", "unavailable")
+    msg.channel = "telegram"
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=RuntimeError("turn failed"))
+
+    def reject_notice(outbound):
+        if isinstance(outbound.event, TurnFailureNotice):
+            raise RuntimeError("outbox full")
+        return outbound
+
+    loop.bus.prepare_outbound = reject_notice
+    with pytest.raises(AutomationTurnError, match="turn failed"):
+        await asyncio.wait_for(loop.submit_cron_turn(msg), timeout=3)
 
 
 @pytest.mark.parametrize("kind", ["cron", "local_trigger"])
@@ -490,22 +507,25 @@ async def test_cancelled_session_completes_queued_automation_waiters(loop):
 async def test_stopped_followups_are_not_recovered_but_shutdown_preserves_them(
     loop,
     tmp_path,
+    monkeypatch,
     followup_still_queued,
     shutdown,
 ):
     started = asyncio.Event()
 
-    async def chat(**kwargs):
+    async def hold_turn(_msg, **_kwargs):
         started.set()
         await asyncio.Event().wait()
 
-    loop.provider.chat_stream_with_retry = chat
+    # Only the inbox owner must be busy. Keep the real journal, cancellation and
+    # restart scan without making this test depend on prompt or provider startup.
+    monkeypatch.setattr(loop, "_process_message", hold_turn)
     key = "websocket:test"
-    (await loop._enqueue_session_message(InboundMessage(
+    await loop._enqueue_session_message(InboundMessage(
         channel="websocket", sender_id="u", chat_id="test", content="first",
         metadata={"webui": True},
-    )))
-    await asyncio.wait_for(started.wait(), timeout=3)
+    ))
+    await asyncio.wait_for(started.wait(), timeout=30)
     (await loop._enqueue_session_message(InboundMessage(
         channel="websocket", sender_id="u", chat_id="test", content="cancel me",
         metadata={"webui": True},
@@ -627,7 +647,7 @@ async def test_stop_does_not_strand_automation_submitted_during_cleanup(
         await stop
         while True:
             reply = await loop.bus.consume_outbound()
-            if reply.event is None and reply.content.startswith("Stopped "):
+            if isinstance(reply.event, CommandResultEvent) and reply.event.command == "/stop":
                 break
         result = await submitted
         assert result is not None and result.content == "automation finished"
@@ -666,7 +686,7 @@ async def test_automation_arriving_during_queue_cancellation_is_not_stranded(loo
         await stop
         while True:
             reply = await loop.bus.consume_outbound()
-            if reply.event is None and reply.content.startswith("Stopped "):
+            if isinstance(reply.event, CommandResultEvent) and reply.event.command == "/stop":
                 break
         result = await submitted
         assert result is not None and result.content == "automation finished"

@@ -1,5 +1,6 @@
 import pytest
 
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.memory import MemoryStore
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMResponse
@@ -358,7 +359,6 @@ class TestEphemeralDirect:
         """Factory fixture that builds a minimal AgentLoop with mocked deps."""
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        from nanobot.agent.loop import AgentLoop
         from nanobot.agent.memory import MemoryStore
         from nanobot.bus.queue import MessageBus
 
@@ -380,7 +380,7 @@ class TestEphemeralDirect:
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
-            loop = AgentLoop(
+            loop = make_agent_loop(
                 bus=bus,
                 provider=provider,
                 workspace=tmp_path,
@@ -445,7 +445,6 @@ class TestEphemeralDirect:
         from copy import deepcopy
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        from nanobot.agent.loop import AgentLoop
         from nanobot.bus.queue import MessageBus
         from nanobot.providers.base import GenerationSettings
 
@@ -461,7 +460,7 @@ class TestEphemeralDirect:
         provider.generation = GenerationSettings()
         provider.estimate_prompt_tokens.return_value = (100, "test")
         provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
-        loop = AgentLoop(
+        loop = make_agent_loop(
             bus=MessageBus(), provider=provider, workspace=tmp_path,
             context_window_tokens=32_000,
         )
@@ -585,7 +584,6 @@ class TestEphemeralHooks:
         from unittest.mock import AsyncMock, MagicMock, patch
 
         from nanobot.agent.hook import AgentHook
-        from nanobot.agent.loop import AgentLoop
         from nanobot.bus.queue import MessageBus
         from nanobot.providers.base import LLMResponse
 
@@ -611,7 +609,7 @@ class TestEphemeralHooks:
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
-            loop = AgentLoop(
+            loop = make_agent_loop(
                 bus=bus,
                 provider=provider,
                 workspace=tmp_path,

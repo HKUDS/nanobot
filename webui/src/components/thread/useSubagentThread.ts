@@ -14,7 +14,6 @@ export function useSubagentThread({ token, sessionKey, task, historyEnabled }: {
 }) {
   const pageVisible = usePageVisibility();
   const [thread, setThread] = useState<WebuiThreadPersistedPayload | null>(null);
-  const [loading, setLoading] = useState(historyEnabled);
   const [error, setError] = useState<string | null>(null);
   const refreshRef = useRef<(() => void) | null>(null);
   const taskId = task.task_id;
@@ -28,7 +27,6 @@ export function useSubagentThread({ token, sessionKey, task, historyEnabled }: {
     const refresh = async () => {
       if (refreshing) { pending = true; return; }
       refreshing = true;
-      setLoading(true);
       setError(null);
       try {
         const payload = await fetchSubagentThread(token, sessionKey, taskId, controller.signal);
@@ -36,7 +34,6 @@ export function useSubagentThread({ token, sessionKey, task, historyEnabled }: {
       } catch (reason) {
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
       } finally {
-        if (!cancelled) setLoading(false);
         refreshing = false;
         if (pending && !cancelled) { pending = false; void refresh(); }
       }
@@ -60,5 +57,6 @@ export function useSubagentThread({ token, sessionKey, task, historyEnabled }: {
   }, [historyEnabled, taskId, task.task_description, task.created_at, task.completed_at, task.result, thread]);
 
   const retry = useCallback(() => refreshRef.current?.(), []);
+  const loading = historyEnabled && thread === null && error === null;
   return { messages, loading, error, activeTurnId: thread?.active_turn_id, retry };
 }
