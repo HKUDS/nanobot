@@ -37,6 +37,13 @@
 
 🐈 **nanobot** is a lightweight, open-source, self-hosted personal AI agent written in Python. Chat with it from your browser, terminal, or favorite chat app to work with files, remember preferences, use tools, and run scheduled tasks—powered by any supported cloud or local AI model.
 
+<p align="center">
+  <a href="https://www.star-history.com/hkuds/nanobot/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=rank&amp;theme=dark"><img alt="Global Star rank from Star History" src="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=rank"></picture></a>
+  <a href="https://www.star-history.com/hkuds/nanobot/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=trending&amp;theme=dark"><img alt="GitHub Trending badge from Star History" src="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=trending"></picture></a>
+  <br>
+  <sub>GitHub Trending milestone: fifth on the Python daily chart (July 15, 2026).</sub>
+</p>
+
 ## 💡 Why nanobot
 
 - **Lightweight & low footprint:** Small Python core with fast startup and low memory usage—runs comfortably on a personal laptop or a modest VPS without heavyweight infrastructure.
