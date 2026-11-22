@@ -166,6 +166,7 @@ export function MessageBlockMenuActions({
   sheet = false,
 }: MessageBlockMenuActionsProps) {
   const { t } = useTranslation();
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const content = messageCopyContent(message, t);
   const hasText = content.trim().length > 0;
   const showFork = message.role === "assistant"
@@ -235,7 +236,7 @@ export function MessageBlockMenuActions({
     </button>
   );
   return (
-    <div data-message-block-menu-actions className={sheet ? "flex w-full flex-col gap-1" : "flex flex-col items-center"}>
+    <div data-message-block-menu-actions className={sheet ? "flex w-full flex-col gap-1" : "flex flex-col items-start"}>
       <div data-message-block-toolbar className={cn("flex", sheet && "flex-col items-stretch gap-1")}>
         {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
         {showFork ? (
@@ -252,14 +253,16 @@ export function MessageBlockMenuActions({
         {activityAction && !sheet ? <HoverHint content={activity.label}>{activityAction}</HoverHint> : activityAction}
       </div>
       {sheet ? details : detailsLabel ? (
-        <Popover>
-          <PopoverTrigger asChild>
-            <button type="button" aria-label={detailsLabel} title={detailsLabel}
-              className="rounded-mark text-[10px] leading-4 tabular-nums text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              {timestampLabel ? <time data-message-hover-time dateTime={new Date(timestamp).toISOString()}>{formatMessageHoverTime(timestamp)}</time>
-                : <Info className="h-3.5 w-3.5" aria-hidden />}
-            </button>
-          </PopoverTrigger>
+        <Popover open={detailsOpen} onOpenChange={setDetailsOpen}>
+          <HoverHint content={detailsLabel} enabled={!detailsOpen}>
+            <PopoverTrigger asChild>
+              <button type="button" aria-label={detailsLabel}
+                className="ms-[calc((var(--message-block-action-width)-0.875rem)/2)] rounded-mark text-start text-[10px] leading-4 tabular-nums text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {timestampLabel ? <time data-message-hover-time dateTime={new Date(timestamp).toISOString()}>{formatMessageHoverTime(timestamp)}</time>
+                  : <Info className="h-3.5 w-3.5" aria-hidden />}
+              </button>
+            </PopoverTrigger>
+          </HoverHint>
           <PopoverContent side="bottom" collisionPadding={12} className="w-max max-w-64 [--message-block-control-size:1.75rem]">{details}</PopoverContent>
         </Popover>
       ) : null}

@@ -23,8 +23,12 @@ describe("desktop hover timestamp", () => {
     expect(times[1]).toHaveAttribute("datetime", new Date(completedAt).toISOString());
     const button = screen.getByRole("button", { name: fmtDateTime(completedAt) });
     expect(button).toContainElement(times[1]);
+    fireEvent.focus(button);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(fmtDateTime(completedAt));
+    expect(button).not.toHaveAttribute("title");
     fireEvent.click(button);
     const details = await screen.findByRole("dialog");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     expect(details).not.toHaveAttribute("data-message-block-menu");
     expect(within(details).getByRole("time")).toHaveAttribute("datetime", new Date(completedAt).toISOString());
   });
