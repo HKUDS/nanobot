@@ -2188,7 +2188,7 @@
     "fallbackResponse": "Cette réponse utilise un modèle de secours : {{preset}}.",
     "editMessage": "Modifier le message",
     "confirmEditResend": "Renvoyer",
-    "editReplaceHint": "Le renvoi remplace ce message et tout ce qui suit.",
+    "editReplaceHint": "Remplace la conversation à partir d’ici.",
     "reviewLatest": "Voir la conversation à jour",
     "editSourceMissing": "Le message d’origine n’est pas affiché. Vous pouvez copier votre brouillon avant d’annuler.",
     "editLoadFailed": "Impossible de charger la dernière version du message. Vérifiez la connexion et réessayez.",

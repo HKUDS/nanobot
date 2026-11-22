@@ -2187,7 +2187,7 @@
     "fallbackResponse": "本則回覆已切換至備用模型，由 {{preset}} 回答。",
     "editMessage": "編輯訊息",
     "confirmEditResend": "重新傳送",
-    "editReplaceHint": "將取代這則訊息及之後的對話。",
+    "editReplaceHint": "取代本則訊息及後續對話",
     "reviewLatest": "查看最新對話",
     "editSourceMissing": "目前未顯示原訊息，可先複製草稿再取消。",
     "editLoadFailed": "無法載入最新訊息版本，請檢查連線後重試。",

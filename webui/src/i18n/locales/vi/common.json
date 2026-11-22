@@ -2188,7 +2188,7 @@
     "fallbackResponse": "Phản hồi này đã chuyển sang mô hình dự phòng, do {{preset}} trả lời.",
     "editMessage": "Chỉnh sửa tin nhắn",
     "confirmEditResend": "Gửi lại",
-    "editReplaceHint": "Gửi lại sẽ thay thế tin nhắn này và toàn bộ phần hội thoại sau đó.",
+    "editReplaceHint": "Thay thế cuộc trò chuyện từ đây.",
     "reviewLatest": "Xem cuộc trò chuyện mới nhất",
     "editSourceMissing": "Tin nhắn gốc không hiển thị. Bạn có thể sao chép bản nháp trước khi hủy.",
     "editLoadFailed": "Không thể tải phiên bản mới nhất của tin nhắn. Kiểm tra kết nối rồi thử lại.",

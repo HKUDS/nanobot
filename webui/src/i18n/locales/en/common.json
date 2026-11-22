@@ -2576,7 +2576,7 @@
     "fallbackResponse": "This reply switched to a fallback model, answered by {{preset}}.",
     "editMessage": "Edit message",
     "confirmEditResend": "Resend",
-    "editReplaceHint": "Resending replaces this message and everything after it.",
+    "editReplaceHint": "Replaces the conversation from here.",
     "reviewLatest": "Review latest conversation",
     "editSourceMissing": "The original message is not in view. You can copy your draft before canceling.",
     "editLoadFailed": "Could not load the latest message version. Check the connection and retry.",

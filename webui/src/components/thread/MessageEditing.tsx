@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { HoverHint } from "@/components/ui/hover-hint";
 import { useClient } from "@/providers/ClientProvider";
 import { parseQuotedUserMessage } from "@/lib/user-message-quote";
+import { isApplePlatform } from "@/lib/keyboard-platform";
 import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import type { UIMessage } from "@/lib/types";
@@ -203,6 +204,12 @@ function EditInput({ sourceMissing }: { sourceMissing: boolean }) {
   </div>;
 }
 
+function actionWithShortcut(label: string, shortcut: string) {
+  return <span className="flex items-center justify-between gap-4">
+    <span>{label}</span><kbd className="whitespace-nowrap font-sans text-muted-foreground">{shortcut}</kbd>
+  </span>;
+}
+
 function EditActionsRow({ sourceMissing }: { sourceMissing: boolean }) {
   const editing = useContext(Editor);
   const { t } = useTranslation();
@@ -220,15 +227,18 @@ function EditActionsRow({ sourceMissing }: { sourceMissing: boolean }) {
       {draft.needsReview || (!sourceMissing && !draft.revision && draft.error) ? <Button type="button" size="sm" variant="ghost" className="touch-target"
         disabled={!draft.error || busy} aria-busy={!draft.error || undefined} onClick={retryRead}>
         {t(draft.needsReview ? "message.reviewLatest" : "common.retry")}
-      </Button> : <HoverHint content={`${resend}\n${hint}`} align="end">
+      </Button> : <HoverHint align="end" content={<>
+        {actionWithShortcut(resend, isApplePlatform() ? "⌘ Enter" : "Ctrl+Enter")}
+        <span className="text-muted-foreground">{hint}</span>
+      </>}>
         <Button type="button" variant="icon" size="icon" className="touch-target h-7 w-7" onClick={confirm}
           aria-label={resend} aria-describedby={feedbackId} aria-busy={pending || undefined} aria-keyshortcuts="Control+Enter Meta+Enter"
           disabled={sourceMissing || busy || draft.submitting || !draft.revision || !draft.text.trim()}>
           {pending ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Check className="h-4 w-4" aria-hidden />}
         </Button>
       </HoverHint>}
-      <HoverHint content={t("common.cancel")} align="end">
-        <Button type="button" variant="icon" size="icon" className="touch-target h-7 w-7 text-muted-foreground" aria-label={t("common.cancel")} disabled={draft.submitting} onClick={cancel}>
+      <HoverHint content={actionWithShortcut(t("common.cancel"), "Esc")} align="end">
+        <Button type="button" variant="icon" size="icon" className="touch-target h-7 w-7 text-muted-foreground" aria-label={t("common.cancel")} aria-keyshortcuts="Escape" disabled={draft.submitting} onClick={cancel}>
           <X className="h-4 w-4" aria-hidden />
         </Button>
       </HoverHint>

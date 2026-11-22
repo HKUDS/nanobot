@@ -29,6 +29,7 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { UpdateMethod } from "@/lib/api";
+import { isApplePlatform } from "@/lib/keyboard-platform";
 import { sidebarShortcutAria, sidebarShortcutLabel } from "@/lib/sidebar-shortcuts";
 import "./sidebar-dock.css";
 
@@ -90,18 +91,6 @@ interface SidebarProps {
   defaultWorkspacePath?: string | null;
   hostChromeInset?: boolean;
   desktopDock?: boolean;
-}
-
-type NavigatorWithUserAgentData = Navigator & {
-  userAgentData?: { platform?: string };
-};
-
-function isApplePlatform(): boolean {
-  if (typeof navigator === "undefined") return false;
-  const platform = navigator.platform || "";
-  const userAgentPlatform =
-    (navigator as NavigatorWithUserAgentData).userAgentData?.platform || "";
-  return /mac|iphone|ipad|ipod/i.test(`${platform} ${userAgentPlatform}`);
 }
 
 export function Sidebar(props: SidebarProps) {

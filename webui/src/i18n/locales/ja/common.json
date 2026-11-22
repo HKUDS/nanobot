@@ -2188,7 +2188,7 @@
     "fallbackResponse": "この返信では代替モデルに切り替わり、{{preset}} が回答しています。",
     "editMessage": "メッセージを編集",
     "confirmEditResend": "再送信",
-    "editReplaceHint": "再送信すると、このメッセージとそれ以降の会話が置き換わります。",
+    "editReplaceHint": "ここからの会話を置き換えます",
     "reviewLatest": "最新の会話を確認",
     "editSourceMissing": "元のメッセージは表示されていません。キャンセルする前に下書きをコピーできます。",
     "editLoadFailed": "最新のメッセージを読み込めませんでした。接続を確認して再試行してください。",

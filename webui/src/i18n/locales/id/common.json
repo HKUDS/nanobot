@@ -2188,7 +2188,7 @@
     "fallbackResponse": "Balasan ini beralih ke model cadangan dan dijawab oleh {{preset}}.",
     "editMessage": "Edit pesan",
     "confirmEditResend": "Kirim ulang",
-    "editReplaceHint": "Mengirim ulang akan mengganti pesan ini dan seluruh percakapan setelahnya.",
+    "editReplaceHint": "Mengganti percakapan mulai dari sini.",
     "reviewLatest": "Lihat percakapan terbaru",
     "editSourceMissing": "Pesan asli tidak ditampilkan. Anda dapat menyalin draf sebelum membatalkan.",
     "editLoadFailed": "Tidak dapat memuat versi terbaru pesan. Periksa koneksi lalu coba lagi.",

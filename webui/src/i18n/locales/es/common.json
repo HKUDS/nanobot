@@ -2188,7 +2188,7 @@
     "fallbackResponse": "Esta respuesta usa un modelo de respaldo: {{preset}}.",
     "editMessage": "Editar mensaje",
     "confirmEditResend": "Reenviar",
-    "editReplaceHint": "Al reenviar, se reemplaza este mensaje y todo lo que sigue.",
+    "editReplaceHint": "Reemplaza la conversación desde aquí.",
     "reviewLatest": "Ver conversación actualizada",
     "editSourceMissing": "El mensaje original no está a la vista. Puedes copiar tu borrador antes de cancelar.",
     "editLoadFailed": "No se pudo cargar la última versión del mensaje. Comprueba la conexión e inténtalo de nuevo.",

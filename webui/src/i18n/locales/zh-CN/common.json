@@ -2576,7 +2576,7 @@
     "fallbackResponse": "本条回复已切换至备用模型，由 {{preset}} 回答。",
     "editMessage": "编辑消息",
     "confirmEditResend": "重新发送",
-    "editReplaceHint": "将替换这条消息及之后的对话。",
+    "editReplaceHint": "替换本条及后续对话",
     "reviewLatest": "查看最新对话",
     "editSourceMissing": "当前未显示原消息，可先复制草稿再取消。",
     "editLoadFailed": "无法加载最新消息版本，请检查连接后重试。",
