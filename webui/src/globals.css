@@ -1000,7 +1000,7 @@
 
   .thread-prompt-rail {
     display: none;
-    left: 1.75rem;
+    left: clamp(0.25rem, calc((100% - var(--content-column-width)) / 2 - 8rem), 1.75rem);
   }
 
   .thread-prompt-rail-scroll {
@@ -1026,42 +1026,48 @@
   }
 }
 
-.thread-message-row,
-.message-block-menu-trigger,
-[data-message-block-menu] {
+.thread-message-row {
   --message-block-control-size: 1.75rem;
   --message-block-action-width: 1.75rem;
-  --message-block-trigger-offset: 2rem;
+  --message-column-margin: calc((100% - var(--content-column-width)) / 2);
+  padding-left: max(calc(3 * var(--message-block-action-width) + 0.75rem), var(--message-column-margin));
+  padding-right: max(3rem, var(--message-column-margin));
 }
 
-.thread-message-row {
-  padding-inline-start: max(
-    calc(var(--message-block-trigger-offset) + 0.75rem),
-    calc((100% - var(--content-column-width)) / 2)
-  );
-  padding-inline-end: max(0.75rem, calc((100% - var(--content-column-width)) / 2));
+/* Keep the prompt navigator and the answer actions in separate hit areas. */
+@container thread-viewport (width > 59rem) {
+  .thread-message-row {
+    padding-left: max(8.25rem, var(--message-column-margin));
+  }
 }
 
-.message-block-menu-trigger,
-.message-block-hover-time {
+.message-side-actions {
+  position: absolute;
+  top: calc(var(--message-text-inset, 0px) + (var(--text-reading-size) * var(--reading-line-height) - var(--message-block-control-size)) / 2);
+  z-index: 20;
+  display: flex;
+  align-items: center;
   pointer-events: none;
   opacity: 0;
+  transition: opacity 120ms ease-out;
 }
 
-[data-user-text-bubble] > .message-block-menu-trigger {
-  top: calc((1rem + var(--text-reading-size) * var(--reading-line-height) - var(--message-block-control-size)) / 2);
+.message-side-actions[data-side="right"] {
+  left: calc(100% + 0.25rem);
 }
 
-[data-user-text-bubble] > .message-block-hover-time {
-  top: calc((1rem + var(--text-reading-size) * var(--reading-line-height) + var(--message-block-control-size)) / 2);
+.message-side-actions[data-side="left"] {
+  right: calc(100% + 0.25rem);
 }
 
-[data-context-block-active] .message-block-menu-trigger,
-[data-message-context-menu-open] .message-block-menu-trigger,
-:where(:root:not([data-focus-modality="pointer"])) .message-block-menu-trigger:focus-visible,
-[data-context-block-active] .message-block-hover-time,
-[data-message-context-menu-open] .message-block-hover-time,
-:where(:root:not([data-focus-modality="pointer"])) .message-block-hover-time:focus-visible {
+[data-user-text-bubble] > .message-side-actions,
+[data-session-message] [data-theme-surface] > .message-side-actions {
+  --message-text-inset: 0.5rem;
+}
+
+[data-context-block-active] .message-side-actions,
+.message-side-actions:has(button[aria-expanded="true"][aria-haspopup="dialog"]),
+.message-side-actions:has(:focus-visible) {
   pointer-events: auto;
   opacity: 1;
 }
@@ -1079,7 +1085,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .message-block-menu-trigger {
+  .message-side-actions {
     transition: none;
   }
 
@@ -1176,12 +1182,9 @@
     font-size: max(16px, 1rem);
   }
 
-  .thread-message-row,
-  .message-block-menu-trigger,
-  [data-message-block-menu] {
+  .thread-message-row {
     --message-block-control-size: 2.75rem;
     --message-block-action-width: 2rem;
-    --message-block-trigger-offset: 3rem;
   }
 
   .touch-target {
@@ -1199,9 +1202,9 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 767px), (hover: none) {
   .thread-message-row {
-    padding-inline: 1rem;
+    padding-inline: max(1rem, calc((100% - var(--content-column-width)) / 2));
   }
 
   [data-message-mobile-actions],

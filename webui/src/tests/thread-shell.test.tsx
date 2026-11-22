@@ -28,11 +28,12 @@ import type {
 import { canonicalThreadPayload } from "./thread-test-payload";
 import { createStreamClient } from "./stream-client";
 
-async function openMessageActions(text: string): Promise<HTMLElement> {
+async function findSideActions(text: string): Promise<HTMLElement> {
   const message = await screen.findByText(text);
   const block = message.closest<HTMLElement>("[data-thread-display-unit]")!;
-  fireEvent.click(within(block).getByRole("button", { name: "Message actions" }));
-  return screen.findByRole("dialog", { name: "Message actions" });
+  const actions = block.querySelector<HTMLElement>("[data-message-side-actions]");
+  expect(actions).not.toBeNull();
+  return actions!;
 }
 
 function makeClient() {
@@ -920,8 +921,8 @@ describe("ThreadShell", () => {
       ? Promise.resolve(httpJson({ schemaVersion: 3, projection: "events", events }))
       : Promise.resolve({ ok: false, status: 404, json: async () => ({}) })));
     render(wrap(client, <ThreadShell session={session("command-history")} title="Command history" onToggleSidebar={() => {}} />));
-    const menu = await openMessageActions("Command answer");
-    fireEvent.click(within(menu).getByRole("button", { name: /Worked/ }));
+    const actions = await findSideActions("Command answer");
+    fireEvent.click(within(actions).getByRole("button", { name: /Worked/ }));
     await waitFor(() => expect(document.body).toHaveTextContent("Command completed bun run test --token ••••"));
     expect(document.body).not.toHaveTextContent(id);
     expect(document.body).not.toHaveTextContent("secret-value");
@@ -983,8 +984,8 @@ describe("ThreadShell", () => {
       />,
     ));
 
-    const menu = await openMessageActions("done");
-    const activity = within(menu).getByRole("button", { name: /Worked/ });
+    const actions = await findSideActions("done");
+    const activity = within(actions).getByRole("button", { name: /Worked/ });
     fireEvent.click(activity);
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Full activity details could not be loaded.",
@@ -997,8 +998,7 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(document.body).toHaveTextContent("echo full"));
 
     fireEvent.click(screen.getByRole("button", { name: /Collapse activity details/ }));
-    const reopenedMenu = await openMessageActions("done");
-    fireEvent.click(within(reopenedMenu).getByRole("button", { name: /Worked/ }));
+    fireEvent.click(activity);
     await act(async () => Promise.resolve());
     expect(detailCalls).toBe(2);
   });
@@ -1049,8 +1049,8 @@ describe("ThreadShell", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Message navigation" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Jump to message: Old question" }));
     await screen.findByText("old answer");
-    const menu = await openMessageActions("old answer");
-    fireEvent.click(within(menu).getByRole("button", { name: /Worked/ }));
+    const actions = await findSideActions("old answer");
+    fireEvent.click(within(actions).getByRole("button", { name: /Worked/ }));
     await waitFor(() => expect(document.body).toHaveTextContent("Command completed echo historical"));
     expect(detailCalls).toBe(1);
     expect(document.body).not.toHaveTextContent(id);
@@ -1081,12 +1081,12 @@ describe("ThreadShell", () => {
     const view = (chatId: string) => wrap(client,
       <ThreadShell session={session(chatId)} title="Detail return" onToggleSidebar={() => {}} />);
     const { rerender } = render(view("detail-return-a"));
-    fireEvent.click(within(await openMessageActions("answer-a")).getByRole("button", { name: /Worked/ }));
+    fireEvent.click(within(await findSideActions("answer-a")).getByRole("button", { name: /Worked/ }));
     await waitFor(() => expect(detailCalls).toBe(1));
     rerender(view("detail-return-b"));
     await screen.findByText("answer-b");
     rerender(view("detail-return-a"));
-    fireEvent.click(within(await openMessageActions("answer-a")).getByRole("button", { name: /Worked/ }));
+    fireEvent.click(within(await findSideActions("answer-a")).getByRole("button", { name: /Worked/ }));
     await waitFor(() => expect(detailCalls).toBe(2));
     await waitFor(() => expect(document.body).toHaveTextContent("echo fresh"));
     await act(async () => resolveOld(httpJson({ message_id: "history-aaaaaaaaaaaaaaaaaaaa", events: [{
@@ -1129,7 +1129,7 @@ describe("ThreadShell", () => {
       />,
     );
     const { rerender } = render(view("trace-failure-a"));
-    fireEvent.click(within(await openMessageActions("done-a")).getByRole("button", { name: /Worked/ }));
+    fireEvent.click(within(await findSideActions("done-a")).getByRole("button", { name: /Worked/ }));
 
     rerender(view("trace-failure-b"));
     await screen.findByText("done-b");
@@ -1169,7 +1169,7 @@ describe("ThreadShell", () => {
       />,
     );
     const { rerender } = render(view("visible-failure-a"));
-    fireEvent.click(within(await openMessageActions("failed-a")).getByRole("button", { name: /Worked/ }));
+    fireEvent.click(within(await findSideActions("failed-a")).getByRole("button", { name: /Worked/ }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
 
     rerender(view("visible-failure-b"));
@@ -1605,8 +1605,8 @@ describe("ThreadShell", () => {
       />,
     ));
 
-    const oldMenu = await openMessageActions("old automation");
-    expect(within(oldMenu).getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    const oldActions = await findSideActions("old automation");
+    expect(within(oldActions).getByRole("button", { name: "Copy" })).toBeInTheDocument();
     const turnId = "turn-automation";
     const startedAt = Date.now() / 1000;
     act(() => client._emitChat("assistant-only-actions", {
@@ -1616,7 +1616,7 @@ describe("ThreadShell", () => {
       started_at: startedAt,
       turn_id: turnId,
     }));
-    expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
 
     act(() => client._emitChat("assistant-only-actions", {
       event: "message",
@@ -1625,7 +1625,7 @@ describe("ThreadShell", () => {
       turn_id: turnId,
     }));
     await waitFor(() => expect(screen.getByText("new automation")).toBeInTheDocument());
-    expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
     expect(screen.getByText("new automation").closest("[data-thread-display-unit]"))
       .not.toHaveAttribute("data-message-context-block");
 
@@ -1634,9 +1634,9 @@ describe("ThreadShell", () => {
       chat_id: "assistant-only-actions",
       turn_id: turnId,
     }));
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(2));
-    const newMenu = await openMessageActions("new automation");
-    expect(within(newMenu).getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2));
+    const newActions = await findSideActions("new automation");
+    expect(within(newActions).getByRole("button", { name: "Copy" })).toBeInTheDocument();
   });
 
   it("does not navigate away when clicking the chat title", async () => {
@@ -1935,7 +1935,8 @@ describe("ThreadShell", () => {
       ).not.toHaveAttribute("data-fallback");
     });
     expect(screen.getByText("Default")).toBeInTheDocument();
-    await openMessageActions("Reply from the actual provider");
+    const actions = await findSideActions("Reply from the actual provider");
+    fireEvent.click(actions.querySelector("time[data-message-hover-time]")!);
     expect(await screen.findByText("backup")).toBeInTheDocument();
   });
 
@@ -2934,8 +2935,8 @@ describe("ThreadShell", () => {
       ),
     );
 
-    const menu = await openMessageActions("answer 100");
-    fireEvent.click(within(menu).getByRole("button", { name: "New chat from here" }));
+    const actions = await findSideActions("answer 100");
+    fireEvent.click(within(actions).getByRole("button", { name: "New chat from here" }));
 
     await waitFor(() =>
       expect(onForkChat).toHaveBeenCalledWith("long-chat", 101),
