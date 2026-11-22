@@ -480,7 +480,7 @@ async def test_reattach_during_terminal_write_observes_the_end(
         await release.wait()
         return persisted
 
-    monkeypatch.setattr(channel._outbound._transcripts, "prepare_and_append", persist_terminal)
+    monkeypatch.setattr(channel.gateway.transcripts, "append", persist_terminal)
     terminal = asyncio.create_task(channel.send(OutboundMessage(
         channel="websocket", chat_id=chat_id, content="", metadata=metadata, event=TurnEndEvent(),
     )))

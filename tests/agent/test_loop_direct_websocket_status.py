@@ -12,6 +12,7 @@ from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.session import webui_turns as wth
 from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
 from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
+from nanobot.webui.transcript import WebUITranscriptRecorder
 
 
 def _make_loop(tmp_path):
@@ -43,7 +44,7 @@ def _make_loop(tmp_path):
 async def test_process_direct_websocket_clears_run_status(tmp_path) -> None:
     loop = _make_loop(tmp_path)
     gateway = MagicMock()
-    gateway.transcripts.prepare_and_append = AsyncMock(return_value=True)
+    gateway.transcripts = WebUITranscriptRecorder(loop.sessions)
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         loop.bus,
