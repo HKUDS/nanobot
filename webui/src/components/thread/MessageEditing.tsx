@@ -220,7 +220,7 @@ function EditActionsRow({ sourceMissing }: { sourceMissing: boolean }) {
       {draft.needsReview || (!sourceMissing && !draft.revision && draft.error) ? <Button type="button" size="sm" variant="ghost" className="touch-target"
         disabled={!draft.error || busy} aria-busy={!draft.error || undefined} onClick={retryRead}>
         {t(draft.needsReview ? "message.reviewLatest" : "common.retry")}
-      </Button> : <HoverHint content={`${resend} · ${hint}`} align="end">
+      </Button> : <HoverHint content={`${resend}\n${hint}`} align="end">
         <Button type="button" variant="icon" size="icon" className="touch-target h-7 w-7" onClick={confirm}
           aria-label={resend} aria-describedby={feedbackId} aria-busy={pending || undefined} aria-keyshortcuts="Control+Enter Meta+Enter"
           disabled={sourceMissing || busy || draft.submitting || !draft.revision || !draft.text.trim()}>
