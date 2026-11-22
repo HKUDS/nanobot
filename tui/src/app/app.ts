@@ -19,7 +19,7 @@ import {
 } from "@opentui/core"
 
 import { switchedModelPreset } from "../../../packages/client-events/model-selection"
-import { isSystemCommandTurnId } from "../client/system-command"
+import { isSystemCommandTurnId } from "../../../packages/client-events/system-command"
 import { terminalMessageText } from "../platform/locale"
 import {
   NanobotClient,
@@ -196,6 +196,7 @@ export class NanobotTui {
   private sessionModelPreset: string | null | undefined
   private sessionTitle = ""
   private sessionMetadataId = 0
+  private modelRevision = 0
   private contextTokens: number | null = null
   private contextWindowTokens: number | null = null
   private lastUsage: TokenUsage | null = null
@@ -701,6 +702,7 @@ export class NanobotTui {
       this.closeUsage()
       if (event.usage) this.lastUsage = event.usage
       if (event.model_preset !== undefined) {
+        this.modelRevision++
         this.applyModelPreset(event.model_preset)
         this.updateTitle()
       }
@@ -768,6 +770,7 @@ export class NanobotTui {
       case "message": {
         const preset = switchedModelPreset(event.command_result)
         if (preset) {
+          this.modelRevision++
           this.applyModelPreset(preset)
           this.updateTitle()
           if (isSystemCommandTurnId(event.turn_id)) return
@@ -1709,10 +1712,6 @@ export class NanobotTui {
     }
   }
 
-  private applySessionModel(session: SessionSummary): void {
-    this.applyModelPreset(session.modelPreset)
-  }
-
   private applySessionScope(session: SessionSummary): void {
     if (session.workspaceScope) this.applyWorkspaceScope(session.workspaceScope)
   }
@@ -2189,6 +2188,7 @@ export class NanobotTui {
     this.clearComposer()
     this.sessionLoading = true
     const loadId = ++this.sessionLoadId
+    const modelRevision = this.modelRevision
     this.status.content = "Loading sessions…"
     try {
       const sessions = await fetchSessions(
@@ -2201,7 +2201,7 @@ export class NanobotTui {
       const current = sessions.find((session) => session.chatId === this.client.activeChatId)
       if (current) {
         this.sessionTitle = sessionLabel(current)
-        this.applySessionModel(current)
+        if (modelRevision === this.modelRevision) this.applyModelPreset(current.modelPreset)
         this.applySessionScope(current)
         this.applyRecoveryState(current.recoveryState ?? null)
         this.updateTitle()
@@ -2229,7 +2229,6 @@ export class NanobotTui {
     this.sessionMenu.markRead(session.chatId)
     if (session.chatId === this.client.activeChatId) {
       this.sessionTitle = sessionLabel(session)
-      this.applySessionModel(session)
       this.applySessionScope(session)
       this.applyRecoveryState(session.recoveryState ?? null)
       this.updateTitle()
@@ -2250,7 +2249,7 @@ export class NanobotTui {
       this.sessionMetadataId += 1
       this.host.reportTitle("")
       this.sessionTitle = sessionLabel(session)
-      this.applySessionModel(session)
+      this.applyModelPreset(session.modelPreset)
       this.applySessionScope(session)
       this.contextTokens = null
       this.lastUsage = null
@@ -2508,6 +2507,7 @@ export class NanobotTui {
   private async refreshSessionMetadata(chatId: string): Promise<void> {
     if (!this.options.apiUrl || !this.options.apiToken) return
     const requestId = ++this.sessionMetadataId
+    const modelRevision = this.modelRevision
     try {
       const sessions = await fetchSessions(
         this.options.apiUrl,
@@ -2521,7 +2521,7 @@ export class NanobotTui {
       const session = sessions.find((candidate) => candidate.chatId === chatId)
       if (!session) return
       this.sessionTitle = sessionLabel(session)
-      this.applySessionModel(session)
+      if (modelRevision === this.modelRevision) this.applyModelPreset(session.modelPreset)
       this.applySessionScope(session)
       this.updateTitle()
     } catch {

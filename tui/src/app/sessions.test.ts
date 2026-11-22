@@ -534,6 +534,12 @@ describe("NanobotTui session navigation", () => {
 
       setup.mockInput.pressEnter()
       await waitUntil(() => sent.includes("/model preset-8"))
+      // A metadata read started before the receipt still owns the title, not the model.
+      const metadata = Promise.withResolvers<Response>()
+      const fetchBeforeUpdate = globalThis.fetch
+      globalThis.fetch = ((input, init) => String(input).endsWith("/api/sessions")
+        ? metadata.promise : fetchBeforeUpdate(input, init)) as typeof fetch
+      app.accept({ event: "session_updated", chat_id: "chat", scope: "metadata" })
       app.accept({
         event: "user_message", chat_id: "chat", turn_id: "webui-system:picker", starts_turn: false, text: "/model preset-8",
       })
@@ -543,6 +549,8 @@ describe("NanobotTui session navigation", () => {
           command: "/model", parts: [{ key: "model.switched", values: { preset: "preset-8" } }],
         },
       })
+      metadata.resolve(Response.json({ sessions: [{ key: "websocket:chat", title: "Renamed chat", model_preset: "default" }] }))
+      await waitUntil(() => (app as unknown as { sessionTitle: string }).sessionTitle === "Renamed chat")
       await setup.flush()
       expect(ui.runtimeControls.visible).toBe(false)
       expect(ui.runtimeControls.modelText.plainText).toBe("preset-8 ▾")

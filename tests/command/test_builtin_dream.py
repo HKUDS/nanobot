@@ -531,6 +531,10 @@ async def test_dream_restore_preserves_uncommitted_memory(tmp_path, dirty) -> No
         assert page.read_bytes() == b"before\n"
     else:
         assert "Couldn't restore" in out.content
+        if dirty == "staged":
+            assert "staged changes" in out.content
+        elif dirty == "deleted":
+            assert "`memory/wiki/known.md`" in out.content
         assert "Commit or undo your changes" in out.content
         assert store.git.log()[0].sha == sha
         assert store.get_last_dream_cursor() == 3

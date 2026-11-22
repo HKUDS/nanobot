@@ -2,7 +2,7 @@ import { isRecoveryState } from "../../../packages/client-events/notifications"
 
 import { switchedModelPreset } from "../../../packages/client-events/model-selection"
 import { terminalMessageText } from "../platform/locale"
-import { isSystemCommandTurnId } from "./system-command"
+import { isSystemCommandTurnId } from "../../../packages/client-events/system-command"
 import type {
   ApiReauthenticator,
   GatewayApiConnection,

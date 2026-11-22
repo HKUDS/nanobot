@@ -508,6 +508,30 @@ describe("ThreadShell", () => {
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the draft and waits for a preset switch before sending with the new options", async () => {
+    localStorage.clear();
+    const client = makeClient();
+    let confirm!: () => void;
+    client.sendSystemCommand.mockImplementationOnce(() => new Promise((resolve) => {
+      confirm = () => resolve({ command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "fast" } }] } });
+    }));
+    render(wrap(client, <ThreadShell session={session("switch")} title="Options" onToggleSidebar={() => {}}
+      settingsSnapshot={optionsSettings()} />, null, "tok", ["webui.model-options.v1"]));
+    await changeOptions();
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "use the new options" } });
+    fireEvent.click(screen.getByRole("button", { name: "Default" }));
+    fireEvent.click(await screen.findByRole("option", { name: "fast" }));
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(client.sendMessage).not.toHaveBeenCalled();
+    expect(input).toHaveValue("use the new options");
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    await act(async () => confirm());
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(client.sendMessage).toHaveBeenCalledWith("switch", "use the new options", undefined,
+      expect.objectContaining({ modelOptions: { reasoning_effort: null, codex_fast_mode: null } }));
+  });
+
   it("sends and migrates the landing selection with the first ordinary message", async () => {
     localStorage.clear();
     const client = makeClient();
@@ -1797,7 +1821,7 @@ describe("ThreadShell", () => {
     expect(await screen.findByLabelText("fast")).toBeVisible();
   });
 
-  it("keeps the confirmed model and shows a localized picker failure outside the transcript", async () => {
+  it("keeps a waiting prompt manual and shows the localized error if its model switch fails", async () => {
     await i18n.changeLanguage("fr");
     const client = makeClient();
     const settings = settingsWithFastPreset();
@@ -1810,15 +1834,24 @@ describe("ThreadShell", () => {
     }));
     render(wrap(client, <ThreadShell session={session("picker-failure", "default")} title="Model switch"
       onToggleSidebar={() => {}} settingsSnapshot={settings} />));
+    const chatId = "picker-failure";
+    act(() => client._emitChat(chatId, { event: "goal_status", chat_id: chatId, turn_id: "owner", status: "running", started_at: 1_000 }));
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "waiting prompt" } });
+    fireEvent.keyDown(input, { key: "Enter" });
     const defaultModel = await screen.findByRole("button", { name: i18n.t("settings.values.default") });
     fireEvent.click(defaultModel);
     fireEvent.click(await screen.findByRole("option", { name: "fast" }));
     expect(defaultModel).toBeVisible();
     expect(defaultModel).toHaveAccessibleName(i18n.t("settings.values.default"));
+    await act(async () => client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: "owner" }));
+    expect(client.sendMessage).not.toHaveBeenCalled();
     await act(async () => rejectSelection());
     expect(await screen.findByRole("alert")).toHaveTextContent(`Impossible de changer de préréglage : ${providerError}`);
     expect(screen.getByRole("button", { name: i18n.t("settings.values.default") })).toBeVisible();
     expect(client.sendMessage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("thread.composer.queued.guide") }));
+    expectSendMessageWithTurn(client, chatId, "waiting prompt");
   });
 
   it("switches through every named preset while preserving call-order priority", async () => {
@@ -2547,16 +2580,10 @@ describe("ThreadShell", () => {
     expect(onCreateChat).toHaveBeenCalledWith(null, "start for real", null);
   });
 
-  it("applies the selected landing preset before sending the first prompt", async () => {
+  it("hands the selected preset to chat creation and sends only after the topic opens", async () => {
     const client = makeClient();
     const settings = settingsWithFastPreset();
     settings.model_call_order = ["fast"];
-    let resolveModelCommand!: () => void;
-    client.sendSystemCommand.mockImplementation(
-      () => new Promise<void>((resolve) => {
-        resolveModelCommand = resolve;
-      }),
-    );
     const onCreateChat = vi.fn().mockResolvedValue("chat-new");
 
     const view = (currentSession: ReturnType<typeof session> | null) => wrap(client, (
@@ -2580,11 +2607,8 @@ describe("ThreadShell", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() => expect(client.sendSystemCommand).toHaveBeenCalledWith(
-      "chat-new",
-      "/model fast",
-    ));
-    expect(onCreateChat).toHaveBeenCalledWith(null, "use the selected model", "fast");
+    await waitFor(() => expect(onCreateChat).toHaveBeenCalledWith(null, "use the selected model", "fast"));
+    expect(client.sendMessage).not.toHaveBeenCalled();
 
     await act(async () => {
       rerender(view(session("chat-new", "fast")));
@@ -2593,11 +2617,6 @@ describe("ThreadShell", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-5.5 OpenAI Codex");
     fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
-    expect(client.sendMessage).not.toHaveBeenCalled();
-
-    await act(async () => {
-      resolveModelCommand();
-    });
     await waitFor(() => {
       expectSendMessageWithTurn(client, "chat-new", "use the selected model");
     });

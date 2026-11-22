@@ -16,7 +16,7 @@ import type {
   RecoveryState,
   WorkspaceScopePayload,
 } from "./types"
-import { systemCommandTurnId } from "./system-command"
+import { systemCommandTurnId } from "../../../packages/client-events/system-command"
 import { decodeInboundEvent, decodeWebUIResponse, isRecord } from "./validation"
 
 export class NanobotClient {

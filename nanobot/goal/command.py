@@ -24,10 +24,8 @@ from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.utils.cancellation import shield_and_drain
 
-GOAL_COMMAND_SPEC = BuiltinCommandSpec(
+GOAL_COMMAND_SPEC = BuiltinCommandSpec.localized(
     GOAL_COMMAND,
-    "Start long-running goal",
-    "Tell the agent to treat the request as a long-running goal.",
     "activity",
     "<goal>",
     lifecycle="agent_turn_with_args",
@@ -120,6 +118,4 @@ def register_goal_command(router: CommandRouter) -> None:
     router.add_spec(GOAL_COMMAND_SPEC, after="/model")
     router.priority("/cancel_goal", cmd_cancel_goal)
     router.exact("/cancel_goal", cmd_cancel_goal)
-    router.add_spec(BuiltinCommandSpec(
-        "/cancel_goal", "Cancel goal", "Cancel the saved goal and stop active goal work.", "circle-x",
-    ), after=GOAL_COMMAND)
+    router.add_spec(BuiltinCommandSpec.localized("/cancel_goal", "circle-x"), after=GOAL_COMMAND)

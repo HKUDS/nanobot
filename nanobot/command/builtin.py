@@ -21,7 +21,6 @@ from nanobot.command.spec import BuiltinCommandSpec
 from nanobot.command.spec import CommandLifecycle as CommandLifecycle
 from nanobot.command.status import status_lines
 from nanobot.command.user_shell import cmd_user_shell
-from nanobot.command_copy import catalog
 from nanobot.providers.base import LLMUsage
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.gitstore import GitStoreDirtyError
@@ -35,107 +34,50 @@ USER_SHELL_COMMAND = "/__shell"
 
 
 CORE_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
-    BuiltinCommandSpec(
-        "/new",
-        "New chat",
-        "Reset this chat and start a fresh conversation.",
-        "square-pen",
+    BuiltinCommandSpec.localized(
+        "/new", "square-pen",
         lifecycle="finalize_active_turn",
     ),
-    BuiltinCommandSpec(
-        "/compact",
-        "Compact context",
-        "Compact this chat's context and continue the conversation.",
-        "archive",
-    ),
-    BuiltinCommandSpec(
-        "/stop",
-        "Stop current task",
-        "Cancel the active agent turn for this chat.",
-        "square",
+    BuiltinCommandSpec.localized("/compact", "archive"),
+    BuiltinCommandSpec.localized(
+        "/stop", "square",
         lifecycle="stop_active_turn",
     ),
-    BuiltinCommandSpec(
-        "/restart",
-        "Restart nanobot",
-        "Restart the bot process.",
-        "rotate-cw",
-    ),
-    BuiltinCommandSpec(
-        "/status",
-        "Show status",
-        "Display runtime, provider, and channel status.",
-        "activity",
-    ),
-    BuiltinCommandSpec(
-        "/model",
-        "Switch model preset",
-        "Show or switch the active model preset.",
-        "brain",
+    BuiltinCommandSpec.localized("/restart", "rotate-cw"),
+    BuiltinCommandSpec.localized("/status", "activity"),
+    BuiltinCommandSpec.localized(
+        "/model", "brain",
         "[preset]",
         accepts_args=True,
     ),
-    BuiltinCommandSpec(
-        "/trigger",
-        "Create named local trigger",
-        "Create a named CLI trigger bound to this chat session.",
-        "zap",
+    BuiltinCommandSpec.localized(
+        "/trigger", "zap",
         "<name>",
         accepts_args=True,
     ),
-    BuiltinCommandSpec(
-        "/dream",
-        "Run Dream",
-        "Manually trigger memory consolidation.",
-        "sparkles",
-    ),
-    BuiltinCommandSpec(
-        "/dream-log",
-        "Show Dream log",
-        "Show what the last Dream consolidation changed.",
-        "book-open",
+    BuiltinCommandSpec.localized("/dream", "sparkles"),
+    BuiltinCommandSpec.localized(
+        "/dream-log", "book-open",
         accepts_args=True,
     ),
-    BuiltinCommandSpec(
-        "/dream-restore",
-        "Restore memory",
-        "Revert memory to a previous Dream snapshot.",
-        "undo-2",
+    BuiltinCommandSpec.localized(
+        "/dream-restore", "undo-2",
         accepts_args=True,
     ),
-    BuiltinCommandSpec(
-        "/dream-prompt",
-        "Dream memory",
-        "Tell Dream how to organize this workspace's memory.",
-        "file-text",
+    BuiltinCommandSpec.localized(
+        "/dream-prompt", "file-text",
         "[init]",
         accepts_args=True,
     ),
-    BuiltinCommandSpec(
-        "/evaluator-prompt",
-        "Heartbeat evaluator",
-        "Customize the heartbeat notification gate prompt for this workspace.",
-        "file-text",
+    BuiltinCommandSpec.localized(
+        "/evaluator-prompt", "file-text",
         "[init]",
         accepts_args=True,
     ),
-    BuiltinCommandSpec(
-        "/skill",
-        "List skills",
-        "List all enabled skills available to the agent.",
-        "wrench",
-    ),
-    BuiltinCommandSpec(
-        "/help",
-        "Show help",
-        "List available slash commands.",
-        "circle-help",
-    ),
-    BuiltinCommandSpec(
-        "/pairing",
-        "Manage pairing",
-        "List, approve, deny or revoke pairing requests.",
-        "shield",
+    BuiltinCommandSpec.localized("/skill", "wrench"),
+    BuiltinCommandSpec.localized("/help", "circle-help"),
+    BuiltinCommandSpec.localized(
+        "/pairing", "shield",
         "[list|approve <code>|deny <code>|revoke <user_id>]",
         accepts_args=True,
     ),
@@ -487,8 +429,10 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
             try:
                 async with store.dream_lock:
                     new_sha = git.revert(sha, message_prefix=_DREAM_COMMIT_PREFIX)
-            except GitStoreDirtyError:
-                parts = [line("dream.restore.dirty", sha=sha)]
+            except GitStoreDirtyError as exc:
+                reason = (line("dream.restore.dirty_file", sha=sha, path=exc.path) if exc.path is not None
+                          else line("dream.restore.staged", sha=sha))
+                parts = [reason, "", line("dream.restore.retry")]
             else:
                 if new_sha:
                     files = ", ".join(f"`{path}`" for path in _extract_changed_files(change[1]))
@@ -557,9 +501,11 @@ def _help_parts(specs: tuple[BuiltinCommandSpec, ...]) -> list[CommandLine | str
     parts: list[CommandLine | str] = [line("help.title")]
     for spec in specs:
         syntax = f"{spec.command} {spec.arg_hint}" if spec.arg_hint else spec.command
-        key = f"palette.{spec.command.removeprefix('/')}.description"
         prefix = f"{syntax} — "
-        parts.append(CommandLine(prefix=prefix, key=key, values={}) if key in catalog() else prefix + spec.description)
+        parts.append(
+            CommandLine(prefix=prefix, key=spec.description_key, values={})
+            if spec.description_key else prefix + spec.description
+        )
     return parts
 
 

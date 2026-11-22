@@ -8,6 +8,7 @@ import {
   fetchSessionAutomations,
   listSessions,
 } from "@/lib/api";
+import { switchModelPreset } from "@/lib/switch-model-preset";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { readReloadSessions, writeReloadCache } from "@/lib/reload-cache";
 import type {
@@ -121,6 +122,7 @@ export function useSessions(): {
     modelPreset?: string | null,
   ): Promise<string> => {
     const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
+    const confirmedPreset = modelPreset ? await switchModelPreset(client, chatId, modelPreset) : null;
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
     // Optimistic insert; a subsequent refresh will replace it with the
@@ -134,7 +136,7 @@ export function useSessions(): {
         updatedAt: new Date().toISOString(),
         title: "",
         preview: "",
-        modelPreset: modelPreset ?? null,
+        modelPreset: confirmedPreset,
         workspaceScope: workspaceScope ?? null,
         projectLocked: false,
       },

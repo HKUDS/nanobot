@@ -84,7 +84,7 @@ import type {
 } from "@/lib/types";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
-import { renderCommandResult } from "../../../../packages/client-events/command-result";
+import { switchModelPreset } from "@/lib/switch-model-preset";
 import { switchedModelPreset } from "../../../../packages/client-events/model-selection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { providerDisplayLabel } from "@/lib/provider-brand";
@@ -394,7 +394,7 @@ export function ThreadShell({
   onOpenSandboxSettings,
   skills = [],
 }: ThreadShellProps) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const showToast = useToast();
   const chatId = session?.chatId ?? null;
   const historyKey = temporary ? null : session?.key ?? null;
@@ -847,24 +847,17 @@ export function ThreadShell({
   // A receipt for the previous chat must not change the newly opened chat's badge.
   const modelScope = useRef(0);
   useLayoutEffect(() => () => { modelScope.current++; }, [client, chatId]);
-  const handleModelPresetChange = useCallback(async (name: string) => {
-    let preset = name;
-    if (chatId) {
-      const scope = modelScope.current;
-      const reply = client.status === "open"
-        ? await client.sendSystemCommand(chatId, `/model ${name}`).catch(() => undefined)
-        : undefined;
-      if (scope !== modelScope.current) return;
-      const confirmed = switchedModelPreset(reply?.command_result);
-      if (!confirmed) {
-        throw new Error(renderCommandResult(reply?.command_result, i18n.resolvedLanguage ?? i18n.language)
-          ?? (reply?.text || t("thread.composer.modelSwitchUnconfirmed")));
-      }
-      preset = confirmed;
-    }
-    resetModelOptions(preset);
-    setLocalModelPreset(preset);
-  }, [chatId, client, i18n, resetModelOptions, t]);
+  const handleModelPresetChange = useCallback((name: string) => {
+    const select = (preset: string) => {
+      resetModelOptions(preset);
+      setLocalModelPreset(preset);
+    };
+    if (!chatId) return select(name);
+    const scope = modelScope.current;
+    return switchModelPreset(client, chatId, name).then((preset) => {
+      if (scope === modelScope.current) select(preset);
+    });
+  }, [chatId, client, resetModelOptions]);
   const modelPresetOptions = useMemo(
     () => modelPresetOptionsFromSettings(settings),
     [settings],
@@ -1070,26 +1063,23 @@ export function ThreadShell({
       setBooting(true);
       let finish!: (accepted: boolean) => void;
       const delivery = new Promise<boolean>((resolve) => { finish = resolve; });
-      pendingFirstRef.current = {
+      const pending = {
         content, images, options: withWorkspaceScope(options), finish,
         draftKey, draft: draftStore?.get(draftKey, persistDraft),
       };
-      setPendingFirstTargetChatId(null);
-      const newId = await onCreateChat?.(workspaceScope, content, localModelPreset);
-      if (!newId) {
-        pendingFirstRef.current = null;
-        setPendingFirstTargetChatId(null);
-        setBooting(false);
-        return false;
+      let newId;
+      try {
+        newId = await onCreateChat?.(workspaceScope, content, localModelPreset === activeModelPreset ? localModelPreset : null);
+      } finally {
+        if (!newId) setBooting(false);
       }
-      moveModelOptionsToSession(`websocket:${newId}`, pendingFirstRef.current?.options?.modelOptions);
-      if (localModelPreset) {
-        await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
-      }
+      if (!newId) return false;
+      pendingFirstRef.current = pending;
+      moveModelOptionsToSession(`websocket:${newId}`, pending.options?.modelOptions);
       setPendingFirstTargetChatId(newId);
       return delivery;
     },
-    [booting, client, draftKey, draftStore, localModelPreset, moveModelOptionsToSession, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
+    [activeModelPreset, booting, draftKey, draftStore, localModelPreset, moveModelOptionsToSession, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
   );
 
   const inspectAttachment = useCallback(async (path: string) => {

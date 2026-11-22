@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import { CliRenderEvents, TextareaRenderable, TextRenderable } from "@opentui/core"
 import { MockTreeSitterClient, createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 import { NanobotTui } from "./app"
@@ -6,6 +6,12 @@ import type { Transcript } from "../rendering/transcript"
 import { options, client, mount, waitUntil, occurrences } from "./test-support"
 
 describe("NanobotTui lifecycle", () => {
+  const locale = process.env.LC_ALL
+  beforeAll(() => { process.env.LC_ALL = "en" })
+  afterAll(() => {
+    if (locale === undefined) delete process.env.LC_ALL
+    else process.env.LC_ALL = locale
+  })
   let setup: TestRendererSetup | undefined
 
   afterEach(() => {

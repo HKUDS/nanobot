@@ -359,17 +359,41 @@
     "vi": "Không thể khôi phục thay đổi Dream `{sha}`.\n\nChỉ có thể khôi phục các phiên bản bộ nhớ Dream. Dùng `/dream-restore` để liệt kê các phiên bản gần đây.",
     "id": "Perubahan Dream `{sha}` tidak dapat dipulihkan.\n\nHanya versi memori Dream yang dapat dipulihkan. Gunakan `/dream-restore` untuk melihat daftar versi terbaru."
   },
-  "dream.restore.dirty": {
-    "en": "Couldn't restore Dream change `{sha}` because memory has uncommitted changes.\n\nCommit or undo your changes before trying again.",
-    "zh-CN": "无法恢复 Dream 更改 `{sha}`，因为记忆仓库中有未提交的更改。\n\n请先提交或撤销更改，然后重试。",
-    "zh-TW": "無法還原 Dream 變更 `{sha}`，因為記憶儲存庫中有尚未提交的變更。\n\n請先提交或復原變更，再試一次。",
-    "fr": "Impossible de restaurer la modification Dream `{sha}` : la mémoire contient des modifications non validées.\n\nValidez-les dans un commit ou annulez-les avant de réessayer.",
-    "ja": "メモリに未コミットの変更があるため、Dream の変更 `{sha}` を復元できませんでした。\n\n変更をコミットするか元に戻してから再試行してください。",
-    "ko": "메모리에 커밋하지 않은 변경 사항이 있어 Dream 변경 사항 `{sha}`를 복원할 수 없습니다.\n\n변경 사항을 커밋하거나 되돌린 후 다시 시도하세요.",
-    "es": "No se pudo restaurar el cambio de Dream `{sha}` porque la memoria contiene cambios sin confirmar.\n\nConfirma los cambios en un commit o deshazlos antes de volver a intentarlo.",
-    "pt-BR": "Não foi possível restaurar a alteração do Dream `{sha}` porque há alterações não confirmadas na memória.\n\nFaça commit das alterações ou desfaça-as antes de tentar novamente.",
-    "vi": "Không thể khôi phục thay đổi Dream `{sha}` vì bộ nhớ có thay đổi chưa được commit.\n\nHãy commit hoặc hoàn tác các thay đổi trước khi thử lại.",
-    "id": "Perubahan Dream `{sha}` tidak dapat dipulihkan karena ada perubahan memori yang belum dikomit.\n\nKomit atau batalkan perubahan sebelum mencoba lagi."
+  "dream.restore.dirty_file": {
+    "en": "Couldn't restore Dream change `{sha}`: `{path}` has uncommitted changes.",
+    "zh-CN": "无法恢复 Dream 更改 `{sha}`：`{path}` 有未提交的更改。",
+    "zh-TW": "無法還原 Dream 變更 `{sha}`：`{path}` 有未提交的變更。",
+    "fr": "Impossible de restaurer la modification Dream `{sha}` : `{path}` contient des modifications non validées.",
+    "ja": "Dream の変更 `{sha}` を復元できません。`{path}` に未コミットの変更があります。",
+    "ko": "Dream 변경 `{sha}`를 복원할 수 없습니다. `{path}`에 커밋하지 않은 변경 사항이 있습니다.",
+    "es": "No se pudo restaurar el cambio de Dream `{sha}`: `{path}` tiene cambios sin confirmar.",
+    "pt-BR": "Não foi possível restaurar a alteração do Dream `{sha}`: `{path}` tem alterações sem commit.",
+    "vi": "Không thể khôi phục thay đổi Dream `{sha}`: `{path}` có thay đổi chưa được commit.",
+    "id": "Perubahan Dream `{sha}` tidak dapat dipulihkan: `{path}` memiliki perubahan yang belum dikomit."
+  },
+  "dream.restore.staged": {
+    "en": "Couldn't restore Dream change `{sha}`: the memory repository has staged changes.",
+    "zh-CN": "无法恢复 Dream 更改 `{sha}`：记忆仓库有已暂存的更改。",
+    "zh-TW": "無法還原 Dream 變更 `{sha}`：記憶儲存庫有已暫存的變更。",
+    "fr": "Impossible de restaurer la modification Dream `{sha}` : le dépôt de mémoire contient des modifications indexées.",
+    "ja": "Dream の変更 `{sha}` を復元できません。メモリリポジトリにステージ済みの変更があります。",
+    "ko": "Dream 변경 `{sha}`를 복원할 수 없습니다. 메모리 저장소에 스테이징된 변경 사항이 있습니다.",
+    "es": "No se pudo restaurar el cambio de Dream `{sha}`: el repositorio de memoria tiene cambios preparados para confirmar.",
+    "pt-BR": "Não foi possível restaurar a alteração do Dream `{sha}`: o repositório de memória tem alterações preparadas para commit.",
+    "vi": "Không thể khôi phục thay đổi Dream `{sha}`: kho bộ nhớ có thay đổi đã được đưa vào vùng staging.",
+    "id": "Perubahan Dream `{sha}` tidak dapat dipulihkan: repositori memori memiliki perubahan yang sudah masuk staging."
+  },
+  "dream.restore.retry": {
+    "en": "Commit or undo your changes before trying again.",
+    "zh-CN": "请先提交或撤销更改，然后重试。",
+    "zh-TW": "請先提交或復原變更，再試一次。",
+    "fr": "Validez-les dans un commit ou annulez-les avant de réessayer.",
+    "ja": "変更をコミットするか元に戻してから再試行してください。",
+    "ko": "변경 사항을 커밋하거나 되돌린 후 다시 시도하세요.",
+    "es": "Confirma los cambios en un commit o deshazlos antes de volver a intentarlo.",
+    "pt-BR": "Faça commit das alterações ou desfaça-as antes de tentar novamente.",
+    "vi": "Hãy commit hoặc hoàn tác các thay đổi trước khi thử lại.",
+    "id": "Komit atau batalkan perubahan sebelum mencoba lagi."
   },
   "dream.restore.done": {
     "en": "Restored Dream memory to the state before `{sha}`.\n\n- New safety commit: `{new_sha}`",

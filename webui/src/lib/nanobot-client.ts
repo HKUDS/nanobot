@@ -1,4 +1,5 @@
 import { uploadAttachments, uploadCapability, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments";
+import { isSystemCommandTurnId, systemCommandTurnId } from "../../../packages/client-events/system-command";
 import { DeliveryReceipts } from "../../../packages/client-events/delivery";
 import { decodeNotification } from "../../../packages/client-events/notifications";
 import type {
@@ -164,7 +165,6 @@ interface PendingChatRequest extends PendingRequest<string> {
   phase: "queued" | "sent";
 }
 
-const SYSTEM_COMMAND_TURN_PREFIX = "webui-system:";
 const TURN_REJECTION_DETAILS = new Set([
   "access_denied",
   "attachment_rejected",
@@ -172,10 +172,6 @@ const TURN_REJECTION_DETAILS = new Set([
   "missing content",
   "workspace_scope_rejected",
 ]);
-
-export function isSystemCommandTurnId(value: string | null | undefined): value is string {
-  return typeof value === "string" && value.startsWith(SYSTEM_COMMAND_TURN_PREFIX);
-}
 
 export interface NanobotClientOptions {
   url: string;
@@ -895,7 +891,7 @@ export class NanobotClient {
 
   sendSystemCommand(chatId: string, command: string, timeoutMs = 5_000): Promise<SystemCommandReply> {
     const normalized = command.trim();
-    const turnId = `${SYSTEM_COMMAND_TURN_PREFIX}${crypto.randomUUID()}`;
+    const turnId = systemCommandTurnId();
     return new Promise<SystemCommandReply>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingSystemCommands.delete(turnId);

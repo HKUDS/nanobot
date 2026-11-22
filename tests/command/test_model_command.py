@@ -382,8 +382,8 @@ def test_goal_command_in_help_and_palette() -> None:
     goal = next(item for item in palette if item["command"] == "/goal")
     assert goal == {
         "command": "/goal",
-        "title": "Start long-running goal",
-        "description": "Tell the agent to treat the request as a long-running goal.",
+        "title": "Long-running goal",
+        "description": "Have the assistant keep working toward this goal.",
         "icon": "activity",
         "arg_hint": "<goal>",
         "lifecycle": "agent_turn_with_args",
@@ -395,5 +395,6 @@ def test_goal_command_in_help_and_palette() -> None:
     cancel = next(item for item in palette if item["command"] == "/cancel_goal")
     assert cancel["lifecycle"] == "side_channel"
     assert cancel["accepts_args"] is False
-    assert "/goal <goal>" in build_help_text()
-    assert "/cancel_goal" in build_help_text()
+    help_text = build_help_text(locale="en")
+    assert f"/goal <goal> — {goal['description']}" in help_text
+    assert "/cancel_goal" in help_text

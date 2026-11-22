@@ -5,6 +5,6 @@ export function systemCommandTurnId(): string {
   return SYSTEM_COMMAND_PREFIX + crypto.randomUUID()
 }
 
-export function isSystemCommandTurnId(id: string | undefined): boolean {
-  return id?.startsWith(SYSTEM_COMMAND_PREFIX) === true
+export function isSystemCommandTurnId(id: string | null | undefined): id is string {
+  return typeof id === "string" && id.startsWith(SYSTEM_COMMAND_PREFIX)
 }

@@ -5,9 +5,9 @@ import pairing from '../../nanobot/command/locales/pairing.json'
 
 const catalog: Record<string, Record<string, string>> = { ...core, ...palette, ...dream, ...pairing }
 
-function language(locale: string): string {
+export function commandLocale(locale: string): string {
   const tag = locale.toLowerCase().split(/[.@]/)[0]?.replaceAll('_', '-') ?? ''
-  const base = tag.split('-')[0] ?? 'en'
+  const base = tag.split('-')[0] || 'en'
   if (base === 'zh') return /-(tw|hk|mo|hant)(-|$)/.test(tag) ? 'zh-TW' : 'zh-CN'
   return base === 'pt' ? 'pt-BR' : base
 }
@@ -19,7 +19,7 @@ function record(value: unknown): value is Record<string, unknown> {
 function template(key: string, locale: string): string | undefined {
   if (!Object.hasOwn(catalog, key)) return undefined
   const entry = catalog[key]!
-  const code = language(locale)
+  const code = commandLocale(locale)
   return Object.hasOwn(entry, code) ? entry[code] : entry.en
 }
 
