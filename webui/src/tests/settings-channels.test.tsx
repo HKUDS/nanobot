@@ -645,6 +645,32 @@ describe("Settings channels", () => {
     },
   );
 
+  it.each([true, false])("turns off failed WeChat from the channel list (support installed: %s)", async (installed) => {
+    const feature: NanobotFeatureInfo = {
+      ...uninstalledConnectFeature("weixin"), installed, configured: true, enabled: true,
+      runtime_status: "failed", status: "failed",
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/settings") return jsonResponse(settingsPayload());
+      if (String(input) === "/api/settings/nanobot-features") return jsonResponse({ features: [feature], enabled_count: 0 });
+      return jsonResponse({});
+    }));
+    requestMutationMock.mockResolvedValueOnce({
+      features: [{ ...feature, enabled: false, runtime_status: "stopped", status: "stopped" }], enabled_count: 0,
+    });
+
+    renderSettingsView({ initialSection: "channels" });
+    expect(await screen.findByText("Failed")).toBeVisible();
+    const toggle = screen.getByRole("switch", { name: "WeChat channel" });
+    expect(toggle).toBeChecked();
+    await userEvent.click(toggle);
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+    expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.feature.disable", { name: "weixin" }, expect.any(Number),
+    );
+    await waitFor(() => expect(screen.queryByRole("button", { name: "View WeChat settings" })).not.toBeInTheDocument());
+  });
+
   it("keeps WeChat login recovery visible across transient channel refreshes", async () => {
     const expiredFeature: NanobotFeatureInfo = {
       name: "weixin",
@@ -808,7 +834,7 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     expect((await screen.findAllByText("Failed")).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("switch", { name: "Matrix channel" })).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Matrix channel" })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Install Matrix" }));
 
     await waitFor(() =>
@@ -858,10 +884,7 @@ describe("Settings channels", () => {
     fireEvent.click(await screen.findByRole("button", { name: "View Matrix settings" }));
     expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
     expect(screen.getByText(runtimeError)).toBeInTheDocument();
-    expect(screen.getByLabelText("Matrix channel")).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
+    expect(screen.getByRole("switch", { name: "Enable channel" })).toBeChecked();
   });
 
   it("starts Feishu connect in WebUI instead of showing a CLI command", async () => {
@@ -1429,10 +1452,7 @@ describe("Settings channels", () => {
     fireEvent.click((await screen.findAllByRole("button", { name: /^View .+ settings$/ }))[0]);
     expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
     expect(screen.getByText(runtimeError)).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "test assistant" })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
+    expect(screen.getByRole("switch", { name: "test assistant" })).toBeChecked();
   });
 
   it("preserves advanced field edits when collapsed and reopened with the keyboard", async () => {

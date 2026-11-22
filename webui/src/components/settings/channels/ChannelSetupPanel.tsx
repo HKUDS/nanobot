@@ -38,7 +38,6 @@ import {
   ChannelRuntimeError,
   CHANNEL_SETUP_PANEL_CLASS_NAME,
   channelSetup,
-  channelToggleChecked,
   localizedChannelDisplayName,
 } from "@/components/settings/channels/ChannelIdentity";
 import { ChannelSetupSurfaceView } from "@/components/settings/channels/ChannelSetupSurfaceView";
@@ -434,7 +433,7 @@ function ChannelSetupSurface({
     }
   };
 
-  const enabled = pendingEnabled ?? channelToggleChecked(feature);
+  const enabled = pendingEnabled ?? feature.enabled;
   const toggleEnabled = async (next: boolean) => {
     if (actionPending) return;
     if (next) {
