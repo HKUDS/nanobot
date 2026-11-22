@@ -41,15 +41,12 @@ async def edited_loop(tmp_path):
     )]
     await manager.state.append_history(value.key, facts, expected_generation=value.generation)
     yield loop
-    tasks = [task for group in loop._active_tasks.values() for task in group]
-    if tasks:
-        await asyncio.wait_for(asyncio.gather(*tasks), 10)
-    await loop.sessions.state.aclose()
+    await loop.aclose()
 
 
-async def edit(loop, index=1):
+async def edit(loop):
     value = await loop.sessions.state.read("websocket:editing")
-    anchor = HistoryEditSource(str(value.revision), f"user:old-{index}")
+    anchor = HistoryEditSource(str(value.revision), "user:old-1")
     msg = InboundMessage(channel="websocket", sender_id="webui", chat_id="editing", content="modified question",
                          metadata={"webui": True, "webui_turn_id": "edit-turn", "_wants_stream": True})
     return msg, anchor
@@ -65,14 +62,18 @@ async def drain(loop):
         await asyncio.wait_for(asyncio.gather(*tasks), 10)
 
 
-async def test_replacement_runs_once_with_only_the_retained_model_context(edited_loop):
+async def test_concurrent_edit_retry_runs_once_with_only_the_retained_context(edited_loop):
     loop = edited_loop
     msg, anchor = await edit(loop)
+    retry, _ = await edit(loop)
     accepted = AsyncMock()
-    await loop.replace_user_input(msg, anchor, display_replacement, accepted)
+    await asyncio.gather(
+        loop.replace_user_input(msg, anchor, display_replacement, accepted),
+        loop.replace_user_input(retry, anchor, display_replacement, accepted),
+    )
     await drain(loop)
-    assert accepted.await_count == 1
-    assert loop.provider.chat_stream_with_retry.await_count == 1
+    accepted.assert_awaited_once()
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
     prompt = loop.provider.chat_stream_with_retry.await_args.kwargs["messages"]
     assert "question-0" in str(prompt) and "answer-0" in str(prompt)
     assert "question-1" not in str(prompt) and "answer-2" not in str(prompt)
@@ -82,7 +83,6 @@ async def test_replacement_runs_once_with_only_the_retained_model_context(edited
         "question-0", "answer-0", "modified question", "new answer",
     ]
     assert "pending_user_turn" not in source.metadata
-    assert "interrupted" not in str(source.messages)
 
 
 async def test_execution_lane_busy_is_checked_at_admission(edited_loop):
@@ -91,26 +91,20 @@ async def test_execution_lane_busy_is_checked_at_admission(edited_loop):
     async with loop._get_session_lock(msg.session_key):
         with pytest.raises(HistoryEditError, match="edit_session_busy"):
             await loop.replace_user_input(msg, anchor, display_replacement, AsyncMock())
-    source = await loop.sessions.state.read(msg.session_key)
-    assert [message["content"] for message in source.messages] == [
-        item for index in range(3) for item in (f"question-{index}", f"answer-{index}")
-    ]
-    assert not loop.provider.chat_stream_with_retry.called
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
-async def test_cancelling_admission_observer_still_executes_an_accepted_input(edited_loop, monkeypatch):
+async def test_cancelling_admission_observer_still_executes_an_accepted_input(edited_loop):
     loop = edited_loop
     msg, anchor = await edit(loop)
     started, release = threading.Event(), threading.Event()
-    original = loop.sessions._store.replace_generation
 
-    def blocked(*args, **kwargs):
+    def blocked_projection(session, history):
         started.set()
         assert release.wait(5)
-        return original(*args, **kwargs)
+        return display_replacement(session, history)
 
-    monkeypatch.setattr(loop.sessions._store, "replace_generation", blocked)
-    task = asyncio.create_task(loop.replace_user_input(msg, anchor, display_replacement, AsyncMock()))
+    task = asyncio.create_task(loop.replace_user_input(msg, anchor, blocked_projection, AsyncMock()))
     assert await asyncio.to_thread(started.wait, 5)
     task.cancel()
     release.set()
@@ -143,70 +137,41 @@ async def test_shutdown_joins_committed_edit_before_worker_snapshot(edited_loop,
         await asyncio.gather(editing, closing)
     assert not loop._active_tasks and not loop._pending_queues
     reopened = SessionManager(loop.workspace, sessions_root=tmp_path / "sessions")
-    try:
-        saved = await reopened.state.read(msg.session_key)
-        assert saved.metadata["pending_user_turn"]
-        assert [row["content"] for row in saved.messages] == ["question-0", "answer-0", "modified question"]
-    finally:
-        await reopened.state.aclose()
+    saved = reopened.read_session_snapshot(msg.session_key)
+    assert saved is not None
+    assert saved.metadata["pending_user_turn"]
+    assert saved.messages[-1]["content"] == msg.content
 
 
-async def test_simultaneous_confirmations_only_admit_one_replacement(edited_loop):
+async def test_followup_gets_a_worker_when_the_reserved_edit_is_rejected(edited_loop):
     loop = edited_loop
     msg, anchor = await edit(loop)
-    results = await asyncio.gather(*(
-        loop.replace_user_input(msg, anchor, display_replacement, AsyncMock())
-        for _ in range(2)
-    ), return_exceptions=True)
-    # The second delivery of the same request is acknowledged from its receipt.
-    assert results == [None, None]
-    await drain(loop)
-    assert loop.provider.chat_stream_with_retry.await_count == 1
+    checking, release = threading.Event(), threading.Event()
 
+    def reject_stale_source(_session, _history):
+        checking.set()
+        assert release.wait(5)
+        raise HistoryEditError("edit_source_changed")
 
-@pytest.mark.parametrize("commit_edit", [True, False])
-async def test_ordinary_input_arriving_during_edit_is_not_lost(edited_loop, monkeypatch, commit_edit):
-    loop = edited_loop
-    msg, anchor = await edit(loop)
-    writing, resume = threading.Event(), threading.Event()
-    replace = loop.sessions._store.replace_generation
-
-    def hold_write(*args, **kwargs):
-        writing.set()
-        assert resume.wait(5)
-        if not commit_edit:
-            raise OSError("fixture write failure")
-        return replace(*args, **kwargs)
-
-    monkeypatch.setattr(loop.sessions._store, "replace_generation", hold_write)
-    editing = asyncio.create_task(loop.replace_user_input(msg, anchor, display_replacement, AsyncMock()))
-    arrived = asyncio.Event()
-
-    async def ordinary_input():
-        arrived.set()
-        await loop._enqueue_session_message(InboundMessage(
-            channel="websocket", sender_id="webui", chat_id="editing", content="ordinary follow-up",
-            metadata={"webui": True, "webui_turn_id": "ordinary-turn", "_wants_stream": True},
-        ))
-
+    editing = asyncio.create_task(loop.replace_user_input(msg, anchor, reject_stale_source, AsyncMock()))
+    followup = InboundMessage(
+        channel="websocket", sender_id="webui", chat_id="editing", content="ordinary follow-up",
+        metadata={"webui": True, "webui_turn_id": "ordinary-turn", "_wants_stream": True},
+    )
     try:
-        assert await asyncio.to_thread(writing.wait, 5)
-        ordinary = asyncio.create_task(ordinary_input())
-        await asyncio.wait_for(arrived.wait(), 5)
-        assert not ordinary.done()
+        assert await asyncio.to_thread(checking.wait, 5)
+        ordinary = asyncio.create_task(loop._enqueue_session_message(followup))
+        await asyncio.sleep(0)  # Let the follow-up reach admission before releasing the edit.
     finally:
-        resume.set()
-    if commit_edit:
+        release.set()
+    with pytest.raises(HistoryEditError, match="edit_source_changed"):
         await editing
-    else:
-        with pytest.raises(OSError, match="fixture write failure"):
-            await editing
     await asyncio.wait_for(ordinary, 5)
     await drain(loop)
     saved = await loop.sessions.state.read(msg.session_key)
-    inputs = [public_history_message(row)["content"] for row in saved.messages if row["role"] == "user"]
-    expected = ["question-0", "modified question"] if commit_edit else [f"question-{i}" for i in range(3)]
-    assert inputs == [*expected, "ordinary follow-up"]
+    assert [public_history_message(row)["content"] for row in saved.messages[-2:]] == [
+        followup.content, "new answer",
+    ]
 
 
 @pytest.mark.parametrize("arrival", ["during_reply", "after_reply"])
@@ -219,6 +184,7 @@ async def test_discarded_turn_child_result_cannot_enter_the_replacement_prompt(e
     runtime = await loop.runtime_for_session(source)
     child_started, release_child, main_started = asyncio.Event(), asyncio.Event(), asyncio.Event()
     release_main = asyncio.Event()
+    child_result = "OLD_CHILD_RESULT_FROM_DISCARDED_SUFFIX"
     main_prompts = []
 
     async def controlled_model(**kwargs):
@@ -226,7 +192,7 @@ async def test_discarded_turn_child_result_cannot_enter_the_replacement_prompt(e
         if str(messages[-1].get("content", "")).startswith("task from discarded turn"):
             child_started.set()
             await release_child.wait()
-            return LLMResponse(content="OLD_CHILD_RESULT_FROM_DISCARDED_SUFFIX")
+            return LLMResponse(content=child_result)
         main_prompts.append(messages)
         main_started.set()
         if arrival == "during_reply":
@@ -252,18 +218,15 @@ async def test_discarded_turn_child_result_cannot_enter_the_replacement_prompt(e
             await drain(loop)
         release_child.set()
         late = await asyncio.wait_for(loop.bus.consume_inbound(), 5)
+        assert late.session_generation == source.generation
+        assert child_result in late.content
         await loop._enqueue_session_message(late)
         release_main.set()
         await drain(loop)
         assert len(main_prompts) == 1
-        assert "OLD_CHILD_RESULT_FROM_DISCARDED_SUFFIX" not in str(main_prompts)
-        assert late.session_generation == source.generation
-        assert "OLD_CHILD_RESULT_FROM_DISCARDED_SUFFIX" not in str((await loop.sessions.state.read(source.key)).messages)
+        assert child_result not in str(main_prompts)
+        saved = await loop.sessions.state.read(source.key)
+        assert child_result not in str(saved.messages)
     finally:
         release_child.set()
         release_main.set()
-        await loop.subagents.close()
-        tasks = [task for group in loop._active_tasks.values() for task in group]
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)

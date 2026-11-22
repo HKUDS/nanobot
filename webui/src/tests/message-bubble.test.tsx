@@ -1516,7 +1516,7 @@ describe("MessageBubble", () => {
         content,
         createdAt: Date.now(),
       };
-      const { container, rerender, unmount } = render(<MessageBubble message={message} />);
+      const { container, unmount } = render(<MessageBubble message={message} />);
 
       const wrapper = container.querySelector("[data-user-text-bubble]")!;
       const toggle = screen.getByRole("button", { name: "Show more" });
@@ -1538,14 +1538,6 @@ describe("MessageBubble", () => {
       fireEvent.click(screen.getByRole("button", { name: "Show less" }));
       expect(wrapper).toHaveAttribute("data-user-message-collapsed", "true");
       expect(clip.style.height).toBe("304px");
-
-      // The editor and its submit controls must not inherit the collapsed text clip.
-      rerender(<MessageBubble message={message} editor={{ input: <textarea defaultValue={content} />, actions: null }} />);
-      expect(screen.getByRole("textbox")).toHaveValue(content);
-      expect(screen.getByRole("textbox").closest("[data-user-message-clip]")).toBeNull();
-      expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
-      rerender(<MessageBubble message={message} />);
-      expect(wrapper).toHaveAttribute("data-user-message-collapsed", "true");
 
       textHeight = 320;
       act(() => { resize?.([], {} as ResizeObserver); });

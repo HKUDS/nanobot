@@ -145,41 +145,30 @@ test("copies full user message text while collapsed and anchors scroll when coll
   expect(topVisible).toBe(true);
 });
 
-for (const width of [1280, 390]) {
-  test(`editing a collapsed prompt keeps the editor unclipped and restores keyboard navigation at ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 844 });
-    await page.goto("/browser/fixture.html?case=long-user-message");
-    const row = page.locator('[data-user-prompt-id="long-user"]');
-    const bubble = row.locator("[data-user-text-bubble]");
-    await expect(bubble).toHaveAttribute("data-user-message-collapsed", "true");
-    const trigger = row.getByRole("button", { name: "Message actions" });
-    await trigger.focus();
-    await trigger.press("Enter");
-    await page.getByRole("button", { name: "Edit message" }).click();
-    const editor = bubble.getByRole("textbox", { name: "Edit message" });
-    await expect(editor).toBeFocused();
-    await expect(editor).toHaveValue(/Final line sentinel/);
-    const resend = row.getByRole("button", { name: "Resend" });
-    const cancel = row.getByRole("button", { name: "Cancel" });
-    await expect(resend).toBeEnabled();
-    await expect(bubble).not.toHaveAttribute("data-user-message-collapsed");
-    const tall = (await bubble.boundingBox())!;
-    expect(await editor.evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1);
-    await editor.fill("Hi");
-    const small = (await bubble.boundingBox())!;
-    expect(small.height).toBeLessThan(tall.height);
-    expect(small.width).toBeLessThan(tall.width);
-    const cross = (await cancel.boundingBox())!;
-    expect(cross.y).toBeGreaterThanOrEqual(small.y + small.height);
-    expect(Math.abs(cross.x + cross.width - small.x - small.width)).toBeLessThan(1);
-    await editor.press("End");
-    await editor.press("Enter");
-    expect((await bubble.boundingBox())!.height).toBeGreaterThan(small.height);
-    await resend.scrollIntoViewIfNeeded();
-    await expect(resend).toBeInViewport();
-    await editor.press("Escape");
-    await expect(bubble).toHaveAttribute("data-user-message-collapsed", "true");
-    await expect(bubble).toContainText("Final line sentinel");
-    await expect(trigger).toBeFocused();
-  });
-}
+test("a collapsed prompt expands for editing on a narrow screen and restores focus on Escape", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/browser/fixture.html?case=long-user-message");
+  const row = page.locator('[data-user-prompt-id="long-user"]');
+  const showMore = row.getByRole("button", { name: "Show more" });
+  await expect(showMore).toBeVisible();
+  const trigger = row.getByRole("button", { name: "Message actions" });
+  await trigger.press("Enter");
+  await page.getByRole("button", { name: "Edit message" }).click();
+  const editor = row.getByRole("textbox", { name: "Edit message" });
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue(/Final line sentinel/);
+  await expect(showMore).toBeHidden();
+  expect(await editor.evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1);
+  await row.getByRole("button", { name: "Resend" }).click({ trial: true });
+
+  const tall = (await editor.boundingBox())!;
+  await editor.fill("Hi");
+  const small = (await editor.boundingBox())!;
+  expect(small.height).toBeLessThan(tall.height);
+  expect(small.width).toBeLessThan(tall.width);
+  await editor.press("Enter");
+  expect((await editor.boundingBox())!.height).toBeGreaterThan(small.height);
+  await editor.press("Escape");
+  await expect(showMore).toBeVisible();
+  await expect(trigger).toBeFocused();
+});

@@ -1040,32 +1040,7 @@ describe("NanobotClient", () => {
     expect(handler).toHaveBeenLastCalledWith("chat-strip", expect.objectContaining({ active: false, startedAt: null }));
   });
 
-  it("replaces the same conversation generation and fences discarded late frames and stale HTTP snapshots", () => {
-    const client = new NanobotClient({ url: "ws://test", reconnect: false,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
-    client.connect();
-    const socket = lastSocket();
-    socket.fakeOpen();
-    const base = { schemaVersion: 3, projection: "events" as const, events: [], history_generation: "before" };
-    client.adoptHistorySnapshot("same", base);
-    const received = vi.fn();
-    client.onTranscript("same", received);
-    socket.fakeMessage({ event: "delta", chat_id: "same", turn_id: "old-turn", text: "old suffix", history_generation: "before" });
-    const replacement = { ...base, history_generation: "after" };
-    socket.fakeMessage({ event: "history_replaced", chat_id: "same", thread: replacement,
-      previous_generation: "before", retired_turn_ids: ["old-turn"] });
-    received.mockClear();
-    socket.fakeMessage({ event: "delta", chat_id: "same", turn_id: "old-turn", text: "late suffix", history_generation: "before" });
-    expect(received).not.toHaveBeenCalled();
-    expect(client.isRetiredHistorySnapshot("same", base)).toBe(true);
-    expect(client.adoptHistorySnapshot("same", base)).toBe(false);
-    socket.fakeMessage({ event: "delta", chat_id: "same", turn_id: "new-turn", text: "new answer", history_generation: "after" });
-    expect(received).toHaveBeenCalledOnce();
-    expect(received.mock.calls[0][0].text).toBe("new answer");
-    client.close();
-  });
-
-  it("takes the WS retired IDs even when HTTP installed the replacement first", () => {
+  it("rejects retired snapshots and frames even when HTTP installed the replacement before WebSocket", () => {
     const client = new NanobotClient({ url: "ws://test", reconnect: false,
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
     client.connect();
@@ -1079,10 +1054,15 @@ describe("NanobotClient", () => {
     received.mockClear();
     socket.fakeMessage({ event: "history_replaced", chat_id: "same", thread,
       previous_generation: "before", retired_turn_ids: ["old-turn"] });
+    const stale = { ...thread, history_generation: "before" };
+    expect(client.isRetiredHistorySnapshot("same", stale)).toBe(true);
+    client.adoptHistorySnapshot("same", stale);
     socket.fakeMessage({ event: "delta", chat_id: "same", turn_id: "old-turn", text: "late untagged answer" });
+    socket.fakeMessage({ event: "delta", chat_id: "same", turn_id: "other-turn", text: "late tagged answer", history_generation: "before" });
     expect(received).not.toHaveBeenCalled();
-    expect(client.isRetiredHistorySnapshot("same", { history_generation: "before" })).toBe(true);
     expect(client.getRunState("same").startedAt).toBe(123);
+    socket.fakeMessage({ event: "delta", chat_id: "same", turn_id: "new-turn", text: "new answer", history_generation: "after" });
+    expect(received).toHaveBeenCalledWith(expect.objectContaining({ text: "new answer" }));
     client.close();
   });
 
