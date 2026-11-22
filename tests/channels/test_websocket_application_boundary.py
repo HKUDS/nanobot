@@ -10,6 +10,7 @@ from websockets.datastructures import Headers
 from websockets.http11 import Request, Response
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent, StreamDeltaEvent, StreamEndEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket import runtime
 from nanobot.webui.gateway_services import build_gateway_services
@@ -48,9 +49,9 @@ async def channel(tmp_path, monkeypatch):
 
 
 async def test_send_delegates_the_outbound_message_to_delivery(channel, monkeypatch):
-    send = AsyncMock()
+    deliver = AsyncMock()
     hydrate = AsyncMock()
-    monkeypatch.setattr(channel._outbound, "send", send)
+    monkeypatch.setattr(channel._outbound, "deliver", deliver)
     monkeypatch.setattr(channel._outbound, "hydrate", hydrate)
     msg = OutboundMessage(
         channel="websocket", chat_id="chat-1", content="hello", reply_to="m1",
@@ -59,42 +60,45 @@ async def test_send_delegates_the_outbound_message_to_delivery(channel, monkeypa
 
     await channel.send(msg)
 
-    send.assert_awaited_once_with(msg)
+    deliver.assert_awaited_once_with((msg,))
     hydrate.assert_not_awaited()
 
 
 async def test_subscribe_hydration_delegates_the_requested_chat(channel, monkeypatch):
     hydrate = AsyncMock()
-    send = AsyncMock()
+    deliver = AsyncMock()
     monkeypatch.setattr(channel._outbound, "hydrate", hydrate)
-    monkeypatch.setattr(channel._outbound, "send", send)
+    monkeypatch.setattr(channel._outbound, "deliver", deliver)
 
     await channel._dispatch_envelope(
         AsyncMock(), "client-1", {"type": "attach", "chat_id": "chat-2"},
     )
 
     hydrate.assert_awaited_once_with("chat-2")
-    send.assert_not_awaited()
+    deliver.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
-    ("method", "args", "kwargs"),
+    ("method", "args", "kwargs", "content", "event"),
     [
-        ("send_delta", ("chat-1", "part", {"webui_turn_id": "turn-1"}), {
-            "stream_id": "s1", "stream_end": True, "resuming": True, "merge_next": True,
-        }),
-        ("send_reasoning_delta", ("chat-1", "plan", {"webui_turn_id": "turn-1"}), {"stream_id": "r1"}),
-        ("send_reasoning_end", ("chat-1", {"webui_turn_id": "turn-1"}), {"stream_id": "r1"}),
-        ("send_file_edit_events", ("chat-1", [{"path": "a.py"}], {"webui_turn_id": "turn-1"}), {}),
+        ("send_delta", ("part",), {"stream_id": "s1"}, "part", StreamDeltaEvent(stream_id="s1")),
+        ("send_delta", ("last",), {"stream_id": "s1", "stream_end": True, "resuming": True, "merge_next": True},
+         "last", StreamEndEvent(stream_id="s1", resuming=True, merge_next=True)),
+        ("send_reasoning_delta", ("plan",), {"stream_id": "r1"}, "plan",
+         ProgressEvent(reasoning_delta=True, stream_id="r1")),
+        ("send_reasoning_end", (), {"stream_id": "r1"}, "", ProgressEvent(reasoning_end=True, stream_id="r1")),
+        ("send_file_edit_events", ([{"path": "a.py"}],), {}, "", ProgressEvent(file_edit_events=[{"path": "a.py"}])),
     ],
 )
-async def test_streaming_capabilities_use_the_same_delivery_owner(channel, monkeypatch, method, args, kwargs):
+async def test_streaming_capabilities_use_the_same_delivery_owner(channel, monkeypatch, method, args, kwargs, content, event):
     deliver = AsyncMock()
-    monkeypatch.setattr(channel._outbound, method, deliver)
+    monkeypatch.setattr(channel._outbound, "deliver", deliver)
+    metadata = {"webui_turn_id": "turn-1"}
 
-    await getattr(channel, method)(*args, **kwargs)
+    await getattr(channel, method)("chat-1", *args, metadata=metadata, **kwargs)
 
-    deliver.assert_awaited_once_with(*args, **kwargs)
+    message = OutboundMessage("websocket", "chat-1", content, metadata=metadata, event=event)
+    deliver.assert_awaited_once_with((message,))
 
 
 async def test_envelope_delegates_connection_client_and_payload_to_application(channel, monkeypatch):
