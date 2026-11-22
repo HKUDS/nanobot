@@ -261,8 +261,9 @@ test.describe("answer order", () => {
       await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
       const lastBlock = last.locator("xpath=ancestor::*[@data-thread-display-unit]");
       await lastBlock.hover();
-      await lastBlock.getByRole("button", { name: "Message actions" }).click();
-      await page.locator("[data-message-block-activity-action]").click();
+      if (width === 390) await lastBlock.getByRole("button", { name: "Message actions" }).click();
+      const controls = width === 390 ? page.locator("[data-message-mobile-sheet]") : lastBlock;
+      await controls.locator("[data-message-block-activity-action]").click();
       const tool = page.getByText(/Searched the web/).first();
       await expect(tool).toBeVisible();
       const [firstNode, lastNode] = await Promise.all([first.elementHandle(), last.elementHandle()]);

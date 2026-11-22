@@ -59,12 +59,21 @@ for (const theme of ["light", "dark"] as const) {
       }
 
       const row = page.locator("[data-thread-display-unit]").filter({ has: page.getByText("@mira", { exact: true }) });
-      await row.hover();
-      await row.getByRole("button", { name: "Message actions", exact: true }).click();
-      await expect(page.locator("[data-message-block-menu]")).toBeVisible();
+      const copy = row.getByRole("button", { name: "Copy", exact: true });
+      if (width >= 768) {
+        const side = row.locator("[data-message-side-actions]");
+        await expect(side).toHaveCSS("opacity", "0");
+        const before = await incoming.first().boundingBox();
+        await incoming.first().hover();
+        await expect(side).toHaveCSS("opacity", "1");
+        expect(await incoming.first().boundingBox()).toEqual(before);
+        const bounds = (await side.boundingBox())!;
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(layout.left);
+        await copy.hover();
+        await expect(side).toHaveCSS("pointer-events", "auto");
+      }
       await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-      if (width < 768) await page.keyboard.press("Escape");
-      await (width < 768 ? row : page.locator("[data-message-block-menu]")).getByRole("button", { name: "Copy", exact: true }).click();
+      await copy.click();
       await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("Looks good.");
     });
   }

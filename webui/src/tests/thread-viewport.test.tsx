@@ -361,7 +361,11 @@ describe("ThreadViewport", () => {
     expect(takeUserControl).toHaveBeenCalledTimes(1);
   });
 
-  it("yields scroll control before expanding activity from a portaled message menu", () => {
+  it.each([390, 1024])("yields scroll control before expanding message activity at %ipx", (width) => {
+    vi.spyOn(window, "matchMedia").mockImplementation(query => ({
+      matches: width === 390 && query.includes("max-width: 767px"), media: query, onchange: null,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+    }));
     const takeUserControl = vi.spyOn(ThreadMotionCoordinator.prototype, "takeUserControl");
     render(
       <ThreadViewport
@@ -373,9 +377,15 @@ describe("ThreadViewport", () => {
         composer={<div>composer</div>}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
-    const disclosure = screen.getByRole("button", { name: "Worked" });
-    expect(screen.getByTestId("thread-message-region")).not.toContainElement(disclosure);
+    const region = screen.getByTestId("thread-message-region");
+    let actions = region;
+    if (width === 390) {
+      expect(within(region).queryByRole("button", { name: "Worked" })).not.toBeInTheDocument();
+      fireEvent.click(within(region).getByRole("button", { name: "Message actions" }));
+      actions = screen.getByRole("dialog", { name: "Message actions" });
+      expect(region).not.toContainElement(actions);
+    }
+    const disclosure = within(actions).getByRole("button", { name: "Worked" });
     takeUserControl.mockClear();
     fireEvent.click(disclosure);
     expect(takeUserControl).toHaveBeenCalledTimes(1);

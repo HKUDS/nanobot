@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Quote, Wrench } from "lucide-react";
+import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Info, Quote, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DisclosureContent } from "@/components/ui/disclosure";
 
@@ -28,11 +28,12 @@ import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
 import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { HoverHint } from "@/components/ui/tooltip";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { formatMessageEndTime } from "@/lib/format-time";
+import { fmtDateTime, formatMessageEndTime, formatMessageHoverTime } from "@/lib/format-time";
 import { toMediaAttachment } from "@/lib/media";
 import { matchingSlashCommand } from "@/lib/slash-command";
 import { parseQuotedUserMessage } from "@/lib/user-message-quote";
@@ -185,110 +186,84 @@ export function MessageBlockMenuActions({
     ? message.source?.label?.trim() || t("message.automationSourceFallback")
     : "";
 
-  return (
+  const details = <>
+    <FallbackResponseSources
+      sources={message.role === "assistant" ? message.responseSources : undefined}
+      className="min-h-[var(--message-block-control-size)] gap-1"
+      badgeClassName="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
+    />
+    {timestampLabel || automationSourceLabel ? (
       <div
-        data-message-block-menu-actions
-        className={cn("flex max-w-full flex-col items-start gap-1", sheet ? "w-full" : "w-max")}
+        data-message-block-metadata
+        className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4 text-muted-foreground", sheet ? "px-2 text-xs" : "text-[10px]")}
       >
-        {(!sheet && hasText) || showFork || activity ? (
-          <div
-            data-message-block-toolbar
-            className={cn("flex w-full flex-wrap gap-x-1 gap-y-1", sheet ? "flex-col items-stretch" : "items-center")}
+        {timestampLabel ? (
+          <time
+            data-message-timestamp
+            data-message-created-at={message.role === "user" || undefined}
+            data-assistant-completed-at={
+              message.role === "assistant" && timestamp === message.completedAt || undefined
+            }
+            dateTime={new Date(timestamp).toISOString()}
+            className="flex min-h-[var(--message-block-control-size)] items-center tabular-nums"
           >
-            {(!sheet && hasText) || showFork ? (
-              <div className="flex min-h-[var(--message-block-control-size)] items-center gap-0.5">
-                {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
-                {showFork ? (
-                  <HoverHint content={t("message.forkFromHere")} side="top" align="center">
-                      <button
-                        type="button"
-                        data-message-block-fork-action
-                        data-assistant-fork-action
-                        onClick={onForkFromHere}
-                        aria-label={t("message.forkFromHere")}
-                        className={cn(
-                          "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
-                          "text-muted-foreground transition-colors",
-                          "hover:text-foreground",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          "motion-reduce:transform-none",
-                          sheet && "w-full justify-start gap-2 px-2 text-sm",
-                        )}
-                      >
-                        <ForkArrowIcon className="h-3.5 w-3.5" />
-                        {sheet ? <span>{t("message.forkFromHere")}</span> : null}
-                      </button>
-                  </HoverHint>
-                ) : null}
-              </div>
-            ) : null}
-            {activity ? (
-              <button
-                type="button"
-                data-message-block-activity-action
-                onClick={activity.onToggle}
-                aria-expanded={activity.expanded}
-                aria-controls={activity.controls}
-                className={cn(
-                  "group inline-flex min-h-[var(--message-block-control-size)] self-start items-center gap-1.5 whitespace-nowrap",
-                  "text-start text-[11px] leading-4",
-                  "text-muted-foreground transition-colors hover:text-foreground",
-                  "focus-visible:outline-none",
-                  sheet && "w-full gap-2 rounded-control px-2 text-sm hover:bg-muted/70",
-                )}
-              >
-                <span
-                  data-message-block-activity-icon
-                  className={cn(
-                    "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] shrink-0 items-center justify-center rounded-control",
-                    "transition-colors",
-                    "group-focus-visible:ring-2 group-focus-visible:ring-ring",
-                    "motion-reduce:transform-none",
-                    sheet && "w-3.5",
-                  )}
-                >
-                  <Activity className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
-                </span>
-                <span>{activity.label}</span>
-              </button>
-            ) : null}
-          </div>
+            {timestampLabel}
+          </time>
         ) : null}
-        <FallbackResponseSources
-          sources={message.role === "assistant" ? message.responseSources : undefined}
-          className="min-h-[var(--message-block-control-size)] gap-1"
-          badgeClassName="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
-        />
-        {timestampLabel || automationSourceLabel ? (
-          <div
-            data-message-block-metadata
-            className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4 text-muted-foreground", sheet ? "px-2 text-xs" : "text-[10px]")}
+        {automationSourceLabel ? (
+          <span
+            data-automation-trigger
+            className="flex min-h-[var(--message-block-control-size)] flex-wrap items-baseline gap-x-2 break-words"
           >
-            {timestampLabel ? (
-              <time
-                data-message-timestamp
-                data-message-created-at={message.role === "user" || undefined}
-                data-assistant-completed-at={
-                  message.role === "assistant" && timestamp === message.completedAt || undefined
-                }
-                dateTime={new Date(timestamp).toISOString()}
-                className="flex min-h-[var(--message-block-control-size)] items-center tabular-nums"
-              >
-                {timestampLabel}
-              </time>
-            ) : null}
-            {automationSourceLabel ? (
-              <span
-                data-automation-trigger
-                className="flex min-h-[var(--message-block-control-size)] flex-wrap items-baseline gap-x-2 break-words"
-              >
-                <span>{t("message.automationTriggered")}</span>{" "}
-                <span>{automationSourceLabel}</span>
-              </span>
-            ) : null}
-          </div>
+            <span>{t("message.automationTriggered")}</span>{" "}
+            <span>{automationSourceLabel}</span>
+          </span>
         ) : null}
       </div>
+    ) : null}
+  </>;
+  const fallback = message.responseSources?.find((source) => source.fallback);
+  const detailsLabel = fmtDateTime(timestamp) || automationSourceLabel
+    || (fallback ? t("message.fallbackResponse", { preset: fallback.preset }) : "");
+  const activityAction = activity && (
+    <button type="button" data-message-block-activity-action onClick={activity.onToggle}
+      aria-expanded={activity.expanded} aria-controls={activity.controls} aria-label={activity.label}
+      className={cn("inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        sheet && "w-full justify-start gap-2 px-2 text-sm hover:bg-muted/70")}>
+      <Activity className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
+      {sheet ? activity.label : null}
+    </button>
+  );
+  return (
+    <div data-message-block-menu-actions className={sheet ? "flex w-full flex-col gap-1" : "flex flex-col items-center"}>
+      <div data-message-block-toolbar className={cn("flex", sheet && "flex-col items-stretch gap-1")}>
+        {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
+        {showFork ? (
+          <HoverHint content={t("message.forkFromHere")}>
+            <button type="button" data-message-block-fork-action data-assistant-fork-action onClick={onForkFromHere}
+              aria-label={t("message.forkFromHere")}
+              className={cn("inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                sheet && "w-full justify-start gap-2 px-2 text-sm")}>
+              <ForkArrowIcon className="h-3.5 w-3.5" />
+              {sheet ? t("message.forkFromHere") : null}
+            </button>
+          </HoverHint>
+        ) : null}
+        {activityAction && !sheet ? <HoverHint content={activity.label}>{activityAction}</HoverHint> : activityAction}
+      </div>
+      {sheet ? details : detailsLabel ? (
+        <Popover>
+          <PopoverTrigger asChild>
+            <button type="button" aria-label={detailsLabel} title={detailsLabel}
+              className="rounded-mark text-[10px] leading-4 tabular-nums text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              {timestampLabel ? <time data-message-hover-time dateTime={new Date(timestamp).toISOString()}>{formatMessageHoverTime(timestamp)}</time>
+                : <Info className="h-3.5 w-3.5" aria-hidden />}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent side="bottom" collisionPadding={12} className="w-max max-w-64 [--message-block-control-size:1.75rem]">{details}</PopoverContent>
+        </Popover>
+      ) : null}
+    </div>
   );
 }
 

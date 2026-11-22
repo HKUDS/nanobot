@@ -106,7 +106,7 @@ for (const width of [1440, 390]) {
       await expect(page.getByText("Earlier context / 之前的上下文")).toBeVisible();
       const bubble = page.locator("[data-user-text-bubble]");
       const text = bubble.locator("p");
-      const trigger = page.locator("[data-message-block-menu-trigger]");
+      const trigger = page.locator(width === 390 ? "[data-message-block-menu-trigger]" : "[data-message-side-actions] [data-message-block-copy-action]");
       const fontSize = { small: 15, standard: 16, large: 18 }[size];
       await expect(text).toHaveCSS("font-size", `${fontSize}px`);
       await bubble.hover();
@@ -125,10 +125,10 @@ for (const width of [1440, 390]) {
           const style = getComputedStyle(node);
           return node.getBoundingClientRect().y + parseFloat(style.paddingTop) + parseFloat(style.lineHeight) / 2;
         });
+        expect(triggerBox.x).toBeGreaterThan(bubbleBox.x + bubbleBox.width);
         expect(Math.abs(triggerBox.y + triggerBox.height / 2 - firstLineCenter)).toBeLessThan(1);
       }
       await trigger.click();
-      await expect(page.locator("[data-message-block-menu]")).toBeVisible();
       if (width === 390) {
         await expect(page.locator("[data-message-mobile-sheet]")).toBeInViewport({ ratio: 1 });
       }

@@ -181,8 +181,7 @@ test("loading an earlier fragment restores a long turn without duplicating its a
   await expectBefore(body, "Long-turn question", "Final answer segment.");
   const answer = body.locator("[data-thread-display-unit]").filter({ has: page.getByText("Final answer segment.", { exact: true }) });
   await answer.hover();
-  await answer.getByRole("button", { name: "Message actions", exact: true }).click();
-  await page.locator("[data-message-block-activity-action]").click();
+  await answer.locator("[data-message-block-activity-action]").click();
   await expect(answer.getByText("Completed step Inspecting long history", { exact: true })).toBeVisible();
   backend.healthy();
 });
@@ -599,8 +598,7 @@ test("cached conversations with a shared fork prefix reset activity disclosures 
   await expect(body.getByText("Source answer.", { exact: true })).toBeVisible();
   const sharedBlock = body.locator("[data-thread-display-unit]").filter({ has: page.getByText("Shared answer.", { exact: true }) });
   await sharedBlock.hover();
-  await sharedBlock.getByRole("button", { name: "Message actions", exact: true }).click();
-  const activity = page.locator("[data-message-block-activity-action]");
+  const activity = sharedBlock.locator("[data-message-block-activity-action]");
   await expect(activity).toHaveAttribute("aria-expanded", "false");
   await activity.click();
   await expect(sharedBlock.getByTestId("agent-activity-content")).toBeVisible();
@@ -609,16 +607,13 @@ test("cached conversations with a shared fork prefix reset activity disclosures 
   const forkRead = await backend.read(B, null, 1);
   await expect(body.getByText("Fork answer.", { exact: true })).toBeVisible();
   await sharedBlock.hover();
-  await sharedBlock.getByRole("button", { name: "Message actions", exact: true }).click();
   await expect(activity).toHaveAttribute("aria-expanded", "false");
-  await page.keyboard.press("Escape");
   await backend.release(forkRead, fork);
 
   await page.getByRole("button", { name: "Conversation A", exact: true }).click();
   await backend.release(await backend.read(A, null, 2), source);
   await expect(body.getByText("Source answer.", { exact: true })).toBeVisible();
   await sharedBlock.hover();
-  await sharedBlock.getByRole("button", { name: "Message actions", exact: true }).click();
   await expect(activity).toHaveAttribute("aria-expanded", "false");
   backend.healthy();
 });

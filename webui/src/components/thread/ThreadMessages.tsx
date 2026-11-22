@@ -10,12 +10,9 @@ import {
 } from "@/components/thread/AgentActivityCluster";
 import { sameHistoryRowIdentity, type HistoryRowIdentity, type HistoryRowSource } from "@/components/thread/history-row-identity";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
-import { fmtDateTime, formatMessageHoverTime } from "@/lib/format-time";
 import { leadingDisplayNoopCount, projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
 import { filterThreadDisplayUnits } from "@/lib/thread-display-projection";
 import { withoutSubagentCreateActivity } from "@/lib/subagent-create-activity";
@@ -111,7 +108,7 @@ export function ThreadMessages({
   const { t } = useTranslation();
   const { activityMode } = useLocalPreferences();
   const messageListRef = useRef<HTMLDivElement>(null);
-  const mobileActions = useMediaQuery("(max-width: 767px)");
+  const mobileActions = useMediaQuery("(max-width: 767px), (hover: none)");
   const rawUnits = useMemo(() => buildDisplayUnits(messages), [messages]);
   const units = useMemo(() => filterThreadDisplayUnits(rawUnits), [rawUnits]);
   const forkBoundaryAfterUnitIndex = useMemo(() => {
@@ -413,10 +410,8 @@ interface MessageBlockMenuProps {
   message: UIMessage;
   isTurnStreaming: boolean;
   contextBlockKey: string;
-  contextActive: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onContextActiveChange: (key: string | null) => void;
   onForkFromHere?: () => void;
   activity?: {
     label: string;
@@ -431,36 +426,13 @@ function MessageBlockMenu({
   message,
   isTurnStreaming,
   contextBlockKey,
-  contextActive,
   open,
   onOpenChange,
-  onContextActiveChange,
   onForkFromHere,
   activity,
 }: MessageBlockMenuProps) {
   const { t } = useTranslation();
-  const contentRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const [triggerHeight, setTriggerHeight] = useState(28);
-  useLayoutEffect(() => {
-    const trigger = triggerRef.current;
-    if (!open || !trigger) return;
-    const measure = () => setTriggerHeight(trigger.getBoundingClientRect().height || 28);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(trigger);
-    return () => observer.disconnect();
-  }, [open]);
-  const contextActiveRef = useRef(contextActive);
-  contextActiveRef.current = contextActive;
   const label = t("message.actions");
-  const timestamp = message.role === "assistant" && Number.isFinite(message.completedAt)
-    ? message.completedAt
-    : message.createdAt;
-  // Re-evaluated when this message becomes active, including after an overnight idle.
-  const shortTime = mobileActions ? "" : formatMessageHoverTime(timestamp);
-  const fullTime = shortTime ? fmtDateTime(timestamp) : "";
   const actions = <MessageBlockMenuActions
     message={message}
     isTurnStreaming={isTurnStreaming}
@@ -473,12 +445,12 @@ function MessageBlockMenu({
       <MessageCopyButton message={message} className="h-11 w-8 [&_svg]:h-4 [&_svg]:w-4" />
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogTrigger asChild>
-          <button ref={triggerRef} type="button" data-message-block-menu-trigger aria-label={label}
+          <button type="button" data-message-block-menu-trigger aria-label={label}
             className="inline-flex h-11 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} aria-hidden />
           </button>
         </DialogTrigger>
-        <DialogContent ref={contentRef} placement="bottom" aria-describedby={undefined}
+        <DialogContent placement="bottom" aria-describedby={undefined}
           data-message-block-menu data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
           className="gap-2 p-4 pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] outline-none"
           onCloseAutoFocus={(event) => { if (activity?.expanded) event.preventDefault(); }}>
@@ -488,91 +460,9 @@ function MessageBlockMenu({
       </Dialog>
     </div>;
   }
-  return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <button
-          ref={triggerRef}
-          type="button"
-          data-message-block-menu-trigger
-          aria-label={label}
-          className={cn(
-            "message-block-menu-trigger group touch-target absolute -start-[var(--message-block-trigger-offset)] top-0 z-20",
-            "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-control-size)] items-center justify-center text-muted-foreground/70",
-            "transition-[color,opacity] hover:text-foreground focus-visible:outline-none",
-            "motion-reduce:transform-none motion-reduce:transition-none",
-          )}
-        >
-          <span
-            data-message-block-menu-highlight
-            className={cn(
-              "inline-flex h-4 w-7 items-center justify-center rounded-full",
-              "transition-colors",
-              "group-focus-visible:ring-2 group-focus-visible:ring-ring",
-              "motion-reduce:transform-none motion-reduce:transition-none",
-            )}
-          >
-            <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-          </span>
-        </button>
-      </PopoverTrigger>
-      {shortTime && fullTime && typeof timestamp === "number" ? (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <time data-message-hover-time dateTime={new Date(timestamp).toISOString()}
-                tabIndex={0} aria-label={fullTime}
-                className="message-block-hover-time absolute start-[calc(-1*var(--message-block-trigger-offset)-2px)] top-[var(--message-block-control-size)] z-10 w-[calc(var(--message-block-control-size)+4px)] truncate rounded-mark text-center text-[10px] leading-4 tabular-nums text-muted-foreground outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none">
-                {shortTime}
-              </time>
-            </TooltipTrigger>
-            <TooltipContent side="right" align="start" collisionPadding={12}
-              data-message-context-menu-block={contextBlockKey}>{fullTime}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      ) : null}
-      <PopoverContent
-        ref={contentRef}
-        data-message-block-menu
-        data-message-context-menu-block={contextBlockKey}
-        side="bottom"
-        align="end"
-        sideOffset={-triggerHeight}
-        collisionPadding={12}
-        tabIndex={-1}
-        aria-label={label}
-        onKeyDownCapture={(event) => {
-          if (event.key !== "Escape"
-            || !(event.target instanceof Node)
-            || !event.currentTarget.contains(event.target)) return;
-          event.preventDefault();
-          event.stopPropagation();
-          onOpenChange(false);
-        }}
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          contentRef.current?.focus({ preventScroll: true });
-        }}
-        onCloseAutoFocus={(event) => {
-          if (!contextActiveRef.current || activity?.expanded) event.preventDefault();
-        }}
-        onPointerEnter={(event) => {
-          if (event.pointerType === "touch") return;
-          onContextActiveChange(contextBlockKey);
-        }}
-        onPointerLeave={(event) => {
-          if (event.pointerType === "touch") return;
-          onContextActiveChange(contextBlockKeyForTarget(event.relatedTarget) ?? null);
-        }}
-        className={cn(
-          "w-max max-w-64 overflow-y-auto outline-none",
-          "shadow-[0_2px_10px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.24)]",
-        )}
-      >
-        {actions}
-      </PopoverContent>
-    </Popover>
-  );
+  return <div data-message-side-actions className="message-side-actions" data-side={message.role === "user" && !message.sessionMessage ? "right" : "left"}>
+    {actions}
+  </div>;
 }
 
 const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
@@ -650,12 +540,12 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         const focusTarget = elementRef.current?.querySelector<HTMLElement>(
           expanded
             ? "[data-contextual-activity-collapse]"
-            : "[data-message-block-menu-trigger]",
+            : mobileActions ? "[data-message-block-menu-trigger]" : "[data-message-block-activity-action]",
         );
         focusTarget?.focus({ preventScroll: true });
       }, 0);
     }
-  }, [contextBlockKey, onActivityExpandedChange]);
+  }, [contextBlockKey, mobileActions, onActivityExpandedChange]);
   const activityDurationMs = blockActivity
     ? completedActivityDurationMs(blockActivity.messages, blockActivity.turnLatencyMs)
     : 0;
@@ -683,10 +573,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
       message={unit.message}
       isTurnStreaming={isTurnStreaming}
       contextBlockKey={contextBlockKey}
-      contextActive={contextBlockActive}
       open={contextBlockMenuOpen}
       onOpenChange={(open) => onContextBlockMenuOpenChange(contextBlockKey, open)}
-      onContextActiveChange={onContextBlockActiveChange}
       onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
       activity={activityLabel ? {
         label: activityLabel,
