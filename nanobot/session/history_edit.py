@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from hashlib import sha256
 from typing import Any, cast
 
 from nanobot.bus.events import InboundMessage
@@ -55,13 +54,7 @@ def ordinary_text_error(message: dict[str, Any]) -> str | None:
 @dataclass(frozen=True)
 class HistoryEditSource:
     revision: str
-    message_id: str
-    turn_id: str | None
-    text_digest: str
-
-    @classmethod
-    def from_text(cls, revision: str, message_id: str, turn_id: str | None, text: str) -> HistoryEditSource:
-        return cls(revision, message_id, turn_id, sha256(text.encode()).hexdigest())
+    id: str
 
 
 @dataclass(frozen=True)

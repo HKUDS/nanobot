@@ -28,6 +28,9 @@ from nanobot.bus.outbound_events import (
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
     SideChannelReplyEvent,
+    StreamDeltaEvent,
+    StreamedResponseEvent,
+    StreamEndEvent,
     TurnEndEvent,
     TurnFailureNotice,
     TurnModelUpdatedEvent,
@@ -83,8 +86,6 @@ from nanobot.webui.transcript import (
 if TYPE_CHECKING:
     from websockets.asyncio.server import ServerConnection
 
-    from nanobot.session.manager import SessionManager
-
 
 @dataclass(frozen=True)
 class ChatAudience:
@@ -133,14 +134,12 @@ class WebUIOutboundDelivery:
         self,
         transport: WebUIOutboundTransport,
         *,
-        sessions: SessionManager | None,
         media: WebUIMediaGateway,
         transcripts: WebUITranscriptRecorder,
         temporary_chats: WebUITemporaryChats,
         session_projection: WebUISessionProjection,
     ) -> None:
         self._transport = transport
-        self._sessions = sessions
         self._history_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._outbound_generation: ContextVar[str | None] = ContextVar("webui_outbound_generation", default=None)
         self._media = media
@@ -233,7 +232,7 @@ class WebUIOutboundDelivery:
         turn_id = following.metadata.get(WEBUI_TURN_METADATA_KEY)
         return (
             activity(previous) and activity(following)
-            and previous.chat_id == following.chat_id
+            and previous.chat_id == following.chat_id and previous.delivery == following.delivery
             and isinstance(generation, str) and bool(generation)
             and isinstance(turn_id, str) and bool(turn_id)
             and all(previous.metadata.get(key) == following.metadata.get(key) for key in (
@@ -241,12 +240,6 @@ class WebUIOutboundDelivery:
             ))
             and self._temporary_chats.should_persist_transcript(following.chat_id)
         )
-
-    async def send_batch(self, messages: Sequence[OutboundMessage]) -> None:
-        # can_batch_send guarantees the same chat, turn and generation for the batch.
-        async with self.history_lock(messages[0].chat_id):
-            if await self._current_delivery(messages[0]):
-                await self._send_batch(messages)
 
     async def _send_batch(self, messages: Sequence[OutboundMessage]) -> None:
         first = messages[0]
@@ -308,13 +301,11 @@ class WebUIOutboundDelivery:
         return lock
 
     async def _is_current(self, key: str, generation: str) -> bool:
-        if self._sessions is None:
+        sessions = self._transcripts.sessions
+        if sessions is None:
             return True
-        current = self._sessions.state.peek_identity(key)
-        if current is not None:
-            return current.generation == generation
-        header = await self._sessions.state.read_header(key)
-        return header is not None and header.generation == generation
+        identity = sessions.state.peek_identity(key) or await sessions.state.read_header(key)
+        return identity is not None and identity.generation == generation
 
     async def _current_delivery(self, msg: OutboundMessage) -> bool:
         delivery = msg.delivery
@@ -326,7 +317,9 @@ class WebUIOutboundDelivery:
             return False
         return not isinstance(generation, str) or await self._is_current(key, generation)
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def deliver(self, messages: Sequence[OutboundMessage]) -> None:
+        # can_batch_send guarantees the same destination, turn and generation.
+        msg = messages[0]
         async with self.history_lock(msg.chat_id):
             current = await self._current_delivery(msg)
             if isinstance(msg.event, GoalStatusEvent) and msg.event.status == "idle":
@@ -343,9 +336,28 @@ class WebUIOutboundDelivery:
                 generation = delivery.session_generation
             token = self._outbound_generation.set(generation)
             try:
-                await self._send_event(msg)
+                if len(messages) == 1:
+                    await self._send_event(msg)
+                else:
+                    await self._send_batch(messages)
             finally:
                 self._outbound_generation.reset(token)
+
+    async def reasoning(self, chat_id: str, text: str, metadata: dict[str, Any] | None, *,
+                        stream_id: str | None, end: bool = False) -> None:
+        event = ProgressEvent(reasoning_delta=not end, reasoning_end=end, stream_id=stream_id)
+        await self.deliver((OutboundMessage("websocket", chat_id, text, metadata=metadata or {}, event=event),))
+
+    async def file_edits(self, chat_id: str, edits: list[dict[str, Any]], metadata: dict[str, Any] | None) -> None:
+        if edits:
+            event = ProgressEvent(file_edit_events=edits)
+            await self.deliver((OutboundMessage("websocket", chat_id, "", metadata=metadata or {}, event=event),))
+
+    async def stream(self, chat_id: str, text: str, metadata: dict[str, Any] | None, *,
+                     stream_id: str | None, stream_end: bool, resuming: bool, merge_next: bool) -> None:
+        event = (StreamEndEvent(stream_id=stream_id, resuming=resuming, merge_next=merge_next)
+                 if stream_end else StreamDeltaEvent(stream_id=stream_id))
+        await self.deliver((OutboundMessage("websocket", chat_id, text, metadata=metadata or {}, event=event),))
 
     async def _send_event(self, msg: OutboundMessage) -> None:
         event = msg.event
@@ -353,6 +365,14 @@ class WebUIOutboundDelivery:
             if event.outcome == "stopped" and msg.metadata.get("webui") is True:
                 return
             msg = replace(msg, content=message_text(msg))
+        if isinstance(event, StreamDeltaEvent | StreamEndEvent):
+            await self._send_delta(msg, event)
+            return
+        if isinstance(event, StreamedResponseEvent):
+            return
+        if isinstance(event, ProgressEvent) and (event.reasoning_delta or event.reasoning_end or event.reasoning):
+            await self._send_reasoning(msg, event)
+            return
         if isinstance(event, PromptSourcesEvent):
             await self._context_graph.observe_prompt(
                 msg.chat_id, event.sources, msg.metadata, system_sources=event.system_sources,
@@ -456,7 +476,7 @@ class WebUIOutboundDelivery:
             return
         progress = event if isinstance(event, ProgressEvent) else None
         if progress and progress.file_edit_events:
-            await self.send_file_edit_events(msg.chat_id, progress.file_edit_events, msg.metadata)
+            await self._send_file_edit_events(msg.chat_id, progress.file_edit_events, msg.metadata)
             return
         await self._send_message(msg, progress)
 
@@ -605,42 +625,30 @@ class WebUIOutboundDelivery:
             body["command_result"] = {"command": msg.event.command, "switched_preset": msg.event.switched_preset}
         await self._fanout(recipients, body, label=" ", on_sent=msg.confirm_sent if msg.sent is not None else None)
 
-    async def send_reasoning_delta(
-        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None,
-        *, stream_id: str | None = None,
-    ) -> None:
+    async def _send_reasoning(self, msg: OutboundMessage, event: ProgressEvent) -> None:
+        chat_id, stream_id = msg.chat_id, event.stream_id
+        key = (chat_id, stream_id or "")
         recipients = self._transport.webui_recipients(ChatAudience(chat_id))
-        if not delta:
-            return
-        payload: StreamWirePayload = {"event": "reasoning_delta", "chat_id": chat_id, "text": delta}
-        if stream_id is not None:
-            payload["stream_id"] = stream_id
-        buffered = self._reasoning_text_buffers.setdefault((chat_id, str(stream_id or "")), _StreamBuffer())
-        buffered.chunks.append(delta)
-        body: dict[str, Any] = dict(payload)
+        common = {"chat_id": chat_id, **({"stream_id": stream_id} if stream_id is not None else {})}
+        if not event.reasoning_end:
+            if not msg.content:
+                return
+            buffered = self._reasoning_text_buffers.setdefault(key, _StreamBuffer())
+            buffered.chunks.append(msg.content)
+            body = {**common, "event": "reasoning_delta", "text": msg.content}
+            await self._persist_turn_stream_event(chat_id, body, completed_text=None, metadata=msg.metadata, phase="reasoning")
+            buffered.observe(body)
+            await self._fanout(recipients, body, label=" reasoning ")
+            if event.reasoning_delta:
+                return
+        buffered = self._reasoning_text_buffers.pop(key, _StreamBuffer())
+        body = {**common, "event": "reasoning_end", **buffered.snapshot()}
         await self._persist_turn_stream_event(
-            chat_id, body, completed_text=None, metadata=metadata or {}, phase="reasoning",
-        )
-        buffered.observe(body)
-        await self._fanout(recipients, body, label=" reasoning ")
-
-    async def send_reasoning_end(
-        self, chat_id: str, metadata: dict[str, Any] | None = None,
-        *, stream_id: str | None = None,
-    ) -> None:
-        recipients = self._transport.webui_recipients(ChatAudience(chat_id))
-        payload: StreamWirePayload = {"event": "reasoning_end", "chat_id": chat_id}
-        if stream_id is not None:
-            payload["stream_id"] = stream_id
-        buffered = self._reasoning_text_buffers.pop((chat_id, str(stream_id or "")), _StreamBuffer())
-        text = "".join(buffered.chunks)
-        body: dict[str, Any] = {**payload, **buffered.snapshot()}
-        await self._persist_turn_stream_event(
-            chat_id, body, completed_text=text or None, metadata=metadata or {}, phase="reasoning",
+            chat_id, body, completed_text="".join(buffered.chunks) or None, metadata=msg.metadata, phase="reasoning",
         )
         await self._fanout(recipients, body, label=" reasoning_end ")
 
-    async def send_file_edit_events(
+    async def _send_file_edit_events(
         self, chat_id: str, edits: list[dict[str, Any]], metadata: dict[str, Any] | None = None,
     ) -> None:
         recipients = self._transport.webui_recipients(ChatAudience(chat_id))
@@ -649,17 +657,10 @@ class WebUIOutboundDelivery:
         await self._persist_turn_transcript_event(chat_id, body, metadata=metadata, phase="activity")
         await self._fanout(recipients, body, label=" file_edit ")
 
-    async def send_delta(
-        self,
-        chat_id: str,
-        delta: str,
-        metadata: dict[str, Any] | None = None,
-        *,
-        stream_id: str | None = None,
-        stream_end: bool = False,
-        resuming: bool = False,
-        merge_next: bool = False,
-    ) -> None:
+    async def _send_delta(self, msg: OutboundMessage, event: StreamDeltaEvent | StreamEndEvent) -> None:
+        chat_id, delta, stream_id = msg.chat_id, msg.content, event.stream_id
+        stream_end = isinstance(event, StreamEndEvent)
+        merge_next = stream_end and event.merge_next
         recipients = self._transport.webui_recipients(ChatAudience(chat_id))
         stream_key = (chat_id, str(stream_id or ""))
         completed_text: str | None = None
@@ -683,13 +684,13 @@ class WebUIOutboundDelivery:
             buffered.chunks.append(delta)
         if stream_id is not None:
             payload["stream_id"] = stream_id
-        if stream_end and resuming:
+        if stream_end and event.resuming:
             payload["resuming"] = True
         if stream_end and merge_next:
             payload["merge_next"] = True
         body: dict[str, Any] = {**payload, **(buffered.snapshot() if stream_end else {})}
         await self._persist_turn_stream_event(
-            chat_id, body, completed_text=completed_text, metadata=metadata or {},
+            chat_id, body, completed_text=completed_text, metadata=msg.metadata,
             phase="answer", include_source=True,
         )
         buffered.observe(body)

@@ -7,6 +7,7 @@ import weakref
 from collections import deque
 from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
+from typing import Literal
 
 from nanobot.bus.events import InboundMessage
 
@@ -40,15 +41,17 @@ class SessionExecutionClosedError(RuntimeError):
     """Work cannot enter the session dispatcher once it starts shutting down."""
 
 
+_Control = Literal["stop", "discard", "edit"]
+
+
 class SessionInboxes(Mapping[str, SessionInbox]):
     """Own inbox admission and the handoff from control cleanup to a new worker."""
 
     def __init__(self) -> None:
         self._active: dict[str, SessionInbox] = {}
-        self._controls: dict[str, dict[asyncio.Event, tuple[asyncio.Task[object] | None, bool]]] = {}
+        self._controls: dict[str, dict[asyncio.Event, tuple[asyncio.Task[object] | None, _Control]]] = {}
         self._closed = False
         self._admission_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
-        self._edits: dict[str, asyncio.Event] = {}
 
     def admission_lock(self, key: str) -> asyncio.Lock:
         lock = self._admission_locks.get(key)
@@ -64,22 +67,12 @@ class SessionInboxes(Mapping[str, SessionInbox]):
         """Under admission_lock, install before yielding; hand off only a committed input."""
         inbox = SessionInbox()
         self.install(key, inbox)
-        finished = self._edits[key] = asyncio.Event()
-        try:
-            yield inbox
-        finally:
-            if inbox.empty():
-                self.detach(key, inbox)
-            del self._edits[key]
-            finished.set()
-
-    async def wait_for_edit(self, key: str) -> None:
-        if finished := self._edits.get(key):
-            await finished.wait()
-
-    async def join_edits(self) -> None:
-        if self._edits:
-            await asyncio.gather(*(finished.wait() for finished in self._edits.values()))
+        with self.controlling(key, "edit"):
+            try:
+                yield inbox
+            finally:
+                if inbox.empty():
+                    self.detach(key, inbox)
 
     def __getitem__(self, key: str) -> SessionInbox:
         return self._active[key]
@@ -108,12 +101,12 @@ class SessionInboxes(Mapping[str, SessionInbox]):
             del self._active[key]
 
     @contextmanager
-    def controlling(self, key: str, *, discard: bool = False) -> Generator[None]:
+    def controlling(self, key: str, kind: _Control = "stop") -> Generator[None]:
         """Accept work into a replacement inbox without starting its worker yet."""
         self.check_admission()
         finished = asyncio.Event()
         controls = self._controls.setdefault(key, {})
-        controls[finished] = (asyncio.current_task(), discard)
+        controls[finished] = (asyncio.current_task(), kind)
         try:
             yield
         finally:
@@ -123,18 +116,16 @@ class SessionInboxes(Mapping[str, SessionInbox]):
             finished.set()
 
     def is_discarding(self, key: str) -> bool:
-        return any(discard for _, discard in self._controls.get(key, {}).values())
+        return any(kind == "discard" for _, kind in self._controls.get(key, {}).values())
 
-    async def wait_for_controls(self, key: str) -> None:
-        while controls := self._controls.get(key):
-            await next(iter(controls)).wait()
-
-    async def join_controls(self) -> None:
-        """After admission closes, wait for controls still using runtime resources."""
+    async def wait_for_controls(self, key: str | None = None, *, kind: _Control | None = None) -> None:
         current = asyncio.current_task()
-        pending = [
-            finished for controls in self._controls.values()
-            for finished, (owner, _) in controls.items() if owner is not current
-        ]
-        if pending:
-            await asyncio.gather(*(finished.wait() for finished in pending))
+        while True:
+            groups = self._controls.values() if key is None else (self._controls.get(key, {}),)
+            pending = next((
+                event for group in groups for event, (owner, control) in group.items()
+                if owner is not current and (kind is None or control == kind)
+            ), None)
+            if pending is None:
+                return
+            await pending.wait()

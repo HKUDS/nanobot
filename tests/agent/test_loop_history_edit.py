@@ -49,7 +49,7 @@ async def edited_loop(tmp_path):
 
 async def edit(loop, index=1):
     value = await loop.sessions.state.read("websocket:editing")
-    anchor = HistoryEditSource.from_text(str(value.revision), "live-id", f"old-{index}", f"question-{index}")
+    anchor = HistoryEditSource(str(value.revision), f"user:old-{index}")
     msg = InboundMessage(channel="websocket", sender_id="webui", chat_id="editing", content="modified question",
                          metadata={"webui": True, "webui_turn_id": "edit-turn", "_wants_stream": True})
     return msg, anchor
@@ -119,6 +119,36 @@ async def test_cancelling_admission_observer_still_executes_an_accepted_input(ed
     await drain(loop)
     assert loop.provider.chat_stream_with_retry.await_count == 1
     assert (await loop.sessions.state.read(msg.session_key)).messages[-1]["content"] == "new answer"
+
+
+async def test_shutdown_joins_committed_edit_before_worker_snapshot(edited_loop, tmp_path):
+    loop = edited_loop
+    msg, anchor = await edit(loop)
+    committed, release = asyncio.Event(), asyncio.Event()
+
+    async def announce(_session):
+        committed.set()
+        await release.wait()
+
+    loop.preserve_inflight_turns_on_shutdown()
+    editing = asyncio.create_task(loop.replace_user_input(msg, anchor, display_replacement, announce))
+    async with asyncio.timeout(5):
+        await committed.wait()
+        closing = asyncio.create_task(loop.aclose())
+        try:
+            await asyncio.sleep(0)
+            assert not closing.done()
+        finally:
+            release.set()
+        await asyncio.gather(editing, closing)
+    assert not loop._active_tasks and not loop._pending_queues
+    reopened = SessionManager(loop.workspace, sessions_root=tmp_path / "sessions")
+    try:
+        saved = await reopened.state.read(msg.session_key)
+        assert saved.metadata["pending_user_turn"]
+        assert [row["content"] for row in saved.messages] == ["question-0", "answer-0", "modified question"]
+    finally:
+        await reopened.state.aclose()
 
 
 async def test_simultaneous_confirmations_only_admit_one_replacement(edited_loop):

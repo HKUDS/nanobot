@@ -589,6 +589,7 @@ function ThreadShellContent({
       completedTurnIds,
       activeTurnId: historyActiveTurnId,
       historyGeneration,
+      sourceRevision,
       version: historyVersion,
       forkBoundaryMessageCount,
     },
@@ -1438,9 +1439,10 @@ function ThreadShellContent({
         >
           <FileActionsProvider value={previewSessionKey ? fileActions : undefined}>
           <McpCatalogContext.Provider value={toolsCatalog}>
-            <MessageEditingProvider chatId={chatId} busy={turnActive}
-              onBegin={anchorMessageEdit} onReviewLatest={promptNavigation.latest}
-              enabled={!temporary && messagesReady && historyKey === `websocket:${chatId}`}>
+          <MessageEditingProvider chatId={chatId} busy={turnActive}
+            sourceRevision={!promptNavigation.window || promptNavigation.window.sourceRevision === sourceRevision ? sourceRevision : null}
+            onBegin={anchorMessageEdit} onReviewLatest={promptNavigation.latest}
+            enabled={!temporary && messagesReady && historyKey === `websocket:${chatId}`}>
           <ExecSessionCommandsContext.Provider value={sessionCommands}>
           <ThreadViewport
             ref={viewportRef}

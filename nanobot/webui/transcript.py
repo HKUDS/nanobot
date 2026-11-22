@@ -232,20 +232,20 @@ def read_transcript_lines(session_key: str, *, history: HistoryReader) -> list[d
     return [record_from_fact(fact, session_key) for fact in history.all_facts()]
 
 
-def transcript_edit_target(
-    session_key: str, message_id: str, turn_id: str | None, *, history: HistoryReader,
-) -> tuple[dict[str, Any], int, int, int] | None:
-    """Resolve persisted input identity independently of the loaded page window."""
-    matches: list[tuple[dict[str, Any], int, int, int]] = []
-    for count, (ordinal, position, fact) in enumerate(history.inputs()):
-        row = {**record_from_fact(fact, session_key),
-               WEBUI_REPLAY_IDENTITY_KEY: f"turn:{ordinal}:record:{position}"}
-        event_id = projection_event_id(row)
-        if event_id == message_id or (turn_id and fact.turn_id == turn_id):
-            if turn_id is not None and fact.turn_id != turn_id or message_id.startswith("history-") and event_id != message_id:
+def transcript_edit_target(history: HistoryReader, input_id: str) -> tuple[int, int, HistoryFact] | None:
+    if entry := next(history.inputs_by_id(input_id), None):
+        return entry
+    # Before durable input IDs, replay identified a user by turn or its position in the transcript.
+    match = None
+    for ordinal, position, fact in history.inputs_by_id(None):
+        legacy_id = f"user:{fact.turn_id}" if fact.turn_id else projection_event_id({
+            WEBUI_REPLAY_IDENTITY_KEY: f"turn:{ordinal}:record:{position}",
+        })
+        if input_id == legacy_id:
+            if match is not None:
                 return None
-            matches.append((row, count, ordinal, position))
-    return matches[0] if len(matches) == 1 else None
+            match = (ordinal, position, fact)
+    return match
 
 
 def _now_ms() -> int:

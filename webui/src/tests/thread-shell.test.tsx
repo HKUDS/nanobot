@@ -619,7 +619,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resend" }));
     await waitFor(() => expect(requestMutation).toHaveBeenCalledWith("chat.fork", {
       mode: "replace", chat_id: "editable", text: "Edited question", turn_id: expect.any(String),
-      source: { revision, message_id: expect.any(String), turn_id: "saved-turn", text: "Saved question" },
+      source: { revision, id: "user:saved-turn" },
     }));
     await waitFor(() => expect(screen.queryByRole("textbox", { name: "Edit message" })).not.toBeInTheDocument());
     expect(client.sendMessage).not.toHaveBeenCalled();

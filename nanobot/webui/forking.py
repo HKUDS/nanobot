@@ -6,11 +6,32 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from loguru import logger
 
+from nanobot.bus.events import InboundMessage
+from nanobot.runtime_context import public_history_message
 from nanobot.session.display_history import HistoryReader
-from nanobot.session.manager import Session, SessionManager
-from nanobot.session.webui_turns import clean_generated_title
+from nanobot.session.history_edit import (
+    HistoryEditError,
+    HistoryEditSource,
+    HistoryEditTarget,
+    ordinary_text_error,
+)
+from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.session.manager import Session, SessionManager, history_prefix_boundary
+from nanobot.session.webui_turns import (
+    clean_generated_title,
+    clear_websocket_turn_if_current,
+    register_queued_websocket_turn_if_idle,
+)
+from nanobot.webui.history import fact_from_record
+from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
-from nanobot.webui.transcript import session_display_facts
+from nanobot.webui.transcript import (
+    build_user_transcript_event,
+    build_webui_thread_response,
+    prompt_index_revision,
+    session_display_facts,
+    transcript_edit_target,
+)
 
 if TYPE_CHECKING:
     from websockets.asyncio.server import ServerConnection
@@ -123,29 +144,6 @@ async def replace_webui_chat_input(
 ) -> dict[str, Any]:
     """Confirm a versioned source and replace both histories before execution."""
 
-    from nanobot.bus.events import InboundMessage
-    from nanobot.runtime_context import public_history_message
-    from nanobot.session.history_edit import (
-        HistoryEditError,
-        HistoryEditSource,
-        HistoryEditTarget,
-        ordinary_text_error,
-    )
-    from nanobot.session.history_visibility import is_hidden_history_message
-    from nanobot.session.manager import history_prefix_boundary
-    from nanobot.session.webui_turns import (
-        clear_websocket_turn_if_current,
-        register_queued_websocket_turn_if_idle,
-    )
-    from nanobot.webui.history import fact_from_record
-    from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
-    from nanobot.webui.transcript import (
-        build_user_transcript_event,
-        build_webui_thread_response,
-        prompt_index_revision,
-        transcript_edit_target,
-    )
-
     gateway = channel.gateway
     chat_id, text, turn_id, raw_source = (
         payload.get("chat_id"), payload.get("text"), payload.get("turn_id"), payload.get("source"),
@@ -156,14 +154,10 @@ async def replace_webui_chat_input(
             or not isinstance(raw_source, dict)):
         raise HistoryEditError("edit_invalid_request")
     fields = cast(dict[str, Any], raw_source)
-    revision, message_id, source_turn_id, original_text = (
-        fields.get("revision"), fields.get("message_id"), fields.get("turn_id"), fields.get("text"),
-    )
-    if (not isinstance(revision, str) or not revision or not isinstance(message_id, str)
-            or not isinstance(original_text, str)
-            or (source_turn_id is not None and not isinstance(source_turn_id, str))):
+    revision, input_id = fields.get("revision"), fields.get("id")
+    if not isinstance(revision, str) or not revision or not isinstance(input_id, str) or not input_id:
         raise HistoryEditError("edit_invalid_request")
-    source = HistoryEditSource.from_text(revision, message_id, source_turn_id, original_text)
+    source = HistoryEditSource(revision, input_id)
     if gateway.ingress.validate_text(text) is not None:
         raise HistoryEditError("edit_text_too_large")
     if gateway.session_manager is None or gateway.replace_user_input is None:
@@ -191,24 +185,28 @@ async def replace_webui_chat_input(
         previous_generation = session.generation
         if history.has_input(f"user:{turn_id}") or any(m.get("webui_turn_id") == turn_id for m in session.messages):
             raise HistoryEditError("edit_request_conflict")
-        target = transcript_edit_target(key, source.message_id, source.turn_id, history=history)
-        if target is None or target[0].get("text") != original_text:
+        target = transcript_edit_target(history, source.id)
+        if target is None:
             raise HistoryEditError("edit_source_changed")
-        row, user_index, ordinal, position = target
-        if reason := ordinary_text_error({**row, "role": "user", "content": original_text}):
+        ordinal, position, fact = target
+        original_text = fact.content.get("text")
+        if reason := ordinary_text_error({**fact.content, "role": "user", "content": original_text}):
             raise HistoryEditError(reason)
-        if row.get("turn_id"):
-            users = [item for item in session.messages if item.get("role") == "user" and not is_hidden_history_message(item)]
-            matches = [index for index, item in enumerate(users) if item.get("webui_turn_id") == row["turn_id"]]
-            if len(matches) != 1:
+        if fact.content.get("input_id") or fact.turn_id:
+            matches = (
+                i for i, m in enumerate(session.messages) if m.get("role") == "user" and not is_hidden_history_message(m)
+                and (m.get("input_id") == source.id or (not m.get("input_id") and fact.turn_id and m.get("webui_turn_id") == fact.turn_id))
+            )
+            boundary = next(matches, None)
+            if next(matches, None) is not None:
                 raise HistoryEditError("edit_source_changed")
-            user_index = matches[0]
-        boundary = history_prefix_boundary(session, user_index)
-        if boundary is None or boundary == len(session.messages):
+        else:
+            boundary = history_prefix_boundary(session, history.user_count_before(ordinal, position))
+        if boundary is None or boundary >= len(session.messages):
             raise HistoryEditError("edit_source_changed")
         original = session.messages[boundary]
-        if (public_history_message(original).get("content") != original_text
-                or original.get("webui_turn_id") != row.get("turn_id")):
+        if (public_history_message(original).get("content") != original_text or original.get("webui_turn_id") != fact.turn_id
+                or (original.get("input_id") and original["input_id"] != source.id)):
             raise HistoryEditError("edit_source_changed")
         if reason := ordinary_text_error(original):
             raise HistoryEditError(reason)
@@ -227,7 +225,7 @@ async def replace_webui_chat_input(
         body = await manager.state.project_history(key, lambda history: build_webui_thread_response(
             key, history=history, limit=40,
             session_messages_loader=lambda: session.messages,
-            session_version_loader=lambda: manager.read_session_version(key),
+            session_version_loader=lambda: history.session_version,
         ))
         assert body is not None
         body["history_generation"] = session.generation

@@ -1065,6 +1065,27 @@ describe("NanobotClient", () => {
     client.close();
   });
 
+  it("takes the WS retired IDs even when HTTP installed the replacement first", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const thread = { schemaVersion: 3, projection: "events" as const, events: [], history_generation: "after" };
+    client.adoptHistorySnapshot("same", thread);
+    const received = vi.fn();
+    client.onTranscript("same", received);
+    socket.fakeMessage({ event: "goal_status", chat_id: "same", turn_id: "new-turn", status: "running", started_at: 123 });
+    received.mockClear();
+    socket.fakeMessage({ event: "history_replaced", chat_id: "same", thread,
+      previous_generation: "before", retired_turn_ids: ["old-turn"] });
+    socket.fakeMessage({ event: "delta", chat_id: "same", turn_id: "old-turn", text: "late untagged answer" });
+    expect(received).not.toHaveBeenCalled();
+    expect(client.isRetiredHistorySnapshot("same", { history_generation: "before" })).toBe(true);
+    expect(client.getRunState("same").startedAt).toBe(123);
+    client.close();
+  });
+
   it("rejects a completed snapshot when a newer run is not represented", () => {
     const client = new NanobotClient({
       url: "ws://test",

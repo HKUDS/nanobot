@@ -13,13 +13,13 @@ const message: UIMessage = { id: "history-original", role: "user", content: "ori
 const revision = "source-snapshot";
 afterEach(() => vi.restoreAllMocks());
 
-function setup(options: { busy?: boolean; messages?: UIMessage[]; onBegin?: (messageId: string) => void } = {}) {
+function setup(options: { busy?: boolean; revision?: string | null; messages?: UIMessage[]; onBegin?: (messageId: string) => void } = {}) {
   const client = new NanobotClient({ url: "ws://test", reconnect: false });
   vi.mocked(fetchLatestWebuiThread).mockResolvedValue({ schemaVersion: 1, projection: "events", events: [], source_revision: revision });
   const requests = vi.spyOn(client, "requestMutation").mockResolvedValue({ accepted: true });
   const send = vi.spyOn(client, "sendMessage");
   const tree = (busy = options.busy ?? false, messages = options.messages ?? [message]) => <ClientProvider client={client} token="test">
-    <MessageEditingProvider chatId="same-chat" busy={busy} enabled onBegin={options.onBegin}>
+    <MessageEditingProvider chatId="same-chat" busy={busy} enabled sourceRevision={options.revision === undefined ? revision : options.revision} onBegin={options.onBegin}>
       <ThreadMessages editScope="websocket:same-chat" messages={messages} hiddenUserMessageCount={24} />
     </MessageEditingProvider>
     <textarea aria-label="Composer draft" defaultValue="untouched bottom draft" />
@@ -69,15 +69,16 @@ describe("message editing", () => {
   });
 
   it("keeps typing and cancellation available when the source read fails", async () => {
-    const { requests } = setup();
+    const { requests } = setup({ revision: null });
     let fail!: (error: Error) => void;
     vi.mocked(fetchLatestWebuiThread).mockReturnValueOnce(new Promise((_, reject) => { fail = reject; }));
     fireEvent.click(openMenu());
     const input = screen.getByRole("textbox", { name: "Edit message" });
     fireEvent.change(input, { target: { value: "keep my unconfirmed edit" } });
-    const resend = screen.getByRole("button", { name: "Resend" });
-    expect(resend).toBeDisabled();
-    expect(resend).toHaveAttribute("aria-busy", "true");
+    const review = screen.getByRole("button", { name: "Review latest conversation" });
+    fireEvent.click(review);
+    expect(review).toBeDisabled();
+    expect(review).toHaveAttribute("aria-busy", "true");
     await act(async () => fail(new Error("history read failed")));
     expect(screen.getByRole("alert")).toHaveTextContent("Could not load the latest message version");
     expect(input).toHaveValue("keep my unconfirmed edit");
@@ -86,8 +87,21 @@ describe("message editing", () => {
     expect(requests).not.toHaveBeenCalled();
   });
 
-  it("confirms exactly once against the read source snapshot in the same chat", async () => {
-    const { requests, send } = setup();
+  it("does not authorize a review response the transcript has not displayed", async () => {
+    const { requests } = setup({ revision: null });
+    fireEvent.click(openMenu());
+    const input = screen.getByRole("textbox", { name: "Edit message" });
+    fireEvent.change(input, { target: { value: "keep this draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review latest conversation" }));
+    // This isolated editor's read succeeds, but its rendered transcript stays unversioned.
+    expect(await screen.findByRole("alert")).toHaveTextContent("conversation changed");
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    expect(input).toHaveValue("keep this draft");
+    expect(requests).not.toHaveBeenCalled();
+  });
+
+  it("confirms exactly once against the displayed snapshot and stable input ID", async () => {
+    const { requests, send } = setup({ messages: [{ ...message, inputId: "input-1" }] });
     const input = await openEditor();
     fireEvent.change(input, { target: { value: "edited question" } });
     let accept!: (value: unknown) => void;
@@ -99,7 +113,7 @@ describe("message editing", () => {
     expect(requests).toHaveBeenCalledTimes(1);
     expect(requests.mock.calls[0]).toEqual(["chat.fork", {
       mode: "replace", chat_id: "same-chat", text: "edited question", turn_id: expect.any(String),
-      source: { revision, message_id: message.id, turn_id: "old-turn", text: "original question" },
+      source: { revision, id: "input-1" },
     }]);
     expect(send).not.toHaveBeenCalled();
     await act(async () => accept({ accepted: true }));
@@ -177,7 +191,7 @@ describe("message editing", () => {
     fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
     await waitFor(() => expect(requests).toHaveBeenCalledWith("chat.fork", {
       mode: "replace", chat_id: "same-chat", text: "shortcut edit", turn_id: expect.any(String),
-      source: { revision, message_id: message.id, turn_id: "old-turn", text: "original question" },
+      source: { revision, id: "user:old-turn" },
     }));
   });
 });

@@ -148,9 +148,6 @@ test("copies full user message text while collapsed and anchors scroll when coll
 for (const width of [1280, 390]) {
   test(`editing a collapsed prompt keeps the editor unclipped and restores keyboard navigation at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
-    await page.route("**/webui-thread?**", (route) => route.fulfill({ json: {
-      schemaVersion: 1, projection: "events", events: [], source_revision: "fixture-revision",
-    } }));
     await page.goto("/browser/fixture.html?case=long-user-message");
     const row = page.locator('[data-user-prompt-id="long-user"]');
     const bubble = row.locator("[data-user-text-bubble]");

@@ -295,11 +295,11 @@ class HistoryReader:
             if row[0] is not None:
                 yield HistoryFact.decode(row[0])
 
-    def inputs(self) -> Iterator[tuple[int, int, HistoryFact]]:
+    def inputs_by_id(self, input_id: str | None) -> Iterator[tuple[int, int, HistoryFact]]:
+        """Use history_input_identity; NULL selects only legacy inputs with no stored ID."""
         for ordinal, position, record in self._db.execute(
-            """SELECT turn_ordinal, position, record FROM history_entries
-               WHERE session_key=? AND kind=? ORDER BY turn_ordinal, position""",
-            (self.key, HistoryKind.INPUT),
+            """SELECT turn_ordinal, position, record FROM history_entries WHERE session_key=?
+               AND kind='input' AND json_extract(record, '$.content.input_id') IS ?""", (self.key, input_id),
         ):
             yield ordinal, position, HistoryFact.decode(record)
 

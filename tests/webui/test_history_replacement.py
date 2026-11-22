@@ -36,7 +36,7 @@ root = Path(sys.argv[1])
 manager = SessionManager(root / "workspace", sessions_root=root / "sessions")
 async def main():
     source = await manager.state.read("websocket:crash-edit")
-    anchor = HistoryEditSource.from_text(str(source.revision), "input", "old-turn", "old private input")
+    anchor = HistoryEditSource(str(source.revision), "user:old-turn")
     message = InboundMessage(channel="websocket", sender_id="webui", chat_id="crash-edit", content="replacement", metadata={"webui_turn_id": "new-edit"})
     fact = HistoryFact(HistoryKind.INPUT, {"text": "replacement"}, "new-edit", created_at_ms=2000)
     if sys.argv[2] == "True":
@@ -103,7 +103,7 @@ async def test_edit_within_a_turn_rebuilds_paging_summaries_and_keeps_its_prefix
     before = await manager.state.project_history(key, lambda history: history.revision)
     replacement = HistoryFact(HistoryKind.INPUT, {"text": "替换输入"}, "new-edit", created_at_ms=4000)
     current = await manager.state.replace_user_input(
-        key, HistoryEditSource.from_text(str(source.revision), "input-2", "old-2", "input-2"),
+        key, HistoryEditSource(str(source.revision), "user:old-2"),
         InboundMessage(channel="websocket", sender_id="webui", chat_id="steering-edit", content="替换输入",
                        metadata={"webui_turn_id": "new-edit"}),
         lambda _session, _history: HistoryEditTarget(4, 1, 2, replacement),

@@ -371,7 +371,6 @@ class WebSocketChannel(BaseChannel):
         self._uploads = gateway.uploads
         self._outbound = WebUIOutboundDelivery(
             self,
-            sessions=gateway.session_manager,
             media=gateway.media,
             transcripts=gateway.transcripts,
             temporary_chats=gateway.temporary_chats,
@@ -1108,17 +1107,17 @@ class WebSocketChannel(BaseChannel):
         await asyncio.sleep(0)
 
     async def send_command_result(self, msg: OutboundMessage) -> Literal["queued"]:
-        await self._outbound.send(msg)
+        await self.send(msg)
         return "queued"
 
     async def send(self, msg: OutboundMessage) -> None:
-        await self._outbound.send(msg)
+        await self._outbound.deliver((msg,))
 
     def can_batch_send(self, previous: OutboundMessage, following: OutboundMessage) -> bool:
         return self._outbound.can_batch_send(previous, following)
 
     async def send_batch(self, messages: Sequence[OutboundMessage]) -> None:
-        await self._outbound.send_batch(messages)
+        await self._outbound.deliver(messages)
 
     def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
         return msg
@@ -1131,7 +1130,7 @@ class WebSocketChannel(BaseChannel):
         *,
         stream_id: str | None = None,
     ) -> None:
-        await self._outbound.send_reasoning_delta(chat_id, delta, metadata, stream_id=stream_id)
+        await self._outbound.reasoning(chat_id, delta, metadata, stream_id=stream_id)
 
     async def send_reasoning_end(
         self,
@@ -1140,7 +1139,7 @@ class WebSocketChannel(BaseChannel):
         *,
         stream_id: str | None = None,
     ) -> None:
-        await self._outbound.send_reasoning_end(chat_id, metadata, stream_id=stream_id)
+        await self._outbound.reasoning(chat_id, "", metadata, stream_id=stream_id, end=True)
 
     async def send_file_edit_events(
         self,
@@ -1148,7 +1147,7 @@ class WebSocketChannel(BaseChannel):
         edits: list[dict[str, Any]],
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        await self._outbound.send_file_edit_events(chat_id, edits, metadata)
+        await self._outbound.file_edits(chat_id, edits, metadata)
 
     async def send_delta(
         self,
@@ -1161,7 +1160,7 @@ class WebSocketChannel(BaseChannel):
         resuming: bool = False,
         merge_next: bool = False,
     ) -> None:
-        await self._outbound.send_delta(
+        await self._outbound.stream(
             chat_id, delta, metadata, stream_id=stream_id,
             stream_end=stream_end, resuming=resuming, merge_next=merge_next,
         )

@@ -416,18 +416,22 @@ export class NanobotClient {
     if (!generation || this.retiredHistoryGenerations.get(chatId)?.has(generation)) return false;
     const previous = this.historyGenerations.get(chatId);
     this.historyGenerations.set(chatId, generation);
-    if ((!previous || previous === generation) && !previousGeneration) return false;
-    if (previous === generation) return false;
-    const retired = this.retiredHistoryGenerations.get(chatId) ?? new Set<string>();
-    if (previous) retired.add(previous);
-    if (previousGeneration) retired.add(previousGeneration);
-    this.retiredHistoryGenerations.set(chatId, retired);
-    this.pendingInboundByChat.delete(chatId);
-    this.goalStateByChatId.delete(chatId);
-    this.applyRunEffects(this.runs.transition({ kind: "forget", chatId }));
-    this.fenceCanonicalCompletedTurns(chatId, retiredTurnIds);
-    this.dispatch(chatId, { event: "history_replaced", chat_id: chatId, thread: body });
-    return true;
+    const replaced = previous !== generation && !!(previous || previousGeneration);
+    if (replaced || previousGeneration) {
+      const retired = this.retiredHistoryGenerations.get(chatId) ?? new Set<string>();
+      if (replaced && previous) retired.add(previous);
+      if (previousGeneration) retired.add(previousGeneration);
+      this.retiredHistoryGenerations.set(chatId, retired);
+    }
+    if (replaced) {
+      this.pendingInboundByChat.delete(chatId);
+      this.goalStateByChatId.delete(chatId);
+      this.applyRunEffects(this.runs.transition({ kind: "forget", chatId }));
+    }
+    // WS can add tombstones after HTTP installed this generation and a new run started.
+    if (retiredTurnIds.length) this.fenceCanonicalCompletedTurns(chatId, retiredTurnIds);
+    if (replaced) this.dispatch(chatId, { event: "history_replaced", chat_id: chatId, thread: body });
+    return replaced;
   }
 
   isRetiredHistorySnapshot(chatId: string, body: Pick<WebuiThreadPersistedPayload, "history_generation">): boolean {

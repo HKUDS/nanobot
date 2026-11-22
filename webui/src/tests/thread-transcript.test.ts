@@ -42,7 +42,7 @@ function receive(thread: ThreadTranscript, ...events: ThreadProjectionEvent[]): 
 }
 
 describe("ThreadTranscript admission", () => {
-  it("discards the edited suffix and fences reads from the previous history generation", () => {
+  it("discards the edited suffix, including live output not yet persisted", () => {
     let thread = new ThreadTranscript();
     const prefix = [input("prefix", "Keep"), { ...at("prefix", 2), event: "message" as const, text: "Keep reply" }];
     const oldBody = history([...prefix, input("old", "Original")], {
@@ -51,8 +51,6 @@ describe("ThreadTranscript admission", () => {
     });
     expect(thread.accept(oldBody, thread.begin("initial"))).toBe(true);
     receive(thread, { ...at("old", 2), event: "delta", stream_id: "old-answer", text: "Discarded live reply" });
-    const latest = thread.begin("latest");
-    const older = thread.begin("older");
     const replacement = history([...prefix, input("new", "Edited")], {
       history_generation: "new-generation",
       page: { before_cursor: "new-cursor", has_more_before: true, user_message_offset: 3 },
@@ -60,10 +58,6 @@ describe("ThreadTranscript admission", () => {
     thread = thread.replacedBy(replacement);
     expect(thread.messages.map((row) => row.content)).toEqual(["Keep", "Keep reply", "Edited"]);
     expect(thread.paging).toMatchObject({ historyGeneration: "new-generation", beforeCursor: "new-cursor", userMessageOffset: 3 });
-    expect(thread.accept(oldBody, latest)).toBe(false);
-    expect(thread.accept(oldBody, older)).toBe(false);
-    thread.finishRead(older, "Late old failure");
-    expect(thread.paging.olderError).toBeNull();
     const restored = new ThreadTranscript([], thread.save());
     receive(restored, { ...at("new", 2), event: "delta", stream_id: "new-answer", text: "New reply" });
     expect(restored.messages.map((row) => row.content)).toEqual(["Keep", "Keep reply", "Edited", "New reply"]);

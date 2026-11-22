@@ -15,7 +15,7 @@ interface EditDraft {
   text: string;
   turnId: string;
   revision: string | null;
-  needsReview: boolean;
+  reading: boolean;
   submitting: boolean;
   error: string | null;
 }
@@ -30,7 +30,8 @@ interface EditActions {
 interface EditorContext {
   draft: EditDraft | null;
   busy: boolean;
-  retryRead: () => void;
+  needsReview: boolean;
+  review: () => void;
   change: (text: string) => void;
   cancel: () => void;
   confirm: () => void;
@@ -52,8 +53,9 @@ function textRestriction(text: string): string | null {
 }
 
 /** Deliberately separate from Composer drafts, attachments and waiting input. */
-export function MessageEditingProvider({ chatId, busy, enabled, onBegin, onReviewLatest, children }: {
+export function MessageEditingProvider({ chatId, busy, enabled, sourceRevision, onBegin, onReviewLatest, children }: {
   chatId: string | null;
+  sourceRevision: string | null;
   busy: boolean;
   enabled: boolean;
   onBegin?: (messageId: string) => void;
@@ -78,27 +80,27 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, onRevie
     const code = error instanceof Error ? error.message : "";
     return t(`message.editErrors.${code}`, { defaultValue: t(fallbackKey) });
   }, [t]);
-  const readRevision = useCallback((turnId: string, reviewLatest = false) => {
-    if (!chatId || read.current) return;
+  const review = () => {
+    if (!draft || !chatId || busy || submitting.current || read.current) return;
+    const { turnId } = draft;
     const controller = new AbortController();
     read.current = controller;
-    setDraft((value) => value?.turnId === turnId ? { ...value, error: null } : value);
+    setDraft((value) => value?.turnId === turnId ? { ...value, reading: true, revision: null, error: null } : value);
     void fetchLatestWebuiThread(client, getToken(), `websocket:${chatId}`, controller.signal).then((body) => {
       if (controller.signal.aborted) return;
       const revision = body?.source_revision;
       if (!revision) throw new Error("Missing source revision");
-      if (reviewLatest) {
-        // Show the very snapshot that the next explicit resend will be checked against.
-        webuiThreadCache.set(`websocket:${chatId}`, body);
-        onReviewLatest?.();
-      }
-      setDraft((value) => value?.turnId === turnId ? { ...value, revision, needsReview: false } : value);
+      webuiThreadCache.set(`websocket:${chatId}`, body);
+      onReviewLatest?.();
+      // The read alone is not authorization: confirm also checks the rendered owner's revision.
+      setDraft((value) => value?.turnId === turnId ? { ...value, revision, reading: false } : value);
     }).catch((error: unknown) => {
       if (!controller.signal.aborted) {
-        setDraft((value) => value?.turnId === turnId ? { ...value, error: errorLabel(error, "message.editLoadFailed") } : value);
+        setDraft((value) => value?.turnId === turnId ? { ...value, reading: false, error: errorLabel(error, "message.editLoadFailed") } : value);
       }
     }).finally(() => { if (read.current === controller) read.current = null; });
-  }, [chatId, client, errorLabel, getToken, onReviewLatest]);
+  };
+  const needsReview = !draft?.revision || draft.revision !== sourceRevision;
   const actions = useMemo<EditActions | null>(() => {
     if (!chatId || !enabled) return null;
     const reason = (message: UIMessage): string | null => {
@@ -115,10 +117,9 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, onRevie
       if (reason(message) || read.current || submitting.current) return;
       const turnId = crypto.randomUUID();
       onBegin?.(message.id);
-      setDraft({ message, text: message.content, turnId, revision: null, needsReview: false, submitting: false, error: null });
-      readRevision(turnId);
+      setDraft({ message, text: message.content, turnId, revision: sourceRevision, reading: false, submitting: false, error: null });
     } };
-  }, [busy, chatId, enabled, onBegin, readRevision, selected, t]);
+  }, [busy, chatId, enabled, onBegin, sourceRevision, selected, t]);
   const cancel = () => {
     if (submitting.current) return;
     read.current?.abort();
@@ -127,7 +128,7 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, onRevie
   };
   const confirm = () => {
     const current = draft;
-    if (!enabled || !chatId || !current?.revision || busy || submitting.current || !current.text.trim()) return;
+    if (!enabled || !chatId || !current?.revision || needsReview || busy || submitting.current || !current.text.trim()) return;
     const restriction = textRestriction(current.text);
     if (restriction) {
       setDraft({ ...current, error: t(`message.editErrors.${restriction}`) });
@@ -137,8 +138,7 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, onRevie
     setDraft({ ...current, submitting: true, error: null });
     void client.requestMutation<{ accepted: boolean }>("chat.fork", {
       mode: "replace", chat_id: chatId, text: current.text, turn_id: current.turnId,
-      source: { revision: current.revision, message_id: current.message.id,
-        turn_id: current.message.turnId, text: current.message.content },
+      source: { revision: current.revision, id: editSourceId(current.message) },
     }).then(() => {
       if (submitting.current === current.turnId) setDraft((value) => value?.turnId === current.turnId ? null : value);
     }, (error: unknown) => {
@@ -146,22 +146,25 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, onRevie
       const stale = error instanceof Error && error.message === "edit_source_changed";
       setDraft((value) => value?.turnId === current.turnId ? {
         ...value, submitting: false, error: errorLabel(error),
-        ...(stale ? { revision: null, needsReview: true } : {}),
+        ...(stale ? { revision: null } : {}),
       } : value);
     }).finally(() => { if (submitting.current === current.turnId) submitting.current = null; });
   };
-  return <Actions.Provider value={actions}><Editor.Provider value={{ draft, busy, confirm, cancel,
-    retryRead: () => { if (draft && !draft.revision) readRevision(draft.turnId, draft.needsReview); },
+  return <Actions.Provider value={actions}><Editor.Provider value={{ draft, busy, confirm, cancel, needsReview, review,
     change: (text) => setDraft((current) => current && !submitting.current
       ? { ...current, text, error: current.revision ? null : current.error }
       : current),
   }}>{children}</Editor.Provider></Actions.Provider>;
 }
 
-export function messageEditorSlots(sourceMissing = false) {
+export function editSourceId(message: UIMessage): string {
+  return message.inputId || (message.turnId ? `user:${message.turnId}` : message.id);
+}
+
+export function messageEditorSlots(sourceMissing = false, loadEarlier?: () => void) {
   return {
     input: <EditInput sourceMissing={sourceMissing} />,
-    actions: <EditActionsRow sourceMissing={sourceMissing} />,
+    actions: <EditActionsRow sourceMissing={sourceMissing} loadEarlier={loadEarlier} />,
   };
 }
 
@@ -210,23 +213,24 @@ function actionWithShortcut(label: string, shortcut: string) {
   </span>;
 }
 
-function EditActionsRow({ sourceMissing }: { sourceMissing: boolean }) {
+function EditActionsRow({ sourceMissing, loadEarlier }: { sourceMissing: boolean; loadEarlier?: () => void }) {
   const editing = useContext(Editor);
   const { t } = useTranslation();
   if (!editing?.draft) return null;
-  const { draft, busy, cancel, confirm, retryRead } = editing;
+  const { draft, busy, cancel, confirm, needsReview, review } = editing;
   const error = busy ? t("message.editErrors.edit_session_busy")
-    : draft.needsReview ? draft.error : sourceMissing ? t("message.editSourceMissing") : draft.error;
-  const pending = draft.submitting || (!sourceMissing && !busy && !draft.revision && !draft.error);
+    : draft.error ?? (needsReview && draft.revision ? t("message.editErrors.edit_source_changed")
+      : sourceMissing && !loadEarlier && !needsReview ? t("message.editSourceMissing") : null);
+  const pending = draft.submitting;
   const resend = t("message.confirmEditResend");
   const hint = t("message.editReplaceHint");
   const feedbackId = `edit-feedback-${draft.turnId}`;
   return <div className="flex max-w-full flex-col items-end gap-1">
     <p id={feedbackId} role={error ? "alert" : undefined} className={error ? "text-xs text-destructive" : "sr-only"}>{error || hint}</p>
     <div className="flex items-center justify-end gap-1">
-      {draft.needsReview || (!sourceMissing && !draft.revision && draft.error) ? <Button type="button" size="sm" variant="ghost" className="touch-target"
-        disabled={!draft.error || busy} aria-busy={!draft.error || undefined} onClick={retryRead}>
-        {t(draft.needsReview ? "message.reviewLatest" : "common.retry")}
+      {needsReview || loadEarlier ? <Button type="button" size="sm" variant="ghost" className="touch-target"
+        disabled={draft.reading || draft.submitting || busy} aria-busy={draft.reading || undefined} onClick={needsReview ? review : loadEarlier}>
+        {t(needsReview ? "message.reviewLatest" : "thread.loadEarlier")}
       </Button> : <HoverHint align="end" content={<>
         {actionWithShortcut(resend, isApplePlatform() ? "⌘ Enter" : "Ctrl+Enter")}
         <span className="text-muted-foreground">{hint}</span>

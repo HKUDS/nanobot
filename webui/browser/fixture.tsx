@@ -76,7 +76,7 @@ async function loadFixture() {
     case "long-user-message": {
       const { LongUserMessageFixture } = await import("./long-user-message-fixture");
       const { MessageEditingProvider } = await import("@/components/thread/MessageEditing");
-      return withClient(<MessageEditingProvider chatId="long-user-message-preview" enabled busy={false}>
+      return withClient(<MessageEditingProvider chatId="long-user-message-preview" enabled busy={false} sourceRevision="fixture-revision">
         <LongUserMessageFixture parameters={parameters} />
       </MessageEditingProvider>);
     }

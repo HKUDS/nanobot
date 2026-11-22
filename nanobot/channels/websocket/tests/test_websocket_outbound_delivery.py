@@ -688,6 +688,77 @@ async def test_activity_batches_keep_replaced_session_generations_separate(histo
 
 
 @pytest.mark.asyncio
+async def test_streams_wait_for_replacement_and_cannot_repopulate_retired_text(history, tmp_path, monkeypatch):
+    from nanobot.bus.delivery import DeliveryRequest
+    from nanobot.bus.outbound_events import ProgressEvent, StreamDeltaEvent, StreamEndEvent
+    from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
+
+    channel = _channel(history.sessions)
+    manager = ChannelManager(
+        Config.model_validate({"channels": {"websocket": {"enabled": False}}}), channel.bus,
+        config_path=tmp_path / "config.json",
+    )
+    manager.channels["websocket"] = channel
+    chat = "stream-handoff"
+    key = f"websocket:{chat}"
+    connection = _RecordingConnection()
+    channel._attach(cast(Any, connection), chat)
+    old = await history.metadata(chat, {"webui_turn_id": "turn"})
+
+    async def publish(text, event, metadata):
+        await channel.bus.publish_outbound(OutboundMessage("websocket", chat, text, metadata=metadata, event=event))
+
+    sending = asyncio.Event()
+    send_once = manager._send_once
+
+    async def observe_send(adapter, message):
+        sending.set()
+        await send_once(adapter, message)
+
+    monkeypatch.setattr(manager, "_send_once", observe_send)
+    dispatcher = asyncio.create_task(manager._dispatch_outbound())
+    try:
+        async with asyncio.timeout(5):
+            async with channel._outbound.history_lock(chat):
+                await publish("in flight", StreamDeltaEvent(), old)
+                await sending.wait()
+                await history.sessions.state.reset(key)
+                fresh = await history.metadata(chat, {"webui_turn_id": "turn"})
+                await channel._commands.announce_webui_history_replacement(
+                    chat, {"history_generation": fresh[HISTORY_GENERATION_METADATA_KEY]},
+                    retired_turn_ids=["turn"], previous_generation=old[HISTORY_GENERATION_METADATA_KEY],
+                )
+            # Adjacent old/new chunks share the stream id, so coalescing also has to respect the boundary.
+            await publish("obsolete", StreamDeltaEvent(), old)
+            await publish("answer", StreamDeltaEvent(), fresh)
+            await publish("discarded thought", ProgressEvent(reasoning_delta=True), old)
+            await publish("thought", ProgressEvent(reasoning_delta=True), fresh)
+            await publish("", ProgressEvent(reasoning_end=True), old)
+            await publish("", ProgressEvent(reasoning_end=True), fresh)
+            await publish("", StreamEndEvent(), old)
+            await publish("!", StreamEndEvent(), fresh)
+            await publish("", ProgressEvent(file_edit_events=[{"path": "discarded"}]), old)
+            await channel.bus.publish_outbound(OutboundMessage("websocket", chat, "obsolete reply", metadata={"webui": True},
+                delivery=DeliveryRequest("old-run", key, old[HISTORY_GENERATION_METADATA_KEY])))
+            await publish("reply", None, fresh)
+            while manager.has_pending_delivery:
+                await asyncio.sleep(0)
+        frames = [json.loads(connection.sent.get_nowait()) for _ in range(connection.sent.qsize())]
+        assert [frame["event"] for frame in frames] == [
+            "history_replaced", "session_updated", "delta", "reasoning_delta", "reasoning_end", "stream_end", "message",
+        ]
+        assert [frame.get("text") for frame in frames[2:]] == ["answer", "thought", None, "answer!", "reply"]
+        assert all(frame["history_generation"] == fresh[HISTORY_GENERATION_METADATA_KEY] for frame in frames[2:])
+        assert frames[0]["previous_generation"] == old[HISTORY_GENERATION_METADATA_KEY]
+        assert frames[0]["thread"]["history_generation"] == fresh[HISTORY_GENERATION_METADATA_KEY]
+        assert [row["text"] for row in history.read(key)] == ["thought", "answer!", "reply"]
+    finally:
+        dispatcher.cancel()
+        await asyncio.gather(dispatcher, return_exceptions=True)
+        await manager.stop_all()
+
+
+@pytest.mark.asyncio
 async def test_cancelled_activity_batch_settles_admitted_write_without_fanout(history, monkeypatch) -> None:
     import threading
 

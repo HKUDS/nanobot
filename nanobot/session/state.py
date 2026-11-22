@@ -1076,19 +1076,17 @@ class SessionState:
 
         def commit() -> Session | None:
             def write() -> Session | None:
-                header = self._load(key, history=False)
-                if header is None or not header.policy.persist:
+                current = self._load(key, history=projection is not None)
+                if current is None or not current.policy.persist:
                     raise HistoryEditError("edit_source_changed")
-                previous = header.metadata.get("history_edit_receipt")
+                previous = current.metadata.get("history_edit_receipt")
                 if isinstance(previous, dict) and cast(dict[str, object], previous).get("turn_id") == receipt["turn_id"]:
                     if previous != receipt:
                         raise HistoryEditError("edit_request_conflict")
                     return None
                 resolve = projection
-                if resolve is None or any(header.metadata.get(name) for name in _RESERVED_KEYS):
+                if resolve is None or any(current.metadata.get(name) for name in _RESERVED_KEYS):
                     raise HistoryEditError("edit_session_busy")
-                current = self._load(key)
-                assert current is not None
                 target = self._store.project_history(key, lambda history: resolve(current, history))
                 previous_generation = current.generation
                 current.retain_history_prefix(target.model_position)

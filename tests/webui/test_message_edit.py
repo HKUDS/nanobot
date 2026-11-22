@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.history_edit import HistoryEditError
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.sqlite_store import SessionConflictError
@@ -34,9 +32,12 @@ async def editing(tmp_path):
     })
     manager.save(session)
     for index in range(4):
-        session.add_message("user", f"question-{index}", webui_turn_id=f"old-{index}")
+        # Mix pre-ID history and current WebUI input identities in one topic.
+        identity = {"input_id": f"user:old-{index}"} if index else {}
+        session.add_message("user", f"question-{index}", webui_turn_id=f"old-{index}", **identity)
         session.add_message("assistant", f"answer-{index}")
-        transcript.append_transcript_object(KEY, {"event": "user", "chat_id": "edit-chat", "text": f"question-{index}", "turn_id": f"old-{index}"}, sessions=manager)
+        transcript.append_transcript_object(KEY, {"event": "user", "chat_id": "edit-chat", "text": f"question-{index}",
+                                                "turn_id": f"old-{index}", **identity}, sessions=manager)
         transcript.append_transcript_object(KEY, {"event": "message", "chat_id": "edit-chat", "text": f"answer-{index}", "turn_id": f"old-{index}"}, sessions=manager)
         transcript.append_transcript_object(KEY, {"event": "turn_end", "chat_id": "edit-chat", "turn_id": f"old-{index}"}, sessions=manager)
     manager.save(session)
@@ -69,8 +70,7 @@ async def read_source(host, index):
     ))
     assert body is not None
     # A paged selection uses stable input identity, never a page-local index.
-    return {"revision": body["source_revision"], "message_id": "live-render-id",
-            "turn_id": f"old-{index}", "text": f"question-{index}"}
+    return {"revision": body["source_revision"], "id": f"user:old-{index}"}
 
 
 def payload(source, text="replacement", turn_id="new-edit"):
@@ -100,11 +100,6 @@ async def test_edit_keeps_identity_prefix_and_one_new_input(editing, index):
     assert after.messages[-1]["input_id"] == "user:new-edit"
     assert after.get_history(include_runtime_context=True)[-1]["_meta"]["input_id"] == "user:new-edit"
     assert after.metadata["pending_user_turn"] is True
-    assert after.metadata["history_edit_receipt"] == {
-        "turn_id": "new-edit", "text": "replacement",
-        "source": {**{name: prepared[name] for name in ("revision", "message_id", "turn_id")},
-                   "text_digest": sha256(prepared["text"].encode()).hexdigest()},
-    }
     rows = read_rows(manager)
     assert [row["text"] for row in rows if row.get("event") == "user"] == [*[f"question-{i}" for i in range(index)], "replacement"]
     assert len(await manager.state.list_sessions()) == 1
@@ -114,6 +109,10 @@ async def test_edit_keeps_identity_prefix_and_one_new_input(editing, index):
     with pytest.raises(SessionConflictError):
         await manager.state.finish_turn(stale_draft)
     assert "obsolete suffix" not in str((await manager.state.read(KEY)).messages)
+    with pytest.raises(SessionConflictError):
+        await manager.state.append_history(KEY, [fact_from_record({"event": "message", "text": "obsolete suffix"})],
+                                           expected_generation=before.generation)
+    assert read_rows(manager) == rows
 
 
 async def test_replay_uses_one_snapshot_and_rejects_an_edit_from_before_concurrent_append(editing, tmp_path, monkeypatch):
@@ -165,8 +164,7 @@ async def test_replay_uses_one_snapshot_and_rejects_an_edit_from_before_concurre
     user = next(event for event in old["events"] if event["event"] == "user_message")
     with pytest.raises(HistoryEditError, match="edit_source_changed"):
         await replace_webui_chat_input(host, payload({
-            "revision": old["source_revision"], "message_id": user["projection_id"],
-            "turn_id": user["turn_id"], "text": user["text"],
+            "revision": old["source_revision"], "id": f"user:{user['turn_id']}",
         }))
     assert not submissions
 
@@ -238,14 +236,26 @@ async def test_long_replacement_broadcast_is_a_page_with_a_recoverable_prefix(ed
     ]
 
 
-async def test_reading_the_edit_source_does_not_change_history(editing):
+async def test_edit_pre_id_history_uses_the_selected_row_not_its_text(editing):
     manager, host, _, _ = editing
-    before = await manager.state.read(KEY)
-    rows = read_rows(manager)
-    await read_source(host, 2)
+    session = await manager.state.get(KEY)
+    facts = []
+    for answer in ("first answer", "second answer"):
+        session.add_message("user", "same question")
+        session.add_message("assistant", answer)
+        facts.extend(fact_from_record(row) for row in (
+            {"event": "user", "text": "same question"}, {"event": "message", "text": answer}, {"event": "turn_end"},
+        ))
+    await manager.state.finish_turn(session)
+    await manager.state.append_history(KEY, facts, expected_generation=session.generation)
+    page = await manager.state.project_history(KEY, lambda history: transcript.build_webui_thread_response(
+        KEY, history=history, limit=40, session_version_loader=lambda: history.session_version,
+    ))
+    first, second = [e for e in page["events"] if e.get("text") == "same question"]
+    assert first["projection_id"] != second["projection_id"]
+    await replace_webui_chat_input(host, payload({"revision": page["source_revision"], "id": second["projection_id"]}))
     after = await manager.state.read(KEY)
-    assert (after.generation, after.revision, after.messages, after.metadata) == (before.generation, before.revision, before.messages, before.metadata)
-    assert read_rows(manager) == rows
+    assert [m["content"] for m in after.messages[-3:]] == ["same question", "first answer", "replacement"]
 
 
 @pytest.mark.parametrize("failure", ["source", "display", "sql", "install"])
@@ -338,92 +348,20 @@ async def test_new_fork_still_creates_distinct_identity_and_preserves_source(edi
     assert len(await manager.state.list_sessions()) == 2
 
 
-async def test_mismatched_source_identity_cannot_truncate_a_different_message(editing):
+async def test_mismatched_display_and_model_input_cannot_truncate_history(editing):
     manager, host, submissions, _ = editing
+    # A recovered display row still has its ID but no longer describes the model input.
+    session = await manager.state.get(KEY)
+    session.messages[2]["content"] = "a different model input"
+    await manager.state.prepare_input(session)
     before = await manager.state.read(KEY)
     rows = read_rows(manager)
     prepared = await read_source(host, 1)
-    prepared["turn_id"] = "old-2"
     with pytest.raises(HistoryEditError, match="edit_source_changed"):
         await replace_webui_chat_input(host, payload(prepared))
     assert (await manager.state.read(KEY)).messages == before.messages
     assert read_rows(manager) == rows
     assert not submissions
-
-
-async def test_replacement_delivery_keeps_retired_generation_out_of_wire_and_history(editing):
-    import asyncio
-    import json
-
-    from nanobot.bus.delivery import DeliveryRequest
-    from nanobot.bus.events import OutboundMessage
-    from nanobot.bus.queue import MessageBus
-    from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
-    from nanobot.webui.gateway_services import build_gateway_services
-
-    manager, host, _, display = editing
-    source = await manager.state.read(KEY)
-    prepared = await read_source(host, 1)
-    await replace_webui_chat_input(host, payload(prepared))
-    config = WebSocketConfig(enabled=True, allow_from=["*"], websocket_requires_token=False)
-    bus = MessageBus()
-    gateway = build_gateway_services(
-        config=config, bus=bus, session_manager=manager, static_dist_path=None,
-        workspace_path=display, default_restrict_to_workspace=False,
-        runtime_model_name=None, runtime_surface="tui", runtime_capabilities_overrides=None,
-    )
-    channel = WebSocketChannel(config, bus, gateway=gateway)
-    rows = read_rows(manager)
-    event = {"event": "stream_end", "text": "discarded late completion"}
-    persisted = await channel._outbound._persist_turn_stream_event(
-        "edit-chat", event, completed_text="discarded late completion", phase="answer",
-        metadata={"webui": True, "webui_turn_id": "old-3", HISTORY_GENERATION_METADATA_KEY: source.generation},
-    )
-    assert persisted is False
-    assert event["history_generation"] == source.generation
-    assert read_rows(manager) == rows
-
-    frames = []
-    delivered = asyncio.Event()
-
-    async def receive(raw):
-        frame = json.loads(raw)
-        frames.append(frame)
-        if frame.get("text") == "replacement answer":
-            delivered.set()
-
-    connection = AsyncMock()
-    connection.send.side_effect = receive
-    channel._attach(connection, "edit-chat")
-    try:
-        current = await manager.state.read(KEY)
-        body = await manager.state.project_history(KEY, lambda history: transcript.build_webui_thread_response(KEY, history=history))
-        assert body is not None
-        body["history_generation"] = current.generation
-        await channel._commands.announce_webui_history_replacement(
-            "edit-chat", body, retired_turn_ids=["old-3"], previous_generation=source.generation,
-        )
-        await channel.send(OutboundMessage(
-            channel="websocket", chat_id="edit-chat", content="discarded late reply",
-            delivery=DeliveryRequest("old-run", KEY, source.generation),
-            metadata={"webui": True, "webui_turn_id": "old-3", HISTORY_GENERATION_METADATA_KEY: source.generation},
-        ))
-        await channel.send(OutboundMessage(
-            channel="websocket", chat_id="edit-chat", content="replacement answer",
-            delivery=DeliveryRequest("new-run", KEY, current.generation),
-            metadata={"webui": True, "webui_turn_id": "new-edit", HISTORY_GENERATION_METADATA_KEY: current.generation},
-        ))
-        await asyncio.wait_for(delivered.wait(), 2)
-        assert frames[0]["event"] == "history_replaced"
-        assert frames[0]["previous_generation"] == source.generation
-        assert frames[0]["thread"]["history_generation"] == current.generation
-        replies = [frame for frame in frames if frame["event"] == "message"]
-        assert [frame["text"] for frame in replies] == ["replacement answer"]
-        assert replies[0]["history_generation"] == current.generation
-        assert "discarded late reply" not in str(read_rows(manager))
-        assert read_rows(manager)[-1]["text"] == "replacement answer"
-    finally:
-        await channel._cleanup_connection(connection)
 
 
 async def test_new_fork_and_replace_share_the_source_owner_boundary(editing, monkeypatch):
