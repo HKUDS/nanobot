@@ -26,6 +26,10 @@
     <a href="https://nanobot.wiki/docs/latest/getting-started/nanobot-overview"><img src="https://img.shields.io/badge/docs-nanobot.wiki-blue" alt="nanobot documentation"></a>
   </p>
   <p>
+    <a href="https://www.star-history.com/hkuds/nanobot/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=rank&amp;theme=dark"><img alt="Global Star rank from Star History" src="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=rank"></picture></a>
+    <a href="https://www.star-history.com/hkuds/nanobot/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=trending&amp;theme=dark"><img alt="GitHub Trending badge from Star History" src="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=trending"></picture></a>
+  </p>
+  <p>
     <a href="https://discord.gg/MnCvHqpUGB">Discord</a> ·
     <a href="https://x.com/nanobot_project">X</a> ·
     <a href="./COMMUNICATION.md#wechat">WeChat 微信交流群</a> ·
@@ -36,11 +40,6 @@
 # nanobot
 
 🐈 **nanobot** is a lightweight, open-source, self-hosted personal AI agent written in Python. Chat with it from your browser, terminal, or favorite chat app to work with files, remember preferences, use tools, and run scheduled tasks—powered by any supported cloud or local AI model.
-
-<p align="center">
-  <a href="https://www.star-history.com/hkuds/nanobot/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=rank&amp;theme=dark"><img alt="Global Star rank from Star History" src="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=rank"></picture></a>
-  <a href="https://www.star-history.com/hkuds/nanobot/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=trending&amp;theme=dark"><img alt="GitHub Trending badge from Star History" src="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=trending"></picture></a>
-</p>
 
 ## 💡 Why nanobot
 
