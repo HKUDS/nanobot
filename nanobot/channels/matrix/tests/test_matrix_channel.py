@@ -3129,7 +3129,13 @@ async def test_listen_help_round_trip_does_not_consume_discussion(monkeypatch, t
         await channel._on_message(room, _listen_event("/help", mentioned=True))
         command_input = await bus.consume_inbound()
         response = await loop._process_message(command_input)
-        assert response is not None and "/help" in response.content
+        assert response is not None
+        client = _FakeAsyncClient("", "", "", None)
+        channel.client = client
+        await channel.send_command_result(response)
+        sent, = client.room_send_calls
+        assert sent["room_id"] == room.room_id
+        assert "/help" in sent["content"]["body"]
         provider.chat_stream_with_retry.assert_not_awaited()
         session = await loop.sessions.state.get(command_input.session_key)
         assert session.get_history() == []
