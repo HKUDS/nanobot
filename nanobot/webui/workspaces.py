@@ -9,7 +9,6 @@ import time
 import weakref
 from collections import OrderedDict
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -25,7 +24,6 @@ from nanobot.security.workspace_access import (
     default_workspace_scope,
     validate_workspace_scope_payload,
 )
-from nanobot.session.model_selection import SessionModelPreset
 from nanobot.session.webui_turns import latest_live_websocket_turn
 from nanobot.webui.session_identity import webui_session_key
 
@@ -212,12 +210,6 @@ def workspaces_payload(
     }
 
 
-@dataclass(frozen=True)
-class _ChatDraft:
-    scope: WorkspaceScope
-    model_preset: str | None
-
-
 class WebUIWorkspaceController:
     """Own WebUI project scope persistence and validation."""
 
@@ -231,7 +223,7 @@ class WebUIWorkspaceController:
         self._sessions = session_manager
         self._default_workspace = default_workspace
         self._default_restrict_to_workspace = default_restrict_to_workspace
-        self._draft_scopes: OrderedDict[str, _ChatDraft] = OrderedDict()
+        self._draft_scopes: OrderedDict[str, WorkspaceScope] = OrderedDict()
         self._scope_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
     def _scope_lock(self, chat_id: str) -> asyncio.Lock:
@@ -303,7 +295,7 @@ class WebUIWorkspaceController:
         draft = self._draft_scopes.get(session_key)
         if draft is not None:
             self._draft_scopes.move_to_end(session_key)
-            return draft.scope
+            return draft
         if self._sessions is None:
             return None
         identity = self._sessions.state.peek_identity(session_key)
@@ -316,7 +308,7 @@ class WebUIWorkspaceController:
         draft = self._draft_scopes.get(session_key)
         if draft is not None:
             self._draft_scopes.move_to_end(session_key)
-            return draft.scope
+            return draft
         if self._sessions is None:
             return self.default_scope()
         data = await self._sessions.state.read_metadata(session_key)
@@ -420,7 +412,7 @@ class WebUIWorkspaceController:
             current = self._scope_from_snapshot(data, default_scope=default)
         elif session_key and (draft := self._draft_scopes.get(session_key)) is not None:
             self._draft_scopes.move_to_end(session_key)
-            current = draft.scope
+            current = draft
         else:
             current = default
         raw = envelope.get(WORKSPACE_SCOPE_METADATA_KEY)
@@ -502,7 +494,9 @@ class WebUIWorkspaceController:
         expected_generation: str | None = None,
     ) -> tuple[str | None, bool]:
         async with self._scope_lock(chat_id):
-            return await self._persist_scope(webui_session_key(chat_id), scope, expected_generation)
+            return await self._persist_scope(
+                webui_session_key(chat_id), scope, expected_generation,
+            )
 
     async def _persist_scope(
         self, session_key: str, scope: WorkspaceScope, expected_generation: str | None = None,
@@ -512,10 +506,7 @@ class WebUIWorkspaceController:
         if self._sessions is not None:
             generation, created = await self._sessions.state.open_with_metadata(
                 session_key,
-                {
-                    "webui": True, WORKSPACE_SCOPE_METADATA_KEY: scope.metadata(),
-                    **SessionModelPreset(self.draft_model_preset(session_key)).metadata_update(),
-                },
+                {"webui": True, WORKSPACE_SCOPE_METADATA_KEY: scope.metadata()},
                 expected_generation=generation,
                 validate_existing=lambda metadata: self._validate_existing_project(metadata, scope),
             )
@@ -529,24 +520,16 @@ class WebUIWorkspaceController:
         generation: str | None,
         *,
         created: bool,
-        draft: _ChatDraft | None,
     ) -> None:
         """Remove a newly opened session when transport admission fails."""
         if not created or generation is None or self._sessions is None:
             return
-        key = webui_session_key(chat_id)
-        async with self._scope_lock(chat_id):
-            if await self._sessions.state.delete(key, expected_generation=generation) and draft is not None:
-                self._stage_draft(key, draft)
+        await self._sessions.state.delete(
+            webui_session_key(chat_id),
+            expected_generation=generation,
+        )
 
-    def draft(self, session_key: str) -> _ChatDraft | None:
-        return self._draft_scopes.get(session_key)
-
-    def draft_model_preset(self, session_key: str) -> str | None:
-        draft = self.draft(session_key)
-        return draft.model_preset if draft else None
-
-    async def stage_scope(self, chat_id: str, scope: WorkspaceScope, *, model_preset: str | None = None) -> WorkspaceScope:
+    async def stage_scope(self, chat_id: str, scope: WorkspaceScope) -> WorkspaceScope:
         """Keep a new chat's scope transient until its first accepted message."""
         async with self._scope_lock(chat_id):
             if latest_live_websocket_turn(chat_id) is not None:
@@ -559,14 +542,11 @@ class WebUIWorkspaceController:
                 await self._persist_scope(session_key, scope)
                 return scope
             remember_webui_project(scope.project_path)
-            self._stage_draft(session_key, _ChatDraft(scope, model_preset or self.draft_model_preset(session_key)))
+            self._draft_scopes[session_key] = scope
+            self._draft_scopes.move_to_end(session_key)
+            while len(self._draft_scopes) > _MAX_DRAFT_SCOPES:
+                self._draft_scopes.popitem(last=False)
             return scope
-
-    def _stage_draft(self, session_key: str, draft: _ChatDraft) -> None:
-        self._draft_scopes[session_key] = draft
-        self._draft_scopes.move_to_end(session_key)
-        while len(self._draft_scopes) > _MAX_DRAFT_SCOPES:
-            self._draft_scopes.popitem(last=False)
 
     def discard_draft_scope(self, session_key: str) -> bool:
         """Discard the staged scope for a chat that has not persisted yet."""

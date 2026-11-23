@@ -46,7 +46,6 @@ class GatewayServices:
     transcripts: WebUITranscriptRecorder
     workspaces: WebUIWorkspaceController
     temporary_chats: WebUITemporaryChats
-    resolve_model_preset: Callable[[str], str] | None
     session_projection: WebUISessionProjection
     session_manager: SessionManager | None
     cron_service: CronService | None
@@ -65,7 +64,6 @@ def build_gateway_services(
     default_restrict_to_workspace: bool,
     config_path: Path | None = None,
     runtime_model_name: Callable[[], str | None] | None,
-    resolve_model_preset: Callable[[str], str] | None = None,
     refresh_runtime_config: Callable[[], None] | None = None,
     runtime_surface: str,
     runtime_capabilities_overrides: dict[str, Any] | None,
@@ -172,7 +170,6 @@ def build_gateway_services(
         transcripts=transcripts,
         workspaces=workspaces,
         temporary_chats=temporary_chats,
-        resolve_model_preset=resolve_model_preset,
         session_projection=session_projection,
         session_manager=session_manager,
         cron_service=cron_service,

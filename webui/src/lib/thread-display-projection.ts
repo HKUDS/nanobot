@@ -1,6 +1,6 @@
 import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
 import { withoutSubagentCreateActivity } from "@/lib/subagent-create-activity";
-import { isSystemCommandTurnId } from "../../../packages/client-events/system-command";
+import { isSystemCommandTurnId } from "@/lib/nanobot-client";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import type { UIMessage } from "@/lib/types";
 

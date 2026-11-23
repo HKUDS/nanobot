@@ -1298,8 +1298,8 @@ describe("App layout", () => {
     const settings = baseSettingsPayload();
     const preset = { ...settings.model_presets[0], provider: "openai" };
     mockFetchRoutes({
-      "/api/settings": { ...settings, agent: { ...settings.agent, model_preset: "named" },
-        model_presets: [{ ...preset, active: false }, { ...preset, active: true, name: "named", label: "named", is_default: false }],
+      "/api/settings": { ...settings, agent: { ...settings.agent, model_preset: "default" },
+        model_presets: [{ ...preset, active: true }, { ...preset, active: false, name: "named", label: "named", is_default: false }],
         providers: [{ name: "openai", label: "OpenAI", configured: true }] },
       "/api/webui/automations": { jobs: [] },
       "/api/sessions": { sessions: [] },
@@ -1307,46 +1307,34 @@ describe("App layout", () => {
     if (surface === "automations") window.history.replaceState(null, "", "/#/automations");
     render(<App />);
     if (surface === "temporary") fireEvent.click(await screen.findByRole("button", { name: "Temporary chat" }));
-    fireEvent.click(await screen.findByRole("button", { name: "named" }));
-    fireEvent.click(await screen.findByRole("option", { name: /^Default\b/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Default" }));
+    fireEvent.click(await screen.findByRole("option", { name: /^named\b/ }));
     const input = screen.getByRole("textbox", { name: surface === "automations" ? "Describe an automation" : "Message input" });
-    const prompt = "Use the explicit default preset";
+    const prompt = "Use the selected preset";
     fireEvent.change(input, { target: { value: prompt } });
     let rejectSelection!: () => void;
-    if (surface === "temporary") {
-      sendSystemCommandSpy.mockImplementationOnce(() => new Promise((resolve) => {
-        rejectSelection = () => resolve({ command_result: { command: "/model", parts: [{ key: "model.failed", values: { error: "Provider unavailable" } }] } });
-      }));
-    } else {
-      expect(createChatSpy).not.toHaveBeenCalled();
-      createChatSpy.mockImplementationOnce(() => new Promise((_resolve, reject) => {
-        rejectSelection = () => reject(new Error("model_preset_rejected:Provider unavailable"));
-      }));
-    }
+    sendSystemCommandSpy.mockImplementationOnce(() => new Promise((resolve) => {
+      rejectSelection = () => resolve({ command_result: { command: "/model", parts: [{ key: "model.failed", values: { error: "Preset not found" } }] } });
+    }));
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(rejectSelection).toBeDefined());
     expect(sendMessageSpy).not.toHaveBeenCalled();
     await act(async () => rejectSelection());
-    expect(await screen.findByRole("alert")).toHaveTextContent("Provider unavailable");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Preset not found");
     expect(input).toHaveValue(prompt);
     expect(input).toBeEnabled();
     expect(sendMessageSpy).not.toHaveBeenCalled();
     if (surface === "temporary") {
       expect(discardTemporaryChatSpy).toHaveBeenCalledWith(sendSystemCommandSpy.mock.calls[0][0]);
-      sendSystemCommandSpy.mockResolvedValueOnce({ command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "default" } }] } });
-    } else {
-      createChatSpy.mockResolvedValueOnce("confirmed-chat");
     }
+    sendSystemCommandSpy.mockResolvedValueOnce({ command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "named" } }] } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(sendMessageSpy).toHaveBeenCalledTimes(1));
-    const chatId = surface === "temporary" ? sendSystemCommandSpy.mock.calls[1][0] : "confirmed-chat";
+    const chatId = sendSystemCommandSpy.mock.calls[1][0];
     expect(sendMessageSpy).toHaveBeenCalledWith(chatId, prompt, undefined,
       surface === "automations" ? expect.objectContaining({ intent: "create_automation" }) : expect.any(Object));
-    if (surface === "temporary") expect(sendSystemCommandSpy).toHaveBeenCalledTimes(2);
-    else {
-      expect(createChatSpy.mock.calls.map((call) => call[2])).toEqual(["default", "default"]);
-      expect(sendSystemCommandSpy).not.toHaveBeenCalled();
-    }
+    expect(sendSystemCommandSpy).toHaveBeenCalledTimes(2);
+    expect(sendSystemCommandSpy).toHaveBeenLastCalledWith(chatId, "/model named");
   });
 
   it("preserves the first message when the gateway rejects a project", async () => {

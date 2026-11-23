@@ -1,7 +1,6 @@
 import i18n from "i18next";
 import { resolveInitialLocale } from "../i18n/config";
 import { uploadAttachments, uploadCapability, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments";
-import { isSystemCommandTurnId, systemCommandTurnId } from "../../../packages/client-events/system-command";
 import { DeliveryReceipts } from "../../../packages/client-events/delivery";
 import { decodeNotification } from "../../../packages/client-events/notifications";
 import type {
@@ -167,6 +166,7 @@ interface PendingChatRequest extends PendingRequest<string> {
   phase: "queued" | "sent";
 }
 
+const SYSTEM_COMMAND_TURN_PREFIX = "webui-system:";
 const TURN_REJECTION_DETAILS = new Set([
   "access_denied",
   "attachment_rejected",
@@ -174,6 +174,10 @@ const TURN_REJECTION_DETAILS = new Set([
   "missing content",
   "workspace_scope_rejected",
 ]);
+
+export function isSystemCommandTurnId(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.startsWith(SYSTEM_COMMAND_TURN_PREFIX);
+}
 
 export interface NanobotClientOptions {
   url: string;
@@ -605,10 +609,9 @@ export class NanobotClient {
   }
 
   /** Ask the server to provision a new chat_id; resolves with the assigned id. */
-  newChat(timeoutMs: number = 5_000, workspaceScope?: WorkspaceScopePayload | null, modelPreset?: string | null): Promise<string> {
+  newChat(timeoutMs: number = 5_000, workspaceScope?: WorkspaceScopePayload | null): Promise<string> {
     return this.requestChat({
       type: "new_chat",
-      ...(modelPreset ? { model_preset: modelPreset } : {}),
       ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
     }, timeoutMs, "newChat");
   }
@@ -895,7 +898,7 @@ export class NanobotClient {
 
   sendSystemCommand(chatId: string, command: string, timeoutMs = 5_000): Promise<SystemCommandReply> {
     const normalized = command.trim();
-    const turnId = systemCommandTurnId();
+    const turnId = `${SYSTEM_COMMAND_TURN_PREFIX}${crypto.randomUUID()}`;
     return new Promise<SystemCommandReply>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingSystemCommands.delete(turnId);

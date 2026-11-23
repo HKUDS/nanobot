@@ -85,7 +85,6 @@ import type {
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { switchModelPreset } from "@/lib/switch-model-preset";
-import { switchedModelPreset } from "../../../../packages/client-events/model-selection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
@@ -810,11 +809,6 @@ export function ThreadShell({
     setModelFallback(null);
     if (!chatId) return;
     return client.onChat(chatId, (event) => {
-      if (event.event === "message") {
-        const preset = switchedModelPreset(event.command_result);
-        if (preset) setLocalModelPreset(preset);
-        return;
-      }
       if (event.event !== "turn_model_updated") return;
       if (event.fallback !== true) {
         // The next turn starts with its configured model, not the previous fallback.
@@ -869,8 +863,8 @@ export function ThreadShell({
     [slashCommands, temporary],
   );
   const modelBadge = useMemo(
-    () => toModelBadgeInfo(modelName, settings, activeModelPreset, t("settings.values.default")),
-    [activeModelPreset, modelName, settings, t],
+    () => toModelBadgeInfo(modelName, settings, activeModelPreset),
+    [activeModelPreset, modelName, settings],
   );
   const modelBadgeLabel = modelBadge.needsSetup
     ? t("thread.composer.chooseAI", { defaultValue: "Choose your AI" })
@@ -1069,7 +1063,7 @@ export function ThreadShell({
       };
       let newId;
       try {
-        newId = await onCreateChat?.(workspaceScope, content, localModelPreset === activeModelPreset ? localModelPreset : null);
+        newId = await onCreateChat?.(workspaceScope, content, localModelPreset);
       } finally {
         if (!newId) setBooting(false);
       }
@@ -1079,7 +1073,7 @@ export function ThreadShell({
       setPendingFirstTargetChatId(newId);
       return delivery;
     },
-    [activeModelPreset, booting, draftKey, draftStore, localModelPreset, moveModelOptionsToSession, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
+    [booting, draftKey, draftStore, localModelPreset, moveModelOptionsToSession, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
   );
 
   const inspectAttachment = useCallback(async (path: string) => {

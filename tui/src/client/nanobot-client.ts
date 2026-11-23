@@ -17,7 +17,6 @@ import type {
   RecoveryState,
   WorkspaceScopePayload,
 } from "./types"
-import { systemCommandTurnId } from "../../../packages/client-events/system-command"
 import { decodeInboundEvent, decodeWebUIResponse, isRecord } from "./validation"
 
 export class NanobotClient {
@@ -189,7 +188,7 @@ export class NanobotClient {
     return turnId
   }
 
-  send(content: string, options: MessageOptions = {}, references?: AttachmentReference[], turnId = options.systemCommand ? systemCommandTurnId() : crypto.randomUUID()): string {
+  send(content: string, options: MessageOptions = {}, references?: AttachmentReference[], turnId = crypto.randomUUID()): string {
     if (!this.chatId) throw new Error("chat is not ready")
     if (options.media?.length && !references) throw new Error("Attachments require HTTP upload")
     this.write({

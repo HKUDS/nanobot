@@ -1,7 +1,6 @@
-import i18n from "i18next";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { renderCommandResult } from "../../../packages/client-events/command-result";
+import { switchModelPreset } from "@/lib/switch-model-preset";
 import { useClient } from "@/providers/ClientProvider";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import {
@@ -122,13 +121,8 @@ export function useSessions(): {
     workspaceScope?: WorkspaceScopePayload | null,
     modelPreset?: string | null,
   ): Promise<string> => {
-    const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope, modelPreset).catch((error: unknown) => {
-      const prefix = "model_preset_rejected:";
-      if (!(error instanceof Error) || !error.message.startsWith(prefix)) throw error;
-      throw new Error(renderCommandResult({ command: "/model", parts: [
-        { key: "model.failed", values: { error: error.message.slice(prefix.length) } },
-      ] }, i18n.resolvedLanguage ?? i18n.language) ?? error.message);
-    });
+    const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
+    const preset = modelPreset ? await switchModelPreset(client, chatId, modelPreset) : null;
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
     // Optimistic insert; a subsequent refresh will replace it with the
@@ -142,7 +136,7 @@ export function useSessions(): {
         updatedAt: new Date().toISOString(),
         title: "",
         preview: "",
-        modelPreset: modelPreset ?? null,
+        modelPreset: preset,
         workspaceScope: workspaceScope ?? null,
         projectLocked: false,
       },

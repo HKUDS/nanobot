@@ -9,9 +9,7 @@ from nanobot.channels.websocket.runtime import WebSocketChannel
 from nanobot.command.builtin import cmd_dream_log
 from nanobot.command.results import command_reply, line, message_text
 from nanobot.command.router import CommandContext
-from nanobot.session.model_selection import SessionModelPreset
 from nanobot.utils.gitstore import CommitInfo
-from nanobot.webui.session_list_index import list_webui_sessions
 
 from .test_websocket_channel import _basic_handler, _sent_ws_payloads
 
@@ -40,46 +38,6 @@ async def test_ui_skill_list_rejected_before_dispatch_but_skill_reference_is_sen
     await channel._dispatch_envelope(connection, "user", {**envelope, "turn_id": "use", "content": "$weather Tokyo"})
     assert channel.bus.inbound_size == 1
     assert (await channel.bus.consume_inbound()).content == "$weather Tokyo"
-
-
-async def test_first_send_validates_preset_before_creating_session(history, monkeypatch):
-    bus = MessageBus()
-    gateway = _basic_handler(bus, session_manager=history.sessions, workspace_path=history.sessions.workspace)
-    resolve = MagicMock(side_effect=[ValueError("provider unavailable"), "fast"])
-    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus,
-                               gateway=replace(gateway, resolve_model_preset=resolve))
-    connection = AsyncMock()
-    envelope = {"type": "new_chat", "model_preset": "fast", "request_id": "first"}
-    try:
-        await channel._dispatch_envelope(connection, "user", envelope)
-        assert _sent_ws_payloads(connection)[-1] == {
-            "event": "error", "detail": "model_preset_rejected", "reason": "provider unavailable", "request_id": "first",
-        }
-        assert not list_webui_sessions(history.sessions)
-        await channel._dispatch_envelope(connection, "user", {**envelope, "request_id": "retry"})
-        attached, = [frame for frame in _sent_ws_payloads(connection) if frame["event"] == "attached"]
-        assert (attached["request_id"], attached["model_preset"]) == ("retry", "fast")
-        assert not list_webui_sessions(history.sessions)
-        assert bus.inbound_size == 0
-
-        chat_id = attached["chat_id"]
-        await channel._dispatch_envelope(connection, "user", {"type": "attach", "chat_id": chat_id})
-        assert [f for f in _sent_ws_payloads(connection) if f["event"] == "attached"][-1]["model_preset"] == "fast"
-        message = {"type": "message", "chat_id": chat_id, "content": "Hello"}
-        with monkeypatch.context() as patch:
-            patch.setattr(channel, "webui_dispatch_message", AsyncMock(side_effect=RuntimeError("dispatch failed")))
-            with pytest.raises(RuntimeError, match="dispatch failed"):
-                await channel._dispatch_envelope(connection, "user", message)
-        assert not list_webui_sessions(history.sessions)
-        await channel._dispatch_envelope(connection, "user", message)
-        assert bus.inbound_size == 1
-        assert (await bus.consume_inbound()).content == "Hello"
-        row, = list_webui_sessions(history.sessions)
-        assert row["key"] == "websocket:" + chat_id
-        session = await history.sessions.state.get_header(row["key"])
-        assert SessionModelPreset.from_metadata(session.metadata).base_preset == "fast"
-    finally:
-        await channel._cleanup_connection(connection)
 
 
 async def _command(history, raw):

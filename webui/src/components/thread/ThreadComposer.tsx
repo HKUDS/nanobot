@@ -1896,7 +1896,7 @@ export function ThreadComposer({
         setModelSwitchPending(true);
         void selection.catch((error: unknown) => {
           pauseQueue();
-          setInlineError(error instanceof Error ? error.message : t("thread.composer.modelSwitchUnconfirmed"));
+          setInlineError(error instanceof Error ? error.message : t("message.agentActivity.commandFailed"));
         }).finally(() => setModelSwitchPending(false));
       })}
       onManageModels={onManageModels}

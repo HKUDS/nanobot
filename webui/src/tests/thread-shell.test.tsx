@@ -1809,18 +1809,6 @@ describe("ThreadShell", () => {
     expect(screen.queryByRole("button", { name: "Choose model" })).not.toBeInTheDocument();
   });
 
-  it("updates the model badge from a confirmed slash result, not the display text", async () => {
-    const client = makeClient();
-    render(wrap(client, <ThreadShell session={session("manual-model", "default")} title="Model switch"
-      onToggleSidebar={() => {}} settingsSnapshot={settingsWithFastPreset()} />));
-    expect(await screen.findByRole("button", { name: "Default" })).toBeVisible();
-    await act(async () => client._emitChat("manual-model", {
-      event: "message", chat_id: "manual-model", turn_id: "switch", side_channel: true, text: "Fallback",
-      command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "fast" } }] },
-    }));
-    expect(await screen.findByLabelText("fast")).toBeVisible();
-  });
-
   it("keeps a waiting prompt manual and shows the localized error if its model switch fails", async () => {
     await i18n.changeLanguage("fr");
     const client = makeClient();
@@ -1839,16 +1827,16 @@ describe("ThreadShell", () => {
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "waiting prompt" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    const defaultModel = await screen.findByRole("button", { name: i18n.t("settings.values.default") });
+    const defaultModel = await screen.findByRole("button", { name: "Default" });
     fireEvent.click(defaultModel);
     fireEvent.click(await screen.findByRole("option", { name: "fast" }));
     expect(defaultModel).toBeVisible();
-    expect(defaultModel).toHaveAccessibleName(i18n.t("settings.values.default"));
+    expect(defaultModel).toHaveAccessibleName("Default");
     await act(async () => client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: "owner" }));
     expect(client.sendMessage).not.toHaveBeenCalled();
     await act(async () => rejectSelection());
     expect(await screen.findByRole("alert")).toHaveTextContent(`Impossible de changer de préréglage : ${providerError}`);
-    expect(screen.getByRole("button", { name: i18n.t("settings.values.default") })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Default" })).toBeVisible();
     expect(client.sendMessage).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: i18n.t("thread.composer.queued.guide") }));
     expectSendMessageWithTurn(client, chatId, "waiting prompt");
@@ -1894,10 +1882,7 @@ describe("ThreadShell", () => {
       "preset-order",
       "/model extra",
     );
-    fireEvent.click(await screen.findByRole("button", { name: "extra" }));
-    fireEvent.click(await screen.findByRole("option", { name: /^Default\b/ }));
-    expect(client.sendSystemCommand).toHaveBeenLastCalledWith("preset-order", "/model default");
-    expect(await screen.findByRole("button", { name: "Default" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "extra" })).toBeVisible();
 
     rerender(view("fast"));
     expect(await screen.findByLabelText("fast", { selector: "button" })).toBeInTheDocument();
