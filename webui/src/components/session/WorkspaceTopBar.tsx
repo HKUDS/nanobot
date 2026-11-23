@@ -125,7 +125,8 @@ export function WorkspaceTopBar({
     && activeSession.session.projectLocked !== false,
   );
 
-  const overviewLabel = isZh ? "工作台" : "Overview";
+  const brandLabel = "nanobot";
+  const homeHintLabel = isZh ? "主页" : "Home";
   const drawerLabel = drawerOpen || drawerPinned
     ? (isZh ? "收起侧边栏" : "Hide sidebar")
     : (isZh ? "展开侧边栏" : "Show sidebar");
@@ -168,7 +169,7 @@ export function WorkspaceTopBar({
           side="bottom"
           content={
             <span className="flex items-center gap-3">
-              <span>{overviewLabel}</span>
+              <span>{homeHintLabel}</span>
               <kbd className="font-sans text-muted-foreground">
                 {sidebarShortcutLabel("overview", apple)}
               </kbd>
@@ -178,14 +179,14 @@ export function WorkspaceTopBar({
           <button
             type="button"
             data-testid="topbar-overview-button"
-            aria-label={overviewLabel}
+            aria-label={homeHintLabel}
             aria-current={view === "overview" ? "page" : undefined}
             onClick={() => onOpenOverview(null)}
             className={cn(
-              "host-no-drag inline-flex h-7 shrink-0 items-center gap-2 rounded-lg px-1.5 text-[13px] leading-none transition-colors",
+              "host-no-drag inline-flex h-7 shrink-0 items-center gap-2 rounded-lg px-1.5 text-[13.5px] leading-none tracking-[-0.01em] transition-colors",
               view === "overview"
                 ? "font-medium text-foreground"
-                : "text-muted-foreground/80 hover:bg-foreground/[0.04] hover:text-foreground",
+                : "text-muted-foreground/85 hover:bg-foreground/[0.04] hover:text-foreground",
             )}
           >
             <span className="relative h-5 w-5 shrink-0">
@@ -202,7 +203,7 @@ export function WorkspaceTopBar({
                 draggable={false}
               />
             </span>
-            <span className="hidden sm:inline">{overviewLabel}</span>
+            <span className="hidden sm:inline">{brandLabel}</span>
           </button>
         </HoverHint>
 
@@ -382,7 +383,7 @@ export function WorkspaceTopBar({
                 }}
                 className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
               >
-                <span>{isZh ? "工作台" : "Overview"}</span>
+                <span>{isZh ? "查看全部" : "View all"}</span>
                 <ArrowRight className="h-3 w-3" aria-hidden />
               </button>
             </div>
