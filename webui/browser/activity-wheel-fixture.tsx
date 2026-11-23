@@ -60,7 +60,7 @@ export function ActivityWheelFixture() {
     setCadence(interval);
   }
 
-  return <main className="mx-auto max-w-4xl space-y-8 px-5 py-8">
+  return <main className="mx-auto space-y-8 px-5 py-8" style={{ maxWidth: 760 }}>
     <header className="space-y-3">
       <p className="text-xs text-muted-foreground">nanobot · 组件预览 / 模拟活动</p>
       <h1 className="text-xl font-semibold">折叠活动滚轮</h1>
