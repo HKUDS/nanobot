@@ -105,6 +105,7 @@ class ChannelManager:
         cron_service: CronService | None = None,
         local_trigger_store: LocalTriggerStore | None = None,
         webui_runtime_model_name: Callable[[], str | None] | None = None,
+        webui_resolve_model_preset: Callable[[str], str] | None = None,
         webui_refresh_runtime_config: Callable[[], None] | None = None,
         webui_cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         webui_local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
@@ -133,6 +134,7 @@ class ChannelManager:
         self._cron_service = cron_service
         self._local_trigger_store = local_trigger_store
         self._webui_runtime_model_name = webui_runtime_model_name
+        self._webui_resolve_model_preset = webui_resolve_model_preset
         self._webui_refresh_runtime_config = webui_refresh_runtime_config
         self._webui_cron_pending_job_ids = webui_cron_pending_job_ids
         self._webui_local_trigger_pending_ids = webui_local_trigger_pending_ids
@@ -217,6 +219,7 @@ class ChannelManager:
                 config_path=self._config_path,
                 disabled_skills=set(self.config.agents.defaults.disabled_skills),
                 runtime_model_name=self._webui_runtime_model_name,
+                resolve_model_preset=self._webui_resolve_model_preset,
                 refresh_runtime_config=self._webui_refresh_runtime_config,
                 runtime_surface=self._webui_runtime_surface,
                 runtime_capabilities_overrides=self._webui_runtime_capabilities,

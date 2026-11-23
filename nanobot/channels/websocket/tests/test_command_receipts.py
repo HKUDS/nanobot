@@ -10,6 +10,7 @@ from nanobot.command.builtin import cmd_dream_log
 from nanobot.command.results import command_reply, line, message_text
 from nanobot.command.router import CommandContext
 from nanobot.utils.gitstore import CommitInfo
+from nanobot.webui.session_list_index import list_webui_sessions
 
 from .test_websocket_channel import _basic_handler, _sent_ws_payloads
 
@@ -38,6 +39,35 @@ async def test_ui_skill_list_rejected_before_dispatch_but_skill_reference_is_sen
     await channel._dispatch_envelope(connection, "user", {**envelope, "turn_id": "use", "content": "$weather Tokyo"})
     assert channel.bus.inbound_size == 1
     assert (await channel.bus.consume_inbound()).content == "$weather Tokyo"
+
+
+async def test_first_send_validates_preset_before_creating_session(history):
+    bus = MessageBus()
+    gateway = _basic_handler(bus, session_manager=history.sessions, workspace_path=history.sessions.workspace)
+    resolve = MagicMock(side_effect=[ValueError("provider unavailable"), "fast"])
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus,
+                               gateway=replace(gateway, resolve_model_preset=resolve))
+    connection = AsyncMock()
+    envelope = {"type": "new_chat", "model_preset": "fast", "request_id": "first"}
+    try:
+        await channel._dispatch_envelope(connection, "user", envelope)
+        assert _sent_ws_payloads(connection)[-1]["detail"] == "access_denied"
+        resolve.assert_not_called()
+        gateway.endpoint.webui_connections.add(connection)
+        await channel._dispatch_envelope(connection, "user", envelope)
+        assert _sent_ws_payloads(connection)[-1] == {
+            "event": "error", "detail": "model_preset_rejected", "reason": "provider unavailable", "request_id": "first",
+        }
+        assert not list_webui_sessions(history.sessions)
+        await channel._dispatch_envelope(connection, "user", {**envelope, "request_id": "retry"})
+        attached, = [frame for frame in _sent_ws_payloads(connection) if frame["event"] == "attached"]
+        assert (attached["request_id"], attached["model_preset"]) == ("retry", "fast")
+        row, = list_webui_sessions(history.sessions)
+        assert row["key"] == "websocket:" + attached["chat_id"]
+        assert not history.read(row["key"])
+        assert bus.inbound_size == 0
+    finally:
+        await channel._cleanup_connection(connection)
 
 
 async def _command(history, raw):

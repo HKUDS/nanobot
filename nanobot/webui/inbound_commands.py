@@ -365,7 +365,28 @@ class WebUICommandRouter:
             )
             if scope is None:
                 return
-            await self._workspaces.stage_scope(new_id, scope)
+            if "model_preset" in envelope:
+                # First send with an explicit preset: never persist a synthetic /model exchange.
+                if not self._transport.is_allowed(client_id) or connection not in self._webui_connections:
+                    await self._transport.webui_send_event(connection, "error", detail="access_denied", **request_fields)
+                    return
+                try:
+                    name = envelope["model_preset"]
+                    if not isinstance(name, str) or not name.strip():
+                        raise ValueError("Expected a model preset name")
+                    resolve = self.gateway.resolve_model_preset
+                    if resolve is None or self.gateway.session_manager is None:
+                        raise ValueError("Model selection unavailable")
+                    preset = resolve(name)
+                except (KeyError, ValueError) as exc:
+                    await self._transport.webui_send_event(
+                        connection, "error", detail="model_preset_rejected", reason=str(exc.args[0]) if exc.args else str(exc),
+                        **request_fields,
+                    )
+                    return
+                await self._workspaces.persist_scope(new_id, scope, initial_preset=preset)
+            else:
+                await self._workspaces.stage_scope(new_id, scope)
             self._transport.webui_attach(connection, new_id)
             await self._transport.webui_send_event(
                 connection,

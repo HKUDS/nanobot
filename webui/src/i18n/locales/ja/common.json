@@ -1926,6 +1926,7 @@
       "goalBlocked": "進行不可",
       "goalStateSheetTitle": "目標",
       "cancelGoal": "目標を取り消す",
+      "modelSwitchUnconfirmed": "モデルの切り替えを確認できませんでした。接続を確認してもう一度お試しください。",
       "cancelGoalFailed": "取り消せませんでした。再試行してください。",
       "cancelGoalOffline": "再接続してから目標を取り消してください。",
       "expandDraft": "入力欄を広げる",

@@ -38,7 +38,8 @@ function modelPresetForBadge(
 export function toModelBadgeInfo(
   modelName: string | null,
   settings: SettingsPayload | null,
-  modelPreset: string | null = null,
+  modelPreset: string | null,
+  defaultLabel: string,
 ): ModelBadgeInfo {
   const scopedPreset = modelPreset?.trim() || null;
   const preset = modelPresetForBadge(settings, scopedPreset);
@@ -47,7 +48,7 @@ export function toModelBadgeInfo(
     : settings?.agent.model || modelName || null;
   const label = preset
     ? preset.is_default
-      ? preset.label?.trim() || "Default"
+      ? defaultLabel
       : preset.name.trim()
     : scopedPreset || compactModelName(model);
   const rawProvider = preset?.provider
@@ -80,8 +81,10 @@ export function modelPresetOptionsFromSettings(
   const order = new Map(
     (settings.model_call_order ?? []).map((name, index) => [name.trim(), index]),
   );
+  // The fallback list can contain only named presets; keep Default accessible at the top.
+  if (!order.has("default")) order.set("default", -1);
   return (settings.model_presets ?? [])
-    .filter((preset) => !preset.is_default && preset.name.trim())
+    .filter((preset) => preset.name.trim())
     .sort((a, b) => (
       (order.get(a.name.trim()) ?? Number.POSITIVE_INFINITY)
       - (order.get(b.name.trim()) ?? Number.POSITIVE_INFINITY)

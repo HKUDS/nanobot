@@ -2108,6 +2108,7 @@
       "goalBlocked": "已阻塞",
       "goalStateSheetTitle": "目标",
       "cancelGoal": "取消目标",
+      "modelSwitchUnconfirmed": "无法确认模型是否已切换。请检查连接后重试。",
       "cancelGoalFailed": "取消失败，请重试。",
       "cancelGoalOffline": "请重新连接后取消目标。",
       "expandDraft": "展开编辑",

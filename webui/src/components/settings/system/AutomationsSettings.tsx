@@ -157,8 +157,8 @@ export function AutomationsSettings({
     [settingsSnapshot],
   );
   const modelBadge = useMemo(
-    () => toModelBadgeInfo(settingsSnapshot?.agent.model ?? null, settingsSnapshot, activeModelPreset),
-    [activeModelPreset, settingsSnapshot],
+    () => toModelBadgeInfo(settingsSnapshot?.agent.model ?? null, settingsSnapshot, activeModelPreset, t("settings.values.default")),
+    [activeModelPreset, settingsSnapshot, t],
   );
   const modelBadgeLabel = modelBadge.needsSetup
     ? tx("thread.composer.chooseAI", "Choose your AI")
@@ -196,7 +196,7 @@ export function AutomationsSettings({
     content.trim(),
     images,
     { ...options, intent: "create_automation" },
-    activeModelPreset,
+    localModelPreset === activeModelPreset ? localModelPreset : null,
   );
   const filterLabel = filter === "all" ? tx("settings.automations.filter", "Filter") : tx("settings.automations.filteredBy", "Filter: {{status}}", {
     status: summaryOptions.find((option) => option.value === filter)?.label,

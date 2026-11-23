@@ -91,6 +91,7 @@ export interface ModelPresetOption {
 
 interface ModelPresetBadgeProps {
   label: string;
+  disabled?: boolean;
   modelDetail?: string | null;
   modelPreset?: string | null;
   modelPresets?: ModelPresetOption[];
@@ -109,6 +110,7 @@ interface ModelPresetBadgeProps {
 
 export function ModelPresetBadge({
   label,
+  disabled,
   modelDetail,
   modelPreset,
   modelPresets = [],
@@ -136,6 +138,7 @@ export function ModelPresetBadge({
   const pickerRef = useRef<HTMLDivElement>(null);
   const focusAfterClose = useRef<"composer" | "management" | null>(null);
   const activeName = modelPreset?.trim() || "";
+  const presetLabel = (name: string) => name === activeName ? label : name === "default" ? t("settings.values.default") : name;
   const listedIndex = modelPresets.findIndex((preset) => preset.name === activeName);
   const activePreset: ModelPresetOption = {
     ...(listedIndex >= 0 ? modelPresets[listedIndex] : undefined),
@@ -309,6 +312,7 @@ export function ModelPresetBadge({
         aria-label={label}
         tabIndex={opensSetup ? undefined : 0}
         type={opensSetup ? "button" : undefined}
+        disabled={opensSetup ? disabled : undefined}
         onClick={opensSetup ? onClick : undefined}
         className={cn(
           "thread-composer-model-badge group inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] appearance-none border-0 bg-transparent p-0 shadow-none focus-visible:outline-none",
@@ -328,6 +332,7 @@ export function ModelPresetBadge({
         <TooltipTrigger asChild>
           <button
             type="button"
+            disabled={disabled}
             data-switching={motion ? "true" : undefined}
             aria-label={label}
             aria-expanded={open}
@@ -393,7 +398,7 @@ export function ModelPresetBadge({
                       return (
                         <PresetPill
                           key={motion.index + offset}
-                          label={preset.name}
+                          label={presetLabel(preset.name)}
                           modelDetail={preset.model}
                           provider={preset.provider}
                           isHero={isHero}
@@ -466,7 +471,7 @@ export function ModelPresetBadge({
             <PresetOption
               key={preset.name}
               preset={preset}
-              label={preset.name || label}
+              label={presetLabel(preset.name)}
               selected={preset.name === activeName}
               onSelect={selectPreset}
             />

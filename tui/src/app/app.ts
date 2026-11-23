@@ -18,6 +18,8 @@ import {
   type TreeSitterClient,
 } from "@opentui/core"
 
+import { switchedModelPreset } from "../../../packages/client-events/model-selection"
+import { isSystemCommandTurnId } from "../../../packages/client-events/system-command"
 import {
   NanobotClient,
   connectionEndpoint,
@@ -193,6 +195,7 @@ export class NanobotTui {
   private sessionModelPreset: string | null | undefined
   private sessionTitle = ""
   private sessionMetadataId = 0
+  private modelRevision = 0
   private contextTokens: number | null = null
   private contextWindowTokens: number | null = null
   private lastUsage: TokenUsage | null = null
@@ -211,8 +214,6 @@ export class NanobotTui {
   private sessionRefreshPending = false
   private sessionRefreshTimer: ReturnType<typeof setInterval> | null = null
   private readonly commandTurns = new Map<string, ResolvedSlashCommandLifecycle>()
-  private readonly modelCommandTurns = new Set<string>()
-  private readonly silentCommandTurns = new Set<string>()
   private currentFileEdits: FileEditEvent[] = []
   private lastFileEdits: FileEditEvent[] = []
   private recoveryState: RecoveryState | null = null
@@ -342,7 +343,13 @@ export class NanobotTui {
         available: () => this.ready,
         beforeOpen: () => this.closeTransientMenus(),
         refreshScope: () => this.refreshSessionMetadata(this.client.activeChatId),
-        onModel: (preset) => this.sendGatewayCommand(`/model ${preset}`, "side_channel", true),
+        onModel: (preset) => {
+          try {
+            this.client.send(`/model ${preset}`, { systemCommand: true })
+          } catch (error) {
+            this.transcript.notice(error instanceof Error ? error.message : String(error), true)
+          }
+        },
         onAccess: (scope) => {
           try {
             this.client.setWorkspaceScope(scope)
@@ -589,7 +596,7 @@ export class NanobotTui {
       return
     }
     if (visibleContent.startsWith("!")) {
-      this.sendGatewayCommand(visibleContent, "side_channel", false, { userShell: true })
+      this.sendGatewayCommand(visibleContent, "side_channel", { userShell: true })
       return
     }
     if (!this.ready) {
@@ -694,11 +701,11 @@ export class NanobotTui {
       this.closeUsage()
       if (event.usage) this.lastUsage = event.usage
       if (event.model_preset !== undefined) {
+        this.modelRevision++
         this.applyModelPreset(event.model_preset)
         this.updateTitle()
       }
       this.commandTurns.clear()
-      this.modelCommandTurns.clear()
       const restoring = this.attachedOnce
       this.attachedOnce = true
       if (restoring) {
@@ -740,6 +747,7 @@ export class NanobotTui {
         this.reconcileTurnOwnership(event)
         return
       case "user_message": {
+        if (isSystemCommandTurnId(event.turn_id)) return
         if (this.transcript.user(
           event.text,
           event.turn_id,
@@ -758,16 +766,19 @@ export class NanobotTui {
         this.turnHadAnswer = true
         this.transcript.stream(event.text)
         return
-      case "message":
+      case "message": {
+        const preset = switchedModelPreset(event.command_result)
+        if (preset) {
+          this.modelRevision++
+          this.applyModelPreset(preset)
+          this.updateTitle()
+          if (isSystemCommandTurnId(event.turn_id)) return
+        }
         if (event.turn_id && this.commandTurns.has(event.turn_id) && !event.kind) {
           const lifecycle = this.commandTurns.get(event.turn_id)
           if (lifecycle !== "agent_turn") {
             this.commandTurns.delete(event.turn_id)
-            const silent = this.silentCommandTurns.delete(event.turn_id)
-            if (this.modelCommandTurns.delete(event.turn_id)) {
-              void this.refreshSessionMetadata(event.chat_id)
-            }
-            if (!silent) this.transcript.assistant(event.text, event.render_as)
+            this.transcript.assistant(event.text, event.render_as)
             if (!this.activeTurn) this.status.content = "Ready"
             return
           }
@@ -783,6 +794,7 @@ export class NanobotTui {
           this.finalMessage = event.text
         }
         return
+      }
       case "file_edit":
         this.retryStatus = null
         this.activeLabel = "Editing"
@@ -829,10 +841,7 @@ export class NanobotTui {
         return
       case "turn_end":
         if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) return
-        if (event.turn_id) {
-          this.commandTurns.delete(event.turn_id)
-          this.modelCommandTurns.delete(event.turn_id)
-        }
+        if (event.turn_id) this.commandTurns.delete(event.turn_id)
         const failed = event.outcome === "failed"
         this.transcript.finishStream(failed || this.turnHadAnswer ? "" : this.finalMessage)
         if (failed) {
@@ -905,11 +914,7 @@ export class NanobotTui {
         return
       case "error":
         const commandLifecycle = event.turn_id ? this.commandTurns.get(event.turn_id) : undefined
-        if (event.turn_id) {
-          this.commandTurns.delete(event.turn_id)
-          this.modelCommandTurns.delete(event.turn_id)
-          this.silentCommandTurns.delete(event.turn_id)
-        }
+        if (event.turn_id) this.commandTurns.delete(event.turn_id)
         if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) {
           this.transcript.notice(event.reason || event.detail || "Unknown gateway error", true)
           return
@@ -1706,10 +1711,6 @@ export class NanobotTui {
     }
   }
 
-  private applySessionModel(session: SessionSummary): void {
-    this.applyModelPreset(session.modelPreset)
-  }
-
   private applySessionScope(session: SessionSummary): void {
     if (session.workspaceScope) this.applyWorkspaceScope(session.workspaceScope)
   }
@@ -2186,6 +2187,7 @@ export class NanobotTui {
     this.clearComposer()
     this.sessionLoading = true
     const loadId = ++this.sessionLoadId
+    const modelRevision = this.modelRevision
     this.status.content = "Loading sessions…"
     try {
       const sessions = await fetchSessions(
@@ -2198,7 +2200,7 @@ export class NanobotTui {
       const current = sessions.find((session) => session.chatId === this.client.activeChatId)
       if (current) {
         this.sessionTitle = sessionLabel(current)
-        this.applySessionModel(current)
+        if (modelRevision === this.modelRevision) this.applyModelPreset(current.modelPreset)
         this.applySessionScope(current)
         this.applyRecoveryState(current.recoveryState ?? null)
         this.updateTitle()
@@ -2226,7 +2228,6 @@ export class NanobotTui {
     this.sessionMenu.markRead(session.chatId)
     if (session.chatId === this.client.activeChatId) {
       this.sessionTitle = sessionLabel(session)
-      this.applySessionModel(session)
       this.applySessionScope(session)
       this.applyRecoveryState(session.recoveryState ?? null)
       this.updateTitle()
@@ -2247,7 +2248,7 @@ export class NanobotTui {
       this.sessionMetadataId += 1
       this.host.reportTitle("")
       this.sessionTitle = sessionLabel(session)
-      this.applySessionModel(session)
+      this.applyModelPreset(session.modelPreset)
       this.applySessionScope(session)
       this.contextTokens = null
       this.lastUsage = null
@@ -2301,7 +2302,6 @@ export class NanobotTui {
   private sendGatewayCommand(
     content: string,
     lifecycle: ResolvedSlashCommandLifecycle,
-    silent = false,
     options: MessageOptions = {},
   ): void {
     if (!this.ready) {
@@ -2320,19 +2320,17 @@ export class NanobotTui {
       return
     }
     this.unsentSubmit = false
-    this.commandTurns.set(turnId, lifecycle)
-    if (silent) this.silentCommandTurns.add(turnId)
-    if (/^\/model(?:\s|$)/iu.test(content)) this.modelCommandTurns.add(turnId)
     this.clearComposer()
     this.commandMenu.hide()
-    if (!silent) this.recordPrompt(content)
+    this.recordPrompt(content)
     if (lifecycle === "stop_active_turn") {
       this.restoreQueuedPrompts()
       if (this.activeTurn) this.status.content = "Stopping…"
       else this.status.content = this.readyStatus()
       return
     }
-    if (!silent) this.transcript.user(content)
+    this.commandTurns.set(turnId, lifecycle)
+    this.transcript.user(content)
 
     if (lifecycle === "finalize_active_turn") {
       this.activeTurnId = null
@@ -2510,6 +2508,7 @@ export class NanobotTui {
   private async refreshSessionMetadata(chatId: string): Promise<void> {
     if (!this.options.apiUrl || !this.options.apiToken) return
     const requestId = ++this.sessionMetadataId
+    const modelRevision = this.modelRevision
     try {
       const sessions = await fetchSessions(
         this.options.apiUrl,
@@ -2523,7 +2522,7 @@ export class NanobotTui {
       const session = sessions.find((candidate) => candidate.chatId === chatId)
       if (!session) return
       this.sessionTitle = sessionLabel(session)
-      this.applySessionModel(session)
+      if (modelRevision === this.modelRevision) this.applyModelPreset(session.modelPreset)
       this.applySessionScope(session)
       this.updateTitle()
     } catch {

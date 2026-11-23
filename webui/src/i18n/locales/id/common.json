@@ -1926,6 +1926,7 @@
       "goalBlocked": "Terhambat",
       "goalStateSheetTitle": "Tujuan",
       "cancelGoal": "Batalkan tujuan",
+      "modelSwitchUnconfirmed": "Perubahan model tidak dapat dikonfirmasi. Periksa koneksi lalu coba lagi.",
       "cancelGoalFailed": "Tujuan gagal dibatalkan. Coba lagi.",
       "cancelGoalOffline": "Hubungkan kembali untuk membatalkan tujuan.",
       "expandDraft": "Perluas kotak pesan",

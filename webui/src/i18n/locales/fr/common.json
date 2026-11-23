@@ -1926,6 +1926,7 @@
       "goalBlocked": "Bloqué",
       "goalStateSheetTitle": "Objectif",
       "cancelGoal": "Annuler l’objectif",
+      "modelSwitchUnconfirmed": "Impossible de confirmer le changement de modèle. Vérifiez votre connexion et réessayez.",
       "cancelGoalFailed": "Échec de l’annulation. Réessayez.",
       "cancelGoalOffline": "Reconnectez-vous pour annuler l’objectif.",
       "expandDraft": "Agrandir la zone de saisie",

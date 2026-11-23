@@ -59,6 +59,44 @@ test("preserves literal shell output and leaves ordinary replies as Markdown", a
   ])
 })
 
+test("replays command results in their original language alongside an uninterrupted stream", async () => {
+  const lang = process.env.LC_ALL
+  process.env.LC_ALL = "fr_FR.UTF-8"
+  try {
+    respond([
+      { event: "delta", text: "A", turn_id: "agent" },
+      { event: "message", text: "Stopped 2 tasks.\nRaw {count}", side_channel: true, turn_id: "notice",
+        command_result: { command: "/stop", parts: [{ key: "stop.done", values: { count: 2 } }, { text: "Raw {count}" }] } },
+      { event: "stream_end", text: "AB", turn_id: "agent" },
+    ])
+    expect((await fetchHistory("http://fixture", "token", "chat")).messages.map(row => row.content)).toEqual([
+      "AB", "Stopped 2 tasks.\nRaw {count}",
+    ])
+  } finally {
+    if (lang === undefined) delete process.env.LC_ALL
+    else process.env.LC_ALL = lang
+  }
+})
+
+test("replays a failed picker receipt and a typed switch without inventing picker prompts", async () => {
+  const success = { command: "/model", parts: [{ key: "model.switched", values: { preset: "fast" } }] }
+  const failure = { command: "/model", parts: [{ key: "model.failed", values: { error: "Missing provider key" } }] }
+  respond([
+    { event: "user_message", starts_turn: false, text: "/model fast", turn_id: "webui-system:one" },
+    { event: "message", side_channel: true, text: "Switched to fast", command_result: success, turn_id: "webui-system:one" },
+    { event: "user_message", starts_turn: false, text: "/model broken", turn_id: "webui-system:two" },
+    { event: "message", side_channel: true, text: "Missing provider key", command_result: failure, turn_id: "webui-system:two" },
+    { event: "user_message", starts_turn: false, text: "/model fast", turn_id: "typed" },
+    { event: "message", side_channel: true, text: "Switched to fast", command_result: success, turn_id: "typed" },
+  ])
+  const { messages } = await fetchHistory("http://fixture", "token", "chat")
+  expect(messages.map((row) => [row.role, row.content])).toEqual([
+    ["assistant", expect.stringContaining("Missing provider key")],
+    ["user", "/model fast"], ["assistant", expect.stringContaining("fast")],
+  ])
+  expect(messages.at(-1)?.forkIndex).toBe(3)
+})
+
 test("keeps distinct answer segments and resumes an unfinished stream", async () => {
   respond([
     { event: "user_message", starts_turn: true, text: "question" },

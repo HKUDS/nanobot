@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { CliRenderEvents, TextareaRenderable, TextRenderable, rgbToHex } from "@opentui/core"
 import { MockTreeSitterClient, createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 import { NanobotTui } from "./app"
-import type { RecoveryState, SlashCommand, WorkspaceScopePayload } from "../client"
+import type { MessageOptions, RecoveryState, SlashCommand, WorkspaceScopePayload } from "../client"
 import { options, client, mount, waitUntil, occurrences, contrastRatio } from "./test-support"
 
 describe("NanobotTui session navigation", () => {
@@ -287,7 +287,7 @@ describe("NanobotTui session navigation", () => {
     expect(ui.runtimeControls.modelText.plainText).not.toContain("deepseek/deepseek-chat")
   })
 
-  test("refreshes the canonical preset after the model command completes", async () => {
+  test("applies the confirmed preset after the model command completes", async () => {
     setup = await createRenderer({ width: 96, height: 20, screenMode: "alternate-screen" })
     const original = globalThis.fetch
     globalThis.fetch = ((input: string | URL | Request) => {
@@ -295,7 +295,7 @@ describe("NanobotTui session navigation", () => {
         return Promise.resolve(new Response(JSON.stringify({})))
       }
       return Promise.resolve(new Response(JSON.stringify({
-        sessions: [{ key: "websocket:chat", model_preset: "Deep Research" }],
+        sessions: [{ key: "websocket:chat", model_preset: null }],
       })))
     }) as typeof fetch
     const sent: string[] = []
@@ -327,7 +327,9 @@ describe("NanobotTui session navigation", () => {
       app.accept({
         event: "message",
         chat_id: "chat",
-        text: "Switched model preset to Deep Research.",
+        text: "Fallback receipt",
+        side_channel: true,
+        command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "Deep Research" } }] },
         turn_id: "turn",
       })
       await waitUntil(() => ui.runtimeControls.modelText.plainText.includes("Deep Research"))
@@ -342,6 +344,7 @@ describe("NanobotTui session navigation", () => {
     const original = globalThis.fetch
     const sent: string[] = []
     const scopes: WorkspaceScopePayload[] = []
+    const sentOptions: MessageOptions[] = []
     let settingsRequests = 0
     let workspaceRequests = 0
     globalThis.fetch = (async (input: string | URL | Request) => {
@@ -367,7 +370,7 @@ describe("NanobotTui session navigation", () => {
     const app = NanobotTui.mount(
       setup.renderer,
       { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
-      client(sent, [], [], [], [], scopes),
+      client(sent, [], [], sentOptions, [], scopes),
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
     )
     app.accept({ event: "attached", chat_id: "chat" })
@@ -412,6 +415,16 @@ describe("NanobotTui session navigation", () => {
       expect(ui.composer.focused).toBe(false)
       await setup.mockMouse.click(fast.x + 2, fast.y)
       await waitUntil(() => sent.includes("/model fast"))
+      expect(sentOptions.at(-1)?.systemCommand).toBe(true)
+      app.accept({
+        event: "message", chat_id: "chat", turn_id: "webui-system:picker", side_channel: true,
+        text: "Missing provider key", command_result: {
+          command: "/model", parts: [{ key: "model.failed", values: { error: "Missing provider key" } }],
+        },
+      })
+      await setup.flush()
+      expect(setup.captureCharFrame()).toContain("Missing provider key")
+      expect(ui.runtimeControls.modelText.plainText).toBe("default ▾")
       expect(ui.composer.focused).toBe(true)
 
       await setup.mockMouse.click(
@@ -521,7 +534,27 @@ describe("NanobotTui session navigation", () => {
 
       setup.mockInput.pressEnter()
       await waitUntil(() => sent.includes("/model preset-8"))
+      // A metadata read started before the receipt still owns the title, not the model.
+      const metadata = Promise.withResolvers<Response>()
+      const fetchBeforeUpdate = globalThis.fetch
+      globalThis.fetch = ((input, init) => String(input).endsWith("/api/sessions")
+        ? metadata.promise : fetchBeforeUpdate(input, init)) as typeof fetch
+      app.accept({ event: "session_updated", chat_id: "chat", scope: "metadata" })
+      app.accept({
+        event: "user_message", chat_id: "chat", turn_id: "webui-system:picker", starts_turn: false, text: "/model preset-8",
+      })
+      app.accept({
+        event: "message", chat_id: "chat", turn_id: "webui-system:picker", side_channel: true,
+        text: "Fallback", command_result: {
+          command: "/model", parts: [{ key: "model.switched", values: { preset: "preset-8" } }],
+        },
+      })
+      metadata.resolve(Response.json({ sessions: [{ key: "websocket:chat", title: "Renamed chat", model_preset: "default" }] }))
+      await waitUntil(() => (app as unknown as { sessionTitle: string }).sessionTitle === "Renamed chat")
+      await setup.flush()
       expect(ui.runtimeControls.visible).toBe(false)
+      expect(ui.runtimeControls.modelText.plainText).toBe("preset-8 ▾")
+      expect(occurrences(setup.captureCharFrame(), "preset-8")).toBe(1)
     } finally {
       globalThis.fetch = original
     }

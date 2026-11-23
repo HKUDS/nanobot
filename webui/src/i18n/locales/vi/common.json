@@ -1926,6 +1926,7 @@
       "goalBlocked": "Bị chặn",
       "goalStateSheetTitle": "Mục tiêu",
       "cancelGoal": "Hủy mục tiêu",
+      "modelSwitchUnconfirmed": "Không thể xác nhận việc chuyển mô hình. Hãy kiểm tra kết nối rồi thử lại.",
       "cancelGoalFailed": "Không thể hủy mục tiêu. Hãy thử lại.",
       "cancelGoalOffline": "Kết nối lại để hủy mục tiêu.",
       "expandDraft": "Mở rộng ô soạn thảo",

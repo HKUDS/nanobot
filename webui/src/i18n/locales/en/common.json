@@ -2108,6 +2108,7 @@
       "goalBlocked": "Blocked",
       "goalStateSheetTitle": "Goal",
       "cancelGoal": "Cancel goal",
+      "modelSwitchUnconfirmed": "Could not confirm the model switch. Check your connection and try again.",
       "cancelGoalFailed": "Could not cancel goal. Try again.",
       "cancelGoalOffline": "Reconnect to cancel the goal.",
       "expandDraft": "Expand editor",

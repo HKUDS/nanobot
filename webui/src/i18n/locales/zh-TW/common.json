@@ -1926,6 +1926,7 @@
       "goalBlocked": "已受阻",
       "goalStateSheetTitle": "目標",
       "cancelGoal": "取消目標",
+      "modelSwitchUnconfirmed": "無法確認模型是否已切換。請檢查連線後再試一次。",
       "cancelGoalFailed": "取消失敗，請重試。",
       "cancelGoalOffline": "請重新連線後取消目標。",
       "expandDraft": "展開編輯",

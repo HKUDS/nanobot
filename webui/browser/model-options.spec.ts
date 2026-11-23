@@ -15,9 +15,10 @@ for (const width of [390, 1280]) {
   test(`current-chat model options preserve the compact preset menu at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/browser/fixture.html?case=model-options");
-    await page.getByRole("button", { name: "Default", exact: true }).click();
+    const open = page.getByTestId("thread-welcome-layout").getByRole("button", { name: "Default", exact: true });
+    await open.click();
     const dialog = page.getByRole("dialog", { name: "Switch model", exact: true });
-    const selected = dialog.getByRole("option", { name: "default", exact: true });
+    const selected = dialog.getByRole("option", { name: "Default", exact: true });
     await expect(selected).toHaveAttribute("aria-selected", "true");
     await dialog.evaluate((element) => Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished)));
     const selectedBefore = await selected.boundingBox();
@@ -74,7 +75,7 @@ for (const width of [390, 1280]) {
     await page.getByRole("button", { name: "Send message", exact: true }).click();
     await expect(page.getByLabel("Sent model options")).toHaveText("Reasoning: high; Codex Fast: on");
     await page.reload();
-    await page.getByRole("button", { name: "Default", exact: true }).click();
+    await open.click();
     await expect(effort).toHaveAttribute("aria-valuetext", "high");
     await expect(fast).toHaveAttribute("aria-pressed", "true");
     await dialog.getByRole("option", { name: "Review", exact: true }).click();
@@ -91,7 +92,7 @@ for (const width of [390, 1280]) {
 test("a long preset list scrolls without moving the model controls in a short viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 380 });
   await page.goto("/browser/fixture.html?case=model-options&many-presets&ultrafast");
-  await page.getByRole("button", { name: "Default", exact: true }).click();
+  await page.getByTestId("thread-welcome-layout").getByRole("button", { name: "Default", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Switch model", exact: true });
   const list = dialog.getByRole("listbox");
   const effort = dialog.getByRole("slider", { name: "Reasoning effort" });
@@ -107,7 +108,7 @@ test("a long preset list scrolls without moving the model controls in a short vi
   expect(await effort.boundingBox()).toEqual(effortBefore);
   expect(await manage.boundingBox()).toEqual(manageBefore);
 
-  await list.getByRole("option", { name: "default", exact: true }).press("End");
+  await list.getByRole("option", { name: "Default", exact: true }).press("End");
   const last = list.getByRole("option", { name: "Example 12", exact: true });
   await expect(last).toBeFocused();
   await expect(last).toBeInViewport({ ratio: 0.9 });
