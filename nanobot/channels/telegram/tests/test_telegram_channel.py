@@ -28,6 +28,7 @@ from nanobot.channels.telegram.runtime import (
     _StreamBuf,
     _telegram_command_text,
 )
+from nanobot.command_copy import command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.events import ContextCompactionEvent
 
@@ -66,6 +67,7 @@ class _FakeBot:
     def __init__(self) -> None:
         self.sent_messages: list[dict] = []
         self.sent_media: list[dict] = []
+        self.menus = {}
         self.get_me_calls = 0
         self.shutdown_calls = 0
 
@@ -76,8 +78,8 @@ class _FakeBot:
         self.get_me_calls += 1
         return SimpleNamespace(id=999, username="nanobot_test")
 
-    async def set_my_commands(self, commands) -> None:
-        self.commands = commands
+    async def set_my_commands(self, commands, *, language_code=None) -> None:
+        self.menus[language_code] = {cmd.command: cmd.description for cmd in commands}
 
     async def send_message(self, **kwargs):
         self.sent_messages.append(kwargs)
@@ -373,14 +375,40 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     assert builder.request_value is api_req
     assert builder.get_updates_request_value.inner is poll_req
     assert callable(app.updater.start_polling_kwargs["error_callback"])
-    assert any(cmd.command == "status" for cmd in app.bot.commands)
-    assert any(cmd.command == "skill" for cmd in app.bot.commands)
-    assert any(cmd.command == "dream" for cmd in app.bot.commands)
-    assert any(cmd.command == "dream_log" for cmd in app.bot.commands)
-    assert any(cmd.command == "dream_restore" for cmd in app.bot.commands)
-    assert any(cmd.command == "dream_prompt" for cmd in app.bot.commands)
-    assert any(cmd.command == "evaluator_prompt" for cmd in app.bot.commands)
-    assert any(cmd.command == "compact" for cmd in app.bot.commands)
+
+
+@pytest.mark.asyncio
+async def test_start_registers_native_menus_without_blocking_polling(monkeypatch) -> None:
+    channel = TelegramChannel(TelegramConfig(token="123:abc"), MessageBus())
+    app = _FakeApp(lambda: None)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.Application.builder", lambda: _FakeBuilder(app))
+    release = asyncio.Event()
+    set_my_commands = app.bot.set_my_commands
+
+    async def register(commands, *, language_code):
+        await release.wait()
+        await set_my_commands(commands, language_code=language_code)
+
+    app.bot.set_my_commands = register
+    try:
+        await asyncio.wait_for(channel._start_app(), timeout=1)
+        assert app.updater.start_polling_kwargs is not None
+        release.set()
+        await asyncio.wait_for(channel._menu_task, timeout=1)
+    finally:
+        await channel._teardown_app()
+
+    menus = app.bot.menus
+    assert set(menus) == {None, "zh", "fr", "ja", "ko", "es", "pt", "vi", "id"}
+    assert menus[None]["start"] == "Start the bot"
+    assert menus["zh"]["start"] == "启动机器人 / 啟動機器人"
+    assert menus["pt"]["dream_log"] == command_text("palette.dream-log.description", "pt-BR")
+    assert {"status", "skill", "dream", "dream_log", "dream_restore", "dream_prompt",
+            "evaluator_prompt", "compact", "cancel_goal"} <= menus[None].keys()
+    for menu in menus.values():
+        assert menu.keys() == menus[None].keys()
+        assert all(1 <= len(description) <= 256 for description in menu.values())
 
 
 @pytest.mark.asyncio
@@ -2429,10 +2457,12 @@ async def test_forward_command_does_not_inject_reply_context() -> None:
 
     reply = SimpleNamespace(text="some old message", message_id=2, from_user=SimpleNamespace(id=1))
     update = _make_telegram_update(text="/new", reply_to_message=reply)
+    update.effective_user.language_code = "zh-Hant"
     await channel._forward_command(update, None)
 
     assert len(handled) == 1
     assert handled[0]["content"] == "/new"
+    assert handled[0]["metadata"]["locale"] == "zh-Hant"
 
 
 @pytest.mark.asyncio
@@ -2536,7 +2566,6 @@ def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
     assert pat.fullmatch("/goal ship the feature")
     assert pat.fullmatch("/cancel_goal")
     assert pat.fullmatch("/cancel_goal@nanobot_bot")
-    assert any(command.command == "cancel_goal" for command in TelegramChannel.BOT_COMMANDS)
     assert pat.fullmatch("/trigger")
     assert pat.fullmatch("/trigger PR review")
     assert pat.fullmatch("/pairing list")
@@ -2561,7 +2590,18 @@ def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
 
 
 @pytest.mark.asyncio
-async def test_on_help_includes_restart_command() -> None:
+async def test_on_start_welcomes_user_in_their_language() -> None:
+    channel = TelegramChannel(TelegramConfig(allow_from=["*"]), MessageBus())
+    update = _make_telegram_update(text="/start", chat_type="private")
+    update.effective_user.language_code = "fr-CA"
+    update.message.reply_text = AsyncMock()
+    await channel._on_start(update, None)
+    update.message.reply_text.assert_awaited_once_with(command_text("native.welcome", "fr", name="Alice"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("language, title", [("zh-Hans", "🐈 nanobot 命令："), ("zh-Hant", "🐈 nanobot 指令：")])
+async def test_on_help_localizes_copy_and_preserves_tappable_commands(language, title) -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
         MessageBus(),
@@ -2569,10 +2609,12 @@ async def test_on_help_includes_restart_command() -> None:
     update = _make_telegram_update(text="/help", chat_type="private")
     update.message.reply_text = AsyncMock()
 
+    update.effective_user.language_code = language
     await channel._on_help(update, None)
 
     update.message.reply_text.assert_awaited_once()
     help_text = update.message.reply_text.await_args.args[0]
+    assert help_text.startswith(title)
     assert "/restart" in help_text
     assert "/status" in help_text
     assert "/skill" in help_text
