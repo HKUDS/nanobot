@@ -659,11 +659,7 @@ class ChannelManager:
         if target is None:
             logger.warning("Restart notice target channel is not enabled: {}", notice.channel)
             return
-        if notice.channel == "websocket":
-            # Reconnect and recovery are already represented by WebSocket
-            # protocol state. A generic restart-complete notice must not
-            # masquerade as a recovery transition and overwrite a real
-            # awaiting-user checkpoint in connected clients.
+        if not notice.should_notify_chat:
             return
 
         while not target.is_running:

@@ -10,11 +10,13 @@ from loguru import logger
 
 from agent.session_helpers import run_session, save_completed_subagent, visible_message
 from nanobot.agent.context import ContextBuilder, TranscriptInput
+from nanobot.agent.dream import DreamResult
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
+    CommandResultEvent,
     GoalStatusEvent,
     StreamDeltaEvent,
     StreamedResponseEvent,
@@ -264,6 +266,46 @@ async def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path
     assert message["trigger_id"] == "trg_123"
     assert message["trigger_name"] == "PR review"
     assert message["trigger_delivery_id"] == "tdel_456"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dispatch", ["queued", "inline", "direct"])
+async def test_fast_dream_finishes_after_the_command_acknowledgement(tmp_path, monkeypatch, dispatch):
+    loop = _make_full_loop(tmp_path)
+    msg = InboundMessage("websocket", "user", "chat-1", "/dream")
+
+    async def no_history(*_args, **_kwargs):
+        return DreamResult(had_input=False)
+
+    publish = loop.bus.publish_outbound
+
+    async def slow_delivery(message):
+        # Exercise the race even when both the command and Dream do no I/O.
+        await asyncio.sleep(0)
+        await publish(message)
+
+    async def next_receipt():
+        while True:
+            message = await loop.bus.consume_outbound()
+            if isinstance(message.event, CommandResultEvent):
+                return message
+
+    monkeypatch.setattr("nanobot.agent.dream.run_dream", no_history)
+    monkeypatch.setattr(loop.bus, "publish_outbound", slow_delivery)
+    try:
+        if dispatch == "direct":
+            acknowledgement = await loop.process_direct("/dream")
+        else:
+            if dispatch == "queued":
+                await run_session(loop, msg)
+            else:
+                await loop._dispatch_command_inline(msg, msg.content, loop.commands.dispatch)
+            acknowledgement = await asyncio.wait_for(next_receipt(), timeout=2)
+        completion = await asyncio.wait_for(next_receipt(), timeout=2)
+        assert acknowledgement.event.parts[0]["key"] == "dream.started"
+        assert completion.event.parts[0]["key"] == "dream.no_input"
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.asyncio

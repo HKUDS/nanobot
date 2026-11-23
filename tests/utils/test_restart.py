@@ -60,14 +60,17 @@ def test_restart_notice_drops_process_local_webui_turn_metadata(monkeypatch):
         channel="websocket",
         chat_id="chat-1",
         metadata={
+            "webui": True,
+            "_history_generation": "admitted-generation",
+            "locale": "zh-CN",
             "webui_turn_id": "turn-from-old-process",
-            "slack": {"thread_ts": "1700.42"},
+            "_websocket_turn_owner": "old-owner",
         },
     )
 
     notice = consume_restart_notice_from_env()
     assert notice is not None
-    assert notice.metadata == {"slack": {"thread_ts": "1700.42"}}
+    assert notice.metadata == {"webui": True, "_history_generation": "admitted-generation", "locale": "zh-CN"}
 
 
 def test_restart_notice_clears_stale_metadata(monkeypatch):
