@@ -39,13 +39,6 @@ def _document_source(text: str) -> DocumentLineSource:
     return DocumentLineSource(lines)
 
 
-class TestReadDescriptionFix:
-
-    def test_description_mentions_image_support(self):
-        tool = ReadFileTool()
-        assert "image" in tool.description.lower()
-
-
 class TestReadDedup:
 
     @pytest.fixture()
@@ -651,14 +644,6 @@ class TestOfficeDocTruncation:
             result = await tool.execute(path=str(f))
         assert "Error" in result
         assert "truncated" not in result
-
-
-class TestReadFileDescription:
-
-    def test_description_mentions_documents(self):
-        tool = ReadFileTool()
-        desc = tool.description.lower()
-        assert "document" in desc or "docx" in desc or "xlsx" in desc or "pptx" in desc
 
 
 class TestBoundedTextReads:

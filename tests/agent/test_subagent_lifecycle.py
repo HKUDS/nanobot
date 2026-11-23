@@ -581,12 +581,13 @@ class TestSubagentHook:
         ctx = _make_hook_context(
             iteration=3,
             tool_events=[{"name": "read_file", "status": "ok", "detail": ""}],
-            usage=LLMUsage.reported(input_tokens=100, output_tokens=0),
+            usage=LLMUsage.reported(input_tokens=100, output_tokens=50),
         )
         await hook.after_iteration(ctx)
         assert status.iteration == 3
         assert len(status.tool_events) == 1
-        assert status.usage == LLMUsage.reported(input_tokens=100, output_tokens=0)
+        assert status.tool_events[0]["name"] == "read_file"
+        assert status.usage == LLMUsage.reported(input_tokens=100, output_tokens=50)
 
     @pytest.mark.asyncio
     async def test_after_iteration_sets_error(self):

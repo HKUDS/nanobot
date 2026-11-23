@@ -50,6 +50,7 @@ async def test_message_tool_keeps_task_local_context() -> None:
 
     assert result_one == "Message sent to feishu:chat-a"
     assert result_two == "Message sent to email:chat-b"
+    assert len(seen) == 2
     assert ("feishu", "chat-a", "one") in seen
     assert ("email", "chat-b", "two") in seen
 
@@ -114,6 +115,7 @@ async def test_subagent_tool_keeps_task_local_context() -> None:
 
     assert result_one == "whatsapp:chat-a:one"
     assert result_two == "telegram:chat-b:two"
+    assert len(seen) == 2
     assert ("whatsapp", "chat-a", "whatsapp:chat-a", "msg-a", "turn-a") in seen
     assert ("telegram", "chat-b", "telegram:chat-b", "msg-b", "turn-b") in seen
 
@@ -146,27 +148,12 @@ async def test_cron_tool_keeps_task_local_context(tmp_path) -> None:
     assert result_two.startswith("Created job")
 
     jobs = tool._cron.list_jobs()
+    assert len(jobs) == 2
     assert {job.payload.session_key for job in jobs} == {"feishu:chat-a", "email:chat-b"}
     assert {(job.payload.origin_channel, job.payload.origin_chat_id) for job in jobs} == {
         ("feishu", "chat-a"),
         ("email", "chat-b"),
     }
-
-
-@pytest.mark.asyncio
-async def test_message_tool_basic_request_context_and_execute() -> None:
-    seen: list[tuple[str, str, str]] = []
-
-    async def send_callback(msg):
-        seen.append((msg.channel, msg.chat_id, msg.content))
-
-    tool = MessageTool(send_callback=send_callback)
-    with request_context(
-        RequestContext(channel="telegram", chat_id="chat-123", message_id="msg-456")
-    ):
-        result = await tool.execute(content="hello")
-    assert result == "Message sent to telegram:chat-123"
-    assert seen == [("telegram", "chat-123", "hello")]
 
 
 @pytest.mark.asyncio
@@ -185,47 +172,6 @@ async def test_message_tool_default_values_without_request_context() -> None:
     result = await tool.execute(content="hi")
     assert result == "Message sent to discord:general"
     assert seen == [("discord", "general", "hi")]
-
-
-@pytest.mark.asyncio
-async def test_subagent_tool_basic_request_context_and_execute() -> None:
-    seen: list[tuple[str, str, str, str | None, str | None]] = []
-
-    class _Manager:
-        max_concurrent_subagents = 1
-
-        def get_running_count(self) -> int:
-            return 0
-
-        async def spawn(
-            self,
-            *,
-            task,
-            runtime,
-            label,
-            origin_channel,
-            origin_chat_id,
-            session_key,
-            origin_message_id=None,
-            origin_turn_id=None,
-            temperature=None,
-            workspace_scope=None,
-            session_policy=None,
-        ):
-            seen.append((origin_channel, origin_chat_id, session_key, origin_message_id, origin_turn_id))
-            return f"ok: {task}"
-
-    tool = SubagentTool(_Manager())
-    with request_context(RequestContext(
-        channel="feishu",
-        chat_id="chat-abc",
-        message_id="msg-123",
-        turn_id="turn-123",
-        runtime=_runtime(),
-    )):
-        result = await tool.execute(action="create", task="do something")
-    assert result == "ok: do something"
-    assert seen == [("feishu", "chat-abc", "feishu:chat-abc", "msg-123", "turn-123")]
 
 
 @pytest.mark.asyncio
@@ -261,22 +207,6 @@ async def test_subagent_tool_rejects_missing_request_runtime() -> None:
     assert result == "Error: create requires an active model runtime"
     assert result.is_error
     assert seen == []
-
-
-@pytest.mark.asyncio
-async def test_cron_tool_basic_request_context_and_execute(tmp_path) -> None:
-    tool = CronTool(CronService(tmp_path / "jobs.json"))
-    with request_context(
-        RequestContext(channel="wechat", chat_id="user-789", session_key="wechat:user-789")
-    ):
-        result = await tool.execute(action="add", message="standup", every_seconds=300)
-    assert result.startswith("Created job")
-
-    jobs = tool._cron.list_jobs()
-    assert len(jobs) == 1
-    assert jobs[0].payload.session_key == "wechat:user-789"
-    assert jobs[0].payload.origin_channel == "wechat"
-    assert jobs[0].payload.origin_chat_id == "user-789"
 
 
 @pytest.mark.asyncio

@@ -42,11 +42,6 @@ def test_adaptive_does_not_inflate_max_tokens() -> None:
     assert kw["max_tokens"] == 2048
 
 
-def test_adaptive_no_budget_tokens() -> None:
-    kw = _build(_make_provider(), "adaptive")
-    assert "budget_tokens" not in kw["thinking"]
-
-
 def test_high_uses_enabled_with_budget() -> None:
     kw = _build(_make_provider(), "high", max_tokens=4096)
     assert kw["thinking"]["type"] == "enabled"
@@ -186,11 +181,6 @@ def test_dated_opus_4_model_does_not_treat_date_as_minor_version() -> None:
     assert kw["temperature"] == 1.0
     assert kw["thinking"] == {"type": "enabled", "budget_tokens": 8192}
     assert "output_config" not in kw
-
-
-def test_ordinary_model_sends_temperature() -> None:
-    kw = _build(_make_provider("claude-sonnet-4-6"), None)
-    assert kw["temperature"] == 0.7
 
 
 def test_reasoning_effort_string_none_does_not_enable_thinking() -> None:

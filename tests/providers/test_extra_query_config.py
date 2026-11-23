@@ -18,22 +18,6 @@ class TestExtraQuerySchema:
         assert config.extra_query == {"api-version": "2024-02-01"}
 
 
-class TestExtraQueryInit:
-
-    def test_default_is_empty(self) -> None:
-        provider = OpenAICompatProvider(api_key="test")
-        assert provider._extra_query == {}
-
-    def test_none_becomes_empty(self) -> None:
-        provider = OpenAICompatProvider(api_key="test", extra_query=None)
-        assert provider._extra_query == {}
-
-    def test_dict_stored(self) -> None:
-        query = {"api-version": "v1"}
-        provider = OpenAICompatProvider(api_key="test", extra_query=query)
-        assert provider._extra_query == query
-
-
 class TestExtraQueryBuildClient:
 
     def test_build_client_passes_default_query(self) -> None:

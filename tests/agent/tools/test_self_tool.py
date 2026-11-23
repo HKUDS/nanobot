@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from types import MappingProxyType
 from unittest.mock import MagicMock, patch
@@ -13,7 +12,6 @@ from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.shell import ExecToolConfig
 from nanobot.agent.tools.web import WebSearchConfig, WebToolsConfig
 from nanobot.config.schema import ModelPresetConfig
-from nanobot.providers.base import LLMUsage
 
 
 def _make_mock_loop(**overrides):
@@ -495,57 +493,6 @@ class TestDeniedAttrs:
         for attr in ("func_globals", "func_code"):
             result = await tool.execute(action="set", key=attr, value="evil")
             assert "protected" in result, f"{attr} should be blocked"
-
-
-class TestSubagentHookStatus:
-
-    @pytest.mark.asyncio
-    async def test_after_iteration_updates_status(self):
-        from nanobot.agent.hook import AgentHookContext
-        from nanobot.agent.subagent import SubagentStatus, _SubagentHook
-
-        status = SubagentStatus(
-            task_id="test",
-            label="test",
-            task_description="test",
-            started_at=time.monotonic(),
-        )
-        hook = _SubagentHook(status)
-
-        context = AgentHookContext(
-            iteration=5,
-            messages=[],
-            tool_events=[{"name": "read_file", "status": "ok", "detail": "ok"}],
-            usage=LLMUsage.reported(input_tokens=100, output_tokens=50),
-        )
-        await hook.after_iteration(context)
-
-        assert status.iteration == 5
-        assert len(status.tool_events) == 1
-        assert status.tool_events[0]["name"] == "read_file"
-        assert status.usage == LLMUsage.reported(input_tokens=100, output_tokens=50)
-
-    @pytest.mark.asyncio
-    async def test_after_iteration_with_error(self):
-        from nanobot.agent.hook import AgentHookContext
-        from nanobot.agent.subagent import SubagentStatus, _SubagentHook
-
-        status = SubagentStatus(
-            task_id="test",
-            label="test",
-            task_description="test",
-            started_at=time.monotonic(),
-        )
-        hook = _SubagentHook(status)
-
-        context = AgentHookContext(
-            iteration=1,
-            messages=[],
-            error="something went wrong",
-        )
-        await hook.after_iteration(context)
-
-        assert status.error == "something went wrong"
 
 
 class TestReadOnlyMode:

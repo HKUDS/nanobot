@@ -32,27 +32,6 @@ class TestSearchUsageInfoFormat:
         assert "HTTP 401" in text
         assert "unavailable" in text
 
-    def test_full_tavily_usage(self):
-        info = SearchUsageInfo(
-            provider="tavily",
-            supported=True,
-            used=142,
-            limit=1000,
-            remaining=858,
-            reset_date="2026-05-01",
-            search_used=120,
-            extract_used=15,
-            crawl_used=7,
-        )
-        text = render(tuple(search_lines(info)), "en")
-        assert "tavily" in text
-        assert "142 / 1000" in text
-        assert "858" in text
-        assert "2026-05-01" in text
-        assert "Search: 120" in text
-        assert "Extract: 15" in text
-        assert "Crawl: 7" in text
-
     def test_usage_without_limit(self):
         info = SearchUsageInfo(provider="tavily", supported=True, used=50)
         text = render(tuple(search_lines(info)), "en")
@@ -65,13 +44,6 @@ class TestSearchUsageInfoFormat:
         )
         text = render(tuple(search_lines(info)), "en")
         assert "Breakdown" not in text
-
-    def test_brave_unsupported(self):
-        info = SearchUsageInfo(provider="brave", supported=False)
-        text = render(tuple(search_lines(info)), "en")
-        assert "brave" in text
-        assert "not available" in text
-
 
 class TestParseTavilyUsage:
     def test_full_response(self):
@@ -98,11 +70,6 @@ class TestParseTavilyUsage:
         assert info.search_used == 120
         assert info.extract_used == 15
         assert info.crawl_used == 7
-
-    def test_remaining_computed(self):
-        data = {"account": {"plan_usage": 300, "plan_limit": 1000}}
-        info = _parse_tavily_usage(data)
-        assert info.remaining == 700
 
     def test_remaining_not_negative(self):
         data = {"account": {"plan_usage": 1100, "plan_limit": 1000}}
@@ -144,30 +111,10 @@ class TestParseTavilyUsage:
 
 class TestFetchSearchUsageRouting:
     @pytest.mark.asyncio
-    async def test_duckduckgo_returns_unsupported(self):
-        info = await fetch_search_usage("duckduckgo")
-        assert info.provider == "duckduckgo"
-        assert info.supported is False
-
-    @pytest.mark.asyncio
-    async def test_searxng_returns_unsupported(self):
-        info = await fetch_search_usage("searxng")
-        assert info.supported is False
-
-    @pytest.mark.asyncio
-    async def test_jina_returns_unsupported(self):
-        info = await fetch_search_usage("jina")
-        assert info.supported is False
-
-    @pytest.mark.asyncio
-    async def test_brave_returns_unsupported(self):
-        info = await fetch_search_usage("brave")
-        assert info.provider == "brave"
-        assert info.supported is False
-
-    @pytest.mark.asyncio
-    async def test_unknown_provider_returns_unsupported(self):
-        info = await fetch_search_usage("some_unknown_provider")
+    @pytest.mark.parametrize("provider", ["duckduckgo", "searxng", "jina", "brave", "some_unknown_provider"])
+    async def test_provider_returns_unsupported(self, provider):
+        info = await fetch_search_usage(provider)
+        assert info.provider == provider
         assert info.supported is False
 
     @pytest.mark.asyncio
@@ -272,16 +219,6 @@ class TestBuildStatusContentWithSearchUsage:
         assert "🔍" not in content
         assert "Web Search" not in content
 
-    def test_search_usage_none_unchanged(self):
-        content = status_text(**self._BASE_KWARGS, search_usage=None)
-        assert "🔍" not in content
-
-    def test_search_usage_appended(self):
-        usage = SearchUsageInfo(provider="tavily", supported=True, used=142, limit=1000)
-        content = status_text(**self._BASE_KWARGS, search_usage=usage)
-        assert "🔍 Web Search: tavily" in content
-        assert "142 / 1000" in content
-
     def test_existing_fields_still_present(self):
         usage = SearchUsageInfo(provider="duckduckgo")
         content = status_text(**self._BASE_KWARGS, search_usage=usage)
@@ -306,4 +243,7 @@ class TestBuildStatusContentWithSearchUsage:
         assert "142 / 1000" in content
         assert "858" in content
         assert "2026-05-01" in content
+        assert "🔍 Web Search: tavily" in content
         assert "Search: 120" in content
+        assert "Extract: 15" in content
+        assert "Crawl: 7" in content

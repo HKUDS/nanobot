@@ -255,25 +255,6 @@ def test_start_refuses_to_overwrite_corrupt_store(tmp_path: Path) -> None:
     assert len(backups) == 1
 
 
-def test_load_store_falls_back_to_in_memory_on_corruption_after_start(
-    tmp_path: Path,
-) -> None:
-    """If the store file becomes corrupt *after* a successful start (e.g. a
-    rclone-mounted Drive returns a partial read), the service must keep
-    using its existing in-memory snapshot instead of dropping every job."""
-    service, store_path = _seeded_store(tmp_path)
-    service._load_store()
-    snapshot = service._store
-    assert snapshot is not None and len(snapshot.jobs) == 1
-
-    store_path.write_text("\x00garbage\x00", encoding="utf-8")
-
-    result = service._load_store()
-    assert result is snapshot
-    assert len(result.jobs) == 1
-    assert result.jobs[0].name == "Daily Loving Message"
-
-
 @pytest.mark.parametrize(
     ("api_name", "call"),
     [

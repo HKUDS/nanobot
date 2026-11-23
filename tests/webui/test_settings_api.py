@@ -3,9 +3,9 @@ from __future__ import annotations
 import builtins
 import json
 import time
-from datetime import date
+from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import httpx
 import pytest
@@ -42,10 +42,6 @@ from nanobot.webui.settings_api import (
     update_provider_settings,
     update_transcription_settings,
     update_web_search_settings,
-)
-from nanobot.webui.settings_models import (
-    _extract_model_rows,
-    _model_catalog_row_active,
 )
 from nanobot.webui.settings_services import WebUIOAuthFlowRegistry
 
@@ -2369,38 +2365,6 @@ def test_provider_models_payload_fetches_openai_compatible_models(
     assert payload["models"][1]["context_window"] == 65536
 
 
-def test_model_catalog_row_active_respects_openai_shutdown_date() -> None:
-    ref = date(2026, 9, 29)
-    live = {"id": "gpt-5-nano", "shutdown_date": None}
-    retired = {"id": "gpt-5-chat-latest", "shutdown_date": "2026-07-23"}
-    scheduled = {"id": "gpt-5.9-chat-latest", "shutdown_date": "2026-12-01"}
-
-    assert _model_catalog_row_active(live, on=ref)
-    assert not _model_catalog_row_active(retired, on=ref)
-    assert _model_catalog_row_active(scheduled, on=ref)
-    assert not _model_catalog_row_active(retired, on=date(2026, 7, 23))
-    assert _model_catalog_row_active(retired, on=date(2026, 7, 22))
-
-
-def test_extract_model_rows_skips_shut_down_openai_models(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "nanobot.webui.settings_models._model_catalog_row_active",
-        lambda row, *, on=None: _model_catalog_row_active(row, on=date(2026, 9, 29)),
-    )
-    body = {
-        "data": [
-            {"id": "gpt-5-nano", "shutdown_date": None},
-            {"id": "gpt-5-chat-latest", "shutdown_date": "2026-07-23"},
-            {"id": "chat-latest", "shutdown_date": None},
-        ]
-    }
-    rows = _extract_model_rows(body)
-    ids = [row["id"] for row in rows]
-    assert ids == ["gpt-5-nano", "chat-latest"]
-
-
 def test_provider_models_payload_omits_openai_models_past_shutdown_date(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2419,22 +2383,24 @@ def test_provider_models_payload_omits_openai_models_past_shutdown_date(
                 "data": [
                     {"id": "gpt-5-nano", "owned_by": "system", "shutdown_date": None},
                     {"id": "gpt-5-chat-latest", "owned_by": "system", "shutdown_date": "2026-07-23"},
+                    {"id": "ends-today", "shutdown_date": "2026-09-29"},
+                    {"id": "ends-tomorrow", "shutdown_date": "2026-09-30"},
+                    {"id": "chat-latest", "shutdown_date": None},
                 ]
             },
             request=httpx.Request("GET", url),
         )
 
     monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
-    monkeypatch.setattr(
-        "nanobot.webui.settings_models._model_catalog_row_active",
-        lambda row, *, on=None: _model_catalog_row_active(row, on=date(2026, 9, 29)),
-    )
+    clock = Mock()
+    clock.now.return_value = datetime(2026, 9, 29, tzinfo=timezone.utc)
+    monkeypatch.setattr("nanobot.webui.settings_models.datetime", clock)
 
     payload = provider_models_payload({"provider": ["openai"]})
 
     assert payload["status"] == "available"
-    assert payload["model_count"] == 1
-    assert payload["models"][0]["id"] == "gpt-5-nano"
+    assert payload["model_count"] == 3
+    assert [row["id"] for row in payload["models"]] == ["gpt-5-nano", "ends-tomorrow", "chat-latest"]
 
 
 def test_provider_models_payload_returns_online_openai_codex_models(
@@ -2495,8 +2461,6 @@ def test_provider_models_payload_exposes_catalog_failure_with_usable_models(
 
 
 def test_copilot_explicit_login_does_not_reuse_revoked_credentials(monkeypatch, oauth_flows):
-    from unittest.mock import Mock
-
     from nanobot.providers.github_copilot_oauth import GitHubCopilotOAuthFlow
 
     start = Mock()

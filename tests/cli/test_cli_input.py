@@ -275,12 +275,6 @@ def test_response_renderable_uses_text_for_explicit_plain_rendering():
     assert renderable.__class__.__name__ == "Text"
 
 
-def test_response_renderable_preserves_normal_markdown_rendering():
-    renderable = terminal._response_renderable("**bold**", render_markdown=True)
-
-    assert renderable.__class__.__name__ == "Markdown"
-
-
 def test_response_renderable_without_metadata_keeps_markdown_path():
     help_text = "🐈 nanobot commands:\n/status — Show bot status\n/help — Show available commands"
 

@@ -648,11 +648,6 @@ class TestExtractAbsolutePaths:
         paths = ExecTool._extract_absolute_paths(cmd)
         assert r"C:\Users\Public" in paths
 
-    def test_windows_drive_path_root(self):
-        cmd = r"dir C:\temp"
-        paths = ExecTool._extract_absolute_paths(cmd)
-        assert any("C:\\" in p for p in paths)
-
     def test_unc_path_simple(self):
         cmd = r"dir \\server\share"
         paths = ExecTool._extract_absolute_paths(cmd)

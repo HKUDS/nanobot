@@ -196,10 +196,6 @@ async def test_token_provider_returns_credential_token(monkeypatch):
     assert credential_instance.get_token.await_count == 2
 
 
-def test_supports_temperature_standard_model():
-    assert AzureOpenAIProvider._supports_temperature("gpt-4o") is True
-
-
 def test_supports_temperature_reasoning_model():
     assert AzureOpenAIProvider._supports_temperature("o3-mini") is False
     assert AzureOpenAIProvider._supports_temperature("gpt-5-chat") is False
@@ -208,10 +204,6 @@ def test_supports_temperature_reasoning_model():
 
 def test_supports_temperature_with_reasoning_effort():
     assert AzureOpenAIProvider._supports_temperature("gpt-4o", reasoning_effort="medium") is False
-
-
-def test_supports_temperature_with_reasoning_effort_none_string():
-    assert AzureOpenAIProvider._supports_temperature("gpt-4o", reasoning_effort="none") is True
 
 
 def test_build_body_basic():

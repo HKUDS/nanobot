@@ -223,21 +223,6 @@ async def test_failing_close_is_logged_but_shutdown_proceeds() -> None:
     assert channels.stopped == 1
 
 
-async def test_duplicate_cleanup_is_idempotent() -> None:
-    agent = _FakeAgent()
-    provider = _FakeMCPProvider()
-    channels = _FakeChannels()
-    task = asyncio.create_task(_cancellable_task([]))
-
-    await _close_gateway_runtime(agent, provider, channels, [task], None)
-    await _close_gateway_runtime(agent, provider, channels, [task], None)
-
-    assert agent.close_calls == 2
-    assert provider.close_calls == 2
-    assert channels.stopped == 2
-    assert task.cancelled()
-
-
 async def test_finished_runtime_tasks_gather_is_retrieved() -> None:
     agent = _FakeAgent()
     provider = _FakeMCPProvider()

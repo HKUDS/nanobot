@@ -2223,6 +2223,7 @@ describe("ThreadShell", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Image mode" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Image aspect ratio" })).not.toBeInTheDocument();
   });
 
   it("restores in-memory messages when switching away and back to a session", async () => {

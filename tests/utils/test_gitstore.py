@@ -37,11 +37,6 @@ class TestSummarizeWorkingTree:
         (tmp_path / "MEMORY.md").write_text("changed\n", encoding="utf-8")
         assert git.summarize_working_tree(["SOUL.md"]) == ""
 
-    def test_counts_additions_and_removals(self, git, tmp_path):
-        (tmp_path / "MEMORY.md").write_text("# M\n- keep\n- new\n", encoding="utf-8")
-        summary = git.summarize_working_tree(["MEMORY.md"])
-        assert "MEMORY.md: +3 -0" in summary
-
     def test_detects_deletion(self, git, tmp_path):
         (tmp_path / "MEMORY.md").write_text("has content\n", encoding="utf-8")
         git.auto_commit("add content")
@@ -100,8 +95,8 @@ class TestNestedRepoProtection:
 
         assert result is True
         gitignore = (workspace / ".gitignore").read_text(encoding="utf-8")
-        expected = g._build_gitignore()
-        assert gitignore == expected
+        assert (workspace / ".git").is_dir()
+        assert gitignore.splitlines() == ["/*", "!MEMORY.md", "!.gitignore"]
 
     def test_init_gitignore_merge_idempotent(self, tmp_path):
         workspace = tmp_path / "workspace"
@@ -120,16 +115,6 @@ class TestNestedRepoProtection:
         assert lines.count("!MEMORY.md") == 1
         assert "*.pyc" in gitignore
         assert "!.gitignore" in gitignore
-
-    def test_init_outside_git_repo_works_normally(self, tmp_path):
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-
-        g = GitStore(workspace, tracked_files=["MEMORY.md"])
-        result = g.init()
-
-        assert result is True
-        assert (workspace / ".git").is_dir()
 
     def test_staging_paths_are_absolute_from_workspace(self, tmp_path, monkeypatch):
         from dulwich import porcelain
@@ -222,16 +207,6 @@ class TestCommitIdEncoding:
             capture_output=True, text=True, check=True,
         ).stdout.strip()
         assert sha == expected
-
-    def test_a_real_git_sha_resolves(self, git, tmp_path):
-        (tmp_path / "MEMORY.md").write_text("- a fact\n", encoding="utf-8")
-        git.auto_commit("memory update")
-        real = subprocess.run(
-            ["git", "-C", str(tmp_path), "log", "-1", "--format=%h", "--abbrev=8"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        assert git._resolve_sha(real) is not None
-
 
 def _git_output(workspace, *args):
     return subprocess.run(

@@ -52,19 +52,12 @@ describe("playTurnCompleteSound", () => {
     expect(MockAudio.instances).toHaveLength(0);
   });
 
-  it("plays the bundled chime when enabled and the page is visible", async () => {
+  it.each(["visible", "hidden"] as const)("plays the bundled chime when enabled and %s", async (visibility) => {
+    setVisibility(visibility);
     writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, notificationSound: true });
     await play();
     expect(MockAudio.instances).toHaveLength(1);
     expect(MockAudio.instances[0].src).toBe(TURN_COMPLETE_SOUND_PATH);
-    expect(MockAudio.instances[0].play).toHaveBeenCalledTimes(1);
-  });
-
-  it("plays when enabled and the page is in the background", async () => {
-    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, notificationSound: true });
-    setVisibility("hidden");
-    await play();
-    expect(MockAudio.instances).toHaveLength(1);
     expect(MockAudio.instances[0].play).toHaveBeenCalledTimes(1);
   });
 

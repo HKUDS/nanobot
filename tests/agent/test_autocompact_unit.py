@@ -127,14 +127,6 @@ class TestIsExpired:
         ts = (now - timedelta(minutes=20)).isoformat()
         assert ac._is_expired(ts, now=now) is True
 
-    def test_custom_now_parameter(self):
-        ac = _make_autocompact(ttl=10)
-        ts = datetime(2026, 1, 1, 10, 0, 0)
-        now_under = datetime(2026, 1, 1, 10, 9, 0)
-        assert ac._is_expired(ts, now=now_under) is False
-        now_over = datetime(2026, 1, 1, 10, 10, 0)
-        assert ac._is_expired(ts, now=now_over) is True
-
     def test_unparseable_string_timestamp_returns_false(self):
         """A persisted timestamp that no longer parses must not raise.
 
@@ -374,24 +366,6 @@ class TestCheckExpired:
 
 
 class TestArchiveDelegates:
-
-    @pytest.mark.asyncio
-    async def test_calls_compact_idle_session(self):
-        ac = _make_autocompact()
-        mock_sm = _mock_sessions()
-        mock_sm.get_or_create.return_value = _make_session(updated_at=datetime.now() - timedelta(minutes=20))
-        ac.sessions = mock_sm
-        ac.consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
-
-        runtime = _runtime()
-        await ac._archive("cli:test", runtime=runtime)
-
-        ac.consolidator.compact_idle_session.assert_awaited_once_with(
-            "cli:test",
-            runtime=runtime,
-            events=NO_EVENTS,
-            reason="idle",
-        )
 
     @pytest.mark.asyncio
     async def test_forwards_timeout_compaction_events_with_session_key(self):

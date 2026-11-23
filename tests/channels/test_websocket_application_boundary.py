@@ -162,8 +162,3 @@ def test_persisted_webui_session_prefix_has_one_production_owner() -> None:
         if lines:
             owners[path.relative_to(_REPOSITORY_ROOT).as_posix()] = lines
     assert set(owners) == {_SESSION_IDENTITY_PATH.relative_to(_REPOSITORY_ROOT).as_posix()}, owners
-
-
-def test_runtime_exports_compatibility_protocol_helpers() -> None:
-    assert runtime._is_valid_chat_id("chat:branch-2")  # pyright: ignore[reportPrivateUsage]
-    assert not runtime._is_valid_chat_id("../escape")  # pyright: ignore[reportPrivateUsage]

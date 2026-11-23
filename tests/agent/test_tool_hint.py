@@ -138,19 +138,6 @@ class TestToolHintFallback:
 
 class TestToolHintFolding:
 
-    def test_single_call_no_fold(self):
-        calls = [_tc("grep", {"pattern": "*.py"})]
-        result = _hint(calls)
-        assert "\u00d7" not in result
-
-    def test_two_consecutive_different_args_not_folded(self):
-        calls = [
-            _tc("grep", {"pattern": "*.py"}),
-            _tc("grep", {"pattern": "*.ts"}),
-        ]
-        result = _hint(calls)
-        assert "\u00d7" not in result
-
     def test_two_consecutive_same_args_folded(self):
         calls = [
             _tc("grep", {"pattern": "TODO"}),
@@ -158,33 +145,6 @@ class TestToolHintFolding:
         ]
         result = _hint(calls)
         assert "\u00d7 2" in result
-
-    def test_three_consecutive_different_args_not_folded(self):
-        calls = [
-            _tc("read_file", {"path": "a.py"}),
-            _tc("read_file", {"path": "b.py"}),
-            _tc("read_file", {"path": "c.py"}),
-        ]
-        result = _hint(calls)
-        assert "\u00d7" not in result
-
-    def test_different_tools_not_folded(self):
-        calls = [
-            _tc("grep", {"pattern": "TODO"}),
-            _tc("read_file", {"path": "a.py"}),
-        ]
-        result = _hint(calls)
-        assert "\u00d7" not in result
-
-    def test_interleaved_same_tools_not_folded(self):
-        calls = [
-            _tc("grep", {"pattern": "a"}),
-            _tc("read_file", {"path": "f.py"}),
-            _tc("grep", {"pattern": "b"}),
-        ]
-        result = _hint(calls)
-        assert "\u00d7" not in result
-
 
 class TestToolHintMultipleCalls:
 
@@ -224,18 +184,19 @@ class TestToolHintEdgeCases:
 
 class TestToolHintMixedFolding:
 
-    def test_read_read_grep_grep_read(self):
+    def test_distinct_neighbors_and_separated_repeats_are_not_folded(self):
         calls = [
             _tc("read_file", {"path": "a.py"}),
             _tc("read_file", {"path": "b.py"}),
+            _tc("read_file", {"path": "c.py"}),
             _tc("grep", {"pattern": "x"}),
             _tc("grep", {"pattern": "y"}),
-            _tc("read_file", {"path": "c.py"}),
+            _tc("read_file", {"path": "a.py"}),
         ]
         result = _hint(calls)
         assert "\u00d7" not in result
         parts = result.split(", ")
-        assert len(parts) == 5
+        assert len(parts) == 6
 
 
 class TestToolHintMaxLength:
@@ -252,11 +213,6 @@ class TestToolHintMaxLength:
         long = _hint([_tc("exec", {"command": cmd})], max_length=120)
         assert len(long) > len(short)
         assert "npm test" in long
-
-    def test_exec_max_length_120_shows_full_command(self):
-        cmd = "cd /home/user/project && npm install && npm run build"
-        result = _hint([_tc("exec", {"command": cmd})], max_length=120)
-        assert "npm run build" in result
 
     def test_fallback_respects_max_length(self):
         long_val = "a" * 100

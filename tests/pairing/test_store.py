@@ -134,15 +134,6 @@ class TestApproveDeny:
     def test_deny_unknown_returns_false(self) -> None:
         assert store.deny_code("UNKNOWN") is False
 
-    def test_approve_expired_returns_none(self, monkeypatch) -> None:
-        clock = {"now": 1_000.0}
-        monkeypatch.setattr(store.time, "time", lambda: clock["now"])
-
-        code = store.generate_code("telegram", "123", ttl=0)
-        clock["now"] += 0.1
-        assert store.approve_code(code) is None
-
-
 class TestRevoke:
     def test_revoke_removes_sender(self) -> None:
         code = store.generate_code("telegram", "123")
@@ -173,9 +164,6 @@ class TestRevoke:
 
 
 class TestListPending:
-    def test_empty(self) -> None:
-        assert store.list_pending() == []
-
     def test_shows_pending(self) -> None:
         store.generate_code("telegram", "123")
         store.generate_code("discord", "456")

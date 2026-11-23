@@ -254,17 +254,9 @@ class TestGetFieldDisplayName:
 
 class TestFormatValue:
 
-    def test_formats_none_as_not_set(self):
-        assert "not set" in _format_value(None)
-
-    def test_formats_empty_string_as_not_set(self):
-        assert "not set" in _format_value("")
-
-    def test_formats_empty_dict_as_not_set(self):
-        assert "not set" in _format_value({})
-
-    def test_formats_empty_list_as_not_set(self):
-        assert "not set" in _format_value([])
+    @pytest.mark.parametrize("value", [None, "", {}, []], ids=["none", "empty-string", "empty-dict", "empty-list"])
+    def test_formats_unset_value(self, value):
+        assert "not set" in _format_value(value)
 
     def test_formats_string_value(self):
         result = _format_value("hello")

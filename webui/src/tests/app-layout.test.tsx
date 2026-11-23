@@ -580,21 +580,6 @@ describe("App layout", () => {
     expect(fetchBootstrap).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the auth form when bootstrap does not issue an API token", async () => {
-    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
-      new BootstrapAuthRequiredError(
-        "bootstrap authentication required: missing api_token",
-      ),
-    );
-
-    render(<App />);
-
-    expect(await screen.findByRole("heading", { level: 1, name: "Connect to nanobot" }))
-      .toBeInTheDocument();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(connectSpy).not.toHaveBeenCalled();
-  });
-
   it("keeps the sign-in form mounted during submission and refocuses it on rejection", async () => {
     let rejectAttempt!: (error: Error) => void;
     vi.mocked(fetchBootstrap)

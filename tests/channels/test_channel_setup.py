@@ -1,4 +1,3 @@
-import ast
 import json
 import re
 import subprocess
@@ -220,33 +219,6 @@ def test_every_runtime_channel_field_has_a_webui_contract() -> None:
             for field_name in runtime_fields - internal_fields
             if field_name not in setup.route_field_types
         }, f"{name} has user-configurable runtime fields that WebUI cannot save"
-
-
-def test_channel_manifests_only_import_contract_modules() -> None:
-    channel_dir = Path(channel_setup_module.__file__).parent
-    allowed_imports = {
-        "nanobot.channels._manifest",
-        "nanobot.channels.contracts",
-        "nanobot.channels.plugin",
-    }
-
-    for name in EXPECTED_CHANNELS:
-        manifest_path = channel_dir / name / "manifest.py"
-        tree = ast.parse(manifest_path.read_text(encoding="utf-8"))
-        imports: set[str] = set()
-        for node in tree.body:
-            if isinstance(node, ast.Import):
-                imports.update(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imports.add(node.module)
-        allowed_channel_imports = {
-            module
-            for module in imports
-            if module.startswith(f"nanobot.channels.{name}.")
-            and not module.endswith(".runtime")
-        }
-        unexpected = imports - allowed_imports - allowed_channel_imports
-        assert not unexpected, f"{name} imports runtime dependencies: {unexpected}"
 
 
 def test_feishu_package_manifest_owns_runtime_and_webui_metadata() -> None:

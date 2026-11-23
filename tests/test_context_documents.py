@@ -16,17 +16,6 @@ def test_build_user_content_with_no_media_returns_string(tmp_path: Path) -> None
     assert result == "hello"
 
 
-def test_build_user_content_with_image_returns_list(tmp_path: Path) -> None:
-    builder = _make_builder(tmp_path)
-    png = tmp_path / "test.png"
-    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
-    result = builder.build_user_content("describe this", [str(png)])
-    assert isinstance(result, list)
-    types = [b["type"] for b in result]
-    assert "image_url" in types
-    assert "text" in types
-
-
 def test_build_user_content_ignores_non_image_files(tmp_path: Path) -> None:
     builder = _make_builder(tmp_path)
     txt = tmp_path / "notes.txt"
@@ -46,4 +35,4 @@ def test_build_user_content_mixed_image_and_non_image(tmp_path: Path) -> None:
     assert isinstance(result, list)
     assert any(b["type"] == "image_url" for b in result)
     text_parts = [b.get("text", "") for b in result if b.get("type") == "text"]
-    assert all("report text" not in t for t in text_parts)
+    assert text_parts == ["analyze"]

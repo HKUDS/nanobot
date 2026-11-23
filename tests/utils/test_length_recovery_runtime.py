@@ -11,4 +11,3 @@ def test_length_recovery_message_anchors_the_existing_tail() -> None:
     assert omitted_prefix not in message["content"]
     assert f"<already_delivered_tail>\n{tail}\n</already_delivered_tail>" in message["content"]
     assert "Output only new continuation text" in message["content"]
-    assert "Break remaining work into smaller steps" not in message["content"]

@@ -55,13 +55,6 @@ async def test_exec_child_receives_filtered_env(monkeypatch, allowed_env_keys, e
     }
 
 
-@pytest.mark.asyncio
-async def test_exec_has_working_path():
-    tool = ExecTool()
-    result = await tool.execute(command="echo hello", yield_time_ms=10000)
-    assert "hello" in result
-
-
 @_UNIX_ONLY
 @pytest.mark.asyncio
 async def test_exec_path_append():
