@@ -365,9 +365,9 @@ class WebUICommandRouter:
             )
             if scope is None:
                 return
+            preset = None
             if "model_preset" in envelope:
-                # First send with an explicit preset: never persist a synthetic /model exchange.
-                if not self._transport.is_allowed(client_id) or connection not in self._webui_connections:
+                if not self._transport.is_allowed(client_id):
                     await self._transport.webui_send_event(connection, "error", detail="access_denied", **request_fields)
                     return
                 try:
@@ -384,16 +384,14 @@ class WebUICommandRouter:
                         **request_fields,
                     )
                     return
-                await self._workspaces.persist_scope(new_id, scope, initial_preset=preset)
-            else:
-                await self._workspaces.stage_scope(new_id, scope)
+            await self._workspaces.stage_scope(new_id, scope, model_preset=preset)
             self._transport.webui_attach(connection, new_id)
             await self._transport.webui_send_event(
                 connection,
                 "attached",
                 chat_id=new_id,
                 **request_fields,
-                **(await self._session_projection.attach_fields(webui_session_key(new_id))),
+                **(await self._session_projection.attach_fields(webui_session_key(new_id), draft_preset=preset)),
             )
             await self._transport.webui_send_event(
                 connection,
@@ -466,7 +464,8 @@ class WebUICommandRouter:
                 )
                 return
             self._transport.webui_attach(connection, chat_id)
-            fields = await self._session_projection.attach_fields(webui_session_key(chat_id))
+            key = webui_session_key(chat_id)
+            fields = await self._session_projection.attach_fields(key, draft_preset=self._workspaces.draft_model_preset(key))
             if connection in self._webui_connections:
                 # Sample after the metadata read and enqueue without another yield.
                 fields["live_turn_ids"] = [
@@ -896,6 +895,7 @@ class WebUICommandRouter:
         accepted = False
         session_generation: str | None = None
         session_created = False
+        draft = self._workspaces.draft(webui_session_key(chat_id))
         try:
             if not restart_control:
                 admission = await self.workspace_scope_or_error(
@@ -953,6 +953,7 @@ class WebUICommandRouter:
                 chat_id,
                 session_generation,
                 created=session_created,
+                draft=draft,
             )
             raise
         finally:

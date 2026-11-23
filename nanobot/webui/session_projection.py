@@ -46,7 +46,7 @@ class WebUISessionProjection:
         except SubagentControlError:
             return None
 
-    async def attach_fields(self, session_key: str) -> dict[str, Any]:
+    async def attach_fields(self, session_key: str, *, draft_preset: str | None = None) -> dict[str, Any]:
         """Return the session runtime facts sent with an attach handshake."""
         if self._sessions is None:
             return {}
@@ -55,7 +55,7 @@ class WebUISessionProjection:
         metadata = cast(dict[str, object], raw_metadata) if isinstance(raw_metadata, dict) else None
 
         try:
-            selection = SessionModelPreset.from_metadata(metadata)
+            selection = SessionModelPreset(draft_preset) if snapshot is None else SessionModelPreset.from_metadata(metadata)
         except ValueError:
             self._log.warning("ignoring invalid model preset metadata for session_key={}", session_key)
             selection = SessionModelPreset()
