@@ -8,6 +8,7 @@ import { ThreadShell } from "@/components/thread/ThreadShell";
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
 import { ToastProvider } from "@/components/ui/toast";
 import i18n from "@/i18n";
+import { useSessions } from "@/hooks/useSessions";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
@@ -130,7 +131,9 @@ function makeClient() {
       for (const h of sessionUpdateHandlers) h(chatId, scope);
     },
     sendMessage,
-    sendSystemCommand: vi.fn().mockResolvedValue(undefined),
+    sendSystemCommand: vi.fn().mockImplementation(async (_chatId: string, command: string) => command.startsWith("/model ")
+      ? { command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: command.slice(7) } }] } }
+      : undefined),
     newChat: vi.fn(),
     forkChat: vi.fn(),
     attach: vi.fn(),
@@ -499,7 +502,7 @@ describe("ThreadShell", () => {
       expect.objectContaining({ modelOptions: { reasoning_effort: "high", codex_fast_mode: false } })));
     fireEvent.click(screen.getByRole("button", { name: "Default" }));
     fireEvent.click(await screen.findByRole("option", { name: "fast" }));
-    fireEvent.click(screen.getByRole("button", { name: "fast" }));
+    fireEvent.click(await screen.findByRole("button", { name: "fast" }));
     expect(screen.getByRole("slider", { name: "Reasoning effort" })).toHaveAttribute("aria-valuetext", "low");
     expect(screen.getByRole("button", { name: "Fast" })).toHaveAttribute("aria-pressed", "true");
     expect(client.sendSystemCommand).toHaveBeenCalledWith("model-options", "/model fast");
@@ -1809,6 +1812,11 @@ describe("ThreadShell", () => {
 
     const badge = await screen.findByRole("button", { name: "Default" });
     expect(badge).toHaveTextContent("Default");
+    client.sendSystemCommand.mockResolvedValueOnce({ command_result: { command: "/model", parts: [{ key: "model.failed", values: { error: "Preset unavailable" } }] } });
+    fireEvent.click(badge);
+    fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Preset unavailable");
+    expect(badge).toHaveAccessibleName("Default");
     fireEvent.click(badge);
     fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
 
@@ -1823,7 +1831,7 @@ describe("ThreadShell", () => {
       "preset-order",
       "/model extra",
     );
-    expect(await screen.findByText("extra")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "extra" })).toBeVisible();
 
     rerender(view("fast"));
     expect(await screen.findByLabelText("fast", { selector: "button" })).toBeInTheDocument();
@@ -2506,28 +2514,19 @@ describe("ThreadShell", () => {
     expect(onCreateChat).toHaveBeenCalledWith(null, "start for real", null);
   });
 
-  it("applies the selected landing preset before sending the first prompt", async () => {
+  it("sends the first prompt only after the selected preset takes effect", async () => {
     const client = makeClient();
     const settings = settingsWithFastPreset();
     settings.model_call_order = ["fast"];
-    let resolveModelCommand!: () => void;
-    client.sendSystemCommand.mockImplementation(
-      () => new Promise<void>((resolve) => {
-        resolveModelCommand = resolve;
-      }),
-    );
-    const onCreateChat = vi.fn().mockResolvedValue("chat-new");
-
-    const view = (currentSession: ReturnType<typeof session> | null) => wrap(client, (
-      <ThreadShell
-        session={currentSession}
-        title={currentSession ? "New chat" : "nanobot"}
-        onToggleSidebar={() => {}}
-        onCreateChat={onCreateChat}
-        settingsSnapshot={settings}
-      />
-    ));
-    const { rerender } = render(view(null));
+    client.newChat.mockResolvedValue("chat-new");
+    client.sendSystemCommand.mockResolvedValueOnce({ command_result: { command: "/model", parts: [{ key: "model.failed", values: { error: "Preset unavailable" } }] } });
+    function Chat() {
+      const { createChat, sessions } = useSessions();
+      const current = sessions.find((row) => row.chatId === "chat-new") ?? null;
+      return <ThreadShell session={current} title="New chat" onToggleSidebar={() => {}} settingsSnapshot={settings}
+        onCreateChat={(scope, _message, preset) => createChat(scope, preset)} />;
+    }
+    render(wrap(client, <Chat />));
 
     fireEvent.click(await screen.findByRole("button", { name: "Default" }));
     fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
@@ -2539,27 +2538,15 @@ describe("ThreadShell", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() => expect(client.sendSystemCommand).toHaveBeenCalledWith(
-      "chat-new",
-      "/model fast",
-    ));
-    expect(onCreateChat).toHaveBeenCalledWith(null, "use the selected model", "fast");
-
-    await act(async () => {
-      rerender(view(session("chat-new", "fast")));
-    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Preset unavailable");
+    expect(screen.getByLabelText("Message input")).toHaveValue("use the selected model");
+    expect(client.sendMessage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expectSendMessageWithTurn(client, "chat-new", "use the selected model"));
     fireEvent.focus(await screen.findByLabelText("fast"));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-5.5 OpenAI Codex");
     fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
-    expect(client.sendMessage).not.toHaveBeenCalled();
-
-    await act(async () => {
-      resolveModelCommand();
-    });
-    await waitFor(() => {
-      expectSendMessageWithTurn(client, "chat-new", "use the selected model");
-    });
   });
 
   it("binds a pending landing message to the chat created for it", async () => {

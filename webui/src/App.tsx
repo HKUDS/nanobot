@@ -81,6 +81,7 @@ import { cn } from "@/lib/utils";
 import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { BrowserNotifications, useBrowserNotificationLifecycle } from "@/components/BrowserNotifications";
+import { switchModelPreset } from "@/lib/switch-model-preset";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { FilePreviewStore } from "@/hooks/useFilePreviewState";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
@@ -1010,11 +1011,11 @@ function Shell({
       }
       return chatId;
     } catch (e) {
-      console.error("Failed to create chat", e);
       if (e instanceof Error && e.message.startsWith("workspace_scope_rejected:")) {
         setWorkspaceError(t("errors.workspaceScopeRejected.body"));
+        return null;
       }
-      return null;
+      throw e;
     }
   }, [activeWorkspaceScope, createChat, navigate, t]);
 
@@ -1050,37 +1051,36 @@ function Shell({
       initialMessage?: string,
       modelPreset?: string | null,
     ) => {
-      try {
-        const chatId = await client.newTemporaryChat();
-        const session = createTemporaryChatSession(chatId);
-        const restrictedScope = workspaceScope
-          ? normalizeWorkspaceScope(scopeWithAccessMode(workspaceScope, "restricted"))
-          : null;
-        const nextSession: ChatSummary = {
-          ...session,
-          preview: initialMessage ?? "",
-          modelPreset: modelPreset ?? null,
-          ...(restrictedScope ? { workspaceScope: restrictedScope } : {}),
-        };
-        setTemporarySessions((current) => ({
-          ...current,
-          [nextSession.key]: nextSession,
-        }));
-        setTemporaryChatEnabled(false);
-        setWorkspaceError(null);
-        setSessionSearchOpen(false);
-        navigate({
-          view: "chat",
-          activeKey: nextSession.key,
-          settingsSection: "overview",
-          temporary: true,
-        });
-        setMobileSidebarOpen(false);
-        return nextSession.chatId;
-      } catch (error) {
-        console.error("Failed to create temporary chat", error);
-        return null;
-      }
+      const chatId = await client.newTemporaryChat();
+      const confirmedPreset = modelPreset ? await switchModelPreset(client, chatId, modelPreset).catch((error: unknown) => {
+        client.discardTemporaryChat(chatId);
+        throw error;
+      }) : null;
+      const session = createTemporaryChatSession(chatId);
+      const restrictedScope = workspaceScope
+        ? normalizeWorkspaceScope(scopeWithAccessMode(workspaceScope, "restricted"))
+        : null;
+      const nextSession: ChatSummary = {
+        ...session,
+        preview: initialMessage ?? "",
+        modelPreset: confirmedPreset,
+        ...(restrictedScope ? { workspaceScope: restrictedScope } : {}),
+      };
+      setTemporarySessions((current) => ({
+        ...current,
+        [nextSession.key]: nextSession,
+      }));
+      setTemporaryChatEnabled(false);
+      setWorkspaceError(null);
+      setSessionSearchOpen(false);
+      navigate({
+        view: "chat",
+        activeKey: nextSession.key,
+        settingsSection: "overview",
+        temporary: true,
+      });
+      setMobileSidebarOpen(false);
+      return nextSession.chatId;
     },
     [client, navigate],
   );

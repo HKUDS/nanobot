@@ -91,6 +91,7 @@ export interface ModelPresetOption {
 
 interface ModelPresetBadgeProps {
   label: string;
+  disabled?: boolean;
   modelDetail?: string | null;
   modelPreset?: string | null;
   modelPresets?: ModelPresetOption[];
@@ -109,6 +110,7 @@ interface ModelPresetBadgeProps {
 
 export function ModelPresetBadge({
   label,
+  disabled,
   modelDetail,
   modelPreset,
   modelPresets = [],
@@ -309,6 +311,7 @@ export function ModelPresetBadge({
         aria-label={label}
         tabIndex={opensSetup ? undefined : 0}
         type={opensSetup ? "button" : undefined}
+        disabled={opensSetup ? disabled : undefined}
         onClick={opensSetup ? onClick : undefined}
         className={cn(
           "thread-composer-model-badge group inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] appearance-none border-0 bg-transparent p-0 shadow-none focus-visible:outline-none",
@@ -328,6 +331,7 @@ export function ModelPresetBadge({
         <TooltipTrigger asChild>
           <button
             type="button"
+            disabled={disabled}
             data-switching={motion ? "true" : undefined}
             aria-label={label}
             aria-expanded={open}

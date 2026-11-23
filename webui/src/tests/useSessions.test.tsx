@@ -38,6 +38,7 @@ function fakeClient() {
     },
     sendMessage: vi.fn(),
     newChat: vi.fn(),
+    sendSystemCommand: vi.fn(),
     forkChat: vi.fn(),
     attach: vi.fn(),
     connect: vi.fn(),
@@ -434,10 +435,11 @@ describe("useSessions", () => {
     expect(result.current.sessions[0]?.workspaceScope).toEqual(workspaceScope);
   });
 
-  it("stores an optimistic model preset when creating a chat", async () => {
+  it("stores the confirmed model preset when creating a chat", async () => {
     vi.mocked(api.listSessions).mockResolvedValue([]);
     const client = fakeClient();
     client.newChat.mockResolvedValue("chat-fast");
+    client.sendSystemCommand.mockResolvedValue({ command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "fast" } }] } });
 
     const { result } = renderHook(() => useSessions(), {
       wrapper: wrap(client),

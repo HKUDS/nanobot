@@ -2628,7 +2628,7 @@ describe("NanobotClient", () => {
       turn_id: frame.turn_id,
     });
 
-    await expect(pending).resolves.toBeUndefined();
+    await expect(pending).resolves.toMatchObject({ text: "Switched model preset to fast.", turn_id: frame.turn_id });
     expect(chatHandler).toHaveBeenCalledTimes(1);
     expect(chatHandler).toHaveBeenCalledWith(expect.objectContaining({
       text: "normal reply",

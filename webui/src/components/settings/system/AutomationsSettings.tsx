@@ -196,7 +196,7 @@ export function AutomationsSettings({
     content.trim(),
     images,
     { ...options, intent: "create_automation" },
-    activeModelPreset,
+    localModelPreset,
   );
   const filterLabel = filter === "all" ? tx("settings.automations.filter", "Filter") : tx("settings.automations.filteredBy", "Filter: {{status}}", {
     status: summaryOptions.find((option) => option.value === filter)?.label,
