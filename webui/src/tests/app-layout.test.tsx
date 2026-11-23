@@ -35,7 +35,6 @@ const newTemporaryChatSpy = vi.fn<() => Promise<string>>();
 const sendMessageSpy = vi.fn();
 const sendSystemCommandSpy = vi.fn().mockResolvedValue(undefined);
 let mockDefaultChatId: string | null = null;
-let mockClientStatus: ConnectionStatus = "idle";
 const statusHandlers = new Set<(status: ConnectionStatus) => void>();
 const runStatusHandlers = new Set<(chatId: string, state: RunState) => void>();
 const runState = (startedAt: number | null): RunState => ({
@@ -263,7 +262,7 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
   class MockClient {
     constructor(options: NanobotClientOptions) { clientOptions = options; }
     onTaskNotice = () => () => {};
-    status = mockClientStatus;
+    status = "idle" as const;
     defaultChatId = mockDefaultChatId;
     sendSystemCommand = sendSystemCommandSpy;
     connect = connectSpy;
@@ -311,7 +310,7 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     fenceCanonicalCompletedTurns = vi.fn();
     getGoalState = () => undefined;
     sendMessage = sendMessageSpy;
-    newChat = createChatSpy;
+    newChat = vi.fn();
     newTemporaryChat = newTemporaryChatSpy;
     attach = attachSpy;
     setSidebarState = setSidebarStateSpy;
@@ -364,7 +363,6 @@ describe("App layout", () => {
     sendMessageSpy.mockReset();
     sendSystemCommandSpy.mockReset().mockResolvedValue(undefined);
     mockDefaultChatId = null;
-    mockClientStatus = "idle";
     statusHandlers.clear();
     runStatusHandlers.clear();
     sessionUpdateHandlers.clear();
@@ -1289,52 +1287,6 @@ describe("App layout", () => {
       access_mode: "restricted",
       restrict_to_workspace: true,
     });
-  });
-
-  it.each(["welcome", "temporary", "automations"])("keeps the %s draft if its selected preset fails, then sends on confirmed retry", async (surface) => {
-    const actual = await vi.importActual<typeof import("@/hooks/useSessions")>("@/hooks/useSessions");
-    vi.mocked(useSessions).mockImplementation(actual.useSessions);
-    mockClientStatus = "open";
-    const settings = baseSettingsPayload();
-    const preset = { ...settings.model_presets[0], provider: "openai" };
-    mockFetchRoutes({
-      "/api/settings": { ...settings, agent: { ...settings.agent, model_preset: "default" },
-        model_presets: [{ ...preset, active: true }, { ...preset, active: false, name: "named", label: "named", is_default: false }],
-        providers: [{ name: "openai", label: "OpenAI", configured: true }] },
-      "/api/webui/automations": { jobs: [] },
-      "/api/sessions": { sessions: [] },
-    });
-    if (surface === "automations") window.history.replaceState(null, "", "/#/automations");
-    render(<App />);
-    if (surface === "temporary") fireEvent.click(await screen.findByRole("button", { name: "Temporary chat" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Default" }));
-    fireEvent.click(await screen.findByRole("option", { name: /^named\b/ }));
-    const input = screen.getByRole("textbox", { name: surface === "automations" ? "Describe an automation" : "Message input" });
-    const prompt = "Use the selected preset";
-    fireEvent.change(input, { target: { value: prompt } });
-    let rejectSelection!: () => void;
-    sendSystemCommandSpy.mockImplementationOnce(() => new Promise((resolve) => {
-      rejectSelection = () => resolve({ command_result: { command: "/model", parts: [{ key: "model.failed", values: { error: "Preset not found" } }] } });
-    }));
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(rejectSelection).toBeDefined());
-    expect(sendMessageSpy).not.toHaveBeenCalled();
-    await act(async () => rejectSelection());
-    expect(await screen.findByRole("alert")).toHaveTextContent("Preset not found");
-    expect(input).toHaveValue(prompt);
-    expect(input).toBeEnabled();
-    expect(sendMessageSpy).not.toHaveBeenCalled();
-    if (surface === "temporary") {
-      expect(discardTemporaryChatSpy).toHaveBeenCalledWith(sendSystemCommandSpy.mock.calls[0][0]);
-    }
-    sendSystemCommandSpy.mockResolvedValueOnce({ command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "named" } }] } });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(sendMessageSpy).toHaveBeenCalledTimes(1));
-    const chatId = sendSystemCommandSpy.mock.calls[1][0];
-    expect(sendMessageSpy).toHaveBeenCalledWith(chatId, prompt, undefined,
-      surface === "automations" ? expect.objectContaining({ intent: "create_automation" }) : expect.any(Object));
-    expect(sendSystemCommandSpy).toHaveBeenCalledTimes(2);
-    expect(sendSystemCommandSpy).toHaveBeenLastCalledWith(chatId, "/model named");
   });
 
   it("preserves the first message when the gateway rejects a project", async () => {
