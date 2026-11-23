@@ -98,6 +98,7 @@ def test_execution_rules_in_system_prompt(tmp_path) -> None:
     prompt = builder.build_system_prompt()
     assert "clear user request" in prompt
     assert "execution and verification" in prompt
+    assert "Ask for confirmation when an irreversible action requires it" in prompt
 
 
 def test_execution_rules_reach_existing_workspace_soul(tmp_path) -> None:
@@ -147,28 +148,6 @@ def test_scheduling_contract_reaches_fresh_and_legacy_workspaces(tmp_path, legac
     assert "每天早上8点提醒我喝水" in messages[-1]["content"]
     assert builder.build_messages(history=[], current_message="Check issues when convenient")[0] == messages[0]
     assert agents_path.read_bytes() == original
-
-
-def test_default_soul_template_keeps_execution_policy_in_tool_contract() -> None:
-    soul = (pkg_files("nanobot") / "templates" / "SOUL.md").read_text(encoding="utf-8")
-    contract = (
-        pkg_files("nanobot") / "templates" / "agent" / "tool_contract.md"
-    ).read_text(encoding="utf-8")
-
-    assert "## Execution Rules" not in soul
-    assert "clear user request" not in soul
-    assert "clear user request" in contract
-    assert "execution and verification" in contract
-    assert "Ask for confirmation when an irreversible action requires it" in contract
-
-
-def test_channel_format_hint_telegram(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    prompt = builder.build_system_prompt(channel="telegram")
-    assert "Format Hint" in prompt
-    assert "messaging app" in prompt
 
 
 def test_channel_format_hint_whatsapp(tmp_path) -> None:

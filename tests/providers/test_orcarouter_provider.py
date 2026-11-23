@@ -3,7 +3,7 @@ from unittest.mock import patch
 from nanobot.config.schema import Config, ProvidersConfig
 from nanobot.providers.factory import make_provider
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import PROVIDERS, find_by_name
+from nanobot.providers.registry import find_by_name
 
 
 def test_orcarouter_config_field_exists() -> None:
@@ -13,10 +13,9 @@ def test_orcarouter_config_field_exists() -> None:
 
 
 def test_orcarouter_provider_in_registry() -> None:
-    specs = {spec.name: spec for spec in PROVIDERS}
-
-    assert "orcarouter" in specs
-    orcarouter = specs["orcarouter"]
+    orcarouter = find_by_name("orcarouter")
+    assert orcarouter is not None
+    assert orcarouter.name == "orcarouter"
     assert orcarouter.backend == "openai_compat"
     assert orcarouter.env_key == "ORCAROUTER_API_KEY"
     assert orcarouter.display_name == "OrcaRouter"
@@ -25,13 +24,6 @@ def test_orcarouter_provider_in_registry() -> None:
     assert orcarouter.detect_by_base_keyword == "orcarouter"
     assert orcarouter.default_api_base == "https://api.orcarouter.ai/v1"
     assert orcarouter.strip_model_prefix is False
-
-
-def test_find_by_name_orcarouter() -> None:
-    spec = find_by_name("orcarouter")
-
-    assert spec is not None
-    assert spec.name == "orcarouter"
 
 
 def test_orcarouter_forced_provider_uses_default_api_base() -> None:

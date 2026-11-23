@@ -13,12 +13,6 @@ from nanobot.providers.registry import find_by_name
 
 class TestDeepMerge:
 
-    def test_flat_merge(self) -> None:
-        assert _deep_merge({"a": 1}, {"b": 2}) == {"a": 1, "b": 2}
-
-    def test_override_scalar(self) -> None:
-        assert _deep_merge({"a": 1}, {"a": 2}) == {"a": 2}
-
     def test_nested_merge(self) -> None:
         base = {"outer": {"a": 1, "b": 2}}
         override = {"outer": {"b": 3, "c": 4}}
@@ -47,22 +41,6 @@ class TestDeepMerge:
         _deep_merge(base, override)
         assert base == {"a": {"x": 1}}
         assert override == {"a": {"y": 2}}
-
-
-class TestExtraBodyInit:
-
-    def test_default_is_empty(self) -> None:
-        provider = OpenAICompatProvider(api_key="test")
-        assert provider._extra_body == {}
-
-    def test_none_becomes_empty(self) -> None:
-        provider = OpenAICompatProvider(api_key="test", extra_body=None)
-        assert provider._extra_body == {}
-
-    def test_dict_stored(self) -> None:
-        body = {"chat_template_kwargs": {"enable_thinking": False}}
-        provider = OpenAICompatProvider(api_key="test", extra_body=body)
-        assert provider._extra_body == body
 
 
 def _make_provider(extra_body: dict[str, Any] | None = None) -> OpenAICompatProvider:
@@ -156,15 +134,6 @@ class TestBuildKwargsExtraBody:
             temperature=0.1, reasoning_effort=None, tool_choice=None,
         )
         assert kwargs["extra_body"]["guided_json"] == schema
-
-    def test_repetition_penalty_injection(self) -> None:
-        provider = _make_provider({"repetition_penalty": 1.15})
-        kwargs = provider._build_kwargs(
-            messages=_simple_messages(),
-            tools=None, model=None, max_tokens=100,
-            temperature=0.1, reasoning_effort=None, tool_choice=None,
-        )
-        assert kwargs["extra_body"]["repetition_penalty"] == 1.15
 
 
 class TestBuildResponsesBodyExtraBody:

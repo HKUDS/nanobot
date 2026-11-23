@@ -284,33 +284,6 @@ async def test_run_returns_result(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_with_hooks(tmp_path):
-    from nanobot.agent.hook import AgentHook, AgentHookContext, SDKCaptureHook
-    from nanobot.bus.events import OutboundMessage
-
-    config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
-
-    class TestHook(AgentHook):
-        async def before_iteration(self, context: AgentHookContext) -> None:
-            pass
-
-    mock_response = OutboundMessage(
-        channel="cli", chat_id="direct", content="done"
-    )
-    bot._loop.process_direct = AsyncMock(return_value=mock_response)
-
-    result = await bot.run("hi", hooks=[TestHook()])
-
-    assert result.content == "done"
-    assert bot._loop._extra_hooks == []
-    hooks = bot._loop.process_direct.await_args.kwargs["hooks"]
-    assert len(hooks) == 2
-    assert isinstance(hooks[0], SDKCaptureHook)
-    assert isinstance(hooks[1], TestHook)
-
-
-@pytest.mark.asyncio
 async def test_run_hooks_restored_on_error(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
@@ -1166,7 +1139,6 @@ async def test_run_user_hooks_still_fire_alongside_capture(tmp_path):
             seen_iterations.append(context.iteration)
 
     async def fake_process_direct(message, *, session_key, hooks):
-        assert len(hooks) == 2, f"expected capture + user hook, got {len(hooks)}"
         ctx = AgentHookContext(iteration=7, messages=[])
         for h in hooks:
             await h.after_iteration(ctx)

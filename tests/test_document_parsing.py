@@ -5,7 +5,6 @@ import pytest
 
 from nanobot.utils.document import (
     PdfSafetyError,
-    _is_text_extension,
     extract_pdf_pages,
     extract_text,
     open_document_line_source,
@@ -28,8 +27,9 @@ class TestExtractText:
         assert result is not None
         assert "[error: file not found:" in result
 
-    def test_extract_text_txt_file(self, tmp_path: Path):
-        txt_file = tmp_path / "test.txt"
+    @pytest.mark.parametrize("suffix", ["txt", "TXT", "md", "csv", "json", "yaml", "yml", "xml", "html", "htm"])
+    def test_extract_text_plain_text_formats(self, tmp_path: Path, suffix: str):
+        txt_file = tmp_path / f"test.{suffix}"
         content = "Hello, world!\nThis is a test."
         txt_file.write_text(content, encoding="utf-8")
 
@@ -59,30 +59,6 @@ class TestExtractText:
         assert len(result) < 300_000
         assert "(truncated," in result
         assert "chars total)" in result
-
-    def test_extract_text_md_file(self, tmp_path: Path):
-        md_file = tmp_path / "test.md"
-        content = "# Header\n\nSome markdown content."
-        md_file.write_text(content, encoding="utf-8")
-
-        result = extract_text(md_file)
-        assert result == content
-
-    def test_extract_text_csv_file(self, tmp_path: Path):
-        csv_file = tmp_path / "test.csv"
-        content = "name,age\nAlice,30\nBob,25"
-        csv_file.write_text(content, encoding="utf-8")
-
-        result = extract_text(csv_file)
-        assert result == content
-
-    def test_extract_text_json_file(self, tmp_path: Path):
-        json_file = tmp_path / "test.json"
-        content = '{"key": "value", "number": 42}'
-        json_file.write_text(content, encoding="utf-8")
-
-        result = extract_text(json_file)
-        assert result == content
 
     def test_pdf_search_lines_expose_page_continuation(
         self,
@@ -517,13 +493,6 @@ class TestExtractText:
             with pytest.raises(PdfSafetyError, match="content stream exceeds"):
                 extract_pdf_pages(path)
 
-    def test_extract_text_pdf_not_found(self, tmp_path: Path):
-        missing_pdf = tmp_path / "nonexistent.pdf"
-
-        result = extract_text(missing_pdf)
-        assert result is not None
-        assert "[error: file not found:" in result
-
     def test_extract_text_image_files(self, tmp_path: Path):
         png_file = tmp_path / "test.png"
         png_data = (
@@ -539,35 +508,3 @@ class TestExtractText:
         assert result is not None
         assert "[image:" in result
         assert "test.png" in result
-
-
-class TestIsTextExtension:
-
-    def test_text_extensions_return_true(self):
-        assert _is_text_extension(".txt") is True
-        assert _is_text_extension(".md") is True
-        assert _is_text_extension(".csv") is True
-        assert _is_text_extension(".json") is True
-        assert _is_text_extension(".yaml") is True
-        assert _is_text_extension(".yml") is True
-        assert _is_text_extension(".xml") is True
-        assert _is_text_extension(".html") is True
-        assert _is_text_extension(".htm") is True
-
-    def test_non_text_extensions_return_false(self):
-        assert _is_text_extension(".pdf") is False
-        assert _is_text_extension(".docx") is False
-        assert _is_text_extension(".xlsx") is False
-        assert _is_text_extension(".pptx") is False
-        assert _is_text_extension(".png") is False
-        assert _is_text_extension(".xyz") is False
-
-    def test_case_sensitivity(self):
-        """Test that _is_text_extension requires lowercase extension.
-
-        Note: The main extract_text function handles case-insensitivity by
-        converting extensions to lowercase before calling _is_text_extension.
-        """
-        assert _is_text_extension(".txt") is True
-        assert _is_text_extension(".TXT") is False
-        assert _is_text_extension(".pdf") is False

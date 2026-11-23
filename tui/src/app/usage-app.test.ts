@@ -131,24 +131,9 @@ describe("TUI /usage", () => {
     expect(sent).toEqual([])
   })
 
-  test("refreshes on turn completion without adding duplicate rounds", async () => {
-    let input = 9000
-    let requests = 0
-    const { app, ui, sent } = await mount(async () => { requests++; return Response.json(page(input)) })
-    await open(ui)
-    input = 12000
-    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn" })
-    await waitUntil(() => requests === 2)
-    await setup!.flush()
-    const frame = setup!.captureCharFrame()
-    expect(frame).toContain("Round 2/2  In 12,000  Out 200")
-    expect(frame).not.toContain("Round 4/4")
-    expect(sent).toEqual([])
-  })
-
   test("coalesces a burst into one trailing request without displaying a stale snapshot", async () => {
     const pending: Array<(response: Response) => void> = []
-    const { app, ui } = await mount(() => new Promise((resolve) => pending.push(resolve)))
+    const { app, ui, sent } = await mount(() => new Promise((resolve) => pending.push(resolve)))
     await open(ui)
     for (let index = 0; index < 10; index++) {
       app.accept({ event: "turn_end", chat_id: "chat", turn_id: `turn-${index}` })
@@ -163,11 +148,12 @@ describe("TUI /usage", () => {
     await setup!.flush()
     expect(setup!.captureCharFrame()).toContain("In 12,000")
     expect(pending.length).toBe(2)
-    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "later" })
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn" })
     expect(pending.length).toBe(3)
     pending[2]!(Response.json(page(15000)))
     await setup!.flush()
-    expect(setup!.captureCharFrame()).toContain("In 15,000")
+    expect(setup!.captureCharFrame()).toContain("Round 2/2  In 15,000  Out 200")
+    expect(sent).toEqual([])
   })
 
   test("retries a queued refresh after failure and stays idle while hidden or streaming", async () => {

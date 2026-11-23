@@ -118,23 +118,18 @@ describe("provider brand logos", () => {
     expect(providerBrand("xai-grok")?.initials).toBe("xAI");
   });
 
-  it("keeps AssemblyAI voice settings on the first-party brand domain", () => {
-    expect(providerBrand("assemblyai")?.logoUrls).toContain("https://assemblyai.com/favicon.ico");
-    expect(providerBrand("assemblyai")?.initials).toBe("AA");
-  });
-
-  it("keeps Bocha web search settings on the first-party brand domain", () => {
-    expect(providerBrand("bocha")?.logoUrls).toContain("https://bochaai.com/favicon.ico");
-    expect(providerBrand("bocha")?.initials).toBe("B");
+  it.each([
+    ["assemblyai", "assemblyai.com", "AA"],
+    ["bocha", "bochaai.com", "B"],
+    ["keenable", "keenable.ai", "K"],
+  ])("uses the first-party favicon and initials for %s", (provider, domain, initials) => {
+    const brand = providerBrand(provider);
+    expect(brand?.logoUrls).toContain(`https://${domain}/favicon.ico`);
+    expect(brand?.initials).toBe(initials);
   });
 
   it("reuses the bundled DeepSeek brand for DeepSeek web search settings", () => {
     expect(providerBrand("deepseek")?.logoUrl).toMatch(/^\/src\/assets\/providers\/.*\.svg$/);
     expect(providerBrand("deepseek")?.initials).toBe("DS");
-  });
-
-  it("keeps Keenable web search settings on the first-party brand domain", () => {
-    expect(providerBrand("keenable")?.logoUrls).toContain("https://keenable.ai/favicon.ico");
-    expect(providerBrand("keenable")?.initials).toBe("K");
   });
 });

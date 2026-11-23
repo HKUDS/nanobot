@@ -805,22 +805,12 @@ describe("MarkdownTextRenderer", () => {
     expect(container.firstElementChild).not.toHaveClass("space-y-0");
   });
 
-  it("keeps streaming parsing without a competing reveal animation", () => {
-    const { container } = render(
-      <MarkdownTextRenderer streaming>春天</MarkdownTextRenderer>,
-    );
-
-    expect(container).toHaveTextContent("春天");
-    expect(container.firstElementChild).not.toHaveClass(
-      "[&>*:last-child]:after:content-[var(--streamdown-caret)]",
-    );
-    expect(container.querySelector("[data-sd-animate]")).not.toBeInTheDocument();
-  });
-
   it("does not add animation markup when a streamed response completes", () => {
     const { container, rerender } = render(
       <MarkdownTextRenderer streaming>春天</MarkdownTextRenderer>,
     );
+    expect(container).toHaveTextContent("春天");
+    expect(container.firstElementChild).not.toHaveClass("[&>*:last-child]:after:content-[var(--streamdown-caret)]");
     expect(container.querySelector("[data-sd-animate]")).not.toBeInTheDocument();
 
     rerender(<MarkdownTextRenderer>春天</MarkdownTextRenderer>);

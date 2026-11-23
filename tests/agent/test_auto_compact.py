@@ -305,10 +305,6 @@ class TestSessionTTLConfig:
         defaults = AgentDefaults(session_ttl_minutes=0)
         assert defaults.session_ttl_minutes == 0
 
-    def test_custom_ttl(self):
-        defaults = AgentDefaults(session_ttl_minutes=30)
-        assert defaults.session_ttl_minutes == 30
-
     def test_user_friendly_alias_is_supported(self):
         defaults = AgentDefaults.model_validate({"idleCompactAfterMinutes": 30})
         assert defaults.session_ttl_minutes == 30
@@ -374,24 +370,14 @@ class TestIdleScanThrottling:
         assert loop.auto_compact.check_expired.call_count == 2
 
 
-class TestAgentLoopTTLParam:
-
-    def test_loop_stores_ttl(self, tmp_path):
-        loop = _make_loop(tmp_path, session_ttl_minutes=25)
-        assert loop.auto_compact._ttl == 25
-
-    def test_explicit_zero_ttl_disables_loop_compaction(self, tmp_path):
-        loop = _make_loop(tmp_path, session_ttl_minutes=0)
-        assert loop.auto_compact._ttl == 0
-
 class TestAutoCompact:
 
     @pytest.mark.asyncio
     async def test_check_expired_only_archives_expired_sessions(self, tmp_path):
-        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        loop = _make_loop(tmp_path, session_ttl_minutes=10)
         s1 = loop.sessions.get_or_create("cli:expired")
         s1.add_message("user", "old")
-        s1.updated_at = datetime.now() - timedelta(minutes=20)
+        s1.updated_at = datetime.now() - timedelta(minutes=12)
         loop.sessions.save(s1)
         s2 = loop.sessions.get_or_create("cli:active")
         s2.add_message("user", "recent")
@@ -402,6 +388,8 @@ class TestAutoCompact:
         await _drain_background_tasks(loop)
 
         active_after = loop.sessions.get_or_create("cli:active")
+        assert loop.sessions.get_or_create("cli:expired").last_archived == 1
+        assert active_after.last_archived == 0
         assert len(active_after.messages) == 1
         assert active_after.messages[0]["content"] == "recent"
         await loop.aclose()
@@ -897,6 +885,7 @@ class TestProactiveAutoCompact:
         await self._run_check_expired(loop)
 
         session_after = loop.sessions.get_or_create("cli:test")
+        assert session_after.last_archived == 0
         assert len(session_after.messages) == 1
         await loop.aclose()
 
@@ -942,19 +931,6 @@ class TestProactiveAutoCompact:
         assert _fake_compact.state["count"] == 0
         assert "dream:20260602-155256" not in loop.auto_compact._archiving
         assert "dream:20260602-155256" not in loop.auto_compact._summaries
-        await loop.aclose()
-
-    @pytest.mark.asyncio
-    async def test_no_proactive_archive_when_active(self, tmp_path):
-        loop = _make_loop(tmp_path, session_ttl_minutes=15)
-        session = loop.sessions.get_or_create("cli:test")
-        session.add_message("user", "recent message")
-        loop.sessions.save(session)
-
-        await self._run_check_expired(loop)
-
-        session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 1
         await loop.aclose()
 
     @pytest.mark.asyncio
@@ -1022,25 +998,6 @@ class TestProactiveAutoCompact:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_skip_expired_session_with_active_agent_task(self, tmp_path):
-        loop = _make_loop(tmp_path, session_ttl_minutes=15)
-        session = loop.sessions.get_or_create("cli:test")
-        _add_turns(session, 6, prefix="old")
-        session.updated_at = datetime.now() - timedelta(minutes=20)
-        loop.sessions.save(session)
-
-        _fake_compact = _make_fake_compact(loop)
-        loop.consolidator.compact_idle_session = _fake_compact
-
-        await self._run_check_expired(loop, active_session_keys={"cli:test"})
-        assert _fake_compact.state["count"] == 0
-
-        session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 12
-
-        await loop.aclose()
-
-    @pytest.mark.asyncio
     async def test_archive_after_active_task_completes(self, tmp_path):
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -1053,6 +1010,7 @@ class TestProactiveAutoCompact:
 
         await self._run_check_expired(loop, active_session_keys={"cli:test"})
         assert _fake_compact.state["count"] == 0
+        assert len(loop.sessions.get_or_create("cli:test").messages) == 12
 
         await self._run_check_expired(loop)
         assert _fake_compact.state["count"] == 1

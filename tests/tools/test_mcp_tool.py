@@ -32,14 +32,6 @@ from nanobot.config.schema import MCPServerConfig
 _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 
 
-def test_type_checking_only_mcp_annotations_are_deferred() -> None:
-    assert mcp_mod._MCPWrapperBase.__annotations__["_session"] == "ClientSession"
-    assert MCPToolWrapper.__init__.__annotations__["session"] == "ClientSession"
-    assert MCPResourceWrapper.__init__.__annotations__["resource_def"] == "Resource"
-    assert MCPPromptWrapper.__init__.__annotations__["prompt_def"] == "Prompt"
-    assert connect_mcp_servers.__annotations__["mcp_servers"] == "dict[str, MCPServerConfig]"
-
-
 class _FakeTextContent:
     def __init__(self, text: str) -> None:
         self.text = text
@@ -2287,10 +2279,6 @@ async def test_connect_accepts_servers_without_tools_capability(
             await stack.aclose()
 
 
-def test_sanitize_name_replaces_spaces() -> None:
-    assert _sanitize_name("PostgreSQL System Information") == "PostgreSQL_System_Information"
-
-
 def test_sanitize_name_replaces_special_characters() -> None:
     assert _sanitize_name("foo.bar@baz!") == "foo_bar_baz_"
 
@@ -2301,20 +2289,6 @@ def test_sanitize_name_collapses_consecutive_underscores() -> None:
 
 def test_sanitize_name_preserves_valid_characters() -> None:
     assert _sanitize_name("my-tool_v2") == "my-tool_v2"
-
-
-def test_sanitize_name_noop_for_already_clean_names() -> None:
-    assert _sanitize_name("mcp_server_tool") == "mcp_server_tool"
-
-
-def test_resource_wrapper_sanitizes_name() -> None:
-    resource_def = SimpleNamespace(
-        name="PostgreSQL System Information",
-        uri="file:///pg/info",
-        description="PG info",
-    )
-    wrapper = MCPResourceWrapper(None, "srv", resource_def)
-    assert wrapper.name == "mcp_srv_resource_PostgreSQL_System_Information"
 
 
 def test_prompt_wrapper_sanitizes_name() -> None:

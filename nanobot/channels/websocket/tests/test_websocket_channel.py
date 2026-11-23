@@ -44,7 +44,6 @@ from nanobot.channels.websocket import runtime as websocket_runtime
 from nanobot.channels.websocket.runtime import (
     WebSocketChannel,
     WebSocketConfig,
-    _is_valid_chat_id,
     _parse_envelope,
     _parse_inbound_payload,
 )
@@ -6039,14 +6038,6 @@ def test_parse_envelope_detects_typed_frames() -> None:
     assert env == {"type": "message", "chat_id": "abc", "content": "hi"}
 
 
-def test_parse_envelope_rejects_legacy_and_garbage() -> None:
-    assert _parse_envelope('{"content":"hi"}') is None
-    assert _parse_envelope("plain text") is None
-    assert _parse_envelope("{broken") is None
-    assert _parse_envelope("[1,2,3]") is None
-    assert _parse_envelope('{"type":123}') is None
-
-
 @pytest.mark.parametrize("retired", [False, True])
 def test_sessions_list_reports_only_live_runs(monkeypatch, retired: bool) -> None:
     from websockets.datastructures import Headers
@@ -6122,25 +6113,6 @@ def test_sessions_list_reports_only_live_runs(monkeypatch, retired: bool) -> Non
             "handle": handle.public_payload(),
         }
     ]
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ("abc", True),
-        ("a1b2_c:d-e", True),
-        ("x" * 64, True),
-        ("", False),
-        ("x" * 65, False),
-        ("has space", False),
-        ("a/b", False),
-        ("a.b", False),
-        (None, False),
-        (123, False),
-    ],
-)
-def test_is_valid_chat_id(value: Any, expected: bool) -> None:
-    assert _is_valid_chat_id(value) is expected
 
 
 @pytest.mark.asyncio

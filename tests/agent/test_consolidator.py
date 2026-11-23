@@ -318,21 +318,6 @@ class TestConsolidatorSummarize:
         assert call["max_tokens"] == 321
         assert call["reasoning_effort"] == "medium"
 
-    async def test_summarize_appends_to_history(
-        self, consolidator, mock_provider, store, runtime
-    ):
-        mock_provider.chat_stream_with_retry.return_value = MagicMock(
-            content="User fixed a bug in the auth module."
-        )
-        messages = [
-            {"role": "user", "content": "fix the auth bug"},
-            {"role": "assistant", "content": "Done, fixed the race condition."},
-        ]
-        result = await _archive(consolidator, messages, runtime)
-        assert result == "User fixed a bug in the auth module."
-        entries = store.read_unprocessed_history(since_cursor=0)
-        assert len(entries) == 1
-
     async def test_summarize_appends_session_key_to_history(
         self,
         consolidator,
@@ -361,33 +346,14 @@ class TestConsolidatorSummarize:
     ):
         mock_provider.chat_stream_with_retry.side_effect = Exception("API error")
         messages = [{"role": "user", "content": "hello"}]
-        result = await _archive(consolidator, messages, runtime)
+        result = await _archive(consolidator, messages, runtime, session_key="slack:chat-2")
         assert result is not None
         assert "[RAW]" in result
         assert "hello" in result
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
-        assert "[RAW]" in entries[0]["content"]
-
-    async def test_raw_dump_fallback_appends_session_key(
-        self,
-        consolidator,
-        mock_provider,
-        store,
-        runtime,
-    ):
-        mock_provider.chat_stream_with_retry.side_effect = Exception("API error")
-        messages = [{"role": "user", "content": "hello"}]
-
-        await _archive(
-            consolidator,
-            messages,
-            runtime,
-            session_key="slack:chat-2",
-        )
-
-        entries = store.read_unprocessed_history(since_cursor=0)
         assert entries[0]["session_key"] == "slack:chat-2"
+        assert "[RAW]" in entries[0]["content"]
 
     async def test_raw_fallback_represents_previous_checkpoint_and_new_chunk(
         self,

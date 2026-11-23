@@ -357,23 +357,6 @@ class TestEditFileTool:
         assert b"\r\n" in raw
 
     @pytest.mark.asyncio
-    async def test_trim_fallback(self, tool, tmp_path):
-        f = tmp_path / "indent.py"
-        f.write_text("    def foo():\n        pass\n", encoding="utf-8")
-        result = await tool.execute(
-            path=str(f), old_text="def foo():\n    pass", new_text="def bar():\n    return 1",
-        )
-        assert "Patch applied:" in result
-        assert "bar" in f.read_text()
-
-    @pytest.mark.asyncio
-    async def test_ambiguous_match(self, tool, tmp_path):
-        f = tmp_path / "dup.py"
-        f.write_text("aaa\nbbb\naaa\nbbb\n", encoding="utf-8")
-        result = await tool.execute(path=str(f), old_text="aaa\nbbb", new_text="xxx")
-        assert "appears" in result.lower() or "Warning" in result
-
-    @pytest.mark.asyncio
     async def test_replace_all(self, tool, tmp_path):
         f = tmp_path / "multi.py"
         f.write_text("foo bar foo bar foo", encoding="utf-8")

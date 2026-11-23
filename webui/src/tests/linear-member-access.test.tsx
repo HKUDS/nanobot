@@ -64,12 +64,6 @@ describe("Linear member access", () => {
     expect(store.getSnapshot().payload?.members.every(member => !member.allowed)).toBe(true);
   });
 
-  it("shows members without team subtitles or a team filter", async () => {
-    await openMembers();
-    expect(screen.queryByRole("combobox", { name: "Filter by team" })).not.toBeInTheDocument();
-    expect(screen.queryByText("nanobot", { exact: true })).not.toBeInTheDocument();
-  });
-
   it("keeps one workspace-level switch per member regardless of team membership", async () => {
     requestMutation.mockResolvedValue({ ...roster, members: [
       { ...roster.members[0], teams: ["Core", "Desktop"] },

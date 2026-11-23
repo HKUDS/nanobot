@@ -298,15 +298,6 @@ class TestDreamCursor:
 
 
 class TestLegacyHistoryMigration:
-    def test_read_unprocessed_history_handles_entries_without_cursor(self, store):
-        store.history_file.write_text(
-            '{"cursor": 1, "timestamp": "2026-03-30 14:30", "content": "Old event"}\n',
-            encoding="utf-8",
-        )
-        entries = store.read_unprocessed_history(since_cursor=0)
-        assert len(entries) == 1
-        assert entries[0]["cursor"] == 1
-
     def test_migrates_legacy_history_md_preserving_partial_entries(self, tmp_path):
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()

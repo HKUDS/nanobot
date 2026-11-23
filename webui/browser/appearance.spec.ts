@@ -4,13 +4,6 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/**", (route) => route.abort());
 });
 
-test("appearance puts interface settings before activity display", async ({ page }) => {
-  await page.goto("/browser/fixture.html?case=appearance");
-  await expect(page.locator(".appearance-page > section > h2")).toHaveText([
-    "Theme", "Reading", "Interface", "Activity display",
-  ]);
-});
-
 test("reading preview and theme cards let a custom background through", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/browser/fixture.html?case=appearance");
@@ -84,7 +77,8 @@ test("custom reading size previews, persists and survives preset changes", async
   await expect(input).toHaveValue("24");
   await page.getByRole("radio", { name: "Small reading text", exact: true }).click();
   await expect(paragraph).toHaveCSS("font-size", "15px");
-  await page.getByRole("spinbutton", { name: "Custom text size", exact: true }).click();
+  await page.locator(".appearance-custom-label").click();
+  await expect(input).toBeFocused();
   await expect(input).toHaveValue("24");
   await expect(paragraph).toHaveCSS("font-size", "24px");
   await expect(title).toHaveCSS("font-size", titleSize);
@@ -119,6 +113,9 @@ for (const narrow of [false, true]) {
 
 test("appearance explanations open on demand and follow the selected display modes", async ({ page }) => {
   await page.goto("/browser/fixture.html?case=appearance");
+  await expect(page.locator(".appearance-page > section > h2")).toHaveText([
+    "Theme", "Reading", "Interface", "Activity display",
+  ]);
   const explanations = [
     ["Reading text size", "Adjust messages, code and the composer—not navigation."],
     ["Activity display", "Choose how much detail appears as nanobot works."],
@@ -249,23 +246,6 @@ test("reading-size guidance opens on hover and focus, and invalid entries explai
   await page.reload();
   await expect(input).toHaveValue("22");
 });
-
-test("the visible Custom label activates the same inline editor from a preset", async ({ page }) => {
-  await page.goto("/browser/fixture.html?case=appearance");
-  const label = page.locator(".appearance-custom-label");
-  const input = page.getByRole("spinbutton", { name: "Custom text size", exact: true });
-  await label.click();
-  await expect(input).toBeFocused();
-  await input.pressSequentially("23");
-  await input.press("Enter");
-  await expect(page.locator("[data-reading-preview-content] .markdown-content p").first()).toHaveCSS("font-size", "23px");
-  await page.getByRole("radio", { name: "Small reading text", exact: true }).click();
-  await label.click();
-  await expect(input).toBeFocused();
-  await expect(input).toHaveValue("23");
-  await expect(page.locator("[data-reading-preview-content] .markdown-content p").first()).toHaveCSS("font-size", "23px");
-});
-
 
 test("unfinished numeric input reports an error instead of acting like a cleared field", async ({ page }) => {
   await page.goto("/browser/fixture.html?case=appearance");

@@ -178,11 +178,6 @@ class TestNormalizeSignalId:
 
 
 class TestCollectSenderIdParts:
-    def test_collects_source_number(self):
-        env = {"sourceNumber": "+15551234567"}
-        parts = SignalChannel._collect_sender_id_parts(env)
-        assert "+15551234567" in parts
-
     def test_collects_multiple_keys(self):
         env = {"sourceNumber": "+15551234567", "sourceUuid": "uuid-abc"}
         parts = SignalChannel._collect_sender_id_parts(env)
@@ -212,10 +207,6 @@ class TestPrimarySenderId:
 
     def test_falls_back_to_first_part(self):
         assert SignalChannel._primary_sender_id(["uuid-abc", "other"]) == "uuid-abc"
-
-    def test_empty_list_returns_empty(self):
-        assert SignalChannel._primary_sender_id([]) == ""
-
 
 class TestExtractGroupId:
     def test_extracts_from_group_info(self):

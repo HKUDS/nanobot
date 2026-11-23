@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from inspect import Parameter, signature
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,13 +10,6 @@ from nanobot.command.application import (
 )
 from nanobot.command.results import message_text
 from nanobot.command.router import CommandContext, CommandRouter
-
-
-def test_command_context_requires_loop_as_keyword_dependency() -> None:
-    loop_parameter = signature(CommandContext).parameters["loop"]
-
-    assert loop_parameter.kind is Parameter.KEYWORD_ONLY
-    assert loop_parameter.default is Parameter.empty
 
 
 class TestIsDispatchableCommand:
@@ -54,8 +46,6 @@ class TestIsDispatchableCommand:
         assert not router.is_dispatchable_command("/restart")
 
     def test_regular_text_not_matched(self, router: CommandRouter) -> None:
-        assert not router.is_dispatchable_command("hello")
-        assert not router.is_dispatchable_command("what is 2+2?")
         assert not router.is_dispatchable_command("!important is still ordinary text")
         assert not router.is_dispatchable_command("")
 

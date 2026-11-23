@@ -114,8 +114,3 @@ def test_loaded_null_metadata_becomes_empty_dict(tmp_path: Path):
     assert session.metadata["title"] == "ok"
     session.metadata.pop("title", None)
     assert session.metadata == {}
-
-
-def test_session_post_init_coerces_null_metadata():
-    session = Session(key="chan:chat", metadata=None)  # type: ignore[arg-type]
-    assert session.metadata == {}

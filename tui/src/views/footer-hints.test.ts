@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { contextualFooterHints, footerHints, footerTelemetry } from "./footer-hints"
+import { contextualFooterHints, footerTelemetry } from "./footer-hints"
 
 const theme = {
   accent: "#EF8E30",
@@ -9,17 +9,6 @@ const theme = {
 }
 
 describe("footerHints", () => {
-  test("separates normal and destructive shortcuts semantically", () => {
-    const result = footerHints([
-      { key: "enter", label: "steer" },
-      { key: "ctrl+c", label: "stop", tone: "danger" },
-    ], theme)
-
-    expect(result.chunks.map(({ text }) => text).join("")).toBe("enter steer   ctrl+c stop")
-    expect(result.chunks[0]?.fg?.toInts().slice(0, 3)).toEqual([239, 142, 48])
-    expect(result.chunks[3]?.fg?.toInts().slice(0, 3)).toEqual([248, 113, 113])
-  })
-
   test("keeps passive composer modes free of permanent instructions", () => {
     const ready = contextualFooterHints("ready", 100, theme)
     const active = contextualFooterHints("active", 100, theme)

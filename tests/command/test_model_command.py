@@ -240,18 +240,6 @@ def test_model_command_in_help_and_palette() -> None:
 
 
 @pytest.mark.asyncio
-async def test_goal_command_shows_usage_without_args(tmp_path) -> None:
-    loop = _make_loop(tmp_path)
-    ctx = _ctx(loop, "/goal")
-    out = await cmd_goal(CommandInput(ctx.msg, ctx.args, ctx.is_user_turn))
-    assert out is not None
-    assert out.channel == "cli"
-    assert out.chat_id == "direct"
-    assert out.metadata == {}
-    assert message_text(out) == "Usage: /goal <long-running task description>"
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("with_session", [False, True])
 async def test_goal_command_preserves_task_and_visible_command(tmp_path, with_session) -> None:
     loop = _make_loop(tmp_path)
@@ -290,6 +278,7 @@ async def test_goal_command_registered_on_router(tmp_path) -> None:
     loop = _make_loop(tmp_path)
     usage = await router.dispatch(_ctx(loop, "/goal"))
     assert isinstance(usage, OutboundMessage)
+    assert (usage.channel, usage.chat_id) == ("cli", "direct")
     assert message_text(usage) == "Usage: /goal <long-running task description>"
     assert usage.metadata == {}
     ctx = _ctx_session(loop, "/goal ship it", args="ship it")

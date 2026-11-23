@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from nanobot.config.schema import Config, ProvidersConfig
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import PROVIDERS, find_by_name
+from nanobot.providers.registry import find_by_name
 
 
 def test_novita_config_field_exists() -> None:
@@ -12,10 +12,9 @@ def test_novita_config_field_exists() -> None:
 
 
 def test_novita_provider_in_registry() -> None:
-    specs = {spec.name: spec for spec in PROVIDERS}
-
-    assert "novita" in specs
-    novita = specs["novita"]
+    novita = find_by_name("novita")
+    assert novita is not None
+    assert novita.name == "novita"
     assert novita.backend == "openai_compat"
     assert novita.env_key == "NOVITA_API_KEY"
     assert novita.display_name == "Novita AI"
@@ -23,13 +22,6 @@ def test_novita_provider_in_registry() -> None:
     assert novita.detect_by_base_keyword == "novita"
     assert novita.default_api_base == "https://api.novita.ai/openai"
     assert novita.strip_model_prefix is False
-
-
-def test_find_by_name_novita() -> None:
-    spec = find_by_name("novita")
-
-    assert spec is not None
-    assert spec.name == "novita"
 
 
 def test_novita_forced_provider_uses_default_api_base() -> None:
