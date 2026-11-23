@@ -2320,11 +2320,17 @@ export class NanobotTui {
       return
     }
     this.unsentSubmit = false
-    this.commandTurns.set(turnId, lifecycle)
     this.clearComposer()
     this.commandMenu.hide()
-    if (lifecycle !== "stop_active_turn") this.transcript.user(content)
     this.recordPrompt(content)
+    if (lifecycle === "stop_active_turn") {
+      this.restoreQueuedPrompts()
+      if (this.activeTurn) this.status.content = "Stopping…"
+      else this.status.content = this.readyStatus()
+      return
+    }
+    this.commandTurns.set(turnId, lifecycle)
+    this.transcript.user(content)
 
     if (lifecycle === "finalize_active_turn") {
       this.activeTurnId = null
@@ -2334,10 +2340,6 @@ export class NanobotTui {
       this.turnHadAnswer = false
       this.setActive(false)
       this.status.content = "Resetting chat…"
-    } else if (lifecycle === "stop_active_turn") {
-      this.activeTurnId = null
-      this.setActive(false)
-      this.status.content = "Stopping…"
     } else if (!this.activeTurn) {
       this.status.content = `Running ${content.split(/\s+/u, 1)[0]}…`
     }

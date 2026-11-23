@@ -354,8 +354,6 @@ class WebUITranscriptRecorder:
         envelope = session_message_envelope(metadata)
         if envelope is not None and envelope["target_session_key"] != webui_session_key(chat_id):
             envelope = None
-        if text.strip() == "/stop" and not media_paths and envelope is None:
-            return False
         event = build_user_transcript_event(
             chat_id,
             text,

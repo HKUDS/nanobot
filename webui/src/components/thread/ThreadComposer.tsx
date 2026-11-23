@@ -1562,7 +1562,6 @@ export function ThreadComposer({
       : null;
     if (
       slashLifecycle === "stop_active_turn"
-      && isStreaming
       && onStop
     ) {
       handleStop();

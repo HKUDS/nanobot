@@ -48,6 +48,30 @@ describe("NanobotTui lifecycle", () => {
     expect(state()).toBe(false)
   })
 
+  test("returns to ready after /stop without a chat reply, even when already idle", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    const app = mount(setup, sent)
+    const ui = app as unknown as {
+      ready: boolean; composer: TextareaRenderable; status: TextRenderable
+      commandMenu: { setCommands(commands: import("../client").SlashCommand[]): void }
+    }
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => ui.ready)
+    ui.commandMenu.setCommands([{ command: "/stop", title: "Stop", description: "Stop", argHint: "", acceptsArgs: false, lifecycle: "stop_active_turn" }])
+    for (const active of [true, false]) {
+      if (active) app.accept({ event: "goal_status", status: "running", chat_id: "chat", turn_id: "work" })
+      ui.composer.setText("/stop")
+      ui.composer.submit()
+      await waitUntil(() => sent.length === (active ? 1 : 2))
+      if (active) app.accept({ event: "turn_end", chat_id: "chat", turn_id: "work", outcome: "cancelled" })
+      await setup.flush()
+      expect(ui.status.plainText).not.toContain("Stopping")
+      expect(setup.captureCharFrame()).not.toContain("/stop")
+    }
+    expect(sent).toEqual(["/stop", "/stop"])
+  })
+
   test("shows actionable connection states without implementation details", async () => {
     setup = await createRenderer({ width: 100, height: 20, screenMode: "alternate-screen" })
     const app = mount(setup)

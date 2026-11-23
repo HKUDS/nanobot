@@ -1432,7 +1432,7 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
 
     async def observe_stop_reply(message):
         await publish_outbound(message)
-        if message.metadata.get("message_id") == "stop-attempt" and message.content.startswith("Stopped "):
+        if message.metadata.get("message_id") == "stop-attempt" and message.content == "Stopped.":
             stop_acknowledged.set()
 
     monkeypatch.setattr(loop.bus, "publish_outbound", observe_stop_reply)
@@ -1482,8 +1482,8 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
         outbound = []
         while loop.bus.outbound_size:
             outbound.append(await loop.bus.consume_outbound())
-        stop_responses = [item.content for item in outbound if item.content.startswith("Stopped ")]
-        assert stop_responses == ["Stopped 1 task(s)."]
+        stop_responses = [item.content for item in outbound if item.content == "Stopped."]
+        assert stop_responses == ["Stopped."]
         endings = [item.event for item in outbound if isinstance(item.event, TurnEndEvent)]
         cancelled = [event for event in endings if event.outcome == "cancelled"]
         assert len(cancelled) == 1 and cancelled[0].goal_state["status"] == "active"
@@ -1852,7 +1852,7 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
     stop_ctx = CommandContext(msg=stop_msg, session=None, key=stop_msg.session_key, raw="/stop", loop=loop)
     stop_result = await cmd_stop(stop_ctx)
 
-    assert "Stopped 1 task" in stop_result.content
+    assert stop_result.content == "Stopped."
     assert task.done()
 
     loop.sessions.invalidate("feishu:c4")

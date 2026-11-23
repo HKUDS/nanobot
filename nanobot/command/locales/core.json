@@ -1,27 +1,15 @@
 {
-  "stop.none": {
-    "en": "No active task to stop.",
-    "zh-CN": "没有正在运行的任务。",
-    "zh-TW": "沒有執行中的工作。",
-    "fr": "Aucune tâche en cours.",
-    "ja": "停止するタスクはありません。",
-    "ko": "중지할 작업이 없습니다.",
-    "es": "No hay tareas activas.",
-    "pt-BR": "Nenhuma tarefa ativa.",
-    "vi": "Không có tác vụ đang chạy.",
-    "id": "Tidak ada tugas aktif."
-  },
   "stop.done": {
-    "en": "Stopped {count} task(s).",
-    "zh-CN": "已停止 {count} 个任务。",
-    "zh-TW": "已停止 {count} 個工作。",
-    "fr": "Tâches arrêtées : {count}.",
-    "ja": "{count} 件のタスクを停止しました。",
-    "ko": "작업 {count}개를 중지했습니다.",
-    "es": "Tareas detenidas: {count}.",
-    "pt-BR": "Tarefas interrompidas: {count}.",
-    "vi": "Đã dừng {count} tác vụ.",
-    "id": "Tugas dihentikan: {count}."
+    "en": "Stopped.",
+    "zh-CN": "已停止。",
+    "zh-TW": "已停止。",
+    "fr": "Arrêté.",
+    "ja": "停止しました。",
+    "ko": "중지했습니다.",
+    "es": "Detenido.",
+    "pt-BR": "Interrompido.",
+    "vi": "Đã dừng.",
+    "id": "Dihentikan."
   },
   "restart.started": {
     "en": "Restarting...",

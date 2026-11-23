@@ -752,6 +752,7 @@ with Path(config).with_name('gateway-stacks.log').open('w') as stacks:
                 followup = await receive_until(lambda event: event.get("event") == "turn_end")
                 assert followup.get("turn_id") == "follow-up"
                 assert len(requests) == 17
+                assert not any(event.get("command_result", {}).get("command") == "/stop" for event in events)
             else:
                 await asyncio.wait_for(closing_request.wait(), 20)
                 waiting = await receive_until(lambda event: (

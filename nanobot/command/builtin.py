@@ -86,12 +86,14 @@ CORE_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
 )
 
 
-async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
+async def cmd_stop(ctx: CommandContext) -> OutboundMessage | None:
     """Cancel all active tasks and subagents for the session."""
     loop = ctx.loop
     msg = ctx.msg
-    total = await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
-    return command_reply(msg, "/stop", line("stop.done", count=total) if total else line("stop.none"))
+    await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
+    if msg.channel == "websocket" and msg.metadata.get("webui") is True:
+        return None  # Both interactive clients observe the cancelled turn directly.
+    return command_reply(msg, "/stop", line("stop.done"))
 
 
 async def cmd_restart(ctx: CommandContext) -> OutboundMessage:

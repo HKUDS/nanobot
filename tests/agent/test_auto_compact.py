@@ -581,7 +581,7 @@ class TestAutoCompactIdleDetection:
         ctx = CommandContext(msg=msg, session=session, key="cli:test", raw=raw, loop=loop)
         result = await loop.commands.dispatch_priority(ctx)
         assert result is not None
-        assert "stopped" in result.content.lower() or "no active task" in result.content.lower()
+        assert result.content == "Stopped."
 
         session_after = loop.sessions.get_or_create("cli:test")
         assert any(m["content"] == "old message" for m in session_after.messages)

@@ -1163,26 +1163,27 @@ async def test_webui_message_envelope_persists_user_transcript_for_refresh(histo
 
 
 @pytest.mark.asyncio
-async def test_webui_stop_control_message_is_not_persisted_as_user_bubble(history,
-    bus: MagicMock,
-    tmp_path,
-    monkeypatch,
+@pytest.mark.parametrize("command", ["/stop", "/STOP@nanobot"])
+async def test_webui_stop_control_is_acknowledged_without_a_chat_bubble(
+    history, command, bus: MagicMock, tmp_path, monkeypatch,
 ) -> None:
-
-
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     channel = _ch(bus, session_manager=history.sessions)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
+    observer = AsyncMock()
+    channel._attach(observer, "chat-1")
 
     await channel._dispatch_envelope(
         conn,
         "webui-client",
-        {"type": "message", "chat_id": "chat-1", "content": "/stop", "webui": True},
+        {"type": "message", "chat_id": "chat-1", "content": command, "webui": True, "turn_id": "stop-control"},
     )
 
     msg = bus.publish_inbound.await_args.args[0]
-    assert msg.content == "/stop"
+    assert msg.content == command
+    assert any(frame["event"] == "message_accepted" and not frame["starts_turn"] for frame in _sent_ws_payloads(conn))
+    assert not any(frame["event"] == "user_message" for frame in _sent_ws_payloads(observer))
     assert history.read("websocket:chat-1") == []
 
 

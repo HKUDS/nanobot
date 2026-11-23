@@ -293,7 +293,7 @@ async def test_stop_completes_a_compact_command_waiting_for_the_session_lock(loo
         reply = await cmd_stop(CommandContext(
             msg=msg, session=None, key=key, raw="/stop", loop=loop,
         ))
-    assert reply.content == "Stopped 1 task(s)."
+    assert reply.content == "Stopped."
     assert len(completions) == 1
     assert completions[0].context.metadata["webui_turn_id"] == "queued-compact"
 
@@ -418,7 +418,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop, command) -> 
         msg=msg, session=session, key=key, raw="/stop", loop=loop,
     ))
 
-    assert reply.content == "Stopped 1 task(s)."
+    assert reply.content == "Stopped."
     assert task.cancelled()
     assert len(completions) == 1
     assert completions[0].context.metadata["webui_turn_id"] == "compact-turn"

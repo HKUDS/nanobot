@@ -879,6 +879,8 @@ class WebUICommandRouter:
         if temporary_policy is not None:
             self._temporary_chats.register_media(connection, chat_id, [str(item.path) for item in uploaded])
         is_webui = metadata.get("webui") is True
+        stop_control = content.lstrip().startswith("/") and normalize_command_text(content).lower() == "/stop"
+        show_user_message = is_webui and not (restart_control or stop_control)
         queued_owner = None
         if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
             queued_owner = register_queued_websocket_turn_if_idle(chat_id, turn_id)
@@ -915,7 +917,7 @@ class WebUICommandRouter:
                 session_generation, session_created = admission
             if session_generation is not None:
                 metadata[HISTORY_GENERATION_METADATA_KEY] = session_generation
-            if is_webui and not restart_control and temporary_policy is None:
+            if show_user_message and temporary_policy is None:
                 await self._transcripts.append_user_message(
                     chat_id,
                     content,
@@ -964,9 +966,9 @@ class WebUICommandRouter:
         for attachment, name in zip(media, media_names, strict=False):
             if name:
                 attachment["name"] = name
-        if is_webui and not restart_control:
-            if session_created:
-                await self._outbound.session_updated(chat_id, scope="metadata")
+        if is_webui and not restart_control and session_created:
+            await self._outbound.session_updated(chat_id, scope="metadata")
+        if show_user_message:
             await self.broadcast_user_message(
                 connection,
                 chat_id,

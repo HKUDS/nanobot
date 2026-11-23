@@ -3336,14 +3336,14 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("/new with a title", undefined, undefined);
   });
 
-  it("routes a manually submitted stop command through the stop handler", () => {
+  it.each([false, true])("routes /stop through the stop handler (streaming=%s)", (isStreaming) => {
     const onSend = vi.fn();
     const onStop = vi.fn();
     render(
       <ThreadComposer
         onSend={onSend}
         onStop={onStop}
-        isStreaming
+        isStreaming={isStreaming}
         placeholder="Type your message..."
         slashCommands={COMMANDS}
       />,
