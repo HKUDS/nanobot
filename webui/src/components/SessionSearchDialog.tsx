@@ -119,7 +119,7 @@ export function SessionSearchDialog({
   const recoverySet = useMemo(() => new Set(recoveryChatIds), [recoveryChatIds]);
 
   const enrichedSessions = useMemo(() => {
-    const generalLabel = isZh ? "通用对话" : t("chat.groups.all", { defaultValue: "General" });
+    const generalLabel = t("chat.groups.all", { defaultValue: "Topics" });
     return sessions.map((session) => {
       const title = titleOverrides[session.key]?.trim()
         || session.title?.trim()
@@ -164,7 +164,6 @@ export function SessionSearchDialog({
     archivedSet,
     automationCountsByKey,
     defaultWorkspacePath,
-    isZh,
     projectNameOverrides,
     recoverySet,
     runningSet,

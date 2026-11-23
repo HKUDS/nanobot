@@ -183,17 +183,17 @@ export function WorkspaceTopBar({
                 : "text-muted-foreground/80 hover:bg-foreground/[0.04] hover:text-foreground",
             )}
           >
-            <span className="relative h-[18px] w-[18px] shrink-0">
+            <span className="relative h-5 w-5 shrink-0">
               <img
                 src="/brand/nanobot_mark.svg"
                 alt=""
-                className="h-[18px] w-[18px] select-none object-contain dark:opacity-0"
+                className="h-5 w-5 select-none object-contain dark:opacity-0"
                 draggable={false}
               />
               <img
                 src="/brand/nanobot_mark_night.svg"
                 alt=""
-                className="absolute inset-0 h-[18px] w-[18px] select-none object-contain opacity-0 dark:opacity-100"
+                className="absolute inset-0 h-5 w-5 select-none object-contain opacity-0 dark:opacity-100"
                 draggable={false}
               />
             </span>
@@ -461,7 +461,7 @@ export function WorkspaceTopBar({
           <div
             ref={onThreadActionsHostChange}
             data-testid="topbar-thread-actions"
-            className="host-no-drag flex h-7 shrink-0 items-center gap-0.5 empty:hidden [&_button]:inline-flex [&_button]:h-7 [&_button]:w-7 [&_button]:items-center [&_button]:justify-center [&_button]:rounded-lg [&_button]:p-0 [&_button]:text-muted-foreground/80 [&_button:hover]:bg-foreground/[0.05] [&_button:hover]:text-foreground [&_svg]:h-[15px] [&_svg]:w-[15px] [&_svg]:stroke-[1.75]"
+            className="host-no-drag flex h-7 shrink-0 items-center gap-0.5 empty:hidden [&_button]:inline-flex [&_button]:h-7 [&_button]:w-7 [&_button]:items-center [&_button]:justify-center [&_button]:rounded-lg [&_button]:p-0 [&_button]:text-muted-foreground/80 [&_button:hover]:bg-foreground/[0.05] [&_button:hover]:text-foreground [&_svg]:h-4 [&_svg]:w-4"
           />
 
           {canMarkActiveDone && activeSession ? (
@@ -475,7 +475,7 @@ export function WorkspaceTopBar({
                 onClick={() => onDoneSession(activeSession.session.key)}
                 className="host-no-drag h-7 w-7 rounded-lg p-0 text-muted-foreground/80 transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
               >
-                <ArchiveIcon className="h-[15px] w-[15px]" />
+                <ArchiveIcon className="h-4 w-4" />
               </Button>
             </HoverHint>
           ) : null}
@@ -512,7 +512,7 @@ export function WorkspaceTopBar({
               onClick={onNewChat}
               className="host-no-drag h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
             >
-              <ComposeIcon className="h-[13.5px] w-[13.5px] -translate-y-[0.5px]" />
+              <ComposeIcon className="h-4 w-4" />
             </Button>
           </HoverHint>
 
@@ -534,9 +534,9 @@ export function WorkspaceTopBar({
               data-testid="topbar-search-button"
               aria-label={t("sidebar.searchAria")}
               onClick={onOpenSearch}
-              className="host-no-drag h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+              className="host-no-drag h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
             >
-              <SearchIcon className="h-[15px] w-[15px]" />
+              <SearchIcon className="h-4 w-4" />
             </Button>
           </HoverHint>
 
@@ -557,9 +557,9 @@ export function WorkspaceTopBar({
                   defaultValue: `Update ${availableUpdate.version}`,
                 })}
                 onClick={availableUpdate.onRequestUpdate ?? onOpenUpdates}
-                className="host-no-drag h-7 w-7 rounded-lg text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400"
+                className="host-no-drag h-7 w-7 rounded-lg p-0 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400"
               >
-                <ArrowUpCircle className="h-[15px] w-[15px]" aria-hidden />
+                <ArrowUpCircle className="h-4 w-4" aria-hidden />
               </Button>
             </HoverHint>
           ) : null}
@@ -574,9 +574,9 @@ export function WorkspaceTopBar({
                   size="icon"
                   data-testid="topbar-mobile-menu"
                   aria-label={isZh ? "更多" : "More"}
-                  className="host-no-drag h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                  className="host-no-drag h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                 >
-                  <MoreHorizontal className="h-[15px] w-[15px]" aria-hidden />
+                  <MoreHorizontal className="h-4 w-4" aria-hidden />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-44">
@@ -594,7 +594,7 @@ export function WorkspaceTopBar({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={onToggleTheme}>
-                  <ThemeToggleIcon theme={theme} className="h-[15px] w-[15px]" />
+                  <ThemeToggleIcon theme={theme} className="h-3.5 w-3.5" />
                   {t("thread.header.toggleTheme")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -605,7 +605,7 @@ export function WorkspaceTopBar({
             <HostSwitcher
               collapsed
               menuSide="bottom"
-              className="h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground [&_svg]:h-[15px] [&_svg]:w-[15px] [&_svg]:stroke-[1.75] [&>span]:-translate-y-[0.5px] [&_span[aria-hidden]]:ring-background"
+              className="h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground [&_span[aria-hidden]]:ring-background"
             />
 
             <HoverHint
@@ -627,13 +627,13 @@ export function WorkspaceTopBar({
                 aria-current={view === "apps" ? "page" : undefined}
                 onClick={onOpenApps}
                 className={cn(
-                  "host-no-drag h-7 w-7 rounded-lg",
+                  "host-no-drag h-7 w-7 rounded-lg p-0",
                   view === "apps"
                     ? "bg-foreground/[0.07] text-foreground"
                     : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
                 )}
               >
-                <AppsIcon className="h-[15px] w-[15px]" />
+                <AppsIcon className="h-4 w-4" />
               </Button>
             </HoverHint>
 
@@ -656,13 +656,13 @@ export function WorkspaceTopBar({
                 aria-current={view === "automations" ? "page" : undefined}
                 onClick={onOpenAutomations}
                 className={cn(
-                  "host-no-drag h-7 w-7 rounded-lg",
+                  "host-no-drag h-7 w-7 rounded-lg p-0",
                   view === "automations"
                     ? "bg-foreground/[0.07] text-foreground"
                     : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
                 )}
               >
-                <AutomationsIcon className="h-[15px] w-[15px]" />
+                <AutomationsIcon className="h-4 w-4" />
               </Button>
             </HoverHint>
 
@@ -687,13 +687,13 @@ export function WorkspaceTopBar({
                 onPointerEnter={onSettingsIntent}
                 onFocus={onSettingsIntent}
                 className={cn(
-                  "host-no-drag h-7 w-7 rounded-lg",
+                  "host-no-drag h-7 w-7 rounded-lg p-0",
                   view === "settings"
                     ? "bg-foreground/[0.07] text-foreground"
                     : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
                 )}
               >
-                <SettingsIcon className="h-[15px] w-[15px]" />
+                <SettingsIcon className="h-4 w-4" />
               </Button>
             </HoverHint>
 
@@ -706,7 +706,7 @@ export function WorkspaceTopBar({
                 onClick={onToggleTheme}
                 className="host-no-drag h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
               >
-                <ThemeToggleIcon theme={theme} className="h-[15.5px] w-[15.5px] stroke-[1.75]" />
+                <ThemeToggleIcon theme={theme} />
               </Button>
             </HoverHint>
           </div>

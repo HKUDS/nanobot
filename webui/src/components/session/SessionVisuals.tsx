@@ -188,7 +188,7 @@ export function SidebarDrawerIcon({
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
-      className={cn("h-[15px] w-[15px]", className)}
+      className={cn("h-4 w-4", className)}
     >
       <path
         d="M5.5 4h3.5v16H5.5A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4Z"
