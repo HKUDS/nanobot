@@ -1,5 +1,8 @@
 import { StyledText, TextAttributes, parseColor, type ColorInput, type TextChunk } from "@opentui/core"
 
+import { commandPaletteCopy } from "../menus/command-palette-copy"
+import { terminalLocale } from "../platform/locale"
+
 export interface FooterHint {
   key: string
   label: string
@@ -78,9 +81,13 @@ function hintsFor(
   if (mode === "branch") return width >= 64
     ? [hint("type", "filter"), hint("↑↓", "choose"), hint("enter", "branch"), hint("esc", "close")]
     : [hint("enter", "branch"), hint("esc", "close")]
-  if (mode === "command") return width >= 72
-    ? [hint("↑↓", "choose"), hint("tab", "complete"), hint("esc", "close")]
-    : [hint("tab", "complete"), hint("esc", "close")]
+  if (mode === "command") {
+    const copy = commandPaletteCopy(terminalLocale())
+    return [
+      ...(width >= 72 ? [hint("↑↓", copy.choose)] : []),
+      hint("tab", copy.complete), hint("esc", copy.close),
+    ]
+  }
   if (mode === "session") return width >= 64
     ? [hint("type", "filter"), hint("↑↓", "choose"), hint("enter", "open"), hint("esc", "close")]
     : [hint("enter", "open"), hint("esc", "close")]

@@ -1,6 +1,10 @@
 import { type BoxRenderable, type CliRenderer } from "@opentui/core"
 
+import { commandLabel } from "../../../packages/client-events/command-result"
 import type { SlashCommand, SlashCommandLifecycle } from "../client"
+import { terminalLocale } from "../platform/locale"
+import { commandPaletteCopy } from "./command-palette-copy"
+import { localCommandLabels } from "./local-command-copy"
 import { PickerMenu, type PickerMenuTheme } from "./picker-menu"
 
 export type CommandMenuTheme = PickerMenuTheme
@@ -33,12 +37,20 @@ function descriptor(choice: CommandChoice): SlashCommand | TuiCommand {
   return choice.command
 }
 
-function commandMatchRank(choice: CommandChoice, query: string): number {
+function commandMatchRank(choice: CommandChoice, query: string, locale: string): number {
   const name = descriptor(choice).command.slice(1).toLocaleLowerCase()
   if (name === query) return 0
   if (name.startsWith(query)) return 1
   if (name.includes(query)) return 2
-  return 3
+  const [title] = choiceLabels(choice, locale)
+  return [title, choice.command.title].some((text) => text.toLocaleLowerCase().includes(query)) ? 3 : 4
+}
+
+function choiceLabels(choice: CommandChoice, locale: string): readonly [string, string] {
+  return choice.source === "tui"
+    ? localCommandLabels(choice.command, locale)
+    : [commandLabel(choice.command.command, "title", locale) ?? choice.command.title,
+        commandLabel(choice.command.command, "description", locale) ?? choice.command.description]
 }
 
 export function resolveSlashCommandLifecycle(
@@ -58,6 +70,7 @@ export function resolveSlashCommandLifecycle(
 export class CommandMenu {
   readonly root: BoxRenderable
   private readonly picker: PickerMenu<CommandChoice>
+  private readonly locale = terminalLocale()
   private commands: CommandChoice[] = []
   private query = ""
 
@@ -65,17 +78,21 @@ export class CommandMenu {
     renderer: CliRenderer,
     theme: CommandMenuTheme,
   ) {
+    const copy = commandPaletteCopy(this.locale)
     this.picker = new PickerMenu(renderer, theme, {
       id: "nanobot-tui-command-menu",
+      emptyText: copy.empty,
+      pageText: copy.page,
       searchText: (choice) => {
         const command = descriptor(choice)
-        return `${command.command} ${command.title}`
+        return `${command.command} ${choiceLabels(choice, this.locale).join(" ")} ${command.title}`
       },
       render: (choice) => {
         const command = descriptor(choice)
         const argHint = "argHint" in command ? command.argHint : ""
         const hint = argHint ? ` ${argHint}` : ""
-        const detail = (command.description || command.title).replace(/\s+/gu, " ")
+        const [title, description] = choiceLabels(choice, this.locale)
+        const detail = (description || title).replace(/\s+/gu, " ")
         return `${command.command}${hint}  ${detail}`
       },
     })
@@ -119,7 +136,7 @@ export class CommandMenu {
     const query = token.slice(1)
     if (changed || !this.picker.visible) {
       const commands = [...this.commands].sort((left, right) => (
-        commandMatchRank(left, query) - commandMatchRank(right, query)
+        commandMatchRank(left, query, this.locale) - commandMatchRank(right, query, this.locale)
       ))
       this.picker.show(commands, query, limit)
     } else this.picker.update(query, limit)

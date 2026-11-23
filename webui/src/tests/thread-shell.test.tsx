@@ -2722,7 +2722,7 @@ describe("ThreadShell", () => {
     expect(screen.getByTestId("thread-composer-motion").closest("[data-layout]")).toHaveAttribute("data-layout", "thread");
   });
 
-  it("hides a live first /model turn when the initial history snapshot is stale", async () => {
+  it("keeps an explicit /model result visible when the initial history snapshot is stale", async () => {
     const client = makeClient();
     const onCreateChat = vi.fn().mockResolvedValue("chat-new");
     let resolveThread:
@@ -2782,11 +2782,15 @@ describe("ThreadShell", () => {
       expectSendMessageWithTurn(client, "chat-new", "/model"),
     );
 
+    const turnId = client.sendMessage.mock.calls.at(-1)?.[3]?.turnId;
     await act(async () => {
       client._emitChat("chat-new", {
         event: "message",
-        chat_id: "chat-new",
-        text: "## Model\n- Current model: `Ring-2.6-1T`",
+        chat_id: "chat-new", turn_id: turnId, turn_seq: 2,
+        text: "- Current model: `Ring-2.6-1T`",
+        side_channel: true,
+        render_as: "text",
+        command_result: { command: "/model", parts: [{ key: "model.current", values: { model: "Ring-2.6-1T" } }] },
       });
       client._emitChat("chat-new", {
         event: "message",
@@ -2794,19 +2798,20 @@ describe("ThreadShell", () => {
         text: "This unrelated reply stays visible.",
       });
     });
-    expect(screen.queryByText("/model")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Current model/)).not.toBeInTheDocument();
+    const modelResult = "- Current model: `Ring-2.6-1T`";
+    expect(screen.getByText("/model")).toBeInTheDocument();
+    expect(screen.getByText(modelResult)).toBeInTheDocument();
     expect(screen.getByText("This unrelated reply stays visible.")).toBeInTheDocument();
 
     await act(async () => {
       resolveThread?.(
-        httpJson(transcriptFromSimpleMessages([{ role: "user", content: "/model" }])),
+        httpJson(transcriptFromSimpleMessages([{ role: "user", content: "/model", turnId }])),
       );
     });
 
     await waitFor(() => {
-      expect(screen.queryByText("/model")).not.toBeInTheDocument();
-      expect(screen.queryByText(/Current model/)).not.toBeInTheDocument();
+      expect(screen.getByText("/model")).toBeInTheDocument();
+      expect(screen.getByText(modelResult)).toBeInTheDocument();
       expect(screen.getByText("This unrelated reply stays visible.")).toBeInTheDocument();
     });
   });
@@ -5623,7 +5628,7 @@ describe("ThreadShell", () => {
     expect(client.sendSystemCommand).toHaveBeenCalledTimes(2);
   });
 
-  it("sends /cancel_goal directly while streaming without a transcript entry, /stop, or offline replay", async () => {
+  it("shows typed /cancel_goal and its result without interrupting a stream or replaying an offline request", async () => {
     const client = makeClient();
     const chatId = "cancel-slash";
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/api/commands")
@@ -5632,7 +5637,6 @@ describe("ThreadShell", () => {
     render(wrap(client, <ThreadShell session={session(chatId)} title="Goal" onToggleSidebar={() => {}} />));
     await act(async () => {});
     act(() => {
-      client._emitChat(chatId, { event: "goal_state", chat_id: chatId, goal_state: { active: false, status: "blocked", objective: "Ship the release" } });
       client._emitChat(chatId, { event: "goal_status", chat_id: chatId, turn_id: "unrelated", status: "running", started_at: 100 });
       client._emitChat(chatId, { event: "delta", chat_id: chatId, turn_id: "unrelated", stream_id: "live", text: "Unrelated reply" });
       client._emitStatus("closed");
@@ -5647,16 +5651,19 @@ describe("ThreadShell", () => {
     expect(input).toHaveValue("/cancel_goal");
     act(() => client._emitStatus("open"));
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
-    client.sendSystemCommand.mockImplementationOnce(async () => {
-      client._emitChat(chatId, { event: "goal_state", chat_id: chatId, goal_state: { active: false } });
-    });
+    expect(client.sendMessage).not.toHaveBeenCalled();
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(input).toHaveValue(""));
-    expect(client.sendSystemCommand).toHaveBeenCalledTimes(1);
-    expect(client.sendSystemCommand).toHaveBeenCalledWith(chatId, "/cancel_goal");
-    expect(client.sendMessage).not.toHaveBeenCalled();
+    expect(client.sendSystemCommand).not.toHaveBeenCalled();
+    expectSendMessageWithTurn(client, chatId, "/cancel_goal");
+    const region = within(screen.getByTestId("thread-message-region"));
+    expect(region.getByTestId("message-slash-command")).toHaveTextContent("/cancel_goal");
+    act(() => client._emitChat(chatId, {
+      event: "message", chat_id: chatId, turn_id: client.sendMessage.mock.calls[0][3]?.turnId,
+      side_channel: true, text: "No goal to cancel.",
+    }));
+    expect(await region.findByText("No goal to cancel.")).toBeVisible();
     expect(client.finishRunLocally).not.toHaveBeenCalled();
-    expect(within(screen.getByTestId("thread-message-region")).queryByText("/cancel_goal")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop response" })).toBeVisible();
   });
 
@@ -5872,6 +5879,20 @@ describe("ThreadShell", () => {
       event: "turn_end", chat_id: "chat-model-failure", turn_id: nextTurnId,
     }));
     expect(screen.queryByRole("button", { name: "停止响应" })).not.toBeInTheDocument();
+  });
+
+  it("explains which commands can be used when a temporary chat rejects a typed command", async () => {
+    const client = makeClient();
+    const chatId = "temp-help";
+    render(wrap(client, <ThreadShell session={session(chatId)} temporary title="Temporary chat" onToggleSidebar={() => {}} />));
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "/help" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expectSendMessageWithTurn(client, chatId, "/help");
+    act(() => client._emitChat(chatId, {
+      event: "error", chat_id: chatId, turn_id: client.sendMessage.mock.calls[0][3]?.turnId,
+      detail: "temporary_chat_command_rejected",
+    }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Temporary chats support only /model and /stop. Use a regular chat for other commands.");
   });
 
   it("moves a correlated delivery error from the banner into the failed message tooltip", async () => {

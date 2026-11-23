@@ -2215,68 +2215,6 @@
           "goalActive": "目标正在运行",
           "goalReady": "开始一个持续目标",
           "stopRunning": "正在运行"
-        },
-        "commands": {
-          "new": {
-            "title": "新建话题",
-            "description": "重置当前话题，开始新话题"
-          },
-          "compact": {
-            "title": "压缩上下文",
-            "description": "压缩上下文后继续对话"
-          },
-          "stop": {
-            "title": "停止任务",
-            "description": "停止此对话正在执行的任务"
-          },
-          "restart": {
-            "title": "重启 nanobot",
-            "description": "重启 nanobot 进程"
-          },
-          "status": {
-            "title": "查看状态",
-            "description": "查看运行、提供商和聊天平台状态"
-          },
-          "model": {
-            "title": "模型",
-            "description": "查看或切换当前模型预设"
-          },
-          "dream": {
-            "title": "运行 Dream",
-            "description": "手动整理记忆"
-          },
-          "dream_log": {
-            "title": "Dream 日志",
-            "description": "查看上次 Dream 整理的修改"
-          },
-          "dream_restore": {
-            "title": "恢复记忆",
-            "description": "恢复到之前的 Dream 记忆快照"
-          },
-          "dream_prompt": {
-            "title": "Dream 设置",
-            "description": "设置 Dream 如何整理当前工作区记忆"
-          },
-          "goal": {
-            "title": "长期目标",
-            "description": "让助手持续推进当前目标"
-          },
-          "cancel_goal": {
-            "title": "取消目标",
-            "description": "取消当前对话中执行或阻塞的目标"
-          },
-          "trigger": {
-            "title": "CLI 触发器",
-            "description": "创建绑定当前对话的 CLI 触发器"
-          },
-          "help": {
-            "title": "查看帮助",
-            "description": "查看可用的斜杠命令"
-          },
-          "pairing": {
-            "title": "配对",
-            "description": "管理配对请求"
-          }
         }
       },
       "mentions": {
@@ -2734,6 +2672,7 @@
       "body": "网关拒绝了此项目或访问权限。请选择已存在的项目或其他访问权限，然后重试。"
     },
     "turnRejected": {
+      "temporaryCommand": "临时聊天仅支持 /model 和 /stop。请在普通聊天中使用其他命令。",
       "title": "消息未发送",
       "body": "网关拒绝了这条消息。请检查消息内容或附件后重试。"
     },

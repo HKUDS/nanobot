@@ -9,7 +9,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { StartupSkeleton } from "@/components/StartupSkeleton";
-import { MessageBubble } from "@/components/MessageBubble";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { resources, setAppLanguage } from "@/i18n";
@@ -21,22 +20,6 @@ import {
 
 const QUICK_ACTION_KEYS = ["plan", "analyze", "brainstorm", "code", "summarize", "more"];
 const IMAGE_QUICK_ACTION_KEYS = ["icon", "sticker", "poster", "product", "portrait", "edit"];
-const SLASH_COMMAND_KEYS = [
-  "new",
-  "compact",
-  "stop",
-  "restart",
-  "status",
-  "model",
-  "dream",
-  "dream_log",
-  "dream_restore",
-  "dream_prompt",
-  "goal",
-  "trigger",
-  "help",
-  "pairing",
-];
 const SETTINGS_NAV_KEYS = [
   "overview",
   "appearance",
@@ -441,13 +424,6 @@ describe("webui i18n", () => {
         expect(notice).toHaveAttribute("aria-busy", String(phase === "started"));
       }
     }
-    for (const compactReply of ["empty", "failed"] as const) {
-      rerender(<MessageBubble message={{
-        id: "reply", role: "assistant", content: "original command reply",
-        compactReply, createdAt: 1,
-      }} />);
-      expect(screen.getByText(copy[compactReply])).toBeInTheDocument();
-    }
   });
 
   it("localizes the parsed splash in document order for every registered locale", async () => {
@@ -621,7 +597,7 @@ describe("webui i18n", () => {
     }
   });
 
-  it("keeps slash commands localized for every registered locale", () => {
+  it("keeps slash menu status hints localized for every registered locale", () => {
     for (const resource of Object.values(resources)) {
       const slash = resource.common.thread.composer.slash;
       expect(slash.badges.current).toBeTruthy();
@@ -629,11 +605,6 @@ describe("webui i18n", () => {
       expect(slash.details.goalActive).toBeTruthy();
       expect(slash.details.goalReady).toBeTruthy();
       expect(slash.details.stopRunning).toBeTruthy();
-      for (const key of SLASH_COMMAND_KEYS) {
-        const command = slash.commands[key as keyof typeof slash.commands];
-        expect(command.title).toBeTruthy();
-        expect(command.description).toBeTruthy();
-      }
     }
   });
 

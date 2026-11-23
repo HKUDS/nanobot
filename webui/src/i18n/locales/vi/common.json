@@ -2025,68 +2025,6 @@
         "navigateHint": "↑↓ Chọn",
         "selectHint": "Enter/Tab Chèn",
         "closeHint": "Esc Đóng",
-        "commands": {
-          "new": {
-            "title": "Cuộc trò chuyện mới",
-            "description": "Đặt lại chủ đề này và bắt đầu chủ đề mới."
-          },
-          "compact": {
-            "title": "Nén ngữ cảnh",
-            "description": "Nén ngữ cảnh và tiếp tục trò chuyện."
-          },
-          "stop": {
-            "title": "Dừng tác vụ",
-            "description": "Dừng tác vụ đang chạy trong trò chuyện này."
-          },
-          "restart": {
-            "title": "Khởi động lại nanobot",
-            "description": "Khởi động lại tiến trình nanobot."
-          },
-          "status": {
-            "title": "Hiển thị trạng thái",
-            "description": "Xem trạng thái chạy, nhà cung cấp và kênh."
-          },
-          "model": {
-            "title": "Mô hình",
-            "description": "Xem hoặc đổi bộ thiết lập mô hình hiện tại."
-          },
-          "dream": {
-            "title": "Chạy Dream",
-            "description": "Sắp xếp bộ nhớ ngay."
-          },
-          "dream_log": {
-            "title": "Nhật ký Dream",
-            "description": "Xem thay đổi từ lần chạy Dream gần nhất."
-          },
-          "dream_restore": {
-            "title": "Khôi phục bộ nhớ",
-            "description": "Khôi phục ảnh chụp bộ nhớ Dream trước đó."
-          },
-          "dream_prompt": {
-            "title": "Thiết lập Dream",
-            "description": "Đặt cách Dream sắp xếp bộ nhớ vùng làm việc này."
-          },
-          "goal": {
-            "title": "Mục tiêu dài hạn",
-            "description": "Để trợ lý tiếp tục làm việc hướng đến mục tiêu này."
-          },
-          "cancel_goal": {
-            "title": "Hủy mục tiêu",
-            "description": "Hủy mục tiêu đang chạy hoặc bị chặn trong cuộc trò chuyện này."
-          },
-          "trigger": {
-            "title": "Kích hoạt CLI",
-            "description": "Tạo kích hoạt CLI cho trò chuyện này."
-          },
-          "help": {
-            "title": "Hiển thị trợ giúp",
-            "description": "Hiện các lệnh slash có thể dùng."
-          },
-          "pairing": {
-            "title": "Ghép nối",
-            "description": "Quản lý yêu cầu ghép."
-          }
-        },
         "badges": {
           "current": "Hiện tại",
           "recent": "Gần đây"
@@ -2552,6 +2490,7 @@
       "body": "Gateway đã từ chối dự án hoặc chế độ truy cập này. Chọn dự án hiện có hoặc chế độ truy cập khác rồi thử lại."
     },
     "turnRejected": {
+      "temporaryCommand": "Cuộc trò chuyện tạm thời chỉ hỗ trợ /model và /stop. Hãy dùng các lệnh khác trong cuộc trò chuyện thông thường.",
       "title": "Tin nhắn chưa được gửi",
       "body": "Gateway đã từ chối tin nhắn này. Hãy kiểm tra nội dung hoặc tệp đính kèm rồi thử lại."
     },

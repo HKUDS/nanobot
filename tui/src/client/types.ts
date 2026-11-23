@@ -192,6 +192,7 @@ export type OutboundEvent =
       content: string
       turn_id: string
       webui: true
+      locale?: string
       workspace_scope?: WorkspaceScopePayload
       media?: import("../../../packages/client-events/attachments").AttachmentReference[]
       cli_apps?: Array<{ name: string }>

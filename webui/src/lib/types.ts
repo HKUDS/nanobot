@@ -145,8 +145,6 @@ export interface UIMessage {
   activityKind?: "model";
   /** Context-compaction lifecycle rendered as a standalone channel notice. */
   compaction?: UIContextCompaction;
-  /** Display-only localization marker for fixed /compact command replies. */
-  compactReply?: "empty" | "failed";
   /** User turn: optimistic blob URLs for preview. Replay: placeholder chips. */
   images?: UIImage[];
   media?: UIMediaAttachment[];
@@ -189,6 +187,7 @@ export interface UIMessage {
   /** Live UI hint; not part of the persisted transcript. */
   processingStatus?: InputProcessingStatus;
   deliveryErrorKind?: MessageDeliveryErrorKind;
+  deliveryErrorDetail?: string;
 }
 
 /** Turn-owned telemetry, not a transcript row or body-history source. */
@@ -1912,6 +1911,7 @@ export type Outbound =
       type: "message";
       chat_id: string;
       content: string;
+      locale?: string;
       media?: import("../../../packages/client-events/attachments").AttachmentReference[];
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];

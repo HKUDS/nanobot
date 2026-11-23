@@ -2025,68 +2025,6 @@
         "navigateHint": "↑↓ 선택",
         "selectHint": "Enter/Tab 입력",
         "closeHint": "Esc 닫기",
-        "commands": {
-          "new": {
-            "title": "새 채팅",
-            "description": "이 주제를 초기화하고 새 주제를 시작합니다."
-          },
-          "compact": {
-            "title": "컨텍스트 압축",
-            "description": "컨텍스트를 압축하고 대화를 계속합니다."
-          },
-          "stop": {
-            "title": "작업 중지",
-            "description": "이 채팅에서 실행 중인 작업을 중지합니다."
-          },
-          "restart": {
-            "title": "nanobot 재시작",
-            "description": "nanobot 프로세스를 재시작합니다."
-          },
-          "status": {
-            "title": "상태 보기",
-            "description": "실행, 제공업체 및 채널 상태를 확인합니다."
-          },
-          "model": {
-            "title": "모델",
-            "description": "현재 모델 프리셋을 확인하거나 전환합니다."
-          },
-          "dream": {
-            "title": "Dream 실행",
-            "description": "메모리를 지금 정리합니다."
-          },
-          "dream_log": {
-            "title": "Dream 로그",
-            "description": "지난 Dream 실행의 변경을 확인합니다."
-          },
-          "dream_restore": {
-            "title": "메모리 복원",
-            "description": "이전 Dream 메모리 스냅샷을 복원합니다."
-          },
-          "dream_prompt": {
-            "title": "Dream 설정",
-            "description": "Dream이 이 작업 공간의 메모리를 정리하는 방법을 설정합니다."
-          },
-          "goal": {
-            "title": "장기 목표",
-            "description": "어시스턴트가 이 목표를 향해 계속 작업하게 합니다."
-          },
-          "cancel_goal": {
-            "title": "목표 취소",
-            "description": "이 채팅에서 진행 중이거나 차단된 목표를 취소합니다."
-          },
-          "trigger": {
-            "title": "CLI 트리거",
-            "description": "이 채팅의 CLI 트리거를 만듭니다."
-          },
-          "help": {
-            "title": "도움말 보기",
-            "description": "사용 가능한 슬래시 명령을 표시합니다."
-          },
-          "pairing": {
-            "title": "페어링",
-            "description": "연결 요청을 관리합니다."
-          }
-        },
         "badges": {
           "current": "현재",
           "recent": "최근"
@@ -2552,6 +2490,7 @@
       "body": "게이트웨이가 이 프로젝트 또는 접근 모드를 거부했습니다. 기존 프로젝트나 다른 접근 모드를 선택한 후 다시 시도하세요."
     },
     "turnRejected": {
+      "temporaryCommand": "임시 채팅에서는 /model 및 /stop 명령만 사용할 수 있습니다. 다른 명령은 일반 채팅에서 사용하세요.",
       "title": "메시지가 전송되지 않았습니다",
       "body": "게이트웨이가 이 메시지를 거부했습니다. 텍스트나 첨부 파일을 확인한 후 다시 시도하세요."
     },

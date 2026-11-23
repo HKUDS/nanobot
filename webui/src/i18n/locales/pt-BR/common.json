@@ -2035,68 +2035,6 @@
           "goalActive": "Objetivo em execução",
           "goalReady": "Iniciar um objetivo sustentado",
           "stopRunning": "Executando agora"
-        },
-        "commands": {
-          "new": {
-            "title": "Nova conversa",
-            "description": "Reinicie este tópico e comece um novo."
-          },
-          "compact": {
-            "title": "Compactar contexto",
-            "description": "Compacte o contexto e continue a conversa."
-          },
-          "stop": {
-            "title": "Parar tarefa",
-            "description": "Pare a tarefa ativa nesta conversa."
-          },
-          "restart": {
-            "title": "Reiniciar nanobot",
-            "description": "Reinicie o processo nanobot."
-          },
-          "status": {
-            "title": "Mostrar status",
-            "description": "Confira o status de execução, provedores e canais."
-          },
-          "model": {
-            "title": "Modelo",
-            "description": "Veja ou troque o preset de modelo atual."
-          },
-          "dream": {
-            "title": "Executar Dream",
-            "description": "Organize a memória agora."
-          },
-          "dream_log": {
-            "title": "Log Dream",
-            "description": "Veja as alterações da última execução do Dream."
-          },
-          "dream_restore": {
-            "title": "Restaurar memória",
-            "description": "Restaure um snapshot anterior da memória Dream."
-          },
-          "dream_prompt": {
-            "title": "Ajustes do Dream",
-            "description": "Defina como Dream organiza a memória deste espaço."
-          },
-          "goal": {
-            "title": "Objetivo de longa duração",
-            "description": "Peça ao assistente para continuar trabalhando neste objetivo."
-          },
-          "cancel_goal": {
-            "title": "Cancelar objetivo",
-            "description": "Cancela o objetivo ativo ou bloqueado desta conversa."
-          },
-          "trigger": {
-            "title": "Gatilho CLI",
-            "description": "Crie um gatilho CLI para esta conversa."
-          },
-          "help": {
-            "title": "Mostrar ajuda",
-            "description": "Mostre os comandos de barra disponíveis."
-          },
-          "pairing": {
-            "title": "Pareamento",
-            "description": "Gerencie solicitações de pareamento."
-          }
         }
       },
       "mentions": {
@@ -2554,6 +2492,7 @@
       "body": "O gateway rejeitou este projeto ou modo de acesso. Escolha um projeto existente ou outro modo de acesso e tente novamente."
     },
     "turnRejected": {
+      "temporaryCommand": "Nos chats temporários, só é possível usar /model e /stop. Para outros comandos, use um chat normal.",
       "title": "A mensagem não foi enviada",
       "body": "O gateway rejeitou esta mensagem. Revise o texto ou os anexos e tente novamente."
     },

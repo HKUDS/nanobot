@@ -2025,68 +2025,6 @@
         "navigateHint": "↑↓ Pilih",
         "selectHint": "Enter/Tab Sisipkan",
         "closeHint": "Esc Tutup",
-        "commands": {
-          "new": {
-            "title": "Obrolan baru",
-            "description": "Reset topik ini dan mulai yang baru."
-          },
-          "compact": {
-            "title": "Ringkas konteks",
-            "description": "Ringkas konteks dan lanjutkan chat."
-          },
-          "stop": {
-            "title": "Hentikan tugas",
-            "description": "Hentikan tugas aktif di chat ini."
-          },
-          "restart": {
-            "title": "Mulai ulang nanobot",
-            "description": "Mulai ulang proses nanobot."
-          },
-          "status": {
-            "title": "Tampilkan status",
-            "description": "Periksa status eksekusi, penyedia, dan kanal."
-          },
-          "model": {
-            "title": "Model",
-            "description": "Lihat atau ganti preset model saat ini."
-          },
-          "dream": {
-            "title": "Jalankan Dream",
-            "description": "Atur memori sekarang."
-          },
-          "dream_log": {
-            "title": "Log Dream",
-            "description": "Lihat perubahan dari eksekusi Dream terakhir."
-          },
-          "dream_restore": {
-            "title": "Pulihkan memori",
-            "description": "Pulihkan snapshot memori Dream sebelumnya."
-          },
-          "dream_prompt": {
-            "title": "Pengaturan Dream",
-            "description": "Atur cara Dream mengelola memori ruang kerja ini."
-          },
-          "goal": {
-            "title": "Tujuan jangka panjang",
-            "description": "Minta asisten terus mengerjakan tujuan ini."
-          },
-          "cancel_goal": {
-            "title": "Batalkan tujuan",
-            "description": "Batalkan tujuan aktif atau terblokir di chat ini."
-          },
-          "trigger": {
-            "title": "Pemicu CLI",
-            "description": "Buat pemicu CLI untuk chat ini."
-          },
-          "help": {
-            "title": "Tampilkan bantuan",
-            "description": "Tampilkan perintah slash yang tersedia."
-          },
-          "pairing": {
-            "title": "Pemasangan",
-            "description": "Kelola permintaan pemasangan."
-          }
-        },
         "badges": {
           "current": "Saat ini",
           "recent": "Terbaru"
@@ -2552,6 +2490,7 @@
       "body": "Gateway menolak proyek atau mode akses ini. Pilih proyek yang sudah ada atau mode akses lain, lalu coba lagi."
     },
     "turnRejected": {
+      "temporaryCommand": "Obrolan sementara hanya mendukung /model dan /stop. Gunakan obrolan biasa untuk perintah lain.",
       "title": "Pesan tidak terkirim",
       "body": "Gateway menolak pesan ini. Periksa teks atau lampiran, lalu coba lagi."
     },

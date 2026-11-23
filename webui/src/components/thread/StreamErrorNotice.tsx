@@ -76,7 +76,8 @@ function resolveCopy(
     case "turn_rejected":
       return {
         title: t("errors.turnRejected.title"),
-        body: t("errors.turnRejected.body"),
+        body: error.detail === "temporary_chat_command_rejected"
+          ? t("errors.turnRejected.temporaryCommand") : t("errors.turnRejected.body"),
       };
     case "model_request_failed":
       return resolveModelRequestFailureCopy(error, t);

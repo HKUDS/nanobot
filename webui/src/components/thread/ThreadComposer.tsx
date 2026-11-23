@@ -46,6 +46,7 @@ import {
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { commandLabel } from "../../../../packages/client-events/command-result";
 
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -56,7 +57,6 @@ import {
   SkillPalette,
   SlashCommandPalette,
   skillSourceBucket,
-  slashCommandI18nKey,
   type MentionCandidate,
   type SkillPaletteItem,
   type SlashPaletteCommand,
@@ -506,7 +506,8 @@ export function ThreadComposer({
   focusRequest = 0,
   onQuotedContextChange,
 }: ThreadComposerProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const locale = i18n.resolvedLanguage ?? i18n.language;
   const [initialDraft] = useState(() => draftKey ? draftStore?.get(draftKey, persistDraft) : undefined);
   const [value, setValue] = useState(initialDraft?.text ?? "");
   const [composerFocused, setComposerFocused] = useState(false);
@@ -909,13 +910,8 @@ export function ThreadComposer({
         ) {
           return [];
         }
-        const commandKey = slashCommandI18nKey(command.command);
-        const title = t(`thread.composer.slash.commands.${commandKey}.title`, {
-          defaultValue: command.title,
-        });
-        const description = t(`thread.composer.slash.commands.${commandKey}.description`, {
-          defaultValue: command.description,
-        });
+        const title = commandLabel(command.command, "title", locale) ?? command.title;
+        const description = commandLabel(command.command, "description", locale) ?? command.description;
         const matchRank = slashCommandMatchRank(command, title, description, slashQuery);
         if (matchRank === null) return [];
         let detail = description;
@@ -934,6 +930,8 @@ export function ThreadComposer({
           matchRank,
           item: {
             ...command,
+            title,
+            description,
             detail,
             badge,
             recent: recentSlashCommands.includes(command.command),
@@ -957,7 +955,7 @@ export function ThreadComposer({
         return 0;
       })
       .map(({ item }) => item);
-  }, [goalState?.active, isStreaming, modelLabel, onStop, recentSlashCommands, skillQuery, slashQuery, t, visibleSlashCommands]);
+  }, [goalState?.active, isStreaming, locale, modelLabel, onStop, recentSlashCommands, skillQuery, slashQuery, t, visibleSlashCommands]);
 
   const showSkillMenu = filteredSkills.length > 0;
   const showSlashMenu = !showSkillMenu && filteredSlashCommands.length > 0;
@@ -1562,7 +1560,6 @@ export function ThreadComposer({
       : null;
     if (
       slashLifecycle === "stop_active_turn"
-      && isStreaming
       && onStop
     ) {
       handleStop();
