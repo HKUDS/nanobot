@@ -53,4 +53,4 @@ async def cmd_user_shell(ctx: CommandContext) -> OutboundMessage:
         finally:
             reset_workspace_scope(workspace_token)
             reset_request_context(request_token)
-    return command_reply(ctx.msg, "/__shell", content, metadata={"render_as": "text"})
+    return command_reply(ctx.msg, "/__shell", content)

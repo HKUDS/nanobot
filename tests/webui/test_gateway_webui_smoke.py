@@ -338,6 +338,7 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             assert "Commandes nanobot" in help_reply["text"]
             assert help_reply["command_result"]["command"] == "/help"
             assert "/model [preset]" in help_reply["text"] and "/dream-prompt [init]" in help_reply["text"]
+            assert not any(row.startswith("/skill ") for row in help_reply["text"].splitlines())
             assert help_reply["render_as"] == "text"
             await _recv_until(ws, "turn_end")
 

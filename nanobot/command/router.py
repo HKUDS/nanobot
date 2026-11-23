@@ -198,7 +198,7 @@ class CommandRouter:
             for pfx, _ in self._prefix
         )
         result = line("invalid.command", command=entered) if accepts_args else line("invalid.args", command=canonical)
-        return command_reply(ctx.msg, canonical, result, metadata={"render_as": "text"})
+        return command_reply(ctx.msg, canonical, result)
 
     def _registered_commands(self) -> dict[str, str]:
         commands = [*self._priority, *self._exact]

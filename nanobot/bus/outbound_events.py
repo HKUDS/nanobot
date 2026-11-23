@@ -79,6 +79,8 @@ CommandPart = CommandLine | LiteralLine
 
 @dataclass(frozen=True, kw_only=True)
 class CommandResultEvent(SideChannelReplyEvent):
+    """A slash-command outcome; the receiving channel chooses whether and how to display it."""
+
     command: str
     parts: tuple[CommandPart, ...]
 

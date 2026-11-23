@@ -26,7 +26,7 @@ from rich.text import Text
 
 from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import CommandResultEvent, ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.contracts import ChannelInstanceSpec
@@ -2423,7 +2423,9 @@ class FeishuChannel(BaseChannel):
                 return
 
             if (
-                msg.content.strip() == "New session started."
+                isinstance(msg.event, CommandResultEvent)
+                and msg.event.command == "/new"
+                and any(part.get("key") == "new.done" for part in msg.event.parts)
                 and msg.metadata.get("chat_type") == "p2p"
                 and not msg.media
                 and not msg.buttons

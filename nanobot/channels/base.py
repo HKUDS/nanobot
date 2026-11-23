@@ -11,6 +11,7 @@ from loguru import logger
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.command.results import as_text_message
 from nanobot.config.network import NetworkConfig
 from nanobot.pairing import (
     PAIRING_CODE_META_KEY,
@@ -71,6 +72,10 @@ class BaseChannel(ABC):
         except Exception:
             self.logger.exception("Audio transcription failed")
             return ""
+
+    async def send_command_result(self, msg: OutboundMessage) -> None:
+        """Present a command receipt. Text channels use the request locale by default."""
+        await self.send(as_text_message(msg))
 
     async def login(self, force: bool = False) -> bool:
         """

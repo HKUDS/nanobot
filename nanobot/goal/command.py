@@ -37,7 +37,7 @@ async def cmd_goal(ctx: CommandInput) -> CommandExpansion | OutboundMessage:
     """Expand an explicit goal command into model-only input."""
     goal = ctx.args.strip()
     def reply(key: str) -> OutboundMessage:
-        return command_reply(ctx.msg, GOAL_COMMAND, line(key), metadata={"render_as": "text"})
+        return command_reply(ctx.msg, GOAL_COMMAND, line(key))
 
     if not goal:
         return reply("goal.usage")
@@ -63,7 +63,7 @@ async def cmd_goal(ctx: CommandInput) -> CommandExpansion | OutboundMessage:
 async def cmd_cancel_goal(ctx: CommandContext) -> OutboundMessage:
     """Cancel a user's saved goal, stopping active goal work before committing."""
     def reply(key: str) -> OutboundMessage:
-        return command_reply(ctx.msg, "/cancel_goal", line(key), metadata={"render_as": "text"})
+        return command_reply(ctx.msg, "/cancel_goal", line(key))
 
     if not ctx.is_user_turn:
         return reply("goal.cancelUserOnly")

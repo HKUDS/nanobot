@@ -14,6 +14,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import CommandResultEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
+from nanobot.command.results import message_text
 from nanobot.cron.service import CronService
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from nanobot.goal.assembly import install_goal
@@ -68,7 +69,7 @@ async def test_idle_new_resets_session_and_accepts_next_message(loop):
                 reply = await loop.bus.consume_outbound()
                 if isinstance(reply.event, CommandResultEvent) and reply.event.command == "/new":
                     break
-        assert reply.content == "New session started."
+        assert message_text(reply) == "New session started."
         assert (await loop.sessions.state.read(key)).messages == []
 
         await loop.bus.publish_inbound(InboundMessage(
@@ -119,7 +120,7 @@ async def test_message_queued_during_idle_new_runs_in_reset_session(loop):
             while len(replies) < 2:
                 reply = await loop.bus.consume_outbound()
                 if reply.event is None or (isinstance(reply.event, CommandResultEvent) and reply.event.command == "/new"):
-                    replies.append(reply.content)
+                    replies.append(message_text(reply))
         assert replies == ["New session started.", "fresh reply"]
         session = await loop.sessions.state.read(key)
         assert any(str(message.get("content", "")).startswith("hello") for message in session.messages)

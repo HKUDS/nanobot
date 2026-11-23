@@ -86,13 +86,11 @@ CORE_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
 )
 
 
-async def cmd_stop(ctx: CommandContext) -> OutboundMessage | None:
+async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     """Cancel all active tasks and subagents for the session."""
     loop = ctx.loop
     msg = ctx.msg
     await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
-    if msg.channel == "websocket" and msg.metadata.get("webui") is True:
-        return None  # Both interactive clients observe the cancelled turn directly.
     return command_reply(msg, "/stop", line("stop.done"))
 
 
@@ -159,7 +157,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         last_usage=last_usage, context_window_tokens=runtime.context_window_tokens,
         session_msg_count=len(session.get_text_history()), context_tokens_estimate=ctx_est,
         search_usage=usage, active_task_count=task_count, max_completion_tokens=runtime.generation.max_tokens,
-    ), metadata={"render_as": "text"})
+    ))
 
 
 async def cmd_new(ctx: CommandContext) -> OutboundMessage:
@@ -261,7 +259,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
             parts = [line("model.switched", preset=runtime.model_preset or "default"), line("model.scope"),
                      line("model.name", model=runtime.model), line("model.window", tokens=runtime.context_window_tokens),
                      line("model.max", tokens=runtime.generation.max_tokens)]
-    return command_reply(ctx.msg, "/model", *parts, metadata={"render_as": "text"})
+    return command_reply(ctx.msg, "/model", *parts)
 
 
 async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
@@ -289,7 +287,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
         if result.commit_sha:
             parts.append(line("dream.commit", sha=result.commit_sha))
         await loop.bus.publish_outbound(command_reply(
-            msg, "/dream", *parts, metadata=None if result.had_input else {"render_as": "text"},
+            msg, "/dream", *parts,
             notification_id=f"command-result:{uuid4().hex}",
         ))
 
@@ -315,7 +313,7 @@ async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
         result = line("dream.prompt.custom", path=display_path)
     else:
         result = line("dream.prompt.default", path=display_path)
-    return command_reply(ctx.msg, "/dream-prompt", result, metadata={"render_as": "text"})
+    return command_reply(ctx.msg, "/dream-prompt", result)
 
 
 async def cmd_evaluator_prompt(ctx: CommandContext) -> OutboundMessage:
@@ -342,7 +340,7 @@ async def cmd_evaluator_prompt(ctx: CommandContext) -> OutboundMessage:
         result = line("evaluator.prompt.custom", path=display_path)
     else:
         result = line("evaluator.prompt.default", path=display_path)
-    return command_reply(ctx.msg, "/evaluator-prompt", result, metadata={"render_as": "text"})
+    return command_reply(ctx.msg, "/evaluator-prompt", result)
 
 
 def _extract_changed_files(diff: str) -> list[str]:
@@ -371,16 +369,15 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
     """Show the diff for the latest Dream commit, or for the requested SHA."""
     store = ctx.loop.consolidator.store
     git = store.git
-    metadata = {"render_as": "text"}
     if not git.is_initialized():
         result = line("dream.log.not_run") if store.get_last_dream_cursor() == 0 else line("dream.history_unavailable")
-        return command_reply(ctx.msg, "/dream-log", result, metadata=metadata)
+        return command_reply(ctx.msg, "/dream-log", result)
 
     args = ctx.args.split()
     if args:
         change = git.show_commit_diff(args[0])
         if not change:
-            return command_reply(ctx.msg, "/dream-log", line("dream.log.not_found", sha=args[0]), metadata=metadata)
+            return command_reply(ctx.msg, "/dream-log", line("dream.log.not_found", sha=args[0]))
     else:
         commits = git.log(max_entries=1, message_prefix=_DREAM_COMMIT_PREFIX)
         change = (
@@ -388,7 +385,7 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
             if commits else None
         )
         if not change:
-            return command_reply(ctx.msg, "/dream-log", line("dream.log.empty"), metadata=metadata)
+            return command_reply(ctx.msg, "/dream-log", line("dream.log.empty"))
 
     commit, diff = change
     files = ", ".join(f"`{path}`" for path in _extract_changed_files(diff))
@@ -402,7 +399,7 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
         parts.extend([line("dream.log.undo", sha=commit.sha), "", fenced_diff])
     else:
         parts.append(line("dream.log.no_diff"))
-    return command_reply(ctx.msg, "/dream-log", *parts, metadata=metadata)
+    return command_reply(ctx.msg, "/dream-log", *parts)
 
 
 async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
@@ -447,7 +444,7 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
                     ]
                 else:
                     parts = [line("dream.restore.no_parent", sha=sha)]
-    return command_reply(ctx.msg, "/dream-restore", *parts, metadata={"render_as": "text"})
+    return command_reply(ctx.msg, "/dream-restore", *parts)
 
 
 async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:
@@ -479,7 +476,7 @@ async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:
     """Create a local trigger bound to the current session."""
     name = ctx.args.strip()
     if not name:
-        return command_reply(ctx.msg, "/trigger", line("trigger.usage"), "", line("palette.trigger.description"), metadata={"render_as": "text"})
+        return command_reply(ctx.msg, "/trigger", line("trigger.usage"), "", line("palette.trigger.description"))
 
     from nanobot.triggers.local_store import LocalTriggerStore
 
@@ -498,7 +495,7 @@ async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:
     )
     return command_reply(ctx.msg, "/trigger", line("trigger.created", name=trigger.name),
                          line("trigger.id", id=trigger.id), "", line("trigger.command"),
-                         f'nanobot trigger {trigger.id} "message"', metadata={"render_as": "text"})
+                         f'nanobot trigger {trigger.id} "message"')
 
 
 def _help_parts(specs: tuple[BuiltinCommandSpec, ...]) -> list[CommandLine | str]:
@@ -515,9 +512,7 @@ def _help_parts(specs: tuple[BuiltinCommandSpec, ...]) -> list[CommandLine | str
 
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     specs = ctx.loop.commands.specs
-    if ctx.msg.channel == "websocket" and ctx.msg.metadata.get("webui") is True:
-        specs = tuple(spec for spec in specs if spec.command not in CHAT_UI_COMMAND_REPLACEMENTS)
-    return command_reply(ctx.msg, "/help", *_help_parts(specs), metadata={"render_as": "text"})
+    return command_reply(ctx.msg, "/help", *_help_parts(specs))
 
 
 def build_help_text(specs: tuple[BuiltinCommandSpec, ...] = CORE_COMMAND_SPECS, *, locale: object = None) -> str:

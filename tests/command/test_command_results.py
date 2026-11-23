@@ -9,7 +9,7 @@ import pytest
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import CommandResultEvent, outbound_message_for_event
 from nanobot.command.application import BUILTIN_COMMAND_SPECS, build_help_text
-from nanobot.command.results import command_reply, line, render
+from nanobot.command.results import command_reply, line, message_text, render
 from nanobot.command.router import CommandInput
 from nanobot.command_copy import catalog
 from nanobot.events import ContextCompactionEvent
@@ -44,7 +44,7 @@ async def test_goal_usage_can_be_read_in_different_languages():
     reply = await cmd_goal(CommandInput(msg, "", True))
     assert hasattr(reply, "event") and isinstance(reply.event, CommandResultEvent)
     assert reply.event.command == "/goal"
-    assert reply.content == "用法：/goal <長期工作說明>"
+    assert message_text(reply) == "用法：/goal <長期工作說明>"
     assert render(reply.event.parts, "en") == "Usage: /goal <long-running task description>"
     help_lines = build_help_text(locale="zh-TW").splitlines()
     assert len(help_lines) == 1 + len(BUILTIN_COMMAND_SPECS)
@@ -56,11 +56,11 @@ def test_literal_output_and_parameter_values_are_not_translated(monkeypatch):
     raw = "{preset} $&"
     msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/model")
     reply = command_reply(msg, "/model", line("model.switched", preset=raw), raw)
-    assert reply.content == f"已切换到 `{raw}`。\n{raw}"
+    assert message_text(reply) == f"已切换到 `{raw}`。\n{raw}"
 
 
 def test_compact_preserves_event_and_projects_localized_text():
     event = ContextCompactionEvent(compaction_id="compact-1", phase="cancelled", notify=True, reason="manual")
     out = outbound_message_for_event(channel="telegram", chat_id="room", event=event, metadata={"locale": "ja"})
-    assert out.content == "コンテキストの圧縮を取り消しました。"
+    assert message_text(out) == "コンテキストの圧縮を取り消しました。"
     assert out.event is event

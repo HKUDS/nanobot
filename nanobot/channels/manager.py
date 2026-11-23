@@ -17,6 +17,7 @@ from loguru import logger
 from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
+    CommandResultEvent,
     ProgressEvent,
     RetryWaitEvent,
     RuntimeModelUpdatedEvent,
@@ -1076,6 +1077,8 @@ class ChannelManager:
             await ChannelManager._send_stream_event(channel, msg, event)
         elif isinstance(event, StreamEndEvent):
             await ChannelManager._send_stream_event(channel, msg, event)
+        elif isinstance(event, CommandResultEvent):
+            await channel.send_command_result(msg)
         elif not isinstance(event, StreamedResponseEvent):
             await channel.send(msg)
 

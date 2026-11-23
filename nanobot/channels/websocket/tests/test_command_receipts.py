@@ -7,6 +7,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel
 from nanobot.command.builtin import cmd_dream_log, cmd_skill
+from nanobot.command.results import command_reply, line, message_text
 from nanobot.command.router import CommandContext
 from nanobot.session.display_history import MAX_HISTORY_FACT_BYTES
 from nanobot.utils.gitstore import CommitInfo
@@ -76,6 +77,23 @@ async def _command(history, raw):
     return CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, loop=MagicMock())
 
 
+async def test_ui_silences_only_successful_stop(history, chat):
+    channel, connection = chat
+    ctx = await _command(history, "/stop")
+    ctx.msg.metadata.update(webui=True, locale="en")
+    done = command_reply(ctx.msg, "/stop", line("stop.done"))
+    await channel.send_command_result(done)
+    invalid = command_reply(ctx.msg, "/stop", line("invalid.args", command="/stop"))
+    await channel.send_command_result(invalid)
+
+    live, = _sent_ws_payloads(connection)
+    replay, = history.build(ctx.key)["events"]
+    assert live["text"] == replay["text"] == message_text(invalid)
+
+    await channel.send_command_result(replace(done, metadata={**done.metadata, "webui": False}))
+    assert _sent_ws_payloads(connection)[-1]["text"] == "Stopped."
+
+
 @pytest.mark.parametrize("fits", [True, False], ids=["structured-fits", "text-only-fits"])
 async def test_large_dream_log_delivers_and_replays_the_full_diff(history, chat, fits):
     channel, connection = chat
@@ -94,7 +112,7 @@ async def test_large_dream_log_delivers_and_replays_the_full_diff(history, chat,
     replay, = history.build(ctx.key)["events"]
     for event in (live, replay):
         assert event["side_channel"] is True
-        assert event["text"] == reply.content and diff in event["text"]
+        assert event["text"] == message_text(reply) and diff in event["text"]
         if fits:
             assert diff in event["command_result"]["parts"][-1]["text"]
         else:

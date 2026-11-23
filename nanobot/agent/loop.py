@@ -58,6 +58,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter
 from nanobot.command.builtin import register_core_commands
+from nanobot.command.results import as_text_message, message_text
 from nanobot.command.router import CommandExpansion, command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
@@ -2129,7 +2130,7 @@ class AgentLoop:
                     ctx.msg, session, _command=True
                 )
                 session.add_message(
-                    "assistant", result.content, _command=True
+                    "assistant", message_text(result), _command=True
                 )
                 self._clear_pending_user_turn(session)
                 await self.sessions.state.prepare_input(session)
@@ -2651,7 +2652,7 @@ class AgentLoop:
                         response = await self._process_message(msg, **kwargs)
                         if response is not None and delivery.after_command_reply:
                             delivery.after_command_reply()
-                        return response
+                        return as_text_message(response) if response is not None else None
                     finally:
                         if temporary_parent:
                             parent = self.sessions.state.peek_header(session_key)

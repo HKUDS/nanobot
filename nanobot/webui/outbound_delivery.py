@@ -27,6 +27,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
+from nanobot.command.results import message_text
 from nanobot.context_graph import ContextGraph, ContextGraphParts, graph_from_parts
 from nanobot.context_sources import PromptSourcesEvent
 from nanobot.events import ModelRequestEvent
@@ -279,6 +280,14 @@ class WebUIOutboundDelivery:
 
     async def send(self, msg: OutboundMessage) -> None:
         event = msg.event
+        if isinstance(event, CommandResultEvent):
+            if msg.metadata.get("webui") is True:
+                if event.command == "/stop" and any(p.get("key") == "stop.done" for p in event.parts):
+                    return
+                if event.command == "/help":
+                    event = replace(event, parts=tuple(p for p in event.parts if p.get("key") != "palette.skill.description"))
+                    msg = replace(msg, event=event)
+            msg = replace(msg, content=message_text(msg))
         if isinstance(event, PromptSourcesEvent):
             await self._context_graph.observe_prompt(
                 msg.chat_id, event.sources, msg.metadata, system_sources=event.system_sources,
@@ -456,7 +465,6 @@ class WebUIOutboundDelivery:
         # Help lists literal command syntax; other command receipts can contain Markdown.
         literal = msg.metadata.get(INBOUND_META_USER_SHELL) is True or (
             isinstance(msg.event, CommandResultEvent) and msg.event.command == "/help"
-            and msg.metadata.get("render_as") == "text"
         )
         payload: MessageWirePayload = {
             "event": "message", "chat_id": msg.chat_id,

@@ -8,7 +8,8 @@ from nanobot.agent.skills import SkillsLoader
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command.application import register_builtin_commands
-from nanobot.command.builtin import cmd_help, cmd_skill
+from nanobot.command.builtin import cmd_skill
+from nanobot.command.results import message_text
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.config.schema import ModelPresetConfig
 
@@ -68,7 +69,7 @@ def _loop_with_skills(tmp_path: Path) -> AgentLoop:
 async def test_skill_command_no_skills(tmp_path: Path) -> None:
     loop = _loop_with_skills(tmp_path)
     out = await cmd_skill(_ctx(loop))
-    assert out.content == "No skills available."
+    assert message_text(out) == "No skills available."
 
 
 @pytest.mark.asyncio
@@ -81,11 +82,11 @@ async def test_skill_command_lists_names_and_descriptions(tmp_path: Path) -> Non
     loop = _loop_with_skills(tmp_path)
     out = await cmd_skill(_ctx(loop))
 
-    assert "Available skills (2):" in out.content
-    assert "**weather** — Get current weather and forecasts" in out.content
-    assert "**cron** — Schedule recurring tasks" in out.content
-    assert ".md" not in out.content
-    assert "/skills/" not in out.content
+    assert "Available skills (2):" in message_text(out)
+    assert "**weather** — Get current weather and forecasts" in message_text(out)
+    assert "**cron** — Schedule recurring tasks" in message_text(out)
+    assert ".md" not in message_text(out)
+    assert "/skills/" not in message_text(out)
 
 
 @pytest.mark.asyncio
@@ -100,8 +101,8 @@ async def test_skill_command_excludes_disabled(tmp_path: Path) -> None:
 
     out = await cmd_skill(_ctx(loop))
 
-    assert "alpha" not in out.content
-    assert "**beta** — Beta skill" in out.content
+    assert "alpha" not in message_text(out)
+    assert "**beta** — Beta skill" in message_text(out)
 
 
 @pytest.mark.asyncio
@@ -113,7 +114,7 @@ async def test_skill_command_fallback_description(tmp_path: Path) -> None:
     loop = _loop_with_skills(tmp_path)
     out = await cmd_skill(_ctx(loop))
 
-    assert "**plain** — plain" in out.content
+    assert "**plain** — plain" in message_text(out)
 
 
 @pytest.mark.asyncio
@@ -132,15 +133,4 @@ async def test_skill_command_registered_on_router(tmp_path: Path) -> None:
     out = await router.dispatch(_ctx(loop, "/skill"))
 
     assert out is not None
-    assert "No skills available." in out.content
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("channel", "metadata", "lists_skills"), [("websocket", {"webui": True}, False), ("telegram", {}, True)])
-async def test_help_lists_commands_for_the_requesting_client(tmp_path, channel, metadata, lists_skills):
-    loop = _make_loop(tmp_path)
-    msg = InboundMessage(channel=channel, chat_id="room", sender_id="user", content="/help", metadata=metadata)
-    reply = await cmd_help(CommandContext(msg=msg, key=msg.session_key, session=None, raw="/help", loop=loop))
-    commands = {row.split()[0] for row in reply.content.splitlines() if row.startswith("/")}
-    assert "/help" in commands
-    assert ("/skill" in commands) is lists_skills
+    assert "No skills available." in message_text(out)
