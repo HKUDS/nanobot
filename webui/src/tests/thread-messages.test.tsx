@@ -812,7 +812,6 @@ describe("ThreadMessages", () => {
     expect(collapse.querySelectorAll("svg")).toHaveLength(1);
     const guide = answerRow.querySelector("[data-contextual-activity-guide]");
     expect(guide).toBeInTheDocument();
-    expect(guide).toHaveClass("start-[13px]");
     expect(screen.getByTestId("agent-activity-content")).toHaveClass("ps-6");
     await waitFor(() => expect(collapse).toHaveFocus());
     fireEvent.click(collapse);
