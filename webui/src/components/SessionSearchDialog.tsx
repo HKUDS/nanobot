@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ArchiveRestore, Check, Search } from "lucide-react";
+import { Archive, ArchiveRestore, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -331,9 +331,9 @@ export function SessionSearchDialog({
 
   const statusTabs: Array<{ id: SearchStatusFilter; label: string }> = [
     { id: "all", label: isZh ? "全部" : "All" },
-    { id: "active", label: isZh ? "活跃中" : "Active" },
-    { id: "open", label: isZh ? "在办" : "Open" },
-    { id: "done", label: isZh ? "已结单" : "Done" },
+    { id: "active", label: isZh ? "进行中" : "Live" },
+    { id: "open", label: isZh ? "当前" : "Active" },
+    { id: "done", label: isZh ? "已归档" : "Archived" },
   ];
 
   const placeholderText = isZh
@@ -516,7 +516,7 @@ export function SessionSearchDialog({
                             <AutomationProtectedBadge count={result.automationCount} compact />
                             {result.archived ? (
                               <span className="shrink-0 text-[11px] text-muted-foreground/60">
-                                · {isZh ? "已结单" : "Done"}
+                                · {isZh ? "已归档" : "Archived"}
                               </span>
                             ) : null}
                           </div>
@@ -540,7 +540,7 @@ export function SessionSearchDialog({
                           {canArchive && onToggleArchive ? (
                             <button
                               type="button"
-                              aria-label={result.archived ? (isZh ? "恢复到在办" : "Restore") : (isZh ? "结单归档" : "Mark done")}
+                              aria-label={result.archived ? (isZh ? "恢复到当前" : "Restore") : (isZh ? "归档" : "Archive")}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 onToggleArchive(session.key);
@@ -555,7 +555,7 @@ export function SessionSearchDialog({
                               {result.archived ? (
                                 <ArchiveRestore className="h-3.5 w-3.5" aria-hidden />
                               ) : (
-                                <Check className="h-3.5 w-3.5" aria-hidden />
+                                <Archive className="h-3.5 w-3.5" aria-hidden />
                               )}
                             </button>
                           ) : null}
@@ -578,7 +578,7 @@ export function SessionSearchDialog({
             {onToggleArchive ? (
               <span>
                 {apple ? "⌘E" : "Ctrl+E"}{" "}
-                {isZh ? "结单 / 恢复" : "Done / Restore"}
+                {isZh ? "归档 / 恢复" : "Archive / Restore"}
               </span>
             ) : null}
           </div>

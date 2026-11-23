@@ -62,6 +62,7 @@ interface PaneWorkbenchProps {
   activePaneKey: string;
   layout: WorkbenchLayout;
   chrome?: boolean;
+  hideHeaderHost?: boolean;
   showLayoutControl: boolean;
   addPaneDisabled?: boolean;
   addPaneDisabledLabel?: string;
@@ -193,6 +194,7 @@ export function PaneWorkbench({
   activePaneKey,
   layout,
   chrome = true,
+  hideHeaderHost = false,
   showLayoutControl,
   addPaneDisabled = false,
   addPaneDisabledLabel,
@@ -683,7 +685,7 @@ export function PaneWorkbench({
           && "[--thread-header-position:relative]",
       )}
     >
-        {chrome ? (
+        {chrome && !hideHeaderHost ? (
           <header className="pointer-events-none inset-x-0 top-0 z-30 shrink-0 [position:var(--thread-header-position,absolute)]">
             <div
               ref={setHeaderPortalTarget}
@@ -732,7 +734,7 @@ export function PaneWorkbench({
                   {renderPane(pane, {
                     active,
                     multiplePanes: displayedPanes.length > 1,
-                    headerPortalTarget: chrome && displayedPanes.length > 1 ? headerPortalTarget : undefined,
+                    headerPortalTarget: chrome && !hideHeaderHost && displayedPanes.length > 1 ? headerPortalTarget : undefined,
                     composerPortalTarget: sharedComposer ? composerPortalTarget : undefined,
                     navigationFrame: displayedPanes.length === 1 ? navigationFrame : undefined,
                     headerActions,

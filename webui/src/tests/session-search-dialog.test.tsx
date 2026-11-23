@@ -278,7 +278,7 @@ describe("SessionSearchDialog", () => {
     fireEvent.keyDown(dialog, { key: "e", ctrlKey: true });
     expect(onToggleArchive).toHaveBeenCalledWith("websocket:chat-3");
 
-    fireEvent.click(screen.getByRole("tab", { name: "Open" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Active" }));
     expect(screen.getByText("Chat 2")).toBeInTheDocument();
     expect(screen.queryByText("Chat 3")).not.toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Search" }), { key: "Enter" });

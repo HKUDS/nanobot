@@ -79,3 +79,16 @@ it("finishes an accepted navigation before handing snapshots to the theme toggle
   captures[0].update();
   expect(update).toHaveBeenCalledOnce();
 });
+
+it("applies and clears data-shell-transition markers for settings and view switches", async () => {
+  const { captures } = nativeCaptures();
+  const enter = vi.fn();
+  transitionSession(enter, true, "enter-settings");
+  expect(document.documentElement).toHaveAttribute("data-shell-transition", "enter-settings");
+  expect(document.documentElement).not.toHaveAttribute("data-session-transition");
+  captures[0].update();
+  expect(enter).toHaveBeenCalledOnce();
+  captures[0].finish();
+  await Promise.resolve();
+  expect(document.documentElement).not.toHaveAttribute("data-shell-transition");
+});

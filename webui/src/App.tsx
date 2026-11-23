@@ -6,10 +6,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import { ArrowRight, CircleHelp, Eye, EyeOff, Loader2 } from "lucide-react";
-import { ThemeToggleIcon } from "@/components/icons/ThemeToggleIcon";
 import { Trans, useTranslation } from "react-i18next";
 import { ChannelPairing } from "@/components/pairing/ChannelPairing";
 import { StarPrompt } from "@/components/StarPrompt";
@@ -28,7 +26,7 @@ import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { StartupShell } from "@/components/StartupShell";
 import { ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
-import { isAppsSection, type SettingsExitGuard, type SettingsFocusTarget } from "@/components/settings/contracts";
+import { type SettingsExitGuard, type SettingsFocusTarget } from "@/components/settings/contracts";
 import {
   RESTART_ROUTE_KEY,
   RESTART_STARTED_KEY,
@@ -43,7 +41,7 @@ import {
   type ShellView,
 } from "@/shell-route";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
-import { transitionSession } from "@/components/thread/session-transition";
+import { transitionSession, type ShellTransitionKind } from "@/components/thread/session-transition";
 import {
   MAX_WORKBENCH_PANES,
   addWorkbenchPane,
@@ -331,22 +329,6 @@ function normalizeWorkspaceScope(scope: WorkspaceScopePayload): WorkspaceScopePa
   };
 }
 
-function HostChrome({
-  rightAction,
-}: {
-  rightAction?: ReactNode;
-}) {
-  return (
-    <header className="host-drag-region pointer-events-none absolute inset-x-0 top-0 z-40 h-11 bg-transparent text-foreground/90">
-      {rightAction ? (
-        <div className="host-no-drag pointer-events-auto absolute right-3 top-2">
-          {rightAction}
-        </div>
-      ) : null}
-    </header>
-  );
-}
-
 function prefetchChat() {
   const route = readShellRoute();
   if (route.view === "chat" && !route.landing) void loadThreadShell().catch(() => {});
@@ -493,6 +475,7 @@ function Shell({
   const [settingsFocus, setSettingsFocus] = useState<SettingsFocusTarget | undefined>(initialRouteRef.current.settingsFocus);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerPinned, setDrawerPinned] = useState(readDrawerPinned);
+  const [topBarThreadActionsHost, setTopBarThreadActionsHost] = useState<HTMLDivElement | null>(null);
   const desktopDrawer = useMediaQuery("(min-width: 1024px)");
   const effectiveDrawerPinned = drawerPinned && desktopDrawer;
   const [overviewTab, setOverviewTab] = useState<"open" | "done">("open");
@@ -638,18 +621,27 @@ function Shell({
     return workbenchTabForPane(workbenchState, current.activeKey).tabKey
       !== workbenchTabForPane(workbenchState, next.activeKey).tabKey;
   }, [mobileWorkbench, workbenchState]);
+  const shellTransitionFor = useCallback((current: ShellRoute, next: ShellRoute): ShellTransitionKind | null => {
+    if (changesVisibleSession(current, next)) return "session";
+    if (current.view === next.view) return null;
+    if (next.view === "settings") return "enter-settings";
+    if (current.view === "settings") return "exit-settings";
+    return "switch-view";
+  }, [changesVisibleSession]);
   const navigate = useCallback(
     (route: ShellRoute, options?: { replace?: boolean; animate?: boolean }) => {
       const current = currentShellRouteRef.current;
+      const transitionKind = shellTransitionFor(current, route);
       const leave = () => transitionSession(
         () => commitNavigation(route, options),
-        options?.animate !== false && changesVisibleSession(current, route),
+        options?.animate !== false && transitionKind !== null,
+        transitionKind ?? "session",
       );
       if (changesSettingsSurface(current, route) && settingsExitGuardRef.current) {
         settingsExitGuardRef.current(leave, { promptRestart: current.view !== route.view });
       } else leave();
     },
-    [commitNavigation, changesVisibleSession],
+    [commitNavigation, shellTransitionFor],
   );
 
   useEffect(() => {
@@ -670,6 +662,7 @@ function Shell({
         }, { promptRestart: current.view !== route.view });
         return;
       }
+      const transitionKind = shellTransitionFor(current, route);
       transitionSession(() => {
         setActiveKey(route.activeKey);
         setView(route.view);
@@ -679,7 +672,7 @@ function Shell({
         if (route.view === "chat" && !route.activeKey) {
           setDraftWorkspaceScope(null);
         }
-      }, changesVisibleSession(current, route));
+      }, transitionKind !== null, transitionKind ?? "session");
     };
     window.addEventListener("hashchange", applyRoute);
     window.addEventListener("popstate", applyRoute);
@@ -687,7 +680,7 @@ function Shell({
       window.removeEventListener("hashchange", applyRoute);
       window.removeEventListener("popstate", applyRoute);
     };
-  }, [changesVisibleSession]);
+  }, [shellTransitionFor]);
 
   useEffect(() => {
     temporarySessionsRef.current = temporarySessions;
@@ -2157,55 +2150,36 @@ function Shell({
           showHostChrome && "host-window-shell",
         )}
       >
-        {showHostChrome && view === "settings" ? (
-          <HostChrome
-            rightAction={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label={t("thread.header.toggleTheme")}
-                onClick={toggle}
-                className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
-              >
-                <ThemeToggleIcon theme={theme} />
-              </Button>
-            }
-          />
-        ) : null}
-
-        {showMainSidebar ? (
-          <WorkspaceTopBar
-            view={view}
-            intelligence={sessionIntelligence}
-            activeSession={activeEnrichedSession}
-            activeTemporaryTitle={temporaryChatActive ? headerTitle : null}
-            activeWorkbenchGroup={activeWorkbenchGroup}
-            drawerOpen={drawerOpen}
-            drawerPinned={effectiveDrawerPinned}
-            theme={theme}
-            hostChromeInset={showHostChrome}
-            availableUpdate={availableUpdate}
-            onOpenOverview={(projectId) => onOpenOverview(projectId, "open")}
-            onToggleDrawer={toggleSidebar}
-            onSelectSession={onSelectChat}
-            onNewChat={onNewChat}
-            onDoneSession={(key) => onArchiveMany([key], true)}
-            onOpenSearch={onOpenSessionSearch}
-            onOpenApps={onOpenApps}
-            onOpenAutomations={onOpenAutomations}
-            onOpenSettings={() => onOpenSettings()}
-            onOpenUpdates={() => onOpenSettings("about")}
-            onSettingsIntent={onSettingsIntent}
-            onToggleTheme={toggle}
-          />
-        ) : null}
+        <WorkspaceTopBar
+          view={view}
+          intelligence={sessionIntelligence}
+          activeSession={activeEnrichedSession}
+          activeTemporaryTitle={temporaryChatActive ? headerTitle : null}
+          activeWorkbenchGroup={activeWorkbenchGroup}
+          drawerOpen={drawerOpen}
+          drawerPinned={effectiveDrawerPinned && showMainSidebar}
+          theme={theme}
+          hostChromeInset={showHostChrome}
+          availableUpdate={availableUpdate}
+          onOpenOverview={(projectId) => onOpenOverview(projectId, "open")}
+          onToggleDrawer={toggleSidebar}
+          onSelectSession={onSelectChat}
+          onNewChat={onNewChat}
+          onDoneSession={(key) => onArchiveMany([key], true)}
+          onOpenSearch={onOpenSessionSearch}
+          onOpenApps={onOpenApps}
+          onOpenAutomations={onOpenAutomations}
+          onOpenSettings={() => onOpenSettings()}
+          onOpenUpdates={() => onOpenSettings("about")}
+          onSettingsIntent={onSettingsIntent}
+          onToggleTheme={toggle}
+          onThreadActionsHostChange={setTopBarThreadActionsHost}
+        />
 
         <div className="relative flex min-h-0 flex-1 w-full overflow-hidden">
-          {showMainSidebar ? (
-            <ActiveSessionDrawer
-              open={drawerOpen}
-              pinned={effectiveDrawerPinned}
+          <ActiveSessionDrawer
+            open={drawerOpen}
+            pinned={effectiveDrawerPinned && showMainSidebar}
               intelligence={sessionIntelligence}
               temporarySessions={sidebarStateLoading ? [] : temporarySessionList}
               activeKey={!managingConnections && view === "chat" ? activeKey : null}
@@ -2223,14 +2197,13 @@ function Shell({
               onRequestDeleteMany={(items) => { void onRequestDeleteMany(items); }}
               onCreateTab={mobileWorkbench ? undefined : onCreateWorkbenchTab}
               onOpenOverviewDone={onOpenOverviewDone}
-              mobileFooterExtra={(
-                <HostSwitcher
-                  menuSide="top"
-                  className="h-7 w-full rounded-lg px-2 text-[12px] text-muted-foreground/75 hover:bg-foreground/[0.04] hover:text-foreground"
-                />
-              )}
-            />
-          ) : null}
+            mobileFooterExtra={(
+              <HostSwitcher
+                menuSide="top"
+                className="h-7 w-full rounded-lg px-2 text-[12px] text-muted-foreground/75 hover:bg-foreground/[0.04] hover:text-foreground"
+              />
+            )}
+          />
 
           {sessionSearchOpen ? (
             <Suspense fallback={null}>
@@ -2257,6 +2230,7 @@ function Shell({
 
           <main ref={managementMain}
             data-theme-surface
+            data-workspace-stage=""
             aria-hidden={managingConnections && remoteConnections?.embeddedManagement || undefined}
             {...(managingConnections && remoteConnections?.embeddedManagement ? { inert: "" } : {})}
             className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background"
@@ -2298,6 +2272,7 @@ function Shell({
                       layout={renderedWorkbenchLayout}
                       splitRatios={renderedWorkbenchSplitRatios}
                       chrome={paneChromeEnabled}
+                      hideHeaderHost
                       showLayoutControl={activeTabVisible}
                       addPaneDisabled={creatingPane || activePaneLimitReached}
                       addPaneDisabledLabel={activePaneLimitReached
@@ -2356,6 +2331,8 @@ function Shell({
                               hideThemeButton
                               hideHeaderTitle
                               hideHeader={false}
+                              actionsPortalTarget={topBarThreadActionsHost}
+                              headerActive={view === "chat"}
                               workspaceScope={activeWorkspaceScope}
                               workspaceDefaultScope={workspaces?.default_scope ?? null}
                               workspaceControls={workspaces?.controls ?? null}
@@ -2406,7 +2383,8 @@ function Shell({
                             showPaneProject={splitSpansMultipleProjects}
                             headerActions={context.headerActions}
                             headerPortalTarget={context.headerPortalTarget}
-                            headerActive={context.active}
+                            actionsPortalTarget={topBarThreadActionsHost}
+                            headerActive={view === "chat" && context.active}
                             composerPortalTarget={context.composerPortalTarget}
                             navigationFrame={context.navigationFrame}
                             composerActive={context.active}
@@ -2449,7 +2427,7 @@ function Shell({
                     mainNavigationExpanded={showMainSidebar && effectiveDrawerPinned}
                     hostChromeInset={showHostChrome}
                     onBackToChat={onBackToChat}
-                  /> : <Suspense fallback={<StartupShell embedded surface={view === "apps" && isAppsSection(settingsInitialSection) ? settingsInitialSection : view} sidebarExpanded={effectiveDrawerPinned} />}>
+                  /> : <Suspense fallback={<div className="flex-1 bg-settings-canvas" />}>
                     <SettingsView
                       registerExitGuard={registerSettingsExitGuard}
                       themePreference={themePreference}
@@ -2473,7 +2451,8 @@ function Shell({
                       onRestart={onRestart}
                       onNativeEngineRestart={onNativeEngineRestart}
                       isRestarting={isRestarting}
-                      hostChromeInset={showHostChrome}
+                      hostChromeInset={false}
+                      hideHostSwitcher
                     />
                   </Suspense>}
                 </div>

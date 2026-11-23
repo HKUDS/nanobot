@@ -149,7 +149,7 @@ export function ActiveSessionDrawer({
     <aside
       data-testid="active-session-drawer"
       data-pinned={pinned ? "true" : undefined}
-      aria-label={isZh ? "在办会话抽屉" : "Active sessions drawer"}
+      aria-label={isZh ? "会话抽屉" : "Sessions drawer"}
       aria-hidden={!visible || undefined}
       {...(!visible ? { inert: "" } : {})}
       className={cn(
@@ -162,7 +162,7 @@ export function ActiveSessionDrawer({
       <div className="flex h-11 shrink-0 items-center justify-between gap-2 px-4">
         <div className="flex items-center gap-2">
           <span className="text-[13px] font-medium text-foreground">
-            {isZh ? "在办" : "Open"}
+            {isZh ? "会话" : "Sessions"}
           </span>
           <span className="text-[11.5px] tabular-nums text-muted-foreground/60">
             {intelligence.open.length}
@@ -217,7 +217,7 @@ export function ActiveSessionDrawer({
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center gap-2.5 py-16 text-center">
             <p className="text-[12.5px] text-muted-foreground/70">
-              {isZh ? "暂无在办" : "Nothing open"}
+              {isZh ? "暂无会话" : "No active sessions"}
             </p>
             <button
               type="button"
@@ -471,8 +471,8 @@ export function ActiveSessionDrawer({
         >
           <span>
             {isZh
-              ? `已结单 (${intelligence.archived.length})`
-              : `Done (${intelligence.archived.length})`}
+              ? `已归档 (${intelligence.archived.length})`
+              : `Archived (${intelligence.archived.length})`}
           </span>
           <ArrowRight className="h-3 w-3 opacity-65" aria-hidden />
         </button>
@@ -629,7 +629,7 @@ function DrawerSessionRow({
             {canArchive ? (
               <ZenDoneCircle
                 completed={completing}
-                label={isZh ? `结单：${item.title}` : `Done: ${item.title}`}
+                label={isZh ? `归档：${item.title}` : `Archive: ${item.title}`}
                 onClick={onArchive}
               />
             ) : null}

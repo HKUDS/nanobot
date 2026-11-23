@@ -1,8 +1,8 @@
 import { useState } from "react";
 import {
+  Archive,
   ArrowRight,
   ArrowUpCircle,
-  Check,
   MoreHorizontal,
   PanelLeft,
 } from "lucide-react";
@@ -79,6 +79,7 @@ export interface WorkspaceTopBarProps {
   onOpenUpdates?: () => void;
   onSettingsIntent?: () => void;
   onToggleTheme: () => void;
+  onThreadActionsHostChange?: (element: HTMLDivElement | null) => void;
 }
 
 export function WorkspaceTopBar({
@@ -104,6 +105,7 @@ export function WorkspaceTopBar({
   onOpenUpdates,
   onSettingsIntent,
   onToggleTheme,
+  onThreadActionsHostChange,
 }: WorkspaceTopBarProps) {
   const { t, i18n } = useTranslation();
   const isZh = Boolean(i18n.resolvedLanguage?.startsWith("zh"));
@@ -124,8 +126,8 @@ export function WorkspaceTopBar({
   );
 
   const overviewLabel = isZh ? "工作台" : "Overview";
-  const drawerLabel = isZh ? "在办抽屉" : "Active drawer";
-  const doneLabel = isZh ? "结单" : "Done";
+  const drawerLabel = isZh ? "会话抽屉" : "Sessions drawer";
+  const doneLabel = isZh ? "归档" : "Archive";
   const inChat = view === "chat";
 
   // Calm single-line summary for the pulse whisper button
@@ -148,6 +150,7 @@ export function WorkspaceTopBar({
   return (
     <header
       data-testid="workspace-top-bar"
+      data-workspace-topbar=""
       data-theme-surface
       className={cn(
         "group/topbar relative z-30 flex h-12 shrink-0 items-center justify-between gap-2 bg-background/85 px-3 backdrop-blur-md transition-colors sm:gap-3 sm:px-4",
@@ -239,6 +242,23 @@ export function WorkspaceTopBar({
               {activeSession ? activeSession.title : activeTemporaryTitle}
             </span>
           </div>
+        ) : null}
+
+        {/* Contextual surface breadcrumb for Settings / Apps / Automations */}
+        {(view === "settings" || view === "apps" || view === "automations") ? (
+          <nav
+            aria-label={isZh ? "当前上下文" : "Current context"}
+            className="flex min-w-0 items-center gap-1.5 pl-1 text-[12.5px]"
+          >
+            <span aria-hidden className="text-foreground/20">/</span>
+            <span className="truncate font-medium text-foreground/90">
+              {view === "settings"
+                ? t("sidebar.settings")
+                : view === "apps"
+                  ? t("sidebar.apps")
+                  : t("sidebar.automations", { defaultValue: "Automations" })}
+            </span>
+          </nav>
         ) : null}
 
         {/* Contextual Breadcrumb in Chat — quiet editorial slashes, no pill noise */}
@@ -422,7 +442,7 @@ export function WorkspaceTopBar({
                             ) : null}
                             {canDone ? (
                               <ZenDoneCircle
-                                label={isZh ? `结单：${item.title}` : `Done: ${item.title}`}
+                                label={isZh ? `归档：${item.title}` : `Archive: ${item.title}`}
                                 onClick={() => onDoneSession(item.session.key)}
                                 className="opacity-65 transition-opacity group-hover:opacity-100"
                               />
@@ -439,21 +459,32 @@ export function WorkspaceTopBar({
         </Popover>
         ) : null}
 
+        {/* Active thread actions (Session automations, prompt search, pane layout, add pane, temporary toggle) */}
+        <div
+          ref={onThreadActionsHostChange}
+          data-testid="topbar-thread-actions"
+          className="host-no-drag flex shrink-0 items-center gap-0.5 empty:hidden [&_button]:h-7 [&_button]:w-7 [&_button]:rounded-lg [&_button]:text-muted-foreground/80 [&_button:hover]:bg-foreground/[0.05] [&_button:hover]:text-foreground [&_button>svg]:h-[15px] [&_button>svg]:w-[15px]"
+        />
+
         {canMarkActiveDone && activeSession ? (
-          <HoverHint content={isZh ? "结单当前会话（归档，可撤销）" : "Mark current session done"} side="bottom">
+          <HoverHint content={isZh ? "归档当前会话（可撤销）" : "Archive current session"} side="bottom">
             <Button
               type="button"
               variant="ghost"
               size="sm"
               data-testid="topbar-done-button"
-              aria-label={isZh ? "结单当前会话" : "Mark current session done"}
+              aria-label={isZh ? "归档当前会话" : "Archive current session"}
               onClick={() => onDoneSession(activeSession.session.key)}
-              className="host-no-drag h-7 gap-1.5 rounded-lg px-2 text-[12px] font-normal text-muted-foreground/75 transition-colors hover:bg-foreground/[0.045] hover:text-foreground"
+              className="host-no-drag h-7 w-7 gap-1.5 rounded-lg p-0 text-[12px] font-normal text-muted-foreground/75 transition-colors hover:bg-foreground/[0.045] hover:text-foreground xl:w-auto xl:px-2"
             >
-              <Check className="h-3.5 w-3.5" strokeWidth={1.9} aria-hidden />
-              <span className="hidden lg:inline">{doneLabel}</span>
+              <Archive className="h-[15px] w-[15px]" strokeWidth={1.85} aria-hidden />
+              <span className="hidden xl:inline">{doneLabel}</span>
             </Button>
           </HoverHint>
+        ) : null}
+
+        {inChat ? (
+          <span aria-hidden className="mx-0.5 hidden h-3.5 w-px bg-border/60 sm:inline-block" />
         ) : null}
 
         {/* Quiet utility controls — gently recessed during active reading/chat on hover-capable devices */}

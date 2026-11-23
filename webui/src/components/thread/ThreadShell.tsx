@@ -34,7 +34,7 @@ import {
   modelPresetOptionsFromSettings,
   toModelBadgeInfo,
 } from "@/components/thread/model-preset";
-import { ThreadHeader } from "@/components/thread/ThreadHeader";
+import { ThreadHeader, ThreadHeaderActions } from "@/components/thread/ThreadHeader";
 import { GoalIsland } from "@/components/thread/GoalIsland";
 import { ThreadLoadingSkeleton } from "@/components/thread/ThreadLoadingSkeleton";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
@@ -230,6 +230,7 @@ interface ThreadShellProps {
   hideHeader?: boolean;
   headerActions?: ReactNode;
   headerPortalTarget?: HTMLElement | null;
+  actionsPortalTarget?: HTMLElement | null;
   headerActive?: boolean;
   composerPortalTarget?: HTMLElement | null;
   navigationFrame?: HTMLElement | null;
@@ -372,6 +373,7 @@ export function ThreadShell({
   hideHeader = false,
   headerActions,
   headerPortalTarget,
+  actionsPortalTarget,
   headerActive = true,
   composerPortalTarget,
   navigationFrame,
@@ -1380,12 +1382,28 @@ export function ThreadShell({
     />
   ) : undefined;
 
-  const threadHeader = !hideHeader ? (
+  const goalElement = currentGoalState && (currentGoalState.active || currentGoalState.status === "blocked")
+    ? <GoalIsland key={historyKey} goal={currentGoalState} cancelDisabled={!online} onCancel={cancelGoal} />
+    : undefined;
+  const actionsPortaled = actionsPortalTarget !== undefined;
+  const threadHeaderActions = (
+    <ThreadHeaderActions
+      sessionInfoAction={sessionInfoAction}
+      promptNavigatorAction={promptNavigatorAction}
+      actions={headerActions}
+      temporaryChatEnabled={temporaryChatEnabled}
+      temporaryChatDisabled={booting || turnActive}
+      onTemporaryChatEnabledChange={
+        showTemporaryChatControl ? onTemporaryChatEnabledChange : undefined
+      }
+    />
+  );
+
+  const threadHeader = !hideHeader && (!actionsPortaled || Boolean(goalElement)) ? (
     <ThreadHeader
       className={previewOpen ? "h-10" : undefined}
       title={title}
-      goal={currentGoalState && (currentGoalState.active || currentGoalState.status === "blocked")
-        ? <GoalIsland key={historyKey} goal={currentGoalState} cancelDisabled={!online} onCancel={cancelGoal} /> : undefined}
+      goal={goalElement}
       onToggleSidebar={onToggleSidebar}
       theme={theme}
       onToggleTheme={onToggleTheme}
@@ -1393,14 +1411,14 @@ export function ThreadShell({
       hideSidebarToggle={hideSidebarToggle}
       hideThemeButton={hideThemeButton}
       hideTitle={hideHeaderTitle}
-      actions={headerActions}
+      actions={actionsPortaled ? undefined : headerActions}
       minimal={!session && !loading}
-      promptNavigatorAction={promptNavigatorAction}
-      sessionInfoAction={sessionInfoAction}
+      promptNavigatorAction={actionsPortaled ? undefined : promptNavigatorAction}
+      sessionInfoAction={actionsPortaled ? undefined : sessionInfoAction}
       temporaryChatEnabled={temporaryChatEnabled}
       temporaryChatDisabled={booting || turnActive}
       onTemporaryChatEnabledChange={
-        showTemporaryChatControl ? onTemporaryChatEnabledChange : undefined
+        !actionsPortaled && showTemporaryChatControl ? onTemporaryChatEnabledChange : undefined
       }
     />
   ) : null;
@@ -1520,6 +1538,9 @@ export function ThreadShell({
       </div>
       {headerPortalTarget && headerActive
         ? createPortal(threadHeader, headerPortalTarget)
+        : null}
+      {actionsPortalTarget && headerActive && !hideHeader
+        ? createPortal(threadHeaderActions, actionsPortalTarget)
         : null}
       <ComposerUsagePopover
         sessionKey={previewSessionKey}

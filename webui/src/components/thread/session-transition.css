@@ -76,12 +76,146 @@
   to { opacity: 1; }
 }
 
+/* Zen shell-level View Transitions: anchor the top bar, smoothly morph only the workspace stage. */
+:root[data-shell-transition] {
+  view-transition-name: none;
+}
+
+:root[data-shell-transition] [data-workspace-topbar] {
+  view-transition-name: workspace-topbar;
+}
+
+:root[data-shell-transition] [data-workspace-stage] {
+  view-transition-name: workspace-stage;
+}
+
+:root[data-shell-transition]::view-transition {
+  pointer-events: none;
+}
+
+:root[data-shell-transition]::view-transition-group(workspace-topbar) {
+  animation: none;
+  z-index: 2;
+}
+
+:root[data-shell-transition]::view-transition-old(workspace-topbar) {
+  display: none;
+}
+
+:root[data-shell-transition]::view-transition-new(workspace-topbar) {
+  animation: none;
+}
+
+:root[data-shell-transition]::view-transition-group(workspace-stage) {
+  animation: none;
+  z-index: 1;
+}
+
+:root[data-shell-transition]::view-transition-old(workspace-stage),
+:root[data-shell-transition]::view-transition-new(workspace-stage) {
+  height: 100%;
+  width: 100%;
+  object-fit: none;
+  object-position: top left;
+  mix-blend-mode: normal;
+}
+
+/* Entering Settings: underlying stage gently recedes while Settings blooms into focus. */
+:root[data-shell-transition="enter-settings"]::view-transition-old(workspace-stage) {
+  animation: zen-stage-recede 190ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+:root[data-shell-transition="enter-settings"]::view-transition-new(workspace-stage) {
+  animation: zen-settings-bloom 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Leaving Settings: reverse depth return back to Workspace or Chat. */
+:root[data-shell-transition="exit-settings"]::view-transition-old(workspace-stage) {
+  animation: zen-settings-retreat 180ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+:root[data-shell-transition="exit-settings"]::view-transition-new(workspace-stage) {
+  animation: zen-stage-surface 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Sibling top-level surfaces (Overview / Chat / Apps / Automations): serene cross-dissolve. */
+:root[data-shell-transition="switch-view"]::view-transition-old(workspace-stage) {
+  animation: zen-view-out 140ms ease-out both;
+}
+
+:root[data-shell-transition="switch-view"]::view-transition-new(workspace-stage) {
+  animation: zen-view-in 210ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes zen-stage-recede {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.988);
+  }
+}
+
+@keyframes zen-settings-bloom {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes zen-settings-retreat {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.992);
+  }
+}
+
+@keyframes zen-stage-surface {
+  from {
+    opacity: 0;
+    transform: scale(0.988);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes zen-view-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes zen-view-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root[data-session-transition]::view-transition-group(*),
-  :root[data-session-transition]::view-transition-new(*) {
+  :root[data-session-transition]::view-transition-new(*),
+  :root[data-shell-transition]::view-transition-group(*),
+  :root[data-shell-transition]::view-transition-new(*) {
     animation: none;
   }
-  :root[data-session-transition]::view-transition-old(*) {
+  :root[data-session-transition]::view-transition-old(*),
+  :root[data-shell-transition]::view-transition-old(*) {
     display: none;
   }
 }

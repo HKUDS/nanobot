@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Archive,
   ArchiveRestore,
-  Check,
   Columns2,
   MoreHorizontal,
   PanelsTopLeft,
@@ -350,7 +350,7 @@ export function MissionControlView({
     <div
       ref={containerRef}
       data-testid="mission-control-view"
-      className="relative h-full min-h-0 w-full overflow-y-auto overscroll-contain bg-background"
+      className="zen-surface-enter relative h-full min-h-0 w-full overflow-y-auto overscroll-contain bg-background"
     >
       <div className="mx-auto flex w-full max-w-[780px] flex-col gap-9 px-5 pb-16 pt-6 sm:gap-10 sm:px-10 sm:pt-11">
         {/* Single Quiet Navigation Rail: Projects on left, Lifecycle on right — zero filler copy */}
@@ -418,7 +418,7 @@ export function MissionControlView({
                 tab === "open" ? "font-medium text-foreground" : "text-muted-foreground/60 hover:text-foreground",
               )}
             >
-              {isZh ? "在办" : "Open"}
+              {isZh ? "当前" : "Active"}
             </button>
 
             {filteredCleanup.length > 0 ? (
@@ -447,7 +447,7 @@ export function MissionControlView({
                 tab === "done" ? "font-medium text-foreground" : "text-muted-foreground/60 hover:text-foreground",
               )}
             >
-              <span>{isZh ? "已结单" : "Done"}</span>
+              <span>{isZh ? "已归档" : "Archived"}</span>
               {projectScopedArchived.length > 0 ? (
                 <span className="tabular-nums opacity-55">{projectScopedArchived.length}</span>
               ) : null}
@@ -495,7 +495,7 @@ export function MissionControlView({
             {visibleProjects.length === 0 && liveNowItems.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
                 <p className="text-[14px] text-muted-foreground/80">
-                  {isZh ? "暂无待办" : "Nothing open"}
+                  {isZh ? "暂无会话" : "No active sessions"}
                 </p>
                 <button
                   type="button"
@@ -585,7 +585,7 @@ export function MissionControlView({
                 className="rounded-full bg-foreground/[0.07] px-3.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-foreground/[0.13] active:scale-[0.98] disabled:opacity-35"
               >
                 {isZh
-                  ? `结单所选 (${selectedCleanupKeys.size})`
+                  ? `归档所选 (${selectedCleanupKeys.size})`
                   : `Archive (${selectedCleanupKeys.size})`}
               </button>
             </div>
@@ -677,7 +677,7 @@ export function MissionControlView({
               <div className="py-16 text-center text-[13.5px] text-muted-foreground/70">
                 {doneFilter.trim()
                   ? (isZh ? "无匹配项" : "No matches")
-                  : (isZh ? "暂无已结单" : "Empty")}
+                  : (isZh ? "暂无已归档" : "No archived sessions")}
               </div>
             ) : (
               <ul className="space-y-0.5">
@@ -993,7 +993,7 @@ function ProjectSection({
                       <div className="pointer-events-none absolute opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
                         <ZenDoneCircle
                           completed={completing}
-                          label={isZh ? `结单：${item.title}` : `Done: ${item.title}`}
+                          label={isZh ? `归档：${item.title}` : `Archive: ${item.title}`}
                           onClick={() => onCompleteSession(item.session.key)}
                         />
                       </div>
@@ -1001,7 +1001,7 @@ function ProjectSection({
                   ) : canArchive ? (
                     <ZenDoneCircle
                       completed={completing}
-                      label={isZh ? `结单：${item.title}` : `Done: ${item.title}`}
+                      label={isZh ? `归档：${item.title}` : `Archive: ${item.title}`}
                       onClick={() => onCompleteSession(item.session.key)}
                       className="border-foreground/25 group-hover:border-foreground/45 dark:border-white/25 dark:group-hover:border-white/45"
                     />
@@ -1080,8 +1080,8 @@ function ProjectSection({
                         <DropdownMenuContent align="end" className="w-40">
                           {canArchive && !isLive ? (
                             <DropdownMenuItem onSelect={() => onCompleteSession(item.session.key)}>
-                              <Check className="h-3.5 w-3.5" aria-hidden />
-                              {isZh ? "结单" : "Mark done"}
+                              <Archive className="h-3.5 w-3.5" aria-hidden />
+                              {isZh ? "归档" : "Archive"}
                             </DropdownMenuItem>
                           ) : null}
                           <DropdownMenuItem onSelect={() => onTogglePin(item.session.key)}>

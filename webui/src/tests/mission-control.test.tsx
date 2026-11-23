@@ -108,15 +108,15 @@ describe("MissionControlView & ActiveSessionDrawer", () => {
 
     // Open Tidy tab and archive the stale candidate
     fireEvent.click(screen.getByRole("tab", { name: /Tidy|整理/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Archive \(1\)|结单所选 \(1\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Archive \(1\)|归档所选 \(1\)/ }));
     expect(onArchiveMany).toHaveBeenCalledWith(["websocket:alpha-stale"], true);
 
-    // Switching to Done tab reveals archived sessions with restore action
-    fireEvent.click(screen.getByRole("tab", { name: /Done|已结单/ }));
+    // Switching to Archived tab reveals archived sessions with restore action
+    fireEvent.click(screen.getByRole("tab", { name: /Archived|已归档/ }));
     expect(screen.getByText("Old finished task")).toBeInTheDocument();
   });
 
-  it("scopes Done counts to the selected project and keeps the selected project tab visible across Open and Done", () => {
+  it("scopes Archived counts to the selected project and keeps the selected project tab visible across Active and Archived", () => {
     const sessions: ChatSummary[] = [
       {
         key: "websocket:alpha-open",
@@ -174,15 +174,15 @@ describe("MissionControlView & ActiveSessionDrawer", () => {
       />,
     );
 
-    // Globally Done shows count 1
-    expect(screen.getByRole("tab", { name: /Done|已结单/ })).toHaveTextContent("1");
+    // Globally Archived shows count 1
+    expect(screen.getByRole("tab", { name: /Archived|已归档/ })).toHaveTextContent("1");
 
-    // Filtering to alpha (0 archived) removes the stale global count from Done tab
+    // Filtering to alpha (0 archived) removes the stale global count from Archived tab
     fireEvent.click(screen.getByRole("tab", { name: "alpha" }));
-    expect(screen.getByRole("tab", { name: /Done|已结单/ })).not.toHaveTextContent("1");
+    expect(screen.getByRole("tab", { name: /Archived|已归档/ })).not.toHaveTextContent("1");
 
-    // Switching to Done keeps the selected alpha tab visible and active
-    fireEvent.click(screen.getByRole("tab", { name: /Done|已结单/ }));
+    // Switching to Archived keeps the selected alpha tab visible and active
+    fireEvent.click(screen.getByRole("tab", { name: /Archived|已归档/ }));
     expect(screen.getByRole("tab", { name: "alpha" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByText("Beta archived thread")).not.toBeInTheDocument();
   });

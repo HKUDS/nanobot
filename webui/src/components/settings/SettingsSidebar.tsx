@@ -60,6 +60,7 @@ interface SettingsSidebarProps {
   isRestarting?: boolean;
   restartPending?: boolean;
   isNativeHost?: boolean;
+  hideHostSwitcher?: boolean;
 }
 
 export function SettingsSidebar(props: SettingsSidebarProps) {
@@ -73,6 +74,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
     isRestarting,
     restartPending,
     isNativeHost,
+    hideHostSwitcher = false,
   } = props;
   const { t } = useTranslation();
   const hostNavigation = useContext(HostNavigationContext);
@@ -96,7 +98,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
   return (
     <aside
       className={cn(
-        "flex w-full shrink-0 select-none flex-col bg-settings-surface px-3 pb-2 lg:w-48 lg:px-3 lg:pb-4",
+        "flex w-full shrink-0 select-none flex-col bg-settings-surface px-3 pb-2 lg:w-48 lg:border-r lg:border-border/40 lg:px-3 lg:pb-4",
         hostChromeInset ? "pt-10 lg:pt-10" : "pt-4 lg:pt-4",
       )}
     >
@@ -185,7 +187,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
             <span>{t("app.account.logout")}</span>
           </Button>
         ) : null}
-        {hostNavigation && <HostSwitcher className={SIDEBAR_ROW} />}
+        {!hideHostSwitcher && hostNavigation && <HostSwitcher className={SIDEBAR_ROW} />}
       </div>
     </aside>
   );
@@ -202,6 +204,7 @@ function MobileSettingsNavigation({
   onRestart,
   isRestarting,
   restartPending,
+  hideHostSwitcher = false,
 }: SettingsSidebarProps & {
   navSection: SettingsSectionKey;
   activeLabel: string;
@@ -276,7 +279,7 @@ function MobileSettingsNavigation({
             </> : null}
           </DropdownMenuContent>
         </DropdownMenu>
-        {hostNavigation && <HostSwitcher collapsed />}
+        {!hideHostSwitcher && hostNavigation && <HostSwitcher collapsed />}
       </div>
       {onRestart && (restartPending || isRestarting) ? (
         <div className="flex min-h-11 items-center justify-between gap-2 px-4 pb-1">
