@@ -14,8 +14,9 @@ import { Trans, useTranslation } from "react-i18next";
 import { ChannelPairing } from "@/components/pairing/ChannelPairing";
 import { StarPrompt } from "@/components/StarPrompt";
 import { WorkspaceTopBar } from "@/components/session/WorkspaceTopBar";
-import { MissionControlView, type MissionControlTab } from "@/components/session/MissionControlView";
+import { MissionControlView } from "@/components/session/MissionControlView";
 import { ActiveSessionDrawer } from "@/components/session/ActiveSessionDrawer";
+import { HostSwitcher } from "@/components/remote/HostSwitcher";
 import { RemoteInstances } from "@/components/remote/RemoteInstances";
 import { useRemoteConnections } from "@/components/remote/remote-context";
 import { LazyRemoteConnectionsPage } from "@/components/remote/LazyRemoteConnectionsPage";
@@ -347,7 +348,8 @@ function HostChrome({
 }
 
 function prefetchChat() {
-  if (readShellRoute().view === "chat") void loadThreadShell().catch(() => {});
+  const route = readShellRoute();
+  if (route.view === "chat" && !route.landing) void loadThreadShell().catch(() => {});
 }
 
 export default function App() {
@@ -491,12 +493,19 @@ function Shell({
   const [settingsFocus, setSettingsFocus] = useState<SettingsFocusTarget | undefined>(initialRouteRef.current.settingsFocus);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerPinned, setDrawerPinned] = useState(readDrawerPinned);
-  const [overviewTab, setOverviewTab] = useState<MissionControlTab>("open");
+  const desktopDrawer = useMediaQuery("(min-width: 1024px)");
+  const effectiveDrawerPinned = drawerPinned && desktopDrawer;
+  const [overviewTab, setOverviewTab] = useState<"open" | "done">("open");
   const [overviewProjectId, setOverviewProjectId] = useState<string | null>(null);
   const landingConsumedRef = useRef(false);
+  const waitingForLanding = Boolean(
+    initialRouteRef.current?.landing
+    && !landingConsumedRef.current
+    && (!sessionsLoaded || sidebarStateLoading),
+  );
   useEffect(() => {
-    if (!localActive || managingConnections) setDrawerOpen(false);
-  }, [localActive, managingConnections]);
+    if (!localActive || managingConnections || effectiveDrawerPinned) setDrawerOpen(false);
+  }, [effectiveDrawerPinned, localActive, managingConnections]);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const mobileWorkbench = useMediaQuery("(max-width: 767px)");
   const workbenchState = sidebarState.workbench;
@@ -925,24 +934,22 @@ function Shell({
   }, []);
 
   const toggleSidebar = useCallback(() => {
-    const isDesktop =
-      typeof window !== "undefined" &&
-      window.matchMedia("(min-width: 1024px)").matches;
-    if (isDesktop && drawerPinned) {
+    if (effectiveDrawerPinned) {
       setDrawerPinned(false);
       setDrawerOpen(false);
       return;
     }
     setDrawerOpen((open) => !open);
-  }, [drawerPinned]);
+  }, [effectiveDrawerPinned]);
 
   const togglePinDrawer = useCallback(() => {
+    if (!desktopDrawer) return;
     setDrawerPinned((pinned) => {
       const next = !pinned;
       if (next) setDrawerOpen(false);
       return next;
     });
-  }, []);
+  }, [desktopDrawer]);
 
   useEffect(() => {
     if (
@@ -1314,7 +1321,6 @@ function Shell({
           ? [...new Set([...current.archived_keys, ...affected])]
           : current.archived_keys.filter((key) => !affected.has(key)),
       });
-      setDrawerOpen(false);
       void saveSidebarState((current) => {
         for (const key of keys) {
           if (persistedSessions.has(key) && current.archived_keys.includes(key) !== archive) selected.add(key);
@@ -1361,21 +1367,24 @@ function Shell({
         });
         const route = currentShellRouteRef.current;
         if (archive && canNavigateArchiveRef.current && route.view === "chat" && route.activeKey && selected.has(route.activeKey)) {
-          const next = topicSessions.find((session) => !archivedAfterSave.includes(session.key));
-          navigate(next
-            ? { view: "chat", activeKey: next.key, settingsSection: "overview" }
+          setDrawerOpen(false);
+          const siblingPaneKey = activeTabState?.paneKeys.find(
+            (key) => key !== route.activeKey && !archivedAfterSave.includes(key),
+          );
+          navigate(siblingPaneKey
+            ? { view: "chat", activeKey: siblingPaneKey, settingsSection: "overview" }
             : overviewShellRoute(null));
         }
       }, reportFailure);
     },
-    [navigate, saveSidebarState, showToast, sidebarStateLoading, t, titleForSession, topicSessions],
+    [activeTabState, navigate, saveSidebarState, showToast, sidebarStateLoading, t, titleForSession, topicSessions],
   );
 
   const onToggleArchive = useCallback((key: string) => {
     onArchiveMany([key], !sidebarState.archived_keys.includes(key));
   }, [onArchiveMany, sidebarState.archived_keys]);
 
-  const onOpenOverview = useCallback((projectId?: string | null, tab: MissionControlTab = "open") => {
+  const onOpenOverview = useCallback((projectId?: string | null, tab: "open" | "done" = "open") => {
     setSessionSearchOpen(false);
     setDrawerOpen(false);
     if (projectId !== undefined) setOverviewProjectId(projectId);
@@ -1495,6 +1504,10 @@ function Shell({
       if (topicSessions.some((session) => session.key === activeKey)) return activeKey;
       return null;
     })();
+    if (!nextKey && topicSessions.length > 0) {
+      navigate(overviewShellRoute(null));
+      return;
+    }
     navigate({
       view: "chat",
       activeKey: nextKey,
@@ -2106,6 +2119,17 @@ function Shell({
       : null),
     [activeTabKey, sessionIntelligence.workbenchGroups],
   );
+  const splitSpansMultipleProjects = useMemo(() => {
+    if (workbenchPaneSessions.length <= 1) return false;
+    const projectIds = new Set(
+      workbenchPaneSessions.map((session) => (
+        sessionIntelligence.byKey.get(session.key)?.project.id
+        ?? session.workspaceScope?.project_path
+        ?? "__general__"
+      )),
+    );
+    return projectIds.size > 1;
+  }, [sessionIntelligence.byKey, workbenchPaneSessions]);
 
   const availableUpdate = localActive && !isNativeRuntime(effectiveRuntimeSurface)
     && versionCheck.result?.type === "update" && versionCheck.result.latestVersion !== versionCheck.dismissedVersion
@@ -2158,7 +2182,7 @@ function Shell({
             activeTemporaryTitle={temporaryChatActive ? headerTitle : null}
             activeWorkbenchGroup={activeWorkbenchGroup}
             drawerOpen={drawerOpen}
-            drawerPinned={drawerPinned}
+            drawerPinned={effectiveDrawerPinned}
             theme={theme}
             hostChromeInset={showHostChrome}
             availableUpdate={availableUpdate}
@@ -2181,7 +2205,7 @@ function Shell({
           {showMainSidebar ? (
             <ActiveSessionDrawer
               open={drawerOpen}
-              pinned={drawerPinned}
+              pinned={effectiveDrawerPinned}
               intelligence={sessionIntelligence}
               temporarySessions={sidebarStateLoading ? [] : temporarySessionList}
               activeKey={!managingConnections && view === "chat" ? activeKey : null}
@@ -2199,6 +2223,12 @@ function Shell({
               onRequestDeleteMany={(items) => { void onRequestDeleteMany(items); }}
               onCreateTab={mobileWorkbench ? undefined : onCreateWorkbenchTab}
               onOpenOverviewDone={onOpenOverviewDone}
+              mobileFooterExtra={(
+                <HostSwitcher
+                  menuSide="top"
+                  className="h-7 w-full rounded-lg px-2 text-[12px] text-muted-foreground/75 hover:bg-foreground/[0.04] hover:text-foreground"
+                />
+              )}
             />
           ) : null}
 
@@ -2254,14 +2284,14 @@ function Shell({
                   onDissolveTab={mobileWorkbench ? undefined : onDissolveWorkbenchTab}
                 />
               ) : null}
-              {(view === "chat" || chatVisited) && <div
+              {(view === "chat" || chatVisited) && !waitingForLanding && <div
                 className={cn(
                   "absolute inset-0 flex flex-col",
                   view !== "chat" && "hidden",
                 )}
               >
                 <ThreadVisibilityContext.Provider value={localActive && !managingConnections && view === "chat"}>
-                  <Suspense fallback={<StartupShell embedded surface="chat" sidebarExpanded={drawerPinned} />}>
+                  <Suspense fallback={<StartupShell embedded surface="chat" sidebarExpanded={effectiveDrawerPinned} />}>
                     <PaneWorkbench
                       panes={renderedWorkbenchPanes}
                       activePaneKey={renderedActivePaneKey}
@@ -2373,6 +2403,7 @@ function Shell({
                             hideThemeButton
                             hideHeaderTitle
                             inlineHandle={!mobileWorkbench && workbenchPaneSessions.length > 1}
+                            showPaneProject={splitSpansMultipleProjects}
                             headerActions={context.headerActions}
                             headerPortalTarget={context.headerPortalTarget}
                             headerActive={context.active}
@@ -2415,10 +2446,10 @@ function Shell({
               {view !== "chat" && view !== "overview" && (
                 <div className="absolute inset-0 flex flex-col">
                   {view === "remote" ? <LazyRemoteConnectionsPage
-                    mainNavigationExpanded={showMainSidebar && drawerPinned}
+                    mainNavigationExpanded={showMainSidebar && effectiveDrawerPinned}
                     hostChromeInset={showHostChrome}
                     onBackToChat={onBackToChat}
-                  /> : <Suspense fallback={<StartupShell embedded surface={view === "apps" && isAppsSection(settingsInitialSection) ? settingsInitialSection : view} sidebarExpanded={drawerPinned} />}>
+                  /> : <Suspense fallback={<StartupShell embedded surface={view === "apps" && isAppsSection(settingsInitialSection) ? settingsInitialSection : view} sidebarExpanded={effectiveDrawerPinned} />}>
                     <SettingsView
                       registerExitGuard={registerSettingsExitGuard}
                       themePreference={themePreference}
@@ -2426,7 +2457,7 @@ function Shell({
                       focusTarget={settingsFocus}
                       initialSettings={settingsSnapshot}
                       showSidebar={view === "settings"}
-                      mainNavigationExpanded={showMainSidebar && drawerPinned}
+                      mainNavigationExpanded={showMainSidebar && effectiveDrawerPinned}
                       onChangeTheme={setTheme}
                       onBackToChat={onBackToChat}
                       onModelNameChange={onModelNameChange}
@@ -2450,7 +2481,7 @@ function Shell({
             </div>
             {managingConnections && !remoteConnections?.embeddedManagement && <div className="absolute inset-0 flex flex-col">
               <LazyRemoteConnectionsPage
-                mainNavigationExpanded={showMainSidebar && drawerPinned}
+                mainNavigationExpanded={showMainSidebar && effectiveDrawerPinned}
                 hostChromeInset={showHostChrome}
                 onBackToChat={() => remoteConnections?.closeManagement()}
               />

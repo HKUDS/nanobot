@@ -3,14 +3,15 @@ import {
   ArrowRight,
   ArrowUpCircle,
   Check,
+  MoreHorizontal,
   PanelLeft,
-  Plus,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
   AppsIcon,
   AutomationsIcon,
+  ComposeIcon,
   SearchIcon,
   SettingsIcon,
 } from "@/components/icons/product-icons";
@@ -24,6 +25,13 @@ import {
   useLiveClock,
 } from "@/components/session/SessionVisuals";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { HoverHint } from "@/components/ui/hover-hint";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -142,9 +150,9 @@ export function WorkspaceTopBar({
       data-testid="workspace-top-bar"
       data-theme-surface
       className={cn(
-        "group/topbar relative z-30 flex h-12 shrink-0 items-center justify-between gap-3 bg-background/85 px-4 backdrop-blur-md transition-colors",
+        "group/topbar relative z-30 flex h-12 shrink-0 items-center justify-between gap-2 bg-background/85 px-3 backdrop-blur-md transition-colors sm:gap-3 sm:px-4",
         !inChat && "border-b border-border/35",
-        hostChromeInset && "pl-[4.75rem]",
+        hostChromeInset && "host-drag-region pl-[4.75rem]",
       )}
     >
       {/* Left: Quiet Brand / Overview + Drawer + Minimal Breadcrumb */}
@@ -163,6 +171,7 @@ export function WorkspaceTopBar({
           <button
             type="button"
             data-testid="topbar-overview-button"
+            aria-label={overviewLabel}
             aria-current={view === "overview" ? "page" : undefined}
             onClick={() => onOpenOverview(null)}
             className={cn(
@@ -220,23 +229,36 @@ export function WorkspaceTopBar({
           </Button>
         </HoverHint>
 
+        {/* Compact mobile session title when in chat (< md) */}
+        {inChat && (activeSession || activeTemporaryTitle) ? (
+          <div className="flex min-w-0 flex-1 items-center gap-1 pl-0.5 text-[13px] md:hidden">
+            <span
+              title={activeSession ? activeSession.title : (activeTemporaryTitle ?? undefined)}
+              className="truncate font-medium text-foreground/90"
+            >
+              {activeSession ? activeSession.title : activeTemporaryTitle}
+            </span>
+          </div>
+        ) : null}
+
         {/* Contextual Breadcrumb in Chat — quiet editorial slashes, no pill noise */}
         {inChat && (activeSession || activeTemporaryTitle) ? (
           <nav
             aria-label={isZh ? "当前上下文" : "Current context"}
             className="hidden min-w-0 items-center gap-1.5 pl-1 text-[12.5px] md:flex"
           >
-            <span aria-hidden className="text-foreground/18">/</span>
+            <span aria-hidden className="text-foreground/20">/</span>
             {activeSession ? (
               <>
                 <button
                   type="button"
+                  title={activeSession.project.name}
                   onClick={() => onOpenOverview(activeSession.project.id)}
                   className="host-no-drag max-w-[9rem] shrink-0 truncate rounded-md px-1.5 py-0.5 text-muted-foreground/80 transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
                 >
                   {activeSession.project.name}
                 </button>
-                <span aria-hidden className="text-foreground/18">/</span>
+                <span aria-hidden className="text-foreground/20">/</span>
                 {activeWorkbenchGroup && activeWorkbenchGroup.panes.length > 1 ? (
                   <div className="flex min-w-0 items-center gap-1">
                     {activeWorkbenchGroup.panes.map((pane, idx) => {
@@ -246,12 +268,14 @@ export function WorkspaceTopBar({
                           {idx > 0 ? <span aria-hidden className="text-foreground/15">·</span> : null}
                           <button
                             type="button"
+                            title={pane.title}
+                            aria-current={paneActive ? "page" : undefined}
                             onClick={() => onSelectSession(pane.session.key)}
                             className={cn(
                               "host-no-drag inline-flex max-w-[11rem] items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors",
                               paneActive
-                                ? "font-medium text-foreground"
-                                : "text-muted-foreground/70 hover:text-foreground",
+                                ? "bg-foreground/[0.055] font-medium text-foreground"
+                                : "text-muted-foreground/70 hover:bg-foreground/[0.035] hover:text-foreground",
                             )}
                           >
                             {pane.attention !== "idle" ? (
@@ -265,7 +289,10 @@ export function WorkspaceTopBar({
                   </div>
                 ) : (
                   <div className="flex min-w-0 items-center gap-2 px-1">
-                    <span className="max-w-[18rem] truncate font-medium text-foreground/90">
+                    <span
+                      title={activeSession.title}
+                      className="max-w-[18rem] truncate font-medium text-foreground/90"
+                    >
                       {activeSession.title}
                     </span>
                     <MutedHandleBadge handle={activeSession.session.handle} />
@@ -273,46 +300,53 @@ export function WorkspaceTopBar({
                 )}
               </>
             ) : (
-              <span className="max-w-[16rem] truncate px-1 font-medium text-foreground/90">
+              <span
+                title={activeTemporaryTitle ?? undefined}
+                className="max-w-[16rem] truncate px-1 font-medium text-foreground/90"
+              >
                 {activeTemporaryTitle}
               </span>
             )}
           </nav>
-        ) : (
-          <div className="hidden pl-1 sm:flex sm:items-center">
-            <HostSwitcher
-              menuSide="bottom"
-              className="h-7 rounded-lg px-2 text-[12px] text-muted-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground"
-            />
-          </div>
-        )}
+        ) : null}
       </div>
 
-      {/* Right: Quiet Live Pulse + Subtle Actions (recede during chat focus, awaken on hover) */}
+      {/* Right: Quiet Live Pulse (shown outside Overview so Overview stays uncluttered) + Subtle Actions */}
       <div className="flex shrink-0 items-center gap-1">
+        {view !== "overview" ? (
         <Popover open={pulseOpen} onOpenChange={setPulseOpen}>
           <PopoverTrigger asChild>
             <button
               type="button"
               data-testid="live-pulse-trigger"
+              aria-label={attentionCount > 0 ? pulseSummary : (isZh ? "静默" : "Quiet")}
               className={cn(
-                "host-no-drag inline-flex h-8 items-center gap-2 rounded-full px-2.5 text-[12px] transition-all duration-150",
+                "host-no-drag inline-flex h-8 items-center gap-1.5 rounded-full px-2 text-[12px] transition-all duration-150 sm:gap-2 sm:px-2.5",
                 attentionCount > 0
                   ? "bg-foreground/[0.035] font-medium text-foreground/85 hover:bg-foreground/[0.065]"
                   : "text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground",
               )}
             >
               <SessionStatusDot state={primaryPulseState} size="sm" />
-              <span className="tabular-nums">
-                {attentionCount > 0 ? pulseSummary : (isZh ? "静默" : "Quiet")}
-              </span>
+              {attentionCount > 0 ? (
+                <>
+                  <span className="tabular-nums sm:hidden">{attentionCount}</span>
+                  <span className="hidden max-w-[14rem] truncate tabular-nums sm:inline">
+                    {pulseSummary}
+                  </span>
+                </>
+              ) : (
+                <span className="hidden tabular-nums sm:inline">
+                  {isZh ? "静默" : "Quiet"}
+                </span>
+              )}
             </button>
           </PopoverTrigger>
 
           <PopoverContent
             align="end"
             sideOffset={10}
-            className="w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-border/60 bg-popover/96 p-0 shadow-[0_16px_48px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:shadow-[0_16px_48px_rgba(0,0,0,0.45)]"
+            className="w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-border/60 bg-popover/95 p-0 shadow-[0_16px_48px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:shadow-[0_16px_48px_rgba(0,0,0,0.45)]"
           >
             <div className="flex items-center justify-between px-4 pb-2.5 pt-3.5">
               <span className="text-[12.5px] font-medium text-foreground/85">
@@ -326,7 +360,7 @@ export function WorkspaceTopBar({
                 }}
                 className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
               >
-                <span>{isZh ? "全部总览" : "Overview"}</span>
+                <span>{isZh ? "工作台" : "Overview"}</span>
                 <ArrowRight className="h-3 w-3" aria-hidden />
               </button>
             </div>
@@ -335,12 +369,7 @@ export function WorkspaceTopBar({
               {attentionCount === 0 ? (
                 <div className="px-4 py-8 text-center">
                   <p className="text-[13px] text-foreground/80">
-                    {isZh ? "此刻风平浪静" : "Everything is quiet"}
-                  </p>
-                  <p className="mt-1 text-[12px] text-muted-foreground/75">
-                    {isZh
-                      ? `${intelligence.open.length} 项在办分布在 ${intelligence.projects.filter((p) => p.openSessions.length > 0).length} 个工作区`
-                      : `${intelligence.open.length} open across ${intelligence.projects.filter((p) => p.openSessions.length > 0).length} workspaces`}
+                    {isZh ? "此刻无活跃任务" : "All quiet"}
                   </p>
                 </div>
               ) : (
@@ -372,14 +401,16 @@ export function WorkspaceTopBar({
                             </p>
                             <div className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted-foreground/75">
                               <span className="max-w-[8rem] truncate">{item.project.name}</span>
-                              <span aria-hidden className="opacity-45">·</span>
-                              <span>
-                                {item.attention === "recovery"
-                                  ? (isZh ? "等你确认" : "Needs attention")
-                                  : item.attention === "running"
-                                    ? (isZh ? "推进中" : "Running")
-                                    : formatCompactRelativeTime(item.updatedMs, i18n.resolvedLanguage, nowMs)}
-                              </span>
+                              {item.attention !== "running" ? (
+                                <>
+                                  <span aria-hidden className="opacity-45">·</span>
+                                  <span>
+                                    {item.attention === "recovery"
+                                      ? (isZh ? "待确认" : "Waiting")
+                                      : formatCompactRelativeTime(item.updatedMs, i18n.resolvedLanguage, nowMs)}
+                                  </span>
+                                </>
+                              ) : null}
                             </div>
                           </button>
                           <div className="flex shrink-0 items-center gap-2 pt-0.5">
@@ -406,6 +437,7 @@ export function WorkspaceTopBar({
             </div>
           </PopoverContent>
         </Popover>
+        ) : null}
 
         {canMarkActiveDone && activeSession ? (
           <HoverHint content={isZh ? "结单当前会话（归档，可撤销）" : "Mark current session done"} side="bottom">
@@ -414,6 +446,7 @@ export function WorkspaceTopBar({
               variant="ghost"
               size="sm"
               data-testid="topbar-done-button"
+              aria-label={isZh ? "结单当前会话" : "Mark current session done"}
               onClick={() => onDoneSession(activeSession.session.key)}
               className="host-no-drag h-7 gap-1.5 rounded-lg px-2 text-[12px] font-normal text-muted-foreground/75 transition-colors hover:bg-foreground/[0.045] hover:text-foreground"
             >
@@ -423,11 +456,11 @@ export function WorkspaceTopBar({
           </HoverHint>
         ) : null}
 
-        {/* Quiet utility controls — gently recessed during active reading/chat */}
+        {/* Quiet utility controls — gently recessed during active reading/chat on hover-capable devices */}
         <div
           className={cn(
             "flex items-center gap-0.5 transition-opacity duration-200",
-            inChat && "opacity-60 hover:opacity-100 focus-within:opacity-100 group-hover/topbar:opacity-100",
+            inChat && "media-hover:opacity-60 hover:opacity-100 focus-within:opacity-100 group-hover/topbar:opacity-100",
           )}
         >
           <HoverHint
@@ -450,7 +483,7 @@ export function WorkspaceTopBar({
               onClick={onNewChat}
               className="host-no-drag h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
             >
-              <Plus className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+              <ComposeIcon className="h-[15px] w-[15px]" />
             </Button>
           </HoverHint>
 
@@ -502,14 +535,49 @@ export function WorkspaceTopBar({
             </HoverHint>
           ) : null}
 
+          {/* Mobile (< sm) overflow menu so Apps, Automations, Settings & Theme remain reachable */}
+          <div className="flex items-center sm:hidden">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  data-testid="topbar-mobile-menu"
+                  aria-label={isZh ? "更多" : "More"}
+                  className="host-no-drag h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                >
+                  <MoreHorizontal className="h-[15px] w-[15px]" aria-hidden />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuItem onSelect={onOpenApps}>
+                  <AppsIcon className="h-3.5 w-3.5" />
+                  {t("sidebar.apps")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={onOpenAutomations}>
+                  <AutomationsIcon className="h-3.5 w-3.5" />
+                  {t("sidebar.automations", { defaultValue: "Automations" })}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={onOpenSettings}>
+                  <SettingsIcon className="h-3.5 w-3.5" />
+                  {t("sidebar.settings")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={onToggleTheme}>
+                  <ThemeToggleIcon theme={theme} />
+                  {t("thread.header.toggleTheme")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
           <div className="hidden items-center gap-0.5 sm:flex">
-            {inChat ? (
-              <HostSwitcher
-                collapsed
-                menuSide="bottom"
-                className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
-              />
-            ) : null}
+            <HostSwitcher
+              collapsed
+              menuSide="bottom"
+              className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+            />
 
             <HoverHint
               side="bottom"

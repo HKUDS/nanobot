@@ -55,7 +55,7 @@ export function SessionStatusDot({
         >
           <span
             aria-hidden
-            className="zen-breathe-halo absolute h-3 w-3 rounded-full bg-amber-500/25 dark:bg-amber-400/25"
+            className="absolute h-3 w-3 rounded-full bg-amber-500/25 dark:bg-amber-400/25"
           />
           <span
             aria-hidden
@@ -120,7 +120,7 @@ export function SessionStatusDot({
       aria-hidden
       className={cn("inline-flex shrink-0 items-center justify-center", box, className)}
     >
-      <span className="h-[5px] w-[5px] rounded-full bg-foreground/18" />
+      <span className="h-[5px] w-[5px] rounded-full bg-foreground/20 dark:bg-white/25" />
     </span>
   );
 }
@@ -147,10 +147,10 @@ export function ZenDoneCircle({
           onClick();
         }}
         className={cn(
-          "group/done inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border transition-all duration-150",
+          "group/done relative inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border transition-all duration-150 before:absolute before:-inset-1.5 before:content-[''] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30 focus-visible:ring-offset-1",
           completed
-            ? "scale-105 border-emerald-500 bg-emerald-500 text-white"
-            : "border-foreground/25 bg-transparent text-transparent hover:border-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground/75",
+            ? "zen-done-pop border-emerald-500 bg-emerald-500 text-white"
+            : "border-foreground/25 bg-transparent text-transparent hover:border-foreground/55 hover:bg-foreground/[0.04] hover:text-foreground/75 dark:border-white/25 dark:hover:border-white/55",
           className,
         )}
       >

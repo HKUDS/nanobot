@@ -64,6 +64,17 @@ const EMPTY_AUTOMATIONS: ReadonlyMap<string, number> = new Map();
 const noSubscription = () => () => {};
 const noRevision = () => 0;
 
+function isApplePlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /mac|iphone|ipad|ipod/i.test(navigator.platform || "");
+}
+
+function isCoarsePointer(): boolean {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(pointer: coarse)").matches;
+}
+
 export function SessionSearchDialog({
   open,
   sessions,
@@ -226,7 +237,7 @@ export function SessionSearchDialog({
   ]);
 
   const itemCount = sessionResults.length;
-  const rowHeight = 68;
+  const rowHeight = 62;
   const windowStart = Math.max(0, Math.min(itemCount - 1, Math.floor(scrollTop / rowHeight) - 4));
   const windowEnd = Math.min(itemCount, windowStart + 24);
 
@@ -277,7 +288,12 @@ export function SessionSearchDialog({
     onSelect(key);
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+  const restoreInputFocus = () => {
+    if (!isCoarsePointer()) inputRef.current?.focus({ preventScroll: true });
+  };
+
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.nativeEvent.isComposing) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setHighlightedIndex((index) =>
@@ -300,7 +316,7 @@ export function SessionSearchDialog({
       }
       return;
     }
-    if (event.key === "Enter") {
+    if (event.key === "Enter" && event.target === inputRef.current) {
       event.preventDefault();
       if (searchPending) return;
       const highlighted = sessionResults[highlightedIndex];
@@ -323,6 +339,7 @@ export function SessionSearchDialog({
   const placeholderText = isZh
     ? "搜索会话标题、项目名、@handle 或消息..."
     : "Search sessions, projects, @handle, or messages...";
+  const apple = isApplePlatform();
 
   if (!open) return null;
 
@@ -330,6 +347,7 @@ export function SessionSearchDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
+        onKeyDown={handleDialogKeyDown}
         className={cn(
           "session-search-dialog flex max-h-[min(40rem,100%)] w-[calc(100vw-2rem)] max-w-[44rem] flex-col gap-0 overflow-hidden p-0",
         )}
@@ -340,71 +358,87 @@ export function SessionSearchDialog({
         </DialogDescription>
 
         {/* Search Input */}
-        <div className="session-search-input flex h-[58px] shrink-0 items-center gap-3 border-b border-border/75 px-[18px]">
+        <div className="session-search-input flex h-[56px] shrink-0 items-center gap-3 border-b border-border/60 px-[18px]">
           <Search
-            className="h-[18px] w-[18px] shrink-0 text-muted-foreground"
+            className="h-[17px] w-[17px] shrink-0 text-muted-foreground/75"
             aria-hidden
           />
           <input
             ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={handleKeyDown}
             placeholder={placeholderText}
             aria-label={t("sidebar.searchAria")}
-            className="h-full min-w-0 flex-1 bg-transparent text-[16px] font-normal leading-none text-foreground outline-none placeholder:text-muted-foreground"
+            className="h-full min-w-0 flex-1 bg-transparent text-[15.5px] font-normal leading-none text-foreground outline-none placeholder:text-muted-foreground/70"
           />
-          <kbd className="hidden shrink-0 rounded-md border border-border/70 bg-muted/60 px-1.5 py-0.5 font-sans text-[11px] text-muted-foreground sm:inline">
+          <kbd className="hidden shrink-0 rounded-md border border-border/60 bg-muted/45 px-1.5 py-0.5 font-sans text-[10.5px] text-muted-foreground/80 sm:inline">
             ESC
           </kbd>
         </div>
 
-        {/* Status & Project Filter Bar — Zen minimal underline / monochrome tabs */}
-        <div
-          role="tablist"
-          aria-label={isZh ? "筛选会话" : "Filter sessions"}
-          className="flex shrink-0 flex-wrap items-center gap-3.5 border-b border-border/45 px-[18px] py-2 text-[12px]"
-        >
-          {statusTabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={statusFilter === tab.id}
-              onClick={() => setStatusFilter(tab.id)}
-              className={cn(
-                "transition-colors",
-                statusFilter === tab.id
-                  ? "font-medium text-foreground"
-                  : "text-muted-foreground/65 hover:text-foreground",
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
+        {/* Status & Project Filter Rail — single-line scrollable monochrome tabs */}
+        <div className="flex shrink-0 items-center gap-3.5 overflow-x-auto border-b border-border/40 px-[18px] text-[12px]">
+          <div
+            role="tablist"
+            aria-label={isZh ? "按状态筛选" : "Filter by status"}
+            className="flex shrink-0 items-center gap-3.5"
+          >
+            {statusTabs.map((tab) => {
+              const selected = statusFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => {
+                    setStatusFilter(tab.id);
+                    restoreInputFocus();
+                  }}
+                  className={cn(
+                    "relative shrink-0 py-2.5 transition-colors",
+                    selected
+                      ? "font-medium text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-[1.5px] after:bg-foreground"
+                      : "text-muted-foreground/65 hover:text-foreground",
+                  )}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
           {projectOptions.length > 1 ? (
             <>
-              <span aria-hidden className="h-3 w-px bg-border/70" />
-              {projectOptions.slice(0, 5).map((proj) => {
-                const selected = projectFilter === proj.id;
-                return (
-                  <button
-                    key={proj.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={selected}
-                    onClick={() => setProjectFilter(selected ? null : proj.id)}
-                    className={cn(
-                      "max-w-[8rem] truncate transition-colors",
-                      selected
-                        ? "font-medium text-foreground"
-                        : "text-muted-foreground/60 hover:text-foreground",
-                    )}
-                  >
-                    {proj.name}
-                  </button>
-                );
-              })}
+              <span aria-hidden className="h-3 w-px shrink-0 bg-border/65" />
+              <div
+                role="tablist"
+                aria-label={isZh ? "按项目筛选" : "Filter by project"}
+                className="flex shrink-0 items-center gap-3.5"
+              >
+                {projectOptions.slice(0, 6).map((proj) => {
+                  const selected = projectFilter === proj.id;
+                  return (
+                    <button
+                      key={proj.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={selected}
+                      onClick={() => {
+                        setProjectFilter(selected ? null : proj.id);
+                        restoreInputFocus();
+                      }}
+                      className={cn(
+                        "max-w-[8rem] shrink-0 truncate rounded-full px-2 py-0.5 transition-colors",
+                        selected
+                          ? "bg-foreground/[0.08] font-medium text-foreground"
+                          : "text-muted-foreground/65 hover:bg-foreground/[0.04] hover:text-foreground",
+                      )}
+                    >
+                      {proj.name}
+                    </button>
+                  );
+                })}
+              </div>
             </>
           ) : null}
         </div>
@@ -418,7 +452,7 @@ export function SessionSearchDialog({
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2.5 scrollbar-thin scrollbar-track-transparent"
         >
           <section>
-            <div className="session-search-label flex items-center justify-between px-2.5 pb-1.5 pt-1 text-[11.5px] font-medium text-muted-foreground">
+            <div className="session-search-label flex items-center justify-between px-2.5 pb-1.5 pt-1 text-[11.5px] font-medium text-muted-foreground/75">
               <span>
                 {normalizedQuery || statusFilter !== "all" || projectFilter
                   ? t("sidebar.searchResults")
@@ -454,10 +488,10 @@ export function SessionSearchDialog({
                       <div
                         onMouseEnter={() => setHighlightedIndex(index)}
                         className={cn(
-                          "group flex h-full w-full min-w-0 items-center gap-3 rounded-xl px-3 py-2 transition-colors",
+                          "group flex h-full w-full min-w-0 items-center gap-3 rounded-xl px-3 py-1.5 transition-colors",
                           highlighted
-                            ? "bg-muted text-foreground"
-                            : "text-foreground hover:bg-muted/70",
+                            ? "bg-foreground/[0.055] text-foreground"
+                            : "text-foreground hover:bg-foreground/[0.035]",
                         )}
                       >
                         <SessionStatusDot state={result.attention} />
@@ -487,7 +521,7 @@ export function SessionSearchDialog({
                             ) : null}
                           </div>
                           {showPreview ? (
-                            <span className="mt-0.5 block truncate text-[12px] leading-4 text-muted-foreground">
+                            <span className="mt-0.5 block truncate text-[12px] leading-4 text-muted-foreground/80">
                               {preview}
                             </span>
                           ) : null}
@@ -495,11 +529,11 @@ export function SessionSearchDialog({
 
                         <div className="flex shrink-0 items-center gap-1.5">
                           {active ? (
-                            <span className="rounded-full bg-muted-foreground/12 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                            <span className="rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                               {t("common.current", { defaultValue: "Current" })}
                             </span>
                           ) : (
-                            <span className="text-[11.5px] tabular-nums text-muted-foreground">
+                            <span className="text-[11.5px] tabular-nums text-muted-foreground/70">
                               {formatCompactRelativeTime(result.updatedMs, i18n.resolvedLanguage)}
                             </span>
                           )}
@@ -511,7 +545,12 @@ export function SessionSearchDialog({
                                 event.stopPropagation();
                                 onToggleArchive(session.key);
                               }}
-                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-background hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+                              className={cn(
+                                "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-background hover:text-foreground focus-visible:opacity-100",
+                                highlighted
+                                  ? "opacity-85"
+                                  : "opacity-80 media-hover:opacity-0 media-hover:group-hover:opacity-100",
+                              )}
                             >
                               {result.archived ? (
                                 <ArchiveRestore className="h-3.5 w-3.5" aria-hidden />
@@ -532,13 +571,13 @@ export function SessionSearchDialog({
         </div>
 
         {/* Keyboard Hints Footer */}
-        <div className="hidden shrink-0 items-center justify-between border-t border-border/55 bg-muted/20 px-4 py-2 text-[11px] text-muted-foreground sm:flex">
+        <div className="hidden shrink-0 items-center justify-between border-t border-border/45 bg-muted/15 px-4 py-2 text-[11px] text-muted-foreground/75 sm:flex">
           <div className="flex items-center gap-3">
             <span>↑↓ {isZh ? "移动" : "Navigate"}</span>
             <span>↵ {isZh ? "打开" : "Open"}</span>
             {onToggleArchive ? (
               <span>
-                {typeof navigator !== "undefined" && /mac|iphone|ipad|ipod/i.test(navigator.platform || "") ? "⌘E" : "Ctrl+E"}{" "}
+                {apple ? "⌘E" : "Ctrl+E"}{" "}
                 {isZh ? "结单 / 恢复" : "Done / Restore"}
               </span>
             ) : null}

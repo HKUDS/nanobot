@@ -226,6 +226,7 @@ interface ThreadShellProps {
   hideThemeButton?: boolean;
   hideHeaderTitle?: boolean;
   inlineHandle?: boolean;
+  showPaneProject?: boolean;
   hideHeader?: boolean;
   headerActions?: ReactNode;
   headerPortalTarget?: HTMLElement | null;
@@ -367,6 +368,7 @@ export function ThreadShell({
   hideThemeButton = false,
   hideHeaderTitle = false,
   inlineHandle = false,
+  showPaneProject = true,
   hideHeader = false,
   headerActions,
   headerPortalTarget,
@@ -1420,22 +1422,36 @@ export function ThreadShell({
         {hideHeaderTitle && multiplePanes && !temporary ? (
           <div
             aria-label={session?.handle ? `Session @${session.handle.name}` : title}
-            className="flex h-9 shrink-0 items-center gap-2 border-b border-border/45 bg-background/80 px-3 text-[12px]"
+            className={cn(
+              "flex h-8 shrink-0 items-center gap-2 border-b px-3 text-[12px] transition-colors",
+              composerActive
+                ? "border-border/55 bg-background/90"
+                : "border-border/35 bg-background/65",
+            )}
           >
-            {workspaceScope?.project_name ? (
+            <span
+              aria-hidden
+              className={cn(
+                "h-1.5 w-1.5 shrink-0 rounded-full transition-colors",
+                composerActive ? "bg-foreground/75" : "bg-foreground/15",
+              )}
+            />
+            {showPaneProject && workspaceScope?.project_name ? (
               <>
-                <span className="max-w-[8rem] shrink-0 truncate font-medium text-muted-foreground">
+                <span className="max-w-[8rem] shrink-0 truncate text-muted-foreground/75">
                   {workspaceScope.project_name}
                 </span>
-                <span aria-hidden className="text-muted-foreground/45">/</span>
+                <span aria-hidden className="text-muted-foreground/35">/</span>
               </>
             ) : null}
-            <span className={cn("min-w-0 flex-1 truncate", composerActive ? "font-medium text-foreground" : "text-muted-foreground")}>
+            <span className={cn("min-w-0 flex-1 truncate", composerActive ? "font-medium text-foreground" : "text-muted-foreground/80")}>
               {title}
             </span>
             {inlineHandle && session?.handle ? (
-              <span className="shrink-0 rounded-md bg-muted/75 px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-muted-foreground">
-                @{session.handle.name}
+              <span className="shrink-0 text-[11px]">
+                <SessionHandleLabel id={session.handle.id}>
+                  @{session.handle.name}
+                </SessionHandleLabel>
               </span>
             ) : null}
           </div>

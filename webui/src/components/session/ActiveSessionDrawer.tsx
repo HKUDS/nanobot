@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   ChevronDown,
@@ -33,6 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { HoverHint } from "@/components/ui/hover-hint";
+import { hasAnyOverlayMounted } from "@/lib/dom-overlays";
 import {
   formatCompactRelativeTime,
   type EnrichedSession,
@@ -63,6 +64,7 @@ export interface ActiveSessionDrawerProps {
   onRequestDeleteMany: (items: SidebarDeleteItem[]) => void;
   onCreateTab?: (paneKey: string) => void;
   onOpenOverviewDone: () => void;
+  mobileFooterExtra?: ReactNode;
 }
 
 export function ActiveSessionDrawer({
@@ -85,6 +87,7 @@ export function ActiveSessionDrawer({
   onRequestDeleteMany,
   onCreateTab,
   onOpenOverviewDone,
+  mobileFooterExtra,
 }: ActiveSessionDrawerProps) {
   const { t, i18n } = useTranslation();
   const isZh = Boolean(i18n.resolvedLanguage?.startsWith("zh"));
@@ -102,11 +105,14 @@ export function ActiveSessionDrawer({
   useEffect(() => {
     if (!open || pinned) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      if (renamingKey !== null || hasAnyOverlayMounted()) return;
+      event.preventDefault();
+      onClose();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, open, pinned]);
+  }, [onClose, open, pinned, renamingKey]);
 
   const completeWithRitual = useCallback((key: string) => {
     if (completingKeys.has(key)) return;
@@ -127,7 +133,17 @@ export function ActiveSessionDrawer({
     if (!pinned) onClose();
   };
 
-  const openProjects = intelligence.projects.filter((group) => group.openSessions.length > 0);
+  const liveNowItems = [...intelligence.recovery, ...intelligence.running];
+  const liveNowKeySet = new Set(liveNowItems.map((item) => item.session.key));
+  const openProjects = intelligence.projects
+    .map((group) => ({
+      ...group,
+      drawerSessions: group.openSessions.filter((item) => !liveNowKeySet.has(item.session.key)),
+    }))
+    .filter((group) => group.drawerSessions.length > 0);
+  const isEmpty = openProjects.length === 0
+    && liveNowItems.length === 0
+    && temporarySessions.length === 0;
 
   const drawerPanel = (
     <aside
@@ -135,8 +151,9 @@ export function ActiveSessionDrawer({
       data-pinned={pinned ? "true" : undefined}
       aria-label={isZh ? "在办会话抽屉" : "Active sessions drawer"}
       aria-hidden={!visible || undefined}
+      {...(!visible ? { inert: "" } : {})}
       className={cn(
-        "zen-drawer-panel flex h-full w-[min(19rem,calc(100vw-2rem))] shrink-0 flex-col border-r border-border/45 bg-sidebar/94 text-sidebar-content backdrop-blur-xl",
+        "zen-drawer-panel flex h-full w-[min(19rem,calc(100vw-2rem))] shrink-0 flex-col border-r border-border/45 bg-sidebar/95 text-sidebar-content backdrop-blur-xl",
         !pinned && "shadow-[0_24px_60px_rgba(15,23,42,0.14)] dark:shadow-[0_24px_60px_rgba(0,0,0,0.5)]",
         !pinned && (open ? "translate-x-0 opacity-100" : "-translate-x-full opacity-0"),
       )}
@@ -197,14 +214,33 @@ export function ActiveSessionDrawer({
 
       {/* Scrollable Body */}
       <div className="sidebar-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-3 pb-4 pt-1">
-        {/* Pinned Top Section: Active Now across all projects */}
-        {intelligence.attention.length > 0 ? (
+        {isEmpty ? (
+          <div className="flex flex-col items-center justify-center gap-2.5 py-16 text-center">
+            <p className="text-[12.5px] text-muted-foreground/70">
+              {isZh ? "暂无在办" : "Nothing open"}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                onNewChat();
+                if (!pinned) onClose();
+              }}
+              className="inline-flex h-7 items-center gap-1.5 rounded-full bg-foreground/[0.06] px-3 text-[12px] font-medium text-foreground transition-colors hover:bg-foreground/[0.1]"
+            >
+              <Plus className="h-3 w-3" aria-hidden />
+              <span>{t("sidebar.newChat")}</span>
+            </button>
+          </div>
+        ) : null}
+
+        {/* Pinned Top Section: Live Now (recovery + running) across all projects — never duplicated below */}
+        {liveNowItems.length > 0 ? (
           <section aria-label={isZh ? "此刻进行" : "Active now"} className="space-y-1">
             <div className="px-2 pb-0.5 text-[11px] font-medium tracking-[0.04em] text-muted-foreground/65">
               {isZh ? "此刻进行" : "Active now"}
             </div>
             <ul className="space-y-0.5">
-              {intelligence.attention.map((item) => {
+              {liveNowItems.map((item) => {
                 const isCurrent = item.session.key === activeKey;
                 const completing = completingKeys.has(item.session.key);
                 return (
@@ -236,15 +272,11 @@ export function ActiveSessionDrawer({
                       <div className="shrink-0 pt-0.5">
                         {item.attention === "running" ? (
                           <LiveElapsedBadge startedAtSec={item.session.runStartedAt} nowMs={nowMs} />
-                        ) : item.attention === "updated" && item.session.projectLocked !== false ? (
-                          <div className="opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
-                            <ZenDoneCircle
-                              completed={completing}
-                              label={isZh ? `结单：${item.title}` : `Done: ${item.title}`}
-                              onClick={() => completeWithRitual(item.session.key)}
-                            />
-                          </div>
-                        ) : null}
+                        ) : (
+                          <span className="text-[11px] text-amber-600/90 dark:text-amber-400/90">
+                            {isZh ? "待确认" : "Waiting"}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </li>
@@ -371,17 +403,22 @@ export function ActiveSessionDrawer({
                         }
                         if (!pinned) onClose();
                       }}
-                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-opacity hover:bg-foreground/[0.05] hover:text-foreground group-hover/proj:opacity-100 focus-visible:opacity-100"
+                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 opacity-75 transition-opacity hover:bg-foreground/[0.05] hover:text-foreground focus-visible:opacity-100 media-hover:opacity-0 media-hover:group-hover/proj:opacity-100"
                     >
                       <Plus className="h-3 w-3" aria-hidden />
                     </button>
                   </HoverHint>
                 </div>
 
-                <div className="zen-disclosure" data-collapsed={collapsed}>
+                <div
+                  className="zen-disclosure"
+                  data-collapsed={collapsed}
+                  aria-hidden={collapsed || undefined}
+                  {...(collapsed ? { inert: "" } : {})}
+                >
                   <div className="zen-disclosure-inner">
                     <ul className="space-y-0.5 pt-0.5">
-                      {group.openSessions.map((item) => (
+                      {group.drawerSessions.map((item) => (
                         <DrawerSessionRow
                           key={item.session.key}
                           item={item}
@@ -420,7 +457,10 @@ export function ActiveSessionDrawer({
       </div>
 
       {/* Quiet Footer */}
-      <div className="shrink-0 border-t border-border/35 px-3 py-2.5">
+      <div className="shrink-0 space-y-1 border-t border-border/35 px-3 py-2.5">
+        {mobileFooterExtra ? (
+          <div className="sm:hidden">{mobileFooterExtra}</div>
+        ) : null}
         <button
           type="button"
           onClick={() => {
@@ -446,9 +486,13 @@ export function ActiveSessionDrawer({
 
   return (
     <div
+      aria-hidden={!open || undefined}
+      {...(!open ? { inert: "" } : {})}
       className={cn(
         "fixed inset-0 top-12 z-40 flex",
-        open ? "pointer-events-auto" : "pointer-events-none",
+        open
+          ? "pointer-events-auto visible"
+          : "pointer-events-none invisible [transition:visibility_0s_280ms]",
       )}
     >
       {drawerPanel}
@@ -458,7 +502,7 @@ export function ActiveSessionDrawer({
         aria-label={t("common.close")}
         onClick={onClose}
         className={cn(
-          "zen-drawer-backdrop flex-1 bg-black/12 backdrop-blur-[1.5px] dark:bg-black/32",
+          "zen-drawer-backdrop flex-1 bg-black/15 backdrop-blur-[1.5px] dark:bg-black/35",
           open ? "opacity-100" : "opacity-0",
         )}
       />
@@ -504,6 +548,7 @@ function DrawerSessionRow({
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
+  const [menuOpen, setMenuOpen] = useState(false);
   const canArchive = item.session.projectLocked !== false;
 
   return (
@@ -535,6 +580,7 @@ function DrawerSessionRow({
                   void onCommitRename();
                 } else if (event.key === "Escape") {
                   event.preventDefault();
+                  event.stopPropagation();
                   onCancelRename();
                 }
               }}
@@ -569,9 +615,17 @@ function DrawerSessionRow({
           )}
         </div>
 
-        {/* Gentle hover-slide completion & menu */}
+        {/* Gentle hover-slide completion & menu (inline on touch, gradient-masked on desktop) */}
         {!isRenaming ? (
-          <div className="pointer-events-none absolute right-1.5 top-2 flex translate-x-1 items-center gap-1 rounded-lg bg-sidebar/95 pl-2 opacity-0 transition-all duration-150 group-hover:pointer-events-auto group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-x-0 group-focus-within:opacity-100">
+          <div
+            className={cn(
+              "flex shrink-0 items-center gap-1 opacity-85 transition-all duration-150",
+              "media-hover:pointer-events-none media-hover:absolute media-hover:right-1.5 media-hover:top-1.5 media-hover:translate-x-1 media-hover:rounded-lg media-hover:bg-gradient-to-l media-hover:from-sidebar media-hover:via-sidebar/95 media-hover:to-transparent media-hover:py-0.5 media-hover:pl-5 media-hover:pr-0.5 media-hover:opacity-0",
+              "media-hover:group-hover:pointer-events-auto media-hover:group-hover:translate-x-0 media-hover:group-hover:opacity-100",
+              "media-hover:group-focus-within:pointer-events-auto media-hover:group-focus-within:translate-x-0 media-hover:group-focus-within:opacity-100",
+              menuOpen && "media-hover:pointer-events-auto media-hover:translate-x-0 media-hover:opacity-100",
+            )}
+          >
             {canArchive ? (
               <ZenDoneCircle
                 completed={completing}
@@ -579,7 +633,7 @@ function DrawerSessionRow({
                 onClick={onArchive}
               />
             ) : null}
-            <DropdownMenu>
+            <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
