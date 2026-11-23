@@ -946,7 +946,7 @@ describe("AgentActivityCluster", () => {
 
       const toggle = screen.getByTestId("file-edit-diff-toggle");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(toggle).toHaveTextContent(/^Expand changes$/);
+      expect(toggle).toHaveAccessibleName("Expand changes src/long.ts");
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       expect(screen.queryByText("line-1")).not.toBeInTheDocument();
 
@@ -1034,7 +1034,7 @@ describe("AgentActivityCluster", () => {
 
       const toggle = screen.getByTestId("file-edit-diff-toggle");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(toggle).toHaveTextContent(/^View changes$/);
+      expect(toggle).toHaveAccessibleName("View changes src/app.tsx");
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       expect(screen.queryByText("return <New />;")).not.toBeInTheDocument();
 
@@ -1091,7 +1091,7 @@ describe("AgentActivityCluster", () => {
 
       const toggle = screen.getByTestId("file-edit-diff-toggle");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(toggle).toHaveTextContent("Expand changes");
+      expect(toggle).toHaveAccessibleName("Expand changes /repo/src/app.tsx");
       expect(screen.queryByTestId("file-edit-diff-truncated")).not.toBeInTheDocument();
 
       fireEvent.click(toggle);

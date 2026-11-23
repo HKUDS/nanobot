@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { DisclosureContent } from "@/components/ui/disclosure";
 import {
   ChevronDown,
@@ -82,47 +82,48 @@ function FileEditRow({
   const hasCountedDiff = !failed && !edit.binary && hasVisibleDiffStats(edit);
   const showDiff = canRenderDiff(edit, displayMode);
 
-  return (
-    <div className="min-w-0">
-      <ActivityStep
-        icon={fileIconForPath(edit.absolute_path || edit.path)}
-        markerLabel={action}
-        active={editing}
-        tone={failed ? "error" : editing ? "active" : "success"}
-        className="text-xs"
-        ariaLabel={formatActivityTarget(t, action, edit.path)}
-        label={edit.pending && !edit.path
-          ? t("message.fileEditPreparing", { defaultValue: "Preparing file edit…" })
-          : (
-            <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
-              <span className="flex min-w-0 shrink overflow-hidden">
-                <FileReferenceChip
-                  path={edit.path}
-                  tooltipPath={edit.absolute_path || edit.path}
-                  previewPath={edit.absolute_path || edit.path}
-                  onOpen={onOpenFilePreview}
-                  display="path"
-                  showIcon={false}
-                  active={editing}
-                  className="min-w-0"
-                  truncateFromStart
-                  textClassName="text-[12px]"
-                  testId="activity-file-reference"
-                />
-              </span>
-              {hasCountedDiff ? <DiffPair added={edit.added} deleted={edit.deleted} /> : null}
+  const summary = (
+    <ActivityStep
+      icon={fileIconForPath(edit.absolute_path || edit.path)}
+      markerLabel={action}
+      active={editing}
+      tone={failed ? "error" : editing ? "active" : "success"}
+      className="text-xs"
+      ariaLabel={formatActivityTarget(t, action, edit.path)}
+      label={edit.pending && !edit.path
+        ? t("message.fileEditPreparing", { defaultValue: "Preparing file edit…" })
+        : (
+          <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
+            <span className={cn("flex min-w-0 shrink overflow-hidden", onOpenFilePreview && "relative z-10")}>
+              <FileReferenceChip
+                path={edit.path}
+                tooltipPath={edit.absolute_path || edit.path}
+                previewPath={edit.absolute_path || edit.path}
+                onOpen={onOpenFilePreview}
+                display="path"
+                showIcon={false}
+                active={editing}
+                className="min-w-0"
+                truncateFromStart
+                textClassName="text-[12px]"
+                testId="activity-file-reference"
+              />
             </span>
-          )}
-      />
-      {showDiff ? (
-        <FileUnifiedDiff
-          diff={edit.diff!}
-          collapsed={displayMode === "collapsed_diff"}
-          previewPath={edit.absolute_path || edit.path}
-          onOpenFilePreview={onOpenFilePreview}
-        />
-      ) : null}
-    </div>
+            {hasCountedDiff ? <DiffPair added={edit.added} deleted={edit.deleted} /> : null}
+          </span>
+        )}
+    />
+  );
+  if (!showDiff) return summary;
+  return (
+    <FileUnifiedDiff
+      diff={edit.diff!}
+      collapsed={displayMode === "collapsed_diff"}
+      previewPath={edit.absolute_path || edit.path}
+      onOpenFilePreview={onOpenFilePreview}
+    >
+      {summary}
+    </FileUnifiedDiff>
   );
 }
 
@@ -153,14 +154,16 @@ function canRenderDiff(edit: FileEditSummary, displayMode: FileEditDisplayMode):
 }
 
 function FileUnifiedDiff({
+  children,
   diff,
   collapsed,
   previewPath,
   onOpenFilePreview,
 }: {
+  children: ReactNode;
   diff: UIFileDiff;
   collapsed: boolean;
-  previewPath?: string;
+  previewPath: string;
   onOpenFilePreview?: (path: string) => void;
 }) {
   const { t } = useTranslation();
@@ -202,7 +205,7 @@ function FileUnifiedDiff({
     setExpandedLines(false);
   }, []);
 
-  if (totalLineCount === 0) return null;
+  if (totalLineCount === 0) return children;
 
   const renderBody = () => (
     <div
@@ -274,28 +277,30 @@ function FileUnifiedDiff({
     </div>
   );
 
-  if (!startsCollapsed) return renderBody();
+  if (!startsCollapsed) return <div className="min-w-0">{children}{renderBody()}</div>;
 
   return (
-    <div className="mt-1">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={contentId}
-        data-testid="file-edit-diff-toggle"
-        onClick={handleToggleOpen}
-        className={cn(
-          "flex w-full cursor-pointer items-center gap-2 rounded-md border border-border/45 bg-muted/35 px-2 py-1 text-left",
-          "text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/50",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        )}
-      >
-        <ChevronRight
-          className={cn("h-3 w-3 shrink-0 transition-transform duration-200 motion-reduce:transition-none", open && "rotate-90")}
-          aria-hidden
-        />
-        <span className="min-w-0 flex-1">{viewDiffLabel}</span>
-      </button>
+    <div className="min-w-0">
+      <div className="relative isolate grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1 rounded-md hover:bg-muted/35">
+        <button
+          type="button"
+          aria-label={formatActivityTarget(t, viewDiffLabel, previewPath)}
+          aria-expanded={open}
+          aria-controls={contentId}
+          data-testid="file-edit-diff-toggle"
+          onClick={handleToggleOpen}
+          className={cn(
+            "cursor-pointer rounded-sm text-muted-foreground after:absolute after:inset-0 after:z-[1]",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+        >
+          <ChevronRight
+            className={cn("h-3 w-3 shrink-0 transition-transform duration-200 motion-reduce:transition-none", open && "rotate-90")}
+            aria-hidden
+          />
+        </button>
+        {children}
+      </div>
       <DisclosureContent id={contentId} open={open} onExitComplete={releaseBody}>
         {shouldRenderBody ? renderBody() : null}
       </DisclosureContent>
