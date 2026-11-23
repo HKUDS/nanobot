@@ -149,7 +149,7 @@ export function ActiveSessionDrawer({
     <aside
       data-testid="active-session-drawer"
       data-pinned={pinned ? "true" : undefined}
-      aria-label={isZh ? "会话抽屉" : "Sessions drawer"}
+      aria-label={isZh ? "侧边栏" : "Sidebar"}
       aria-hidden={!visible || undefined}
       {...(!visible ? { inert: "" } : {})}
       className={cn(
@@ -182,11 +182,11 @@ export function ActiveSessionDrawer({
               <Plus className="h-3.5 w-3.5" aria-hidden />
             </button>
           </HoverHint>
-          <HoverHint content={pinned ? (isZh ? "取消固定" : "Unpin") : (isZh ? "固定抽屉" : "Pin drawer")} side="bottom">
+          <HoverHint content={pinned ? (isZh ? "取消固定" : "Unpin") : (isZh ? "固定侧边栏" : "Pin sidebar")} side="bottom">
             <button
               type="button"
               data-testid="drawer-pin-button"
-              aria-label={pinned ? (isZh ? "取消固定" : "Unpin") : (isZh ? "固定抽屉" : "Pin drawer")}
+              aria-label={pinned ? (isZh ? "取消固定" : "Unpin") : (isZh ? "固定侧边栏" : "Pin sidebar")}
               aria-pressed={pinned}
               onClick={onTogglePinDrawer}
               className={cn(
@@ -235,9 +235,9 @@ export function ActiveSessionDrawer({
 
         {/* Pinned Top Section: Live Now (recovery + running) across all projects — never duplicated below */}
         {liveNowItems.length > 0 ? (
-          <section aria-label={isZh ? "此刻进行" : "Active now"} className="space-y-1">
+          <section aria-label={isZh ? "运行中" : "Running"} className="space-y-1">
             <div className="px-2 pb-0.5 text-[11px] font-medium tracking-[0.04em] text-muted-foreground/65">
-              {isZh ? "此刻进行" : "Active now"}
+              {isZh ? "运行中" : "Running"}
             </div>
             <ul className="space-y-0.5">
               {liveNowItems.map((item) => {

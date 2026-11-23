@@ -8,12 +8,7 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { HoverHint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { SessionHandle } from "@/lib/types";
 
@@ -48,51 +43,31 @@ export function ThreadHeaderActions({
       {promptNavigatorAction}
       {actions}
       {onTemporaryChatEnabledChange ? (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                disabled={temporaryChatDisabled}
-                aria-label={t("temporaryChat.title")}
-                aria-pressed={temporaryChatEnabled}
-                onClick={() => onTemporaryChatEnabledChange(!temporaryChatEnabled)}
-                className={cn(
-                  "host-no-drag h-8 w-8 shrink-0 rounded-control text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <TemporaryChatIcon
-                  data-testid="temporary-chat-icon"
-                  className={cn(
-                    "h-4 w-4 motion-safe:transition-colors",
-                    temporaryChatEnabled
-                      ? "text-[var(--temporary-control-active)] motion-safe:duration-150"
-                      : "text-current motion-safe:duration-75",
-                  )}
-                  aria-hidden
-                />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent
-              side="bottom"
-              align="end"
-              className="max-w-72 rounded-control border border-border/70 bg-popover px-3 py-2 text-[12px]/[1.4] text-popover-foreground shadow-[0_8px_24px_rgba(15,23,42,0.13)] dark:border-white/10"
-            >
-              <div className="font-medium">{t("temporaryChat.title")}</div>
-              <div className="mt-1 text-muted-foreground">
-                {t("temporaryChat.retention")}
-              </div>
-              <div className="mt-1 font-medium">
-                {t("temporaryChat.expiration")}
-              </div>
-              <div className="mt-1 text-muted-foreground">
-                {t("temporaryChat.externalEffects")}
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <HoverHint content={t("temporaryChat.title")} side="bottom">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={temporaryChatDisabled}
+            aria-label={t("temporaryChat.title")}
+            aria-pressed={temporaryChatEnabled}
+            onClick={() => onTemporaryChatEnabledChange(!temporaryChatEnabled)}
+            className={cn(
+              "host-no-drag h-8 w-8 shrink-0 rounded-control text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <TemporaryChatIcon
+              data-testid="temporary-chat-icon"
+              className={cn(
+                "h-4 w-4 motion-safe:transition-colors",
+                temporaryChatEnabled
+                  ? "text-[var(--temporary-control-active)] motion-safe:duration-150"
+                  : "text-current motion-safe:duration-75",
+              )}
+              aria-hidden
+            />
+          </Button>
+        </HoverHint>
       ) : null}
     </>
   );

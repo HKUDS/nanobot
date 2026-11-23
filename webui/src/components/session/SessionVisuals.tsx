@@ -276,7 +276,7 @@ export function AutomationProtectedBadge({
   if (count <= 0) return null;
   const isZh = Boolean(i18n.resolvedLanguage?.startsWith("zh"));
   const label = isZh
-    ? `定时任务守护（${count} 个）`
+    ? `已关联 ${count} 个定时任务`
     : `${count} linked automation${count > 1 ? "s" : ""}`;
   return (
     <HoverHint content={label} side="top">

@@ -115,7 +115,11 @@ const loadThreadShell = () => import("@/components/thread/ThreadShell");
 const ThreadShell = lazy(() => loadThreadShell().then(
   (module) => ({ default: module.ThreadShell }),
 ));
-const loadSettingsView = () => import("@/components/settings/SettingsView");
+let settingsViewLoaded = false;
+const loadSettingsView = () => import("@/components/settings/SettingsView").then((module) => {
+  settingsViewLoaded = true;
+  return module;
+});
 const SettingsView = lazy(async () => {
   const module = await loadSettingsView();
   return { default: module.SettingsView };
@@ -624,6 +628,9 @@ function Shell({
   const shellTransitionFor = useCallback((current: ShellRoute, next: ShellRoute): ShellTransitionKind | null => {
     if (changesVisibleSession(current, next)) return "session";
     if (current.view === next.view) return null;
+    if (!settingsViewLoaded && (next.view === "settings" || next.view === "apps" || next.view === "automations")) {
+      return null;
+    }
     if (next.view === "settings") return "enter-settings";
     if (current.view === "settings") return "exit-settings";
     return "switch-view";
@@ -2452,6 +2459,7 @@ function Shell({
                       isRestarting={isRestarting}
                       hostChromeInset={false}
                       hideHostSwitcher
+                      hideBackButton
                     />
                   </Suspense>}
                 </div>

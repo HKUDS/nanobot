@@ -330,14 +330,14 @@ export function SessionSearchDialog({
 
   const statusTabs: Array<{ id: SearchStatusFilter; label: string }> = [
     { id: "all", label: isZh ? "全部" : "All" },
-    { id: "active", label: isZh ? "进行中" : "Live" },
+    { id: "active", label: isZh ? "运行中" : "Live" },
     { id: "open", label: isZh ? "当前" : "Active" },
     { id: "done", label: isZh ? "已归档" : "Archived" },
   ];
 
   const placeholderText = isZh
-    ? "搜索会话标题、项目名、@handle 或消息..."
-    : "Search sessions, projects, @handle, or messages...";
+    ? "搜索话题、项目或消息…"
+    : "Search topics, projects, or messages…";
   const apple = isApplePlatform();
 
   if (!open) return null;
@@ -539,7 +539,7 @@ export function SessionSearchDialog({
                           {canArchive && onToggleArchive ? (
                             <button
                               type="button"
-                              aria-label={result.archived ? (isZh ? "恢复到当前" : "Restore") : (isZh ? "归档" : "Archive")}
+                              aria-label={result.archived ? (isZh ? "取消归档" : "Restore") : (isZh ? "归档" : "Archive")}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 onToggleArchive(session.key);

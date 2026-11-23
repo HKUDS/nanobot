@@ -126,7 +126,12 @@ export function WorkspaceTopBar({
   );
 
   const overviewLabel = isZh ? "工作台" : "Overview";
-  const drawerLabel = isZh ? "会话抽屉" : "Sessions drawer";
+  const drawerLabel = drawerOpen || drawerPinned
+    ? (isZh ? "收起侧边栏" : "Hide sidebar")
+    : (isZh ? "展开侧边栏" : "Show sidebar");
+  const themeToggleLabel = theme === "dark"
+    ? (isZh ? "切换浅色模式" : "Switch to light mode")
+    : (isZh ? "切换深色模式" : "Switch to dark mode");
   const inChat = view === "chat";
 
   // Calm single-line summary for the pulse whisper button
@@ -336,7 +341,7 @@ export function WorkspaceTopBar({
             <button
               type="button"
               data-testid="live-pulse-trigger"
-              aria-label={attentionCount > 0 ? pulseSummary : (isZh ? "静默" : "Quiet")}
+              aria-label={attentionCount > 0 ? pulseSummary : (isZh ? "空闲" : "Idle")}
               className={cn(
                 "host-no-drag mr-1.5 inline-flex h-7 items-center gap-1.5 rounded-full px-2 text-[12px] leading-none transition-all duration-150 sm:gap-2 sm:px-2.5",
                 attentionCount > 0
@@ -354,7 +359,7 @@ export function WorkspaceTopBar({
                 </>
               ) : (
                 <span className="hidden tabular-nums sm:inline">
-                  {isZh ? "静默" : "Quiet"}
+                  {isZh ? "空闲" : "Idle"}
                 </span>
               )}
             </button>
@@ -367,7 +372,7 @@ export function WorkspaceTopBar({
           >
             <div className="flex items-center justify-between px-4 pb-2.5 pt-3.5">
               <span className="text-[12.5px] font-medium text-foreground/85">
-                {isZh ? "跨项目实时动态" : "Live across workspaces"}
+                {isZh ? "运行状态" : "Activity"}
               </span>
               <button
                 type="button"
@@ -386,7 +391,7 @@ export function WorkspaceTopBar({
               {attentionCount === 0 ? (
                 <div className="px-4 py-8 text-center">
                   <p className="text-[13px] text-foreground/80">
-                    {isZh ? "此刻无活跃任务" : "All quiet"}
+                    {isZh ? "暂无运行中的任务" : "No active tasks"}
                   </p>
                 </div>
               ) : (
@@ -465,13 +470,13 @@ export function WorkspaceTopBar({
           />
 
           {canMarkActiveDone && activeSession ? (
-            <HoverHint content={isZh ? "归档当前会话（可撤销）" : "Archive current session"} side="bottom">
+            <HoverHint content={isZh ? "归档会话" : "Archive session"} side="bottom">
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
                 data-testid="topbar-done-button"
-                aria-label={isZh ? "归档当前会话" : "Archive current session"}
+                aria-label={isZh ? "归档会话" : "Archive session"}
                 onClick={() => onDoneSession(activeSession.session.key)}
                 className="host-no-drag h-7 w-7 rounded-lg p-0 text-muted-foreground/80 transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
               >
@@ -595,7 +600,7 @@ export function WorkspaceTopBar({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={onToggleTheme}>
                   <ThemeToggleIcon theme={theme} className="h-3.5 w-3.5" />
-                  {t("thread.header.toggleTheme")}
+                  {themeToggleLabel}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -626,6 +631,8 @@ export function WorkspaceTopBar({
                 aria-label={t("sidebar.apps")}
                 aria-current={view === "apps" ? "page" : undefined}
                 onClick={onOpenApps}
+                onPointerEnter={onSettingsIntent}
+                onFocus={onSettingsIntent}
                 className={cn(
                   "host-no-drag h-7 w-7 rounded-lg p-0",
                   view === "apps"
@@ -655,6 +662,8 @@ export function WorkspaceTopBar({
                 aria-label={t("sidebar.automations", { defaultValue: "Automations" })}
                 aria-current={view === "automations" ? "page" : undefined}
                 onClick={onOpenAutomations}
+                onPointerEnter={onSettingsIntent}
+                onFocus={onSettingsIntent}
                 className={cn(
                   "host-no-drag h-7 w-7 rounded-lg p-0",
                   view === "automations"
@@ -697,12 +706,12 @@ export function WorkspaceTopBar({
               </Button>
             </HoverHint>
 
-            <HoverHint content={t("thread.header.toggleTheme")} side="bottom">
+            <HoverHint content={themeToggleLabel} side="bottom">
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label={t("thread.header.toggleTheme")}
+                aria-label={themeToggleLabel}
                 onClick={onToggleTheme}
                 className="host-no-drag h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
               >

@@ -61,6 +61,7 @@ interface SettingsSidebarProps {
   restartPending?: boolean;
   isNativeHost?: boolean;
   hideHostSwitcher?: boolean;
+  hideBackButton?: boolean;
 }
 
 export function SettingsSidebar(props: SettingsSidebarProps) {
@@ -75,6 +76,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
     restartPending,
     isNativeHost,
     hideHostSwitcher = false,
+    hideBackButton = false,
   } = props;
   const { t } = useTranslation();
   const hostNavigation = useContext(HostNavigationContext);
@@ -102,17 +104,19 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
         hostChromeInset ? "pt-10 lg:pt-10" : "pt-4 lg:pt-4",
       )}
     >
-      <button
-        type="button"
-        onClick={onBackToChat}
-        aria-label={t("settings.backToChat")}
-        className={cn(
-          "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-xl text-ui text-sidebar-content transition-colors duration-150 motion-reduce:transition-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ring hover:text-foreground lg:mb-3",
-          hostChromeInset && "-ml-1",
-        )}
-      >
-        <ChevronLeft className="h-4 w-4" aria-hidden />
-      </button>
+      {!hideBackButton ? (
+        <button
+          type="button"
+          onClick={onBackToChat}
+          aria-label={t("settings.backToChat")}
+          className={cn(
+            "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-xl text-ui text-sidebar-content transition-colors duration-150 motion-reduce:transition-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ring hover:text-foreground lg:mb-3",
+            hostChromeInset && "-ml-1",
+          )}
+        >
+          <ChevronLeft className="h-4 w-4" aria-hidden />
+        </button>
+      ) : null}
 
       <nav
         aria-label={t("settings.sidebar.ariaLabel")}
@@ -205,6 +209,7 @@ function MobileSettingsNavigation({
   isRestarting,
   restartPending,
   hideHostSwitcher = false,
+  hideBackButton = false,
 }: SettingsSidebarProps & {
   navSection: SettingsSectionKey;
   activeLabel: string;
@@ -234,12 +239,14 @@ function MobileSettingsNavigation({
       hostChromeInset ? "pt-10" : "pt-[env(safe-area-inset-top)]")}
     >
       <div className="grid h-14 grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center px-3">
-        <Button size="icon" type="button" variant="ghost" onClick={onBackToChat}
-          aria-label={t("settings.backToChat")}
-          className="h-11 w-11 rounded-xl p-0 text-sidebar-content"
-        >
-          <ChevronLeft className="h-5 w-5" aria-hidden />
-        </Button>
+        {!hideBackButton ? (
+          <Button size="icon" type="button" variant="ghost" onClick={onBackToChat}
+            aria-label={t("settings.backToChat")}
+            className="h-11 w-11 rounded-xl p-0 text-sidebar-content"
+          >
+            <ChevronLeft className="h-5 w-5" aria-hidden />
+          </Button>
+        ) : <span aria-hidden />}
         <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="ghost"

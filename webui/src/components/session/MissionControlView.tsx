@@ -482,7 +482,6 @@ export function MissionControlView({
                   <SplitChip
                     key={group.tabKey}
                     group={group}
-                    isZh={isZh}
                     onOpen={() => onSelectWorkbenchGroup(group.tabKey)}
                     onRename={onRequestRenameTab ? () => onRequestRenameTab(group.tabKey, group.title) : undefined}
                     onDissolve={onDissolveTab ? () => onDissolveTab(group.tabKey) : undefined}
@@ -647,7 +646,7 @@ export function MissionControlView({
                       setDoneFilter("");
                     }
                   }}
-                  placeholder={isZh ? "筛选..." : "Filter..."}
+                  placeholder={isZh ? "筛选已归档…" : "Filter archived…"}
                   className="h-8 w-full border-b border-border/45 bg-transparent pl-6 pr-6 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/55 focus:border-foreground/40"
                 />
                 {doneFilter ? (
@@ -676,7 +675,7 @@ export function MissionControlView({
             {filteredArchived.length === 0 ? (
               <div className="py-16 text-center text-[13.5px] text-muted-foreground/70">
                 {doneFilter.trim()
-                  ? (isZh ? "无匹配项" : "No matches")
+                  ? (isZh ? "没有匹配结果" : "No matches")
                   : (isZh ? "暂无已归档" : "No archived sessions")}
               </div>
             ) : (
@@ -791,13 +790,11 @@ function LiveTile({
 
 function SplitChip({
   group,
-  isZh,
   onOpen,
   onRename,
   onDissolve,
 }: {
   group: DecoupledWorkbenchGroup;
-  isZh: boolean;
   onOpen: () => void;
   onRename?: () => void;
   onDissolve?: () => void;
@@ -829,13 +826,13 @@ function SplitChip({
             {onRename ? (
               <DropdownMenuItem onSelect={onRename}>
                 <Pencil className="h-3.5 w-3.5" aria-hidden />
-                {isZh ? "重命名" : "Rename"}
+                {t("chat.rename")}
               </DropdownMenuItem>
             ) : null}
             {onDissolve ? (
               <DropdownMenuItem onSelect={onDissolve}>
                 <Ungroup className="h-3.5 w-3.5" aria-hidden />
-                {isZh ? "解散分屏" : "Dissolve split"}
+                {t("workbench.dissolveTab")}
               </DropdownMenuItem>
             ) : null}
           </DropdownMenuContent>

@@ -156,7 +156,7 @@ describe("SessionSearchDialog", () => {
     render(<SessionSearchDialog open sessions={[session(1), session(2)]}
       activeKey={null} loading={false} messageCache={cache}
       onOpenChange={() => {}} onSelect={onSelect} />);
-    expect(screen.getByPlaceholderText(/Search sessions, projects/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Search topics, projects/i)).toBeInTheDocument();
     const input = screen.getByRole("textbox", { name: "Search" });
     for (const query of ["权限", "full access", "25%", "session_history.py"]) {
       fireEvent.change(input, { target: { value: query } });

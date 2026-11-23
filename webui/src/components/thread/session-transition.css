@@ -120,74 +120,61 @@
   mix-blend-mode: normal;
 }
 
-/* Entering Settings: underlying stage gently recedes while Settings blooms into focus. */
+/* Entering Settings: calm dissolve + subtle upward settle (no scale snap on handoff). */
 :root[data-shell-transition="enter-settings"]::view-transition-old(workspace-stage) {
-  animation: zen-stage-recede 190ms cubic-bezier(0.4, 0, 1, 1) both;
+  animation: zen-view-out 140ms ease-out both;
 }
 
 :root[data-shell-transition="enter-settings"]::view-transition-new(workspace-stage) {
-  animation: zen-settings-bloom 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: zen-settings-bloom 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Leaving Settings: reverse depth return back to Workspace or Chat. */
+/* Leaving Settings: gentle reverse settle back to Workspace or Chat. */
 :root[data-shell-transition="exit-settings"]::view-transition-old(workspace-stage) {
-  animation: zen-settings-retreat 180ms cubic-bezier(0.4, 0, 1, 1) both;
+  animation: zen-settings-retreat 140ms ease-out both;
 }
 
 :root[data-shell-transition="exit-settings"]::view-transition-new(workspace-stage) {
-  animation: zen-stage-surface 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: zen-stage-surface 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* Sibling top-level surfaces (Overview / Chat / Apps / Automations): serene cross-dissolve. */
 :root[data-shell-transition="switch-view"]::view-transition-old(workspace-stage) {
-  animation: zen-view-out 140ms ease-out both;
+  animation: zen-view-out 130ms ease-out both;
 }
 
 :root[data-shell-transition="switch-view"]::view-transition-new(workspace-stage) {
-  animation: zen-view-in 210ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-@keyframes zen-stage-recede {
-  from {
-    opacity: 1;
-    transform: scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: scale(0.988);
-  }
+  animation: zen-view-in 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes zen-settings-bloom {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.992);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
 @keyframes zen-settings-retreat {
   from {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
   to {
     opacity: 0;
-    transform: translateY(8px) scale(0.992);
+    transform: translateY(4px);
   }
 }
 
 @keyframes zen-stage-surface {
   from {
     opacity: 0;
-    transform: scale(0.988);
   }
   to {
     opacity: 1;
-    transform: scale(1);
   }
 }
 

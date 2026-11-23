@@ -78,6 +78,7 @@ interface SettingsPageProps {
   isRestarting: boolean;
   hostChromeInset: boolean;
   hideHostSwitcher?: boolean;
+  hideBackButton?: boolean;
 }
 
 export function SettingsPage({
@@ -99,6 +100,7 @@ export function SettingsPage({
   isRestarting,
   hostChromeInset,
   hideHostSwitcher = false,
+  hideBackButton = false,
 }: SettingsPageProps) {
   const { client, webuiCapabilities } = useClient();
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
@@ -673,6 +675,7 @@ export function SettingsPage({
           restartPending={settings?.requires_restart}
           isNativeHost={(settings?.surface ?? settings?.runtime_surface) === "native"}
           hideHostSwitcher={hideHostSwitcher}
+          hideBackButton={hideBackButton}
         />
       ) : null}
 

@@ -37,6 +37,7 @@ interface SettingsViewProps {
   isRestarting?: boolean;
   hostChromeInset?: boolean;
   hideHostSwitcher?: boolean;
+  hideBackButton?: boolean;
 }
 
 export function SettingsView({
@@ -64,6 +65,7 @@ export function SettingsView({
   isRestarting = false,
   hostChromeInset = false,
   hideHostSwitcher = false,
+  hideBackButton = false,
 }: SettingsViewProps) {
   const controller = useSettingsController({
     initialSection,
@@ -95,6 +97,7 @@ export function SettingsView({
       isRestarting={isRestarting}
       hostChromeInset={hostChromeInset}
       hideHostSwitcher={hideHostSwitcher}
+      hideBackButton={hideBackButton}
     />
   );
 }
