@@ -1,5 +1,3 @@
-"""Shared handling for session-bound automation turns."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping

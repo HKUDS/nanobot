@@ -1,5 +1,3 @@
-"""Tests for Memory checkpoint consolidation and history journaling."""
-
 from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -23,7 +21,6 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     append_runtime_context,
 )
-from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import Session
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
@@ -57,7 +54,6 @@ def runtime(mock_provider):
 def consolidator(store):
     sessions = MagicMock()
     sessions.save = MagicMock()
-    # Store sessions by key so refreshes observe the same test object.
     _session_cache: dict[str, MagicMock] = {}
     sessions.get_or_create = MagicMock(side_effect=lambda key: _session_cache.get(key, MagicMock()))
     sessions._session_cache = _session_cache
@@ -280,19 +276,18 @@ class TestTurnTranscriptSummary:
 
 
 class TestConsolidatorSummarize:
-    def test_format_messages_keeps_media_only_user_turn(self):
-        path = "/home/user/.nanobot/media/websocket/clip.mp4"
-
-        formatted = MemoryStore._format_messages([
-            {
-                "role": "user",
-                "content": "",
-                "media": [path],
-                "timestamp": "2026-07-27",
-            }
+    def test_raw_archive_keeps_captions_and_path_free_image_markers(self, store):
+        checkpoint = store.raw_archive([
+            {"role": "user", "content": "look", "media": ["/m/pic.png"]},
+            {"role": "user", "content": [{"type": "image_attachment", "id": "a" * 64}]},
+            {"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,YQ=="}},
+                {"type": "text", "text": "a caption"},
+            ]},
         ])
 
-        assert formatted == f"[2026-07-27] USER: [image: {path}]"
+        assert checkpoint == "[RAW] 3 messages\n[?] USER: look\n[?] USER: [image]\n[?] USER: [image]\na caption"
+        assert store.read_unprocessed_history(since_cursor=0)[0]["content"] == checkpoint
 
     async def test_archive_uses_captured_generation(
         self, consolidator, mock_provider, runtime
@@ -323,22 +318,6 @@ class TestConsolidatorSummarize:
         assert call["max_tokens"] == 321
         assert call["reasoning_effort"] == "medium"
 
-    async def test_summarize_appends_to_history(
-        self, consolidator, mock_provider, store, runtime
-    ):
-        """Consolidator should persist the LLM summary in history.jsonl."""
-        mock_provider.chat_stream_with_retry.return_value = MagicMock(
-            content="User fixed a bug in the auth module."
-        )
-        messages = [
-            {"role": "user", "content": "fix the auth bug"},
-            {"role": "assistant", "content": "Done, fixed the race condition."},
-        ]
-        result = await _archive(consolidator, messages, runtime)
-        assert result == "User fixed a bug in the auth module."
-        entries = store.read_unprocessed_history(since_cursor=0)
-        assert len(entries) == 1
-
     async def test_summarize_appends_session_key_to_history(
         self,
         consolidator,
@@ -365,36 +344,16 @@ class TestConsolidatorSummarize:
     async def test_summarize_raw_dumps_on_llm_failure(
         self, consolidator, mock_provider, store, runtime
     ):
-        """On LLM failure, append raw messages to memory/history.jsonl."""
         mock_provider.chat_stream_with_retry.side_effect = Exception("API error")
         messages = [{"role": "user", "content": "hello"}]
-        result = await _archive(consolidator, messages, runtime)
+        result = await _archive(consolidator, messages, runtime, session_key="slack:chat-2")
         assert result is not None
         assert "[RAW]" in result
         assert "hello" in result
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
-        assert "[RAW]" in entries[0]["content"]
-
-    async def test_raw_dump_fallback_appends_session_key(
-        self,
-        consolidator,
-        mock_provider,
-        store,
-        runtime,
-    ):
-        mock_provider.chat_stream_with_retry.side_effect = Exception("API error")
-        messages = [{"role": "user", "content": "hello"}]
-
-        await _archive(
-            consolidator,
-            messages,
-            runtime,
-            session_key="slack:chat-2",
-        )
-
-        entries = store.read_unprocessed_history(since_cursor=0)
         assert entries[0]["session_key"] == "slack:chat-2"
+        assert "[RAW]" in entries[0]["content"]
 
     async def test_raw_fallback_represents_previous_checkpoint_and_new_chunk(
         self,
@@ -459,7 +418,6 @@ class TestConsolidatorArchiveErrorHandling:
         runtime,
         finish_reason: str,
     ):
-        """Incomplete LLM output should trigger raw_archive, not persist partial text."""
         invalid_output = f"INVALID_{finish_reason.upper()}_OUTPUT"
         mock_provider.chat_stream_with_retry.return_value = MagicMock(
             content=invalid_output,
@@ -480,7 +438,6 @@ class TestConsolidatorArchiveErrorHandling:
     async def test_archive_preserves_summary_on_success(
         self, consolidator, mock_provider, store, runtime
     ):
-        """Normal LLM response should still produce a proper summary entry."""
         mock_provider.chat_stream_with_retry.return_value = MagicMock(
             content="User fixed a bug in the auth module.",
             finish_reason="stop",
@@ -539,7 +496,6 @@ class TestConsolidatorArchiveErrorHandling:
 
 class TestConsolidatorPromptEstimate:
     async def test_estimate_uses_full_unarchived_tail(self, consolidator, runtime):
-        """Consolidation pressure must account for the full unarchived tail."""
         session = Session(key="test:full-tail")
         for i in range(160):
             session.add_message("user", f"msg-{i}")
@@ -576,7 +532,6 @@ class TestConsolidatorPromptEstimate:
         assert captured["history"] == []
 
 class TestCompactIdleSession:
-    """Idle compaction tests."""
 
     @pytest.fixture
     def runtime(self, mock_provider):
@@ -599,6 +554,33 @@ class TestCompactIdleSession:
             build_messages=MagicMock(side_effect=_build_test_messages),
             get_tool_definitions=MagicMock(return_value=[]),
         )
+
+    async def test_archive_and_token_probe_use_image_markers_without_reading_attachments(
+        self, real_consolidator, runtime, mock_provider, monkeypatch,
+    ):
+        from nanobot.session.image_attachments import persist_user_image_blocks
+
+        session = Session(key="cli:archive-images")
+        session.add_message("user", persist_user_image_blocks([
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,YQ=="}},
+            {"type": "text", "text": "compare"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,Yg=="}},
+        ]))
+        monkeypatch.setattr(
+            "nanobot.session.image_attachments.read_atomic_bytes",
+            lambda *_: pytest.fail("text history opened an image"),
+        )
+        mock_provider.chat_stream_with_retry.return_value = LLMResponse(content="Compared two images.")
+
+        real_consolidator.estimate_session_prompt_tokens(session, runtime=runtime)
+        summary = await real_consolidator.archive_session(session, archive_end=1, runtime=runtime)
+
+        assert summary == "Compared two images."
+        assert mock_provider.chat_stream_with_retry.await_args.kwargs["messages"][1]["content"] == [
+            {"type": "text", "text": "[image]"},
+            {"type": "text", "text": "compare"},
+            {"type": "text", "text": "[image]"},
+        ]
 
     async def test_partial_raw_write_does_not_advance_checkpoint(
         self, real_consolidator, store, runtime, mock_provider, monkeypatch
@@ -1037,7 +1019,6 @@ class TestCompactIdleSession:
         for i in range(18):
             session.add_message("user", f"user msg {i}")
             session.add_message("assistant", f"assistant msg {i}")
-        # The latest correction must be included in the replacement summary.
         session.add_message("user", "no, that's wrong, use approach B")
         session.add_message("assistant", "CORRECTED_FINAL_RESULT_alpha")
         sessions.save(session)
@@ -1056,7 +1037,6 @@ class TestCompactIdleSession:
     async def test_raw_dumps_full_archive_batch_on_llm_failure(
         self, real_consolidator, mock_provider, store, runtime
     ):
-        """The fallback covers the same full range as successful idle archival."""
         mock_provider.chat_stream_with_retry.side_effect = RuntimeError("LLM unavailable")
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:rawdrop")
@@ -1109,7 +1089,6 @@ class TestCompactIdleSession:
     async def test_empty_session_does_not_refresh_timestamp(
         self, real_consolidator, runtime
     ):
-        """Empty session with old updated_at does not look active after compaction."""
         from datetime import datetime, timedelta
 
         sessions = real_consolidator.sessions
@@ -1131,7 +1110,6 @@ class TestCompactIdleSession:
     async def test_nothing_commits_checkpoint_once_without_raw_archive(
         self, real_consolidator, mock_provider, runtime
     ):
-        """A model's decision to retain nothing is a successful replacement."""
         mock_provider.chat_stream_with_retry.return_value = MagicMock(
             content="(nothing)", finish_reason="stop"
         )
@@ -1178,7 +1156,6 @@ class TestCompactIdleSession:
         assert result is not None
         assert "[RAW]" in result
 
-        # raw_archive should have been called (history.jsonl gets an entry)
         entries = store.read_unprocessed_history(since_cursor=0)
         assert entries[0]["content"].startswith("[RAW] 20 messages")
 
@@ -1192,7 +1169,6 @@ class TestCompactIdleSession:
     async def test_respects_last_archived(
         self, real_consolidator, mock_provider, runtime
     ):
-        """30 turns with last_archived=50 → only the unarchived tail is considered."""
         mock_provider.chat_stream_with_retry.return_value = MagicMock(
             content="Tail summary.", finish_reason="stop"
         )
@@ -1201,7 +1177,7 @@ class TestCompactIdleSession:
         for i in range(30):
             session.add_message("user", f"u{i}")
             session.add_message("assistant", f"a{i}")
-        session.last_archived = 50  # Only 10 messages remain unarchived
+        session.last_archived = 50
         sessions.save(session)
 
         result = await real_consolidator.compact_idle_session(
@@ -1212,12 +1188,9 @@ class TestCompactIdleSession:
         assert len(reloaded.messages) == 61
         assert reloaded.last_archived == 60
 
-        # Verify only the unarchived tail was processed:
-        # All 10 unarchived messages (50-59) are archived exactly once.
         archived_call = mock_provider.chat_stream_with_retry.call_args
         sent_messages = archived_call.kwargs["messages"]
         sent_content = [message.get("content") for message in sent_messages]
-        # The replacement overview covers all model-visible conversation context.
         assert "u0" not in sent_content
         assert "u26" in sent_content
         assert sent_messages[-1]["content"] == _ARCHIVE_PROMPT
@@ -1250,7 +1223,6 @@ class TestCompactIdleSession:
         assert reloaded.last_archived == 25
         assert reloaded.get_history(max_messages=25) == []
 
-        # Both the first question and the final tool-heavy exchange are summarized.
         archived_call = mock_provider.chat_stream_with_retry.call_args
         sent_content = [message.get("content") for message in archived_call.kwargs["messages"]]
         assert "user-00" in sent_content
@@ -1500,7 +1472,7 @@ class TestCompactIdleSession:
         assert sent[-1]["content"] == _ARCHIVE_PROMPT
 
     @pytest.mark.asyncio
-    async def test_reuses_real_prefix_for_unified_session_workspace(
+    async def test_reuses_real_prefix_for_webui_session_workspace(
         self,
         loop_factory,
         mock_provider,
@@ -1510,14 +1482,13 @@ class TestCompactIdleSession:
         project.mkdir()
         (tmp_path / "AGENTS.md").write_text("GLOBAL_WORKSPACE_MARKER", encoding="utf-8")
         (project / "AGENTS.md").write_text("PROJECT_WORKSPACE_MARKER", encoding="utf-8")
-        loop = loop_factory(provider=mock_provider, unified_session=True)
+        loop = loop_factory(provider=mock_provider)
         runtime = loop.llm_runtime()
         runtime.provider.chat_stream_with_retry.return_value = LLMResponse(
             content="Summary.",
             finish_reason="stop",
         )
-        session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
-        remember_last_channel(session.metadata, "websocket", "scope")
+        session = loop.sessions.get_or_create("websocket:scope")
         session.metadata["workspace_scope"] = {
             "project_path": str(project),
             "access_mode": "restricted",
@@ -1530,6 +1501,7 @@ class TestCompactIdleSession:
             current_message="next project question",
             channel="websocket",
             workspace=project,
+            has_cron=False,
         )
 
         await loop.consolidator.compact_idle_session(
@@ -1548,10 +1520,8 @@ class TestCompactIdleSession:
     async def test_acquires_consolidation_lock(
         self, real_consolidator, mock_provider, runtime
     ):
-        """Verify lock is held during execution."""
         import asyncio
 
-        # Use a slow LLM response to ensure the lock is held while we check
         started = asyncio.Event()
         release_chat = asyncio.Event()
 
@@ -1585,7 +1555,6 @@ class TestCompactIdleSession:
 
 
 class TestRawArchiveChunks:
-    """raw_archive() keeps complete journal content with bounded individual entries."""
 
     @pytest.mark.parametrize("boundary", ["A ", "\n\n", "<think>PRIVATE</think>"])
     def test_raw_chunks_preserve_sanitized_boundaries(self, store, boundary):
@@ -1598,7 +1567,6 @@ class TestRawArchiveChunks:
 
         store.raw_archive([message])
 
-        # Reload the real journal, rather than observing append call arguments.
         entries = MemoryStore(store.workspace).read_unprocessed_history(since_cursor=0)
         joined = "".join(entry["content"].split("\n", 1)[1] for entry in entries)
         assert joined == expected
@@ -1606,7 +1574,6 @@ class TestRawArchiveChunks:
         assert "PUBLIC_TAIL" in joined
 
     def test_raw_archive_splits_large_content_into_bounded_entries(self, store):
-        """Large messages are split across bounded journal entries."""
         big = "x" * 50_000
         messages = [{"role": "user", "content": big}]
         store.raw_archive(messages)
@@ -1616,7 +1583,6 @@ class TestRawArchiveChunks:
         assert "[RAW]" in entries[0]["content"]
 
     def test_raw_archive_preserves_small_content(self, store):
-        """Small messages should not be truncated."""
         messages = [{"role": "user", "content": "hello"}]
         store.raw_archive(messages)
         entries = store.read_unprocessed_history(since_cursor=0)
@@ -1661,7 +1627,6 @@ class TestRawArchiveChunks:
         assert entries[0]["session_key"] == "websocket:chat-1"
 
     def test_raw_archive_custom_max_chars(self, store):
-        """max_chars parameter should override default limit."""
         messages = [{"role": "user", "content": "a" * 200}]
         store.raw_archive(messages, max_chars=100)
         entries = store.read_unprocessed_history(since_cursor=0)

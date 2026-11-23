@@ -301,7 +301,6 @@ def test_source_preflight_failure_does_not_mark_installation_modified(checkout, 
 
 
 def test_real_python_restart_resolution_detects_cwd_shadowing(tmp_path, monkeypatch):
-    """Exercise real import lookup without installing or changing the user's env."""
     import venv
 
     env = tmp_path / "env"
@@ -315,7 +314,6 @@ def test_real_python_restart_resolution_detects_cwd_shadowing(tmp_path, monkeypa
     (package / "__init__.py").write_text("__version__ = '0.3.5'\n", encoding="utf-8")
     checkout = tmp_path / "source"
     (checkout / "nanobot").mkdir(parents=True)
-    # Matching metadata is the original bug: the old code can report a new version.
     (checkout / "nanobot/__init__.py").write_text("__version__ = '0.3.5'\n", encoding="utf-8")
     monkeypatch.setattr(sys, "executable", str(executable))
     monkeypatch.chdir(checkout)
@@ -374,7 +372,6 @@ def installed_release(tmp_path, monkeypatch, create_integration_env):
 
 
 def test_retry_restores_missing_same_version_package_files(installed_release):
-    """A terminated install can leave valid metadata but incomplete application files."""
     asset = installed_release
     asset.unlink()
     update._mark_installing()
@@ -387,7 +384,6 @@ def test_retry_restores_missing_same_version_package_files(installed_release):
 
 
 def test_old_gateway_cannot_downgrade_a_newer_shared_installation(installed_release, monkeypatch):
-    # Another process has upgraded the shared environment since this gateway started.
     monkeypatch.setattr(update, "__version__", "0.3.3")
     monkeypatch.setattr(update, "latest_release", lambda: "0.3.4")
     install = Mock(wraps=update._install)

@@ -1,10 +1,7 @@
-"""Tests for AnthropicProvider._merge_consecutive."""
-
 from nanobot.providers.anthropic_provider import AnthropicProvider
 
 
 class TestMergeConsecutive:
-    """Verify role alternation and trailing-assistant stripping."""
 
     def test_basic_alternation(self):
         msgs = [
@@ -23,12 +20,10 @@ class TestMergeConsecutive:
             {"role": "assistant", "content": "reply"},
         ]
         result = AnthropicProvider._merge_consecutive(msgs)
-        # Two user messages merged into one, trailing assistant stripped
         assert len(result) == 1
         assert result[0]["role"] == "user"
 
     def test_trailing_assistant_stripped(self):
-        """Anthropic rejects prefill — trailing assistant must be removed."""
         msgs = [
             {"role": "user", "content": "hello"},
             {"role": "assistant", "content": "hi"},
@@ -47,7 +42,6 @@ class TestMergeConsecutive:
             {"role": "assistant", "content": "c"},
         ]
         result = AnthropicProvider._merge_consecutive(msgs)
-        # b+c merged into one assistant, then stripped as trailing
         assert len(result) == 3
         assert result[-1]["role"] == "user"
         assert result[-1]["content"] == "ok"
@@ -79,7 +73,6 @@ class TestMergeConsecutive:
         result = AnthropicProvider._merge_consecutive(msgs)
         assert len(result) == 1
         assert result[0]["role"] == "user"
-        # "b" was merged into "a"'s block list during the merge pass.
         assert result[0]["content"] == [
             {"type": "text", "text": "a"},
             {"type": "text", "text": "b"},

@@ -1,5 +1,3 @@
-"""Helpers for keeping the bundled WebUI build in sync with source checkouts."""
-
 from __future__ import annotations
 
 import os
@@ -89,6 +87,7 @@ def iter_webui_source_files(source_dir: Path) -> list[Path]:
         if not root.is_dir():
             continue
         files.extend(path for path in root.rglob("*") if path.is_file())
+    files.extend((source_dir.parent / "nanobot" / "command" / "locales").glob("*.json"))
     shared_root = source_dir.parent / "packages" / "client-events"
     if shared_root.is_dir():
         files.extend(path for path in shared_root.rglob("*") if path.is_file())
@@ -192,8 +191,10 @@ def build_webui_bundle(
     using_bun = Path(command_runner).stem.lower() == "bun"
 
     _emit(output, f"Building bundled WebUI with `{command_runner}`...")
+    # Reinstall the locked tree: Bun's incremental install can retain the old
+    # hoisting layout after a source upgrade and omit new nested major versions.
     _run_frontend_command(
-        [command_runner, "install", *(["--frozen-lockfile"] if using_bun else [])],
+        [command_runner, "install", *(["--frozen-lockfile", "--force"] if using_bun else [])],
         cwd=resolved_source,
         subprocess_run=subprocess_run,
     )

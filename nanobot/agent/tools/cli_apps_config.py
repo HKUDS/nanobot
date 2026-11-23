@@ -1,5 +1,3 @@
-"""CLI Apps configuration shared by the tool and root schema."""
-
 from pydantic import Field
 
 from nanobot.config_base import Base

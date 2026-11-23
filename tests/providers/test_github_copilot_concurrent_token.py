@@ -12,7 +12,6 @@ from nanobot.providers import github_copilot_provider as gc
 
 @pytest.mark.asyncio
 async def test_concurrent_token_refresh_fetches_once(monkeypatch):
-    """A competing caller waits for the in-flight exchange and reuses its token."""
     monkeypatch.setattr(gc, "_load_github_token", lambda: SimpleNamespace(access="github-token"))
 
     fetch_count = 0
@@ -48,7 +47,6 @@ async def test_concurrent_token_refresh_fetches_once(monkeypatch):
     provider = gc.GitHubCopilotProvider()
 
     async def competing_call():
-        # No suspension between this signal and entering the token path.
         competing_started.set()
         return await provider._get_copilot_access_token()
 

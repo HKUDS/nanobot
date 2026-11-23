@@ -1,3 +1,5 @@
+import { renderCommandResult } from "../../../packages/client-events/command-result"
+import { terminalLocale } from "../platform/locale"
 import { acceptsCompactionPhase } from "../../../packages/client-events/notifications"
 import {
   BoxRenderable,
@@ -108,7 +110,6 @@ function projectUserMessage(media: readonly UserMessageMedia[]): UserMessageProj
   return { imageLabels, attachmentNames }
 }
 
-/** Projects gateway events into retained, reflowable conversation cells. */
 export class Transcript {
   readonly root: ScrollBoxRenderable
   readonly diagrams: TranscriptDiagrams
@@ -273,7 +274,7 @@ export class Transcript {
     if (messages.length === 0) return
     const previousTop = this.root.scrollTop
     const previousHeight = this.root.scrollHeight
-    let index = 1 // Keep the launch header first.
+    let index = 1
     for (const message of messages) {
       if (message.compaction) {
         if (this.compaction(message.compaction, index)) index += 1
@@ -351,13 +352,9 @@ export class Transcript {
       this.compactions.set(compaction.id, entry)
     }
     entry.phase = compaction.phase
-    entry.text.content = compaction.phase === "started"
-      ? "  ≋ Compacting conversation…"
-      : compaction.phase === "succeeded"
-        ? "  ✓ Conversation compacted"
-        : compaction.phase === "cancelled"
-          ? "  Conversation compaction cancelled"
-          : "  × Could not compact conversation"
+    const marker = { started: "≋ ", succeeded: "✓ ", cancelled: "", failed: "× " }[compaction.phase]
+    const label = renderCommandResult({ command: "/compact", parts: [{ key: `compact.${compaction.phase}`, values: {} }] }, terminalLocale())
+    entry.text.content = `  ${marker}${label}`
     entry.text.fg = compaction.phase === "failed" ? this.theme.error : this.theme.muted
     return added
   }

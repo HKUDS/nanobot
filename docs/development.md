@@ -2,7 +2,7 @@
 
 This page collects contributor-facing notes for extending nanobot. User-facing setup and runtime options live in [`configuration.md`](./configuration.md).
 
-For browser interface changes, start with [WebUI development](../webui/README.md). For Python setup and contribution checks, see [CONTRIBUTING.md](../CONTRIBUTING.md). The sections below cover provider extensions.
+For source and test entry points by task, start with the [development navigation](../.agent/navigation.md). For browser interface changes, use the [WebUI change map](../webui/README.md#change-a-behavior). For Python setup and contribution checks, see [CONTRIBUTING.md](../CONTRIBUTING.md). The sections below cover provider extensions.
 
 ## Adding an LLM Provider
 
@@ -74,7 +74,7 @@ Replace `OpenAICompatProvider(api_type=...)` with `OpenAICompatProvider(model_ap
 ModelAPICapabilities(supported_apis=("responses",), preferred_api="responses")
 ```
 
-API types and automatic selection rules are defined in `nanobot.providers.model_api`. The registry owns `ProviderSpec`, model metadata, and provider declarations; it also re-exports the API types. The temporary `apiType` configuration migration applies to JSON configuration and Settings inputs; it does not preserve the old Python constructor arguments.
+API types and automatic selection rules are defined in `nanobot.providers.model_api`. The registry owns `ProviderSpec`, model metadata, and provider declarations; it also re-exports the API types. JSON configuration and Settings inputs use the `api` object; the old `apiType` field no longer selects a request API.
 
 ## Adding a Transcription Provider
 

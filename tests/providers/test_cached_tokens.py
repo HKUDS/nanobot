@@ -1,5 +1,3 @@
-"""Tests for cached token extraction from OpenAI-compatible providers."""
-
 from __future__ import annotations
 
 import pytest
@@ -19,7 +17,6 @@ def _provider() -> OpenAICompatProvider:
     return OpenAICompatProvider(api_key="test-key")
 
 
-# Minimal valid choice so _parse reaches _extract_usage.
 _DICT_CHOICE = {"message": {"content": "Hello"}}
 
 
@@ -38,10 +35,7 @@ def _sdk_response(usage) -> ChatCompletion:
     })
 
 
-# --- dict-based response (raw JSON / mapping) ---
-
 def test_extract_usage_openai_cached_tokens_dict():
-    """prompt_tokens_details.cached_tokens from a dict response."""
     p = _provider()
     response = {
         "choices": [_DICT_CHOICE],
@@ -59,7 +53,6 @@ def test_extract_usage_openai_cached_tokens_dict():
 
 
 def test_extract_usage_deepseek_cached_tokens_dict():
-    """prompt_cache_hit_tokens from a DeepSeek dict response."""
     p = _provider()
     response = {
         "choices": [_DICT_CHOICE],
@@ -77,7 +70,6 @@ def test_extract_usage_deepseek_cached_tokens_dict():
 
 
 def test_extract_usage_no_cached_tokens_dict():
-    """Response without any cache fields preserves an unreported cache count."""
     p = _provider()
     response = {
         "choices": [_DICT_CHOICE],
@@ -94,7 +86,6 @@ def test_extract_usage_no_cached_tokens_dict():
 
 
 def test_extract_usage_openai_cached_zero_dict():
-    """cached_tokens=0 remains distinct from an unreported cache count."""
     p = _provider()
     response = {
         "choices": [_DICT_CHOICE],
@@ -140,11 +131,8 @@ def test_extract_usage_missing_is_none():
     assert result.usage is None
 
 
-# --- object-based response (OpenAI SDK Pydantic model) ---
-
 @pytest.mark.parametrize("cache_read, cache_write", [(1200, None), (0, 0)])
 def test_extract_usage_openai_cached_tokens_obj(cache_read, cache_write):
-    """SDK prompt token details preserve cache counts, including explicit zero."""
     p = _provider()
     response = _sdk_response({
         "prompt_tokens": 2000,
@@ -179,7 +167,6 @@ def test_extract_usage_preserves_reported_total_and_cache_write_obj():
 
 
 def test_extract_usage_deepseek_cached_tokens_obj():
-    """prompt_cache_hit_tokens from a DeepSeek SDK object response."""
     p = _provider()
     response = _sdk_response({
         "prompt_tokens": 1500,
@@ -193,7 +180,6 @@ def test_extract_usage_deepseek_cached_tokens_obj():
 
 
 def test_extract_usage_stepfun_top_level_cached_tokens_dict():
-    """StepFun/Moonshot: usage.cached_tokens at top level (not nested)."""
     p = _provider()
     response = {
         "choices": [_DICT_CHOICE],
@@ -210,7 +196,6 @@ def test_extract_usage_stepfun_top_level_cached_tokens_dict():
 
 
 def test_extract_usage_stepfun_top_level_cached_tokens_obj():
-    """StepFun/Moonshot: usage.cached_tokens as SDK object attribute."""
     p = _provider()
     response = _sdk_response({
         "prompt_tokens": 591,
@@ -224,7 +209,6 @@ def test_extract_usage_stepfun_top_level_cached_tokens_obj():
 
 
 def test_extract_usage_priority_nested_over_top_level_dict():
-    """When both nested and top-level cached_tokens exist, nested wins."""
     p = _provider()
     response = {
         "choices": [_DICT_CHOICE],
@@ -278,7 +262,6 @@ def test_parse_chunks_preserves_usage_only_chunk(as_sdk: bool) -> None:
 
 
 def test_anthropic_adds_native_cache_fields_to_logical_input():
-    """Anthropic excludes cache reads/writes from its native input_tokens."""
     from nanobot.providers.anthropic_provider import AnthropicProvider
 
     usage_obj = FakeUsage(
@@ -304,7 +287,6 @@ def test_anthropic_adds_native_cache_fields_to_logical_input():
 
 
 def test_anthropic_no_cache_fields():
-    """Anthropic response without cache fields preserves unreported counts."""
     from nanobot.providers.anthropic_provider import AnthropicProvider
 
     usage_obj = FakeUsage(input_tokens=800, output_tokens=200)

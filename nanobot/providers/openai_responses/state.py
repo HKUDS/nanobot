@@ -1,5 +1,3 @@
-"""Opaque conversation state for Responses API item replay."""
-
 from __future__ import annotations
 
 from copy import deepcopy
@@ -9,6 +7,11 @@ from loguru import logger
 
 from nanobot.providers.base import LLMResponse, LLMUsage, ProviderConversationState
 from nanobot.providers.openai_responses.converters import convert_messages
+from nanobot.providers.openai_responses.errors import (
+    COMPACTION_FEATURES,
+    is_unsupported_feature_error,
+    response_error_details,
+)
 
 RESPONSES_STATE_KIND = "openai_responses"
 RESPONSES_STATE_VERSION = 1
@@ -52,21 +55,22 @@ def prepare_responses_input(
     When no compatible state exists, it is converted normally as a safe
     fallback.
     """
-    instructions, fallback_items = convert_messages(
-        messages,
-        preserve_reasoning=preserve_reasoning,
+    prior_items = (
+        _state_items(state)
+        if state is not None and responses_state_matches(state, provider=provider, model=model)
+        else None
     )
-    if state is None or not responses_state_matches(
-        state,
-        provider=provider,
-        model=model,
-    ):
-        return instructions, fallback_items, False
-
-    prior_items = _state_items(state)
     if prior_items is None:
-        return instructions, fallback_items, False
+        instructions, items = convert_messages(messages, preserve_reasoning=preserve_reasoning)
+        return instructions, items, False
 
+    instructions = ""
+    for message in reversed(messages):
+        if message.get("role") == "system":
+            content = message.get("content")
+            instructions = content if isinstance(content, str) else ""
+            break
+    assert state is not None
     _, delta_items = convert_messages(
         state.pending_messages,
         preserve_reasoning=preserve_reasoning,
@@ -164,7 +168,7 @@ def responses_state_items(
 
 
 def responses_state_context_tokens(state: ProviderConversationState) -> int:
-    """Return the last server-reported active context size."""
+    """Return the reported active size or a locally estimated compacted prefix size."""
     value = state.payload.get(_CONTEXT_TOKENS_KEY)
     if isinstance(value, bool) or not isinstance(value, int):
         return 0
@@ -195,24 +199,8 @@ def is_compaction_compatibility_error(exc: Exception) -> bool:
     """Recognize endpoints that reject native Responses compaction fields."""
     if getattr(exc, "compaction_unsupported", False) is True:
         return True
-    response = getattr(exc, "response", None)
-    status_code = getattr(exc, "status_code", None)
-    if status_code is None and response is not None:
-        status_code = getattr(response, "status_code", None)
-    body = (
-        getattr(exc, "body", None)
-        or getattr(exc, "doc", None)
-        or getattr(response, "text", None)
-        or str(exc)
-    )
-    text = str(body).lower()
-    has_compaction_marker = any(
-        marker in text
-        for marker in ("context_management", "compact_threshold", "compaction_trigger")
-    )
-    if not has_compaction_marker:
-        return False
-    return isinstance(exc, TypeError) or status_code in {400, 404, 422}
+    status, body = response_error_details(exc)
+    return is_unsupported_feature_error(status, body, COMPACTION_FEATURES)
 
 
 def _prune_before_latest_output_compaction(

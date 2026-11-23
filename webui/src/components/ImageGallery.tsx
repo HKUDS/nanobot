@@ -3,15 +3,18 @@ import { ImageIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ImageLightbox } from "@/components/ImageLightbox";
+import { PendingEdgeOverlay, type PendingEdgeState } from "@/components/PendingEdgeOverlay";
 import { IMAGE_GAP, imageFrameRatio, layoutImageRows, type ImageDimensions } from "@/lib/image-gallery-layout";
 import type { UIImage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** A bounded, quiet preview; the viewer still contains every delivered image. */
-export function ImageGallery({ images, align = "left", size = "large" }: {
+export function ImageGallery({ images, align = "left", size = "large", edgeState = "solid", onSealEnd }: {
   images: UIImage[];
   align?: "left" | "right";
   size?: "compact" | "large";
+  edgeState?: PendingEdgeState;
+  onSealEnd?: () => void;
 }) {
   const { t } = useTranslation();
   const [index, setIndex] = useState<number | null>(null);
@@ -70,7 +73,8 @@ export function ImageGallery({ images, align = "left", size = "large" }: {
         const remaining = images.length - visible.length;
         const overflow = position === visible.length - 1 && remaining > 0;
         return <ImageThumbnail key={`${image.url ?? image.name}-${position}`}
-          image={image} size={size} frame={frame}
+          image={image} size={size} frame={frame} edgeState={edgeState}
+          onSealEnd={position === 0 ? onSealEnd : undefined}
           onLoad={(value) => { if (image.url) remember(image.url, value); }}
           onError={() => { if (image.url) remember(image.url, null); }}
           label={overflow ? t("lightbox.viewAll", { count: images.length }) : undefined}
@@ -83,9 +87,11 @@ export function ImageGallery({ images, align = "left", size = "large" }: {
   </>;
 }
 
-export function ImageThumbnail({ image, size = "large", frame, onOpen, label, overlay, onLoad, onError }: {
+export function ImageThumbnail({ image, size = "large", frame, onOpen, label, overlay, onLoad, onError, edgeState = "solid", onSealEnd }: {
   image: UIImage;
   size?: "compact" | "large";
+  edgeState?: PendingEdgeState;
+  onSealEnd?: () => void;
   frame?: ImageDimensions & { left: number; top: number };
   onOpen?: () => void;
   label?: string;
@@ -96,11 +102,13 @@ export function ImageThumbnail({ image, size = "large", frame, onOpen, label, ov
   const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
   const classes = cn(
-    "relative block max-w-full shrink-0 overflow-hidden rounded-control bg-muted/25 ring-1 ring-inset ring-border/60",
+    "relative block max-w-full shrink-0 overflow-hidden rounded-control bg-muted/25",
+    edgeState === "solid" && "ring-1 ring-inset ring-border/60",
     !frame && (size === "large" ? "w-[min(100%,28rem)]" : "w-48"),
   );
   const style: CSSProperties | undefined = frame ? { ...frame, position: "absolute" } : undefined;
   const unavailable = t("message.attachmentUnavailable");
+  const edgeOverlay = <PendingEdgeOverlay state={edgeState} solidTone="media" onSealEnd={onSealEnd} />;
   const content = image.url && !failed ? <img src={image.url} alt={image.name ?? ""}
     loading="lazy" decoding="async" draggable={false}
     onLoad={(event) => {
@@ -114,11 +122,12 @@ export function ImageThumbnail({ image, size = "large", frame, onOpen, label, ov
       <ImageIcon className="h-4 w-4 shrink-0" aria-hidden />
       <span className="min-w-0 truncate">{unavailable}</span>
     </span>;
-  if (!onOpen || ((!image.url || failed) && !overlay)) return <span className={classes} style={style}>{content}</span>;
+  if (!onOpen || ((!image.url || failed) && !overlay)) return <span className={classes} style={style}>{content}{edgeOverlay}</span>;
   return <button type="button" onClick={onOpen} style={style}
     aria-label={label ?? (image.name ? `${t("lightbox.open")}: ${image.name}` : t("lightbox.open"))}
     className={cn(classes, "cursor-zoom-in p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background")}>
     {content}
     {overlay ? <span className="absolute inset-0 flex items-center justify-center bg-black/45 text-xl font-medium text-white" aria-hidden>{overlay}</span> : null}
+    {edgeOverlay}
   </button>;
 }

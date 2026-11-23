@@ -140,7 +140,6 @@ async function cacheFirstPublicIcon(request) {
     await cache.put(request, response.clone());
     await trimIconCache(cache);
   } catch {
-    // Cache storage is optional; a successful network response still wins.
   }
   return response;
 }
@@ -152,7 +151,6 @@ self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
 
-// Collect same-origin paths referenced by the given HTML document.
 function referencedAssetPaths(html) {
   const refs = new Set();
   const re = /(?:src|href)="(\/[^"]*)"/g;
@@ -200,12 +198,6 @@ async function refreshAssetManifest(cache) {
   return true;
 }
 
-// Drop cached entries that the current index.html no longer references.
-// CACHE_NAME is stable across deployments, so without this, hashed assets from
-// previous builds would pile up in the same cache forever. The cached
-// index.html is the latest one this client saw (navigation is network-first
-// and overwrites it on every successful visit), so pruning against it keeps
-// the offline shell consistent with the last loaded build.
 async function pruneStaleEntries() {
   const cache = await caches.open(CACHE_NAME);
   const cachedIndex = await cache.match("/");
@@ -290,7 +282,6 @@ self.addEventListener("fetch", (event) => {
   const isNavigation = request.mode === "navigate";
   if (!isNavigation && !NETWORK_FIRST_STATIC_PATHS.has(path)) return;
 
-  // App shell and public files: network-first with an offline fallback.
   const networkResponse = fetch(request);
   event.waitUntil(
     networkResponse

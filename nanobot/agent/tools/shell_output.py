@@ -1,5 +1,3 @@
-"""Terminal control filtering for shell tool output."""
-
 from __future__ import annotations
 
 

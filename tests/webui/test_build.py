@@ -4,6 +4,8 @@ import os
 from contextlib import nullcontext
 from pathlib import Path
 
+import pytest
+
 from nanobot.webui.build import (
     ensure_webui_bundle,
     inspect_webui_bundle,
@@ -76,10 +78,11 @@ def test_inspect_webui_bundle_detects_channel_owned_ui_source(tmp_path: Path) ->
     assert status.newest_source == channel_ui
 
 
-def test_shared_notifications_make_existing_bundle_stale(tmp_path: Path) -> None:
+@pytest.mark.parametrize("asset", ["packages/client-events/notifications.ts", "nanobot/command/locales/core.json"])
+def test_shared_client_assets_make_existing_bundle_stale(tmp_path: Path, asset: str) -> None:
     source = tmp_path / "webui"
     dist = tmp_path / "nanobot/web/dist"
-    shared = tmp_path / "packages/client-events/notifications.ts"
+    shared = tmp_path / asset
     _touch(source / "package.json", mtime_ns=10)
     _touch(dist / "index.html", mtime_ns=20)
     _touch(shared, mtime_ns=30)
@@ -128,7 +131,8 @@ def test_ensure_webui_bundle_auto_builds_stale_dist(tmp_path: Path, monkeypatch)
     )
 
     assert status.stale is False
-    assert commands == [("bun", "install", "--frozen-lockfile"), ("bun", "--bun", "run", "build")]
+    assert commands == [("bun", "install", "--frozen-lockfile", "--force"),
+                        ("bun", "--bun", "run", "build")]
 
 
 def test_pick_webui_build_runner_returns_resolved_executable(monkeypatch) -> None:

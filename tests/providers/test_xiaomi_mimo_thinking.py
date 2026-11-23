@@ -60,19 +60,12 @@ def _simple_messages() -> list[dict[str, Any]]:
     return [{"role": "user", "content": "hello"}]
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
 def test_xiaomi_mimo_config_field_exists():
-    """ProvidersConfig should expose a xiaomi_mimo field."""
     config = ProvidersConfig()
     assert hasattr(config, "xiaomi_mimo")
 
 
 def test_xiaomi_mimo_uses_thinking_type_style():
-    """MiMo hosted API uses {"thinking": {"type": ...}}, the thinking_type style."""
     spec = _mimo_spec()
     assert spec.thinking_style == "thinking_type"
     assert spec.backend == "openai_compat"
@@ -80,33 +73,23 @@ def test_xiaomi_mimo_uses_thinking_type_style():
 
 
 def test_openrouter_declares_gateway_reasoning_style():
-    """OpenRouter uses its own reasoning.effort field for routed thinking models."""
     spec = _openrouter_spec()
     assert spec.thinking_style == ""
     assert spec.gateway_reasoning_style == "reasoning_effort"
 
 
-# ---------------------------------------------------------------------------
-# _build_kwargs wire-format
-# ---------------------------------------------------------------------------
-
-
 def test_mimo_reasoning_effort_none_disables_thinking():
-    """reasoning_effort="none" should send thinking.type="disabled"."""
     provider = _mimo_provider()
     kwargs = provider._build_kwargs(
         messages=_simple_messages(),
         tools=None, model=None, max_tokens=100,
         temperature=0.7, reasoning_effort="none", tool_choice=None,
     )
-    # reasoning_effort itself must NOT be sent when value is "none"
     assert "reasoning_effort" not in kwargs
-    # The disable signal must be in extra_body
     assert kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
 def test_mimo_reasoning_effort_medium_enables_thinking():
-    """reasoning_effort="medium" should send thinking.type="enabled"."""
     provider = _mimo_provider()
     kwargs = provider._build_kwargs(
         messages=_simple_messages(),
@@ -118,7 +101,6 @@ def test_mimo_reasoning_effort_medium_enables_thinking():
 
 
 def test_mimo_reasoning_effort_low_enables_thinking():
-    """Any non-none/minimal effort enables thinking."""
     provider = _mimo_provider()
     kwargs = provider._build_kwargs(
         messages=_simple_messages(),
@@ -143,11 +125,6 @@ def test_mimo_reasoning_effort_unset_preserves_provider_default():
     )
     assert "reasoning_effort" not in kwargs
     assert "extra_body" not in kwargs
-
-
-# ---------------------------------------------------------------------------
-# Gateway path: MiMo routed through OpenRouter (no spec.thinking_style)
-# ---------------------------------------------------------------------------
 
 
 def test_mimo_via_openrouter_reasoning_effort_none_disables_thinking():

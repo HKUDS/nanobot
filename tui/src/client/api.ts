@@ -137,7 +137,6 @@ async function fetchThreadPage(
   throw new Error("Unsupported history response format")
 }
 
-/** Same recent model-call samples and context boundary as the WebUI usage popover. */
 export async function fetchSessionUsage(
   apiUrl: string,
   apiToken: string,
@@ -227,6 +226,9 @@ export async function fetchHistory(
             role: "activity", content: event.text,
             ...(event.tool_events?.length ? { toolEvents: event.tool_events } : {}),
           })
+        } else if (event.side_channel === true) {
+          messages.push({ role: "assistant", content: event.text, forkIndex: userIndex,
+            ...(event.render_as === "text" ? { renderAs: event.render_as } : {}) })
         } else {
           // A final message can repeat the answer already saved by stream_end.
           if (stream && stream.turnId === event.turn_id) {

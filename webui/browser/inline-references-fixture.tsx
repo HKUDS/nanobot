@@ -4,7 +4,7 @@ import { MessageBubble } from "@/components/MessageBubble";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { useReadingTypography } from "@/hooks/useReadingTypography";
-import type { ChatSummary, CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
+import type { ChatSummary, CliAppInfo, McpPresetInfo, SkillSummary, SlashCommand, UIMessage } from "@/lib/types";
 
 const session: ChatSummary = {
   key: "websocket:typography", channel: "websocket", chatId: "typography",
@@ -28,10 +28,46 @@ const linearPreset: McpPresetInfo = {
   connection_summary: "", logo_url: logo,
 };
 const mcpPresets = [linearPreset, { ...linearPreset, name: "adobe-express-docs", display_name: "Adobe Express Developer" }];
-const commands: SlashCommand[] = [{
-  command: "/goal", title: "Start a goal", description: "Start a sustained goal.",
-  icon: "activity", lifecycle: "agent_turn_with_args", acceptsArgs: true,
-}];
+const commands: SlashCommand[] = [
+  {
+    command: "/goal", title: "Start a goal", description: "Start a sustained goal.",
+    icon: "activity", lifecycle: "agent_turn_with_args", acceptsArgs: true,
+  },
+  {
+    command: "/compact", title: "Compact context", description: "Compact context and continue chatting.",
+    icon: "archive", lifecycle: "finalize_active_turn", acceptsArgs: false,
+  },
+  {
+    command: "/model", title: "Model", description: "View or switch the current model preset.",
+    icon: "brain", argHint: "[preset]", lifecycle: "side_channel", acceptsArgs: true,
+  },
+  {
+    command: "/status", title: "Show status", description: "Check runtime, provider, and channel status.",
+    icon: "activity", lifecycle: "side_channel", acceptsArgs: false,
+  },
+  {
+    command: "/pairing", title: "Pairing", description: "Manage pairing requests.",
+    icon: "shield", argHint: "[list|approve <code>|deny <code>|revoke <user_id>]",
+    lifecycle: "side_channel", acceptsArgs: true,
+  },
+];
+const skills: SkillSummary[] = [
+  {
+    name: "frontend-design",
+    description: "Build polished interfaces with balanced typography, motion, and responsive layout across light and dark themes.",
+    source: "workspace", enabled: true, available: true,
+  },
+  {
+    name: "nanobot-document",
+    description: "Look up nanobot configuration, architecture, and troubleshooting guides.",
+    source: "builtin", enabled: true, available: true,
+  },
+  {
+    name: "skill-creator",
+    description: "Create or update reusable AgentSkills in the workspace.",
+    source: "builtin", enabled: true, available: true,
+  },
+];
 const answer: UIMessage = {
   id: "reference-answer", role: "assistant", createdAt: 1,
   content: "[相关会话](#session/websocket%3Atypography) · [外部文档](https://example.com/reference)",
@@ -44,7 +80,7 @@ export function InlineReferencesFixture() {
   return <ThemeProvider theme={theme}>
     <main className="mx-auto h-full max-w-[var(--content-column-width)] space-y-6 overflow-y-auto p-4">
       {[answer, ...sent].map(message => <MessageBubble key={message.id} message={message} slashCommands={commands} />)}
-      <ThreadComposer compactWhenIdle sessions={[session, longSession]} cliApps={cliApps} mcpPresets={mcpPresets} modelLabel="Fixture" persistDraft={false} slashCommands={commands}
+      <ThreadComposer compactWhenIdle sessions={[session, longSession]} cliApps={cliApps} mcpPresets={mcpPresets} modelLabel="Fixture" persistDraft={false} slashCommands={commands} skills={skills}
         onSend={(text, _media, options) => setSent(current => [...current, {
           id: `sent-${current.length}`, role: "user", content: text, createdAt: current.length + 2,
         }, ...(options?.userShell ? [{

@@ -61,7 +61,6 @@ class IndexHandler(SimpleHTTPRequestHandler):
 
 @pytest.fixture
 def uv_installation(tmp_path, monkeypatch):
-    # Private synthetic package-manager fixtures, not release-signature proof.
     monkeypatch.setattr(ReleaseFeed, "_authorize", AsyncMock())
     from nanobot import update_process
 
@@ -71,8 +70,12 @@ def uv_installation(tmp_path, monkeypatch):
     tmp_path = tmp_path.resolve()
     account = tmp_path / "private account"
     account.mkdir()
+    for key in list(os.environ):
+        if key.startswith("UV_"):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(account / ".config"))
+    monkeypatch.setenv("XDG_CONFIG_DIRS", str(account / "config-dirs"))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: account))
-    # The read-only bootstrap has the same isolated account as frozen workers.
     monkeypatch.setattr(update_process, "_INSPECTION_BOOTSTRAP", (
         "from pathlib import Path\n"
         f"Path.home = classmethod(lambda cls: Path({str(account)!r}))\n"
@@ -80,8 +83,6 @@ def uv_installation(tmp_path, monkeypatch):
     archive_worker = jobs._worker_archive
 
     def private_worker(path):
-        # All worker entrypoints, including installer children, use a private
-        # account. Do not change HOME or patch production transaction behavior.
         archive_worker(path)
         with ZipFile(path) as source:
             files = {item.filename: source.read(item) for item in source.infolist()}
@@ -180,8 +181,6 @@ async def test_uv_prepared_job_preserves_owner_and_sealed_inputs(uv_installation
     original_receipt = receipt.read_bytes()
     async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
         if mode == "external-policy":
-            # A later user-level index/security policy cannot silently disappear
-            # merely because this first implementation only froze the receipt.
             config_root = tmp_path / "user config"
             config = config_root / "uv/uv.toml"
             config.parent.mkdir(parents=True)
@@ -197,20 +196,15 @@ async def test_uv_prepared_job_preserves_owner_and_sealed_inputs(uv_installation
         assert spec.uv is not None
         assert inspect_environment(plan.installation.python, uv=True) == before
         assert receipt.read_bytes() == original_receipt
-        # The selected app is not the newer index version, injected packages and
-        # extras survive, and an obsolete dependency is removed by the owner.
         assert spec.uv.versions == {
             "nanobot-ai": "0.3.5", "fixture-feature": "2.0.0",
             "fixture-runtime": "2.0.0", "fixture-injected": "1.0.0",
         }
         cache = directory / spec.uv.cache
         server.shutdown()
-        server.server_close()  # Dependencies must come entirely from prepared inputs.
+        server.server_close()
         if mode == "tamper":
             (cache / "changed-after-preparation").write_text("not part of approved preparation")
-            # Preflight can encounter cache changes after the initial worker
-            # check (for example during release revalidation). Refuse before
-            # posting even a shutdown preparation request to the gateways.
             with pytest.raises(ValueError, match="cache changed"):
                 await stop_reviewed_gateways(directory)
             assert not (directory.parent.parent / "stop.json").exists()
@@ -263,7 +257,7 @@ async def test_orphan_native_uv_preparation_keeps_lease_and_can_be_settled(uv_in
 
     server.RequestHandlerClass = partial(HeldIndex, directory=str(tmp_path / "index"))
     template = tmp_path / "private-worker.pyz"
-    jobs._worker_archive(template)  # Existing fixture makes every child use the private account.
+    jobs._worker_archive(template)
     hook = f"""
 import shutil, subprocess
 Path.home = classmethod(lambda cls: Path({str(Path.home())!r}))

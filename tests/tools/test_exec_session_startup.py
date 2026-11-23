@@ -8,6 +8,7 @@ import pytest
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.execution import processes
 
 
 async def test_owner_cancellation_during_startup_preserves_other_execution(tmp_path, monkeypatch):
@@ -16,7 +17,7 @@ async def test_owner_cancellation_during_startup_preserves_other_execution(tmp_p
     blocked_command = [sys.executable, "-u", "-c", "print('blocked launch')"]
     entered = asyncio.Event()
     release = asyncio.Event()
-    spawn = manager._spawn
+    spawn = processes.spawn_process_tree
 
     async def gated_spawn(command, cwd, env, shell_program, login, *, stdin):
         if command == blocked_command:
@@ -24,7 +25,7 @@ async def test_owner_cancellation_during_startup_preserves_other_execution(tmp_p
             await release.wait()
         return await spawn(command, cwd, env, shell_program, login, stdin=stdin)
 
-    monkeypatch.setattr(manager, "_spawn", gated_spawn)
+    monkeypatch.setattr(processes, "spawn_process_tree", gated_spawn)
     token = bind_request_context(RequestContext(channel="cli", chat_id="a", session_key="cli:a"))
     try:
         blocked = asyncio.create_task(tool.execute(command=blocked_command, yield_time_ms=0))

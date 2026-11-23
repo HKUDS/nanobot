@@ -1,18 +1,18 @@
 {
+  "goal": {
+    "title": "GoalIsland · Objectif",
+    "description": "Prévisualisez l’objectif et ses détails.",
+    "options": "Fournissez l’état, le résumé, l’objectif et un bilan facultatif.",
+    "state": "État",
+    "summary": "Préparer la publication",
+    "objective": "Examinez les modifications et vérifiez la publication.\n\n- Vérifier les tests\n- Relire la documentation\n- Confirmer que tout est prêt",
+    "recap": "En attente d’approbation."
+  },
   "rename": {
     "title": "RenameDialog · Renommer groupes et projets",
     "description": "Essayez le renommage des groupes et projets. Les sujets se renomment dans la liste des discussions.",
     "options": "L’appelant fournit dialogTitle, description et placeholder. title définit la valeur initiale ; onConfirm reçoit le titre sans espaces aux extrémités. Un titre vide ne peut pas être enregistré.",
     "hint": "L’enregistrement met à jour le titre ci-dessus."
-  },
-  "delete": {
-    "title": "DeleteConfirm · Confirmation de suppression",
-    "description": "Comparez la suppression d’une discussion, de plusieurs discussions ou d’une discussion avec automatisations.",
-    "options": "count détermine le texte de suppression groupée. automations affiche les tâches liées, leur planification et leur prochaine exécution. La confirmation appelle onConfirm.",
-    "scenario": "Scénario de suppression",
-    "open": "Ouvrir la confirmation de suppression",
-    "confirmed": "Suppression d’exemple confirmée.",
-    "hint": "Choisissez une discussion, plusieurs discussions ou une discussion avec automatisations."
   },
   "inlineTokens": {
     "title": "Inline tokens · Commandes et identifiants de session",
@@ -178,6 +178,18 @@
     "dismissed": "Avis de reprise fermé.",
     "reset": "Réinitialiser l’aperçu",
     "hint": "Sélectionnez un état de reprise, puis essayez de continuer ou de fermer."
+  },
+  "sandbox": {
+    "gateway": "Passerelle d’exemple",
+    "unknownGateway": "Non précisée",
+    "title": "Avis de commande",
+    "description": "Comparez les composants manquants, les installations non protégées et les échecs de démarrage avec le composant réel.",
+    "options": "L’avis ne prend pas le focus et ne relance aucune commande. Changez son état, fermez-le et continuez à saisir.",
+    "missing": "Composant introuvable",
+    "permissions": "Installation à vérifier",
+    "startup": "Démarrage indisponible",
+    "hint": "Démonstration uniquement. Aucune commande ni modification des paramètres.",
+    "settingsAction": "Paramètres du bac à sable demandés (démonstration)."
   },
   "fallback": {
     "title": "ModelFallbackNotice · Modèle de secours",

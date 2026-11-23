@@ -1,5 +1,3 @@
-"""Tests for SDK streaming primitives."""
-
 import asyncio
 
 import pytest

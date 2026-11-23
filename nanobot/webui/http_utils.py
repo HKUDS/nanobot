@@ -1,5 +1,3 @@
-"""Shared HTTP helpers for the embedded WebUI gateway."""
-
 from __future__ import annotations
 
 import email.utils
@@ -86,6 +84,14 @@ def host_for_url(host: str, port: int) -> str:
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
     return f"{host}:{port}"
+
+
+def etag_matches(value: str, etag: str) -> bool:
+    target = etag.strip().removeprefix("W/")
+    return any(
+        candidate.strip().removeprefix("W/") in {"*", target}
+        for candidate in value.split(",")
+    )
 
 
 def accepts_gzip(value: str) -> bool:

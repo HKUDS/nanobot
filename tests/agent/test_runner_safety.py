@@ -1,5 +1,3 @@
-"""Tests for AgentRunner security: workspace violations, SSRF, shell guard, throttling."""
-
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -59,27 +57,22 @@ async def test_runner_does_not_abort_on_workspace_violation_anymore():
     assert result.error is None
     assert result.final_content == "ok, telling the user instead"
     assert result.tool_events and result.tool_events[0]["status"] == "error"
-    # Detail still carries the workspace_violation breadcrumb for telemetry,
-    # but the runner did not raise.
     assert "workspace_violation" in result.tool_events[0]["detail"]
 
 
 def test_is_ssrf_violation_recognizes_private_url_blocks():
-    """SSRF rejections are classified separately from workspace boundaries."""
     ssrf_msg = "Error: Command blocked by safety guard (internal/private URL detected)"
     assert is_ssrf_violation(ssrf_msg) is True
     assert is_ssrf_violation(
         "URL validation failed: Blocked: host resolves to private/internal address 192.168.1.2"
     ) is True
 
-    # Workspace-bound markers are NOT classified as SSRF.
     assert is_ssrf_violation(
         "Error: Command blocked by safety guard (path outside working dir)"
     ) is False
     assert is_ssrf_violation(
         "Path /tmp/x is outside allowed directory /ws"
     ) is False
-    # Deny / allowlist filter messages stay non-fatal too.
     assert is_ssrf_violation(
         "Error: Command blocked by deny pattern filter"
     ) is False
@@ -87,7 +80,6 @@ def test_is_ssrf_violation_recognizes_private_url_blocks():
 
 @pytest.mark.asyncio
 async def test_runner_returns_non_retryable_hint_on_ssrf_violation():
-    """SSRF stays blocked, but the runtime gives the LLM a final chance to recover."""
     provider = MagicMock()
     provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
@@ -180,7 +172,6 @@ async def test_runner_lets_llm_recover_from_shell_guard_path_outside():
     assert result.error is None
     assert result.final_content == "recovered final answer"
     assert result.tool_events and result.tool_events[0]["status"] == "error"
-    # v2: detail keeps the breadcrumb but the runner did not raise.
     assert "workspace_violation" in result.tool_events[0]["detail"]
     calls = [
         call
@@ -240,12 +231,9 @@ async def test_runner_throttles_repeated_workspace_bypass_attempts():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    # All 4 bypass attempts surface to the LLM (no fatal abort), and the
-    # runner finally completes once the LLM stops asking.
     assert result.stop_reason != "tool_error"
     assert result.error is None
     assert result.final_content == "ok telling user"
-    # The third+ attempts must have been escalated -- look at the events.
     escalated = [
         ev for ev in result.tool_events
         if ev["status"] == "error"

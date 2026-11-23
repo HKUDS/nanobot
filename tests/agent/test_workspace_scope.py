@@ -176,6 +176,7 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
     skill_file = agent_workspace / "skills" / "custom" / "SKILL.md"
     history_file = agent_workspace / "memory" / "history.jsonl"
     private_memory_file = agent_workspace / "memory" / "private.txt"
+    wiki_file = agent_workspace / "memory" / "wiki" / "projects" / "example.md"
     private_file = agent_workspace / "private.txt"
     project_file = project / "project.txt"
     skill_file.parent.mkdir(parents=True)
@@ -183,6 +184,8 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
     project.mkdir()
     skill_file.write_text("global skill", encoding="utf-8")
     history_file.write_text('{"content":"global history"}\n', encoding="utf-8")
+    wiki_file.parent.mkdir(parents=True)
+    wiki_file.write_text("Wiki deployment details", encoding="utf-8")
     private_memory_file.write_text("private memory", encoding="utf-8")
     private_file.write_text("private", encoding="utf-8")
     project_file.write_text("project", encoding="utf-8")
@@ -209,6 +212,8 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
             path=str(history_file),
             output_mode="content",
         )
+        wiki_result = await read_tool.execute(path=str(wiki_file))
+        wiki_write_result = await write_tool.execute(path=str(wiki_file), content="changed")
         private_memory_result = await read_tool.execute(path=str(private_memory_file))
         private_result = await read_tool.execute(path=str(private_file))
         write_result = await write_tool.execute(path=str(skill_file), content="changed")
@@ -219,6 +224,9 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
     assert "project" in project_result
     assert "global skill" in skill_result
     assert "global history" in history_result
+    assert "Wiki deployment details" in wiki_result
+    assert "outside allowed directory" in wiki_write_result
+    assert wiki_file.read_text(encoding="utf-8") == "Wiki deployment details"
     assert "outside allowed directory" in private_memory_result
     assert "outside allowed directory" in private_result
     assert "outside allowed directory" in write_result

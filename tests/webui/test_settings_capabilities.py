@@ -7,7 +7,6 @@ import pytest
 from nanobot.config.schema import Config
 from nanobot.webui.settings_capabilities import (
     capability_settings_payload,
-    update_api_settings,
     update_image_generation_settings,
     update_network_safety_settings,
     update_transcription_settings,
@@ -75,10 +74,6 @@ def test_capability_domain_updates_representative_settings() -> None:
             "use_jina_reader": ["false"],
         },
     )
-    update_api_settings(
-        config,
-        {"host": ["127.0.0.2"], "port": ["8900"], "timeout": ["90"]},
-    )
     image_changed = update_image_generation_settings(
         config,
         {"enabled": ["true"], "provider": ["openrouter"]},
@@ -102,7 +97,5 @@ def test_capability_domain_updates_representative_settings() -> None:
     assert transcription_changed is True
     assert (network_changed, access_mode) == (True, "default")
     assert payload["web_search"]["max_results"] == 7
-    assert payload["api"]["host"] == "127.0.0.2"
-    assert payload["api"]["port"] == 8900
     assert payload["image_generation"]["enabled"] is True
     assert payload["transcription"]["provider"] == "openrouter"

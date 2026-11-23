@@ -1,4 +1,3 @@
-/** Compact token counts for dense runtime metadata (for example, 74.9K). */
 export function formatCompactTokenCount(value: number): string {
   if (value < 1_000) return Math.round(value).toLocaleString();
   if (value < 1_000_000) {
@@ -52,7 +51,6 @@ function isLowInformationTitlePreview(text: string): boolean {
   );
 }
 
-/** Truncate the first user message into a chat title. */
 export function deriveTitle(preview: string | undefined, fallback: string): string {
   if (!preview) return fallback;
   const oneLine = visibleSessionPreview(preview).replace(/\s+/g, " ").trim();

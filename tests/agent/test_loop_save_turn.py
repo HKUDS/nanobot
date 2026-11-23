@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -9,11 +10,13 @@ from loguru import logger
 
 from agent.session_helpers import run_session, save_completed_subagent, visible_message
 from nanobot.agent.context import ContextBuilder, TranscriptInput
+from nanobot.agent.dream import DreamResult
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
+    CommandResultEvent,
     GoalStatusEvent,
     StreamDeltaEvent,
     StreamedResponseEvent,
@@ -21,8 +24,18 @@ from nanobot.bus.outbound_events import (
     TurnEndEvent,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import TurnCompleted, TurnRunStatusChanged
+from nanobot.command.results import message_text
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
-from nanobot.providers.base import LLMProvider, LLMResponse, LLMUsage, ProviderConversationState
+from nanobot.goal.assembly import install_goal
+from nanobot.providers.base import (
+    GenerationSettings,
+    LLMProvider,
+    LLMResponse,
+    LLMUsage,
+    ProviderConversationState,
+    ToolCallRequest,
+)
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -34,10 +47,6 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
-from nanobot.session.keys import (
-    LAST_CHANNEL_METADATA_KEY,
-    UNIFIED_SESSION_KEY,
-)
 from nanobot.session.manager import Session
 from nanobot.session.recovery import (
     PENDING_FOLLOWUP_ID_KEY,
@@ -61,7 +70,6 @@ from nanobot.session.webui_turns import (
     WebuiTurnCoordinator,
     clean_generated_title,
     maybe_generate_webui_title,
-    maybe_generate_webui_title_after_turn,
 )
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
@@ -119,14 +127,16 @@ def _runtime_message(content, blocks: list[RuntimeContextBlock]) -> dict:
 
 
 def _make_full_loop(tmp_path: Path) -> AgentLoop:
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.provider_name = "test"
     provider.get_default_model.return_value = "test-model"
-    provider.generation = SimpleNamespace(max_tokens=4096)
+    provider.generation = GenerationSettings(max_tokens=4096)
+    provider.estimate_prompt_tokens.return_value = (100, "test")
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
     bus = MessageBus()
     loop = AgentLoop(
         bus=bus, provider=provider, workspace=tmp_path, model="test-model",
+        builtin_assembly=install_goal,
     )
     WebuiTurnCoordinator(
         bus=loop.bus,
@@ -212,7 +222,6 @@ async def test_persist_user_message_acknowledges_durable_followup(tmp_path: Path
     try:
         identifier = await loop.sessions.state.queue_followup(message.session_key, message)
         message.metadata[PENDING_FOLLOWUP_ID_KEY] = identifier
-        # Control: unlike mid-turn injection, this draft already sees the journal.
         session = await loop.sessions.state.get(message.session_key)
         assert await loop._persist_user_message_early(message, session)
         assert PENDING_FOLLOWUPS_KEY not in session.metadata
@@ -260,6 +269,46 @@ async def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("dispatch", ["queued", "inline", "direct"])
+async def test_fast_dream_finishes_after_the_command_acknowledgement(tmp_path, monkeypatch, dispatch):
+    loop = _make_full_loop(tmp_path)
+    msg = InboundMessage("websocket", "user", "chat-1", "/dream")
+
+    async def no_history(*_args, **_kwargs):
+        return DreamResult(had_input=False)
+
+    publish = loop.bus.publish_outbound
+
+    async def slow_delivery(message):
+        # Exercise the race even when both the command and Dream do no I/O.
+        await asyncio.sleep(0)
+        await publish(message)
+
+    async def next_receipt():
+        while True:
+            message = await loop.bus.consume_outbound()
+            if isinstance(message.event, CommandResultEvent):
+                return message
+
+    monkeypatch.setattr("nanobot.agent.dream.run_dream", no_history)
+    monkeypatch.setattr(loop.bus, "publish_outbound", slow_delivery)
+    try:
+        if dispatch == "direct":
+            acknowledgement = await loop.process_direct("/dream")
+        else:
+            if dispatch == "queued":
+                await run_session(loop, msg)
+            else:
+                await loop._dispatch_command_inline(msg, msg.content, loop.commands.dispatch)
+            acknowledgement = await asyncio.wait_for(next_receipt(), timeout=2)
+        completion = await asyncio.wait_for(next_receipt(), timeout=2)
+        assert acknowledgement.event.parts[0]["key"] == "dream.started"
+        assert completion.event.parts[0]["key"] == "dream.no_input"
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.asyncio
 async def test_new_with_bot_suffix_does_not_persist_command(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
 
@@ -273,7 +322,7 @@ async def test_new_with_bot_suffix_does_not_persist_command(tmp_path: Path) -> N
     )
 
     assert response is not None
-    assert response.content == "New session started."
+    assert message_text(response) == "New session started."
     session = loop.sessions.get_or_create("websocket:chat-1")
     assert session.messages == []
 
@@ -309,7 +358,7 @@ async def test_invalid_slash_command_is_rejected_without_calling_provider(
     )
 
     assert response is not None
-    assert response.content == expected
+    assert message_text(response) == expected
     loop.provider.chat_stream_with_retry.assert_not_awaited()
     session = loop.sessions.get_or_create("websocket:chat-1")
     persisted = [
@@ -318,7 +367,7 @@ async def test_invalid_slash_command_is_rejected_without_calling_provider(
     ]
     assert persisted == [
         ("user", content, True),
-        ("assistant", response.content, True),
+        ("assistant", expected, True),
     ]
 
 
@@ -361,7 +410,11 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
     )
     session = loop.sessions.get_or_create("websocket:chat-title")
     session.metadata[WEBUI_SESSION_METADATA_KEY] = True
-    session.add_message("user", "帮我优化一下 webui 的 sidebar")
+    caption = "帮我优化一下 webui 的 sidebar"
+    session.add_message("user", [
+        {"type": "image_attachment", "id": "a" * 64},
+        {"type": "text", "text": caption},
+    ])
     session.add_message("assistant", "可以，我会先调整布局和视觉层级。")
     loop.sessions.save(session)
 
@@ -376,6 +429,8 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
     session = await loop.sessions.state.get(session.key)
     assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "优化 WebUI 侧边栏"
     loop.provider.chat_stream_with_retry.assert_awaited_once()
+    title_prompt = loop.provider.chat_stream_with_retry.await_args.args[0][-1]["content"]
+    assert f"User: {caption}\nAssistant:" in title_prompt
     assert loop.provider.chat_stream_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
     assert (
         loop.provider.chat_stream_with_retry.await_args.kwargs["reasoning_effort"]
@@ -455,69 +510,6 @@ async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) 
     loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_generate_webui_title_projects_onto_chat_session_under_unified_routing(
-    tmp_path: Path,
-) -> None:
-    loop = _make_full_loop(tmp_path)
-    loop.provider.chat_stream_with_retry = AsyncMock(
-        return_value=LLMResponse(content='"查询临期 IP"', finish_reason="stop")
-    )
-    unified = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
-    unified.metadata[WEBUI_SESSION_METADATA_KEY] = True
-    unified.metadata[WEBUI_TITLE_METADATA_KEY] = "开启私聊Topic功能"
-    unified.add_message("user", "很早以前的问题")
-    unified.add_message("assistant", "很久以前的回答。")
-    unified.add_message("user", "帮我查一下临期IP有哪些")
-    unified.add_message("assistant", "以下是临期 IP 列表。")
-    loop.sessions.save(unified)
-
-    generated = await maybe_generate_webui_title_after_turn(
-        channel="websocket",
-        chat_id="chat-projection",
-        metadata={WEBUI_SESSION_METADATA_KEY: True},
-        sessions=loop.sessions,
-        session_key=UNIFIED_SESSION_KEY,
-        provider=loop.provider,
-        model=loop.model,
-    )
-
-    assert generated is True
-    chat = loop.sessions.get_or_create("websocket:chat-projection")
-    assert chat.metadata[WEBUI_TITLE_METADATA_KEY] == "查询临期 IP"
-    assert unified.metadata[WEBUI_TITLE_METADATA_KEY] == "开启私聊Topic功能"
-    prompt = loop.provider.chat_stream_with_retry.await_args.args[0][1]["content"]
-    assert "帮我查一下临期IP有哪些" in prompt
-    assert "很早以前的问题" not in prompt
-
-
-@pytest.mark.asyncio
-async def test_projected_title_generation_skips_existing_chat_title(tmp_path: Path) -> None:
-    loop = _make_full_loop(tmp_path)
-    unified = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
-    unified.metadata[WEBUI_SESSION_METADATA_KEY] = True
-    unified.add_message("user", "帮我查一下临期IP有哪些")
-    unified.add_message("assistant", "以下是临期 IP 列表。")
-    chat = loop.sessions.get_or_create("websocket:chat-existing")
-    chat.metadata[WEBUI_TITLE_METADATA_KEY] = "Existing title"
-    loop.sessions.save(chat)
-    loop.sessions.save(unified)
-
-    generated = await maybe_generate_webui_title_after_turn(
-        channel="websocket",
-        chat_id="chat-existing",
-        metadata={WEBUI_SESSION_METADATA_KEY: True},
-        sessions=loop.sessions,
-        session_key=UNIFIED_SESSION_KEY,
-        provider=loop.provider,
-        model=loop.model,
-    )
-
-    assert generated is False
-    assert chat.metadata[WEBUI_TITLE_METADATA_KEY] == "Existing title"
-    loop.provider.chat_stream_with_retry.assert_not_awaited()
-
-
 def test_save_turn_keeps_multimodal_runtime_context_for_model_replay() -> None:
     loop = _mk_loop()
     session = Session(key="test:runtime-only")
@@ -587,7 +579,7 @@ def test_save_turn_commits_summary_boundary_without_rewriting_raw_history() -> N
     ]
 
 
-def test_save_turn_keeps_image_placeholder_and_runtime_context() -> None:
+def test_save_turn_keeps_user_image_and_runtime_context() -> None:
     loop = _mk_loop()
     session = Session(key="test:image")
     block = RuntimeContextBlock(source="test", content="provider context")
@@ -602,33 +594,11 @@ def test_save_turn_keeps_image_placeholder_and_runtime_context() -> None:
         )],
         skip=0,
     )
-    assert session.messages[0]["content"] == [
-        {"type": "text", "text": "[image: /media/feishu/photo.jpg]"},
-        {"type": "text", "text": "provider context"},
-    ]
-    assert public_history_message(session.messages[0])["content"] == [
-        {"type": "text", "text": "[image: /media/feishu/photo.jpg]"}
-    ]
-
-
-def test_save_turn_keeps_image_placeholder_without_meta() -> None:
-    loop = _mk_loop()
-    session = Session(key="test:image-no-meta")
-    block = RuntimeContextBlock(source="test", content="provider context")
-
-    loop._save_turn(
-        session,
-        [_runtime_message(
-            [
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
-            ],
-            [block],
-        )],
-        skip=0,
-    )
-    assert session.messages[0]["content"] == [
+    content = session.get_history()[0]["content"]
+    assert content[0]["image_url"] == {"url": "data:image/png;base64,abc"}
+    assert content[1:] == [{"type": "text", "text": "provider context"}]
+    assert session.get_history(include_runtime_context=False)[0]["content"] == [
         {"type": "text", "text": "[image]"},
-        {"type": "text", "text": "provider context"},
     ]
 
 
@@ -836,7 +806,9 @@ def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> 
     assert session.messages[0]["role"] == "assistant"
     assert session.messages[1]["tool_call_id"] == "call_done"
     assert session.messages[2]["tool_call_id"] == "call_pending"
-    assert "interrupted before this tool finished" in session.messages[2]["content"].lower()
+    assert "outcome is unknown" in session.messages[2]["content"]
+    assert "Check its effects before retrying" in session.messages[2]["content"]
+    assert session.messages[2]["_recovery_interrupted"] is True
     assert session.provider_state is None
 
 
@@ -1190,9 +1162,8 @@ async def test_subagent_followup_clears_state_before_compatibility_failure(
 
 
 @pytest.mark.asyncio
-async def test_process_message_persists_unified_session_delivery_route(tmp_path: Path) -> None:
+async def test_process_message_persists_delivery_route_on_failure(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    loop._unified_session = True
     loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
 
     msg = InboundMessage(
@@ -1200,77 +1171,15 @@ async def test_process_message_persists_unified_session_delivery_route(tmp_path:
         sender_id="u1",
         chat_id="oc_123",
         content="persist my route",
-        session_key_override=UNIFIED_SESSION_KEY,
     )
     with pytest.raises(RuntimeError, match="boom"):
         await loop._process_message(msg)
 
-    loop.sessions.invalidate(UNIFIED_SESSION_KEY)
-    persisted = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
-    assert persisted.metadata[LAST_CHANNEL_METADATA_KEY] == "feishu:oc_123"
+    loop.sessions.invalidate("feishu:oc_123")
+    persisted = loop.sessions.get_or_create("feishu:oc_123")
     assert persisted.metadata["_compaction_route"] == {
         "channel": "feishu", "chat_id": "oc_123", "metadata": {},
     }
-
-
-@pytest.mark.parametrize(
-    ("msg", "is_user_turn"),
-    [
-        (
-            InboundMessage(
-                channel="cli",
-                sender_id="u1",
-                chat_id="direct",
-                content="cli input",
-            ),
-            True,
-        ),
-        (
-            InboundMessage(
-                channel="system",
-                sender_id="system",
-                chat_id="discord:automation",
-                content="system event",
-            ),
-            False,
-        ),
-        (
-            InboundMessage(
-                channel="discord",
-                sender_id="subagent",
-                chat_id="subagent-result",
-                content="subagent result",
-            ),
-            True,
-        ),
-        (
-            InboundMessage(
-                channel="discord",
-                sender_id="u1",
-                chat_id="automation",
-                content="scheduled turn",
-                metadata={CRON_TRIGGER_META: {"job_id": "job-1"}},
-            ),
-            True,
-        ),
-    ],
-)
-def test_unified_session_route_ignores_non_user_destinations(
-    tmp_path: Path,
-    msg: InboundMessage,
-    is_user_turn: bool,
-) -> None:
-    loop = _make_full_loop(tmp_path)
-    loop._unified_session = True
-    session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
-    session.metadata[LAST_CHANNEL_METADATA_KEY] = "telegram:existing"
-
-    loop._remember_session_route(
-        session, msg, is_user_turn=is_user_turn,
-        delivery=loop.turn_delivery_factory.unrouted(msg, session.key),
-    )
-
-    assert session.metadata[LAST_CHANNEL_METADATA_KEY] == "telegram:existing"
 
 
 # 1x1 PNG used by the media-persistence tests. Attachment preparation filters
@@ -1314,18 +1223,17 @@ async def test_process_message_persists_media_paths_on_user_turn(tmp_path: Path)
     loop.sessions.invalidate("websocket:c-media")
     persisted = loop.sessions.get_or_create("websocket:c-media")
     assert [m["role"] for m in persisted.messages] == ["user"]
-    assert public_history_message(persisted.messages[0])["content"] == "look"
+    assert persisted.get_history(include_runtime_context=False)[0]["content"] == [
+        {"type": "text", "text": "[image]"},
+        {"type": "text", "text": "[image]"},
+        {"type": "text", "text": "look"},
+    ]
     assert persisted.messages[0]["media"] == [str(img_a), str(img_b)]
 
 
 @pytest.mark.asyncio
 async def test_process_message_persists_media_only_turn_without_text(tmp_path: Path) -> None:
-    """A turn with images but no text still persists (previously silent-dropped).
-
-    The old early-persist gate skipped messages without text, leaving pure
-    image turns un-checkpointed. They now materialise as an empty-content
-    user row with ``media`` attached.
-    """
+    """The image-only input is replayable even if the first model call never finishes."""
     img = tmp_path / "only.png"
     img.write_bytes(_PNG_1X1)
 
@@ -1346,7 +1254,11 @@ async def test_process_message_persists_media_only_turn_without_text(tmp_path: P
     persisted = loop.sessions.get_or_create("websocket:c-images-only")
     assert len(persisted.messages) == 1
     assert persisted.messages[0]["role"] == "user"
-    assert public_history_message(persisted.messages[0])["content"] == ""
+    content = persisted.get_history()[0]["content"]
+    assert [block["type"] for block in content].count("image_url") == 1
+    assert persisted.get_history(include_runtime_context=False)[0]["content"] == [
+        {"type": "text", "text": "[image]"},
+    ]
     assert persisted.messages[0]["media"] == [str(img)]
 
 
@@ -1381,256 +1293,284 @@ async def test_process_message_does_not_duplicate_early_persisted_user_message(t
 
 
 @pytest.mark.asyncio
-async def test_internal_continuation_queues_turn_without_fake_user_history(
-    tmp_path: Path,
-) -> None:
+async def test_explicit_recovery_continues_without_fake_user_history(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("feishu:c-auto")
-    session.metadata[GOAL_STATE_KEY] = {
-        "status": "active",
-        "objective": "Finish the long goal.",
-    }
+    session = loop.sessions.get_or_create("feishu:recovery")
+    session.add_message("user", "Inspect the migration")
+    session.add_message("assistant", "Evidence collected before interruption.")
     loop.sessions.save(session)
-
-    calls: list[dict] = []
-
-    async def fake_run_agent_loop(transcript_input, *, metadata=None, **_kwargs):
-        initial_messages = _assembled_messages(loop.context, transcript_input)
-        calls.append({"initial_messages": initial_messages, "metadata": metadata})
-        if len(calls) == 1:
-            return _agent_run_result(
-                "paused",
-                [*initial_messages, {"role": "assistant", "content": "paused"}],
-                stop_reason="max_iterations",
-            )
-        return _agent_run_result(
-            "done",
-            [*initial_messages, {"role": "assistant", "content": "done"}],
-        )
-
-    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
-    pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
-
-    first = await loop._process_message(
-        InboundMessage(
-            channel="feishu",
-            sender_id="u1",
-            chat_id="c-auto",
-            content="start the goal",
-        ),
-        pending_queue=pending,
-    )
-
-    assert first is None
-    queued = pending.get_nowait()
-    assert queued.sender_id == "system:continuation"
-    assert queued.metadata[INTERNAL_CONTINUATION_META] is True
-    assert "Finish the long goal." in queued.content
-
-    session = loop.sessions.get_or_create("feishu:c-auto")
-    assert "Finish the long goal." in str(session.messages[0]["content"])
-    assert [
-        {k: v for k, v in m.items() if k in {"role", "content"}}
-        for m in map(public_history_message, session.messages)
-    ] == [{"role": "user", "content": "start the goal"}]
-
-    second = await loop._process_message(queued, pending_queue=asyncio.Queue())
-
-    assert second is not None
-    assert second.content == "done"
-    session = loop.sessions.get_or_create("feishu:c-auto")
-    assert [
-        {k: v for k, v in m.items() if k in {"role", "content"}}
-        for m in map(public_history_message, session.messages)
-    ] == [
-        {"role": "user", "content": "start the goal"},
-        {"role": "assistant", "content": "done"},
-    ]
-
-
-@pytest.mark.asyncio
-async def test_internal_continuation_preserves_streaming_route_metadata(
-    tmp_path: Path,
-) -> None:
-    loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("feishu:c-stream")
-    session.metadata[GOAL_STATE_KEY] = {
-        "status": "active",
-        "objective": "Finish the streamed long goal.",
-    }
-    loop.sessions.save(session)
-
-    calls = 0
-
-    async def fake_run_agent_loop(transcript_input, *, events, streaming, **_kwargs):
-        nonlocal calls
-        initial_messages = _assembled_messages(loop.context, transcript_input)
-        calls += 1
-        if calls == 1:
-            return _agent_run_result(
-                "paused",
-                [*initial_messages, {"role": "assistant", "content": "paused"}],
-                stop_reason="max_iterations",
-            )
-        assert streaming
-        await events.emit(StreamDeltaEvent(content="done"))
-        await events.emit(StreamEndEvent())
-        return _agent_run_result(
-            "done",
-            [*initial_messages, {"role": "assistant", "content": "done"}],
-        )
-
-    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
-
-    await run_session(loop, InboundMessage(
-        channel="feishu",
-        sender_id="u1",
-        chat_id="c-stream",
-        content="start the goal",
-        metadata={
-            "_wants_stream": True,
-            "message_id": "om_001",
-            "origin_message_id": "root_001",
-        },
-    ))
-
-    outbound = []
-    while loop.bus.outbound_size:
-        outbound.append(await loop.bus.consume_outbound())
-    deltas = [m for m in outbound if isinstance(m.event, StreamDeltaEvent)]
-    ends = [m for m in outbound if isinstance(m.event, StreamEndEvent)]
-    streamed_markers = [m for m in outbound if isinstance(m.event, StreamedResponseEvent)]
-
-    assert [m.content for m in deltas] == ["done"]
-    assert len(ends) == 1
-    assert isinstance(ends[0].event, StreamEndEvent)
-    assert ends[0].event.resuming is False
-    assert ends[0].metadata["message_id"] == "om_001"
-    assert ends[0].metadata["origin_message_id"] == "root_001"
-    assert isinstance(ends[0].event.stream_id, str)
-    assert streamed_markers and streamed_markers[-1].content == "done"
-    assert loop.bus.inbound_size == 0
-    assert calls == 2
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("content", ["start the goal", "/goal start the goal"])
-async def test_websocket_internal_continuation_keeps_single_visible_run(
-    tmp_path: Path, content: str,
-) -> None:
-    loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("websocket:c-auto")
-    session.metadata[GOAL_STATE_KEY] = {
-        "status": "active",
-        "objective": "Finish the long goal.",
-    }
-    loop.sessions.save(session)
-
-    calls = 0
-
-    async def fake_run_agent_loop(transcript_input, **_kwargs):
-        nonlocal calls
-        initial_messages = _assembled_messages(loop.context, transcript_input)
-        calls += 1
-        if calls == 1:
-            return _agent_run_result(
-                "paused",
-                [*initial_messages, {"role": "assistant", "content": "paused"}],
-                stop_reason="max_iterations",
-            )
-        return _agent_run_result(
-            "done",
-            [*initial_messages, {"role": "assistant", "content": "done"}],
-        )
-
-    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
-
-    await run_session(loop, InboundMessage(
-        channel="websocket",
-        sender_id="u1",
-        chat_id="c-auto",
-        content=content,
-        metadata={"webui": True},
-    ))
-
-    first_outbound = []
-    while loop.bus.outbound_size:
-        first_outbound.append(await loop.bus.consume_outbound())
-    first_statuses = [m.event for m in first_outbound if isinstance(m.event, GoalStatusEvent)]
-    assert [m.status for m in first_statuses] == ["running", "running", "idle"]
-    started_at = first_statuses[0].started_at
-    assert first_statuses[1].started_at == started_at
-    turn_end = [m for m in first_outbound if isinstance(m.event, TurnEndEvent)]
-    assert len(turn_end) == 1
-    assert isinstance(turn_end[0].event, TurnEndEvent)
-    assert isinstance(turn_end[0].event.latency_ms, int)
-    assert loop.bus.inbound_size == 0
-    assert calls == 2
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("content", ["start the goal", "/goal start the goal"])
-async def test_stop_after_continuation_queued_ends_visible_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str,
-) -> None:
-    from nanobot.command.builtin import cmd_stop
-    from nanobot.command.router import CommandContext
-
-    loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("websocket:c-stop-continuation")
-    session.metadata[GOAL_STATE_KEY] = {
-        "status": "active",
-        "objective": "Finish the long goal.",
-    }
-    loop.sessions.save(session)
-    calls = 0
-
-    async def fake_run_agent_loop(transcript_input, **_kwargs):
-        nonlocal calls
-        calls += 1
-        initial_messages = _assembled_messages(loop.context, transcript_input)
-        return _agent_run_result(
-            "paused",
-            [*initial_messages, {"role": "assistant", "content": "paused"}],
-            stop_reason="max_iterations",
-        )
-
-    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
-    saving = asyncio.Event()
-    finish_turn = loop.sessions.state.finish_turn
-
-    async def hold_first_save(session):
-        if not saving.is_set():
-            saving.set()
-            await asyncio.Event().wait()
-        await finish_turn(session)
-
-    monkeypatch.setattr(loop.sessions.state, "finish_turn", hold_first_save)
-    msg = InboundMessage(
-        channel="websocket", sender_id="u1", chat_id="c-stop-continuation",
-        content=content, metadata={"webui": True},
-    )
-    await loop._enqueue_session_message(msg)
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
     try:
-        await asyncio.wait_for(saving.wait(), timeout=5)
+        result = await loop._process_message(InboundMessage(
+            channel="feishu", sender_id="system:recovery", chat_id="recovery",
+            content="Continue the interrupted request from saved context.",
+            metadata={INTERNAL_CONTINUATION_META: True},
+        ))
+        assert result is not None and result.content == "done"
+        saved = await loop.sessions.state.read(session.key)
+        assert [
+            {k: v for k, v in row.items() if k in {"role", "content"}}
+            for row in map(public_history_message, saved.messages)
+        ] == [
+            {"role": "user", "content": "Inspect the migration"},
+            {"role": "assistant", "content": "Evidence collected before interruption."},
+            {"role": "assistant", "content": "done"},
+        ]
+        prompt = loop.provider.chat_stream_with_retry.await_args.kwargs["messages"]
+        assert "Continue the interrupted request from saved context." in str(prompt)
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.asyncio
+async def test_same_run_goal_preserves_streaming_route_metadata(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.max_iterations = 1
+    session = await loop.sessions.state.get("feishu:c-stream")
+    await loop.sessions.state.update_metadata(session.key, {GOAL_STATE_KEY: {
+        "status": "active", "objective": "Finish the streamed long goal.",
+    }})
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="list", name="list_dir", arguments={"path": "."},
+        )]),
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="complete", name="update_goal", arguments={"action": "complete", "recap": "done"},
+        )]),
+        LLMResponse(content="done"),
+    ])
+    loop.runner.run = AsyncMock(wraps=loop.runner.run)
+    try:
+        await run_session(loop, InboundMessage(
+            channel="feishu", sender_id="u1", chat_id="c-stream", content="start the goal",
+            metadata={"_wants_stream": True, "message_id": "om_001", "origin_message_id": "root_001"},
+        ))
+        outbound = []
+        while loop.bus.outbound_size:
+            outbound.append(await loop.bus.consume_outbound())
+        deltas = [m for m in outbound if isinstance(m.event, StreamDeltaEvent)]
+        ends = [m for m in outbound if isinstance(m.event, StreamEndEvent)]
+        streamed_markers = [m for m in outbound if isinstance(m.event, StreamedResponseEvent)]
+        assert [m.content for m in deltas] == ["done"]
+        assert [item.event.resuming for item in ends] == [True, True, False]
+        assert all(item.metadata["message_id"] == "om_001" for item in ends)
+        assert all(item.metadata["origin_message_id"] == "root_001" for item in ends)
+        assert all(isinstance(item.event.stream_id, str) for item in ends)
+        assert streamed_markers and streamed_markers[-1].content == "done"
+        assert loop.bus.inbound_size == 0
+        assert loop.provider.chat_stream_with_retry.await_count == 3
+        loop.runner.run.assert_awaited_once()
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    loop = _make_full_loop(tmp_path)
+    loop.provider.aclose = AsyncMock()
+    loop.consolidator.compact_idle_session = AsyncMock()
+    loop.max_iterations = 1
+    gate = asyncio.Semaphore(1)
+    loop._concurrency_gate = gate
+    session = loop.sessions.get_or_create("websocket:committed-checkpoint")
+    session.metadata[GOAL_STATE_KEY] = {"status": "active", "objective": "Finish the goal."}
+    loop.sessions.save(session)
+    calls = 0
+    model_progress: asyncio.Queue[int] = asyncio.Queue()
+
+    async def respond(*args, **kwargs):
+        nonlocal calls
+        if args and "You write short, neutral chat titles" in str(args[0]):
+            return LLMResponse(content="Goal checkpoint")
+        calls += 1
+        model_progress.put_nowait(calls)
+        if calls == 3:
+            await loop._dispatch_inbound(InboundMessage(
+                channel="websocket", sender_id="user", chat_id="committed-checkpoint",
+                content="/compact", metadata={"webui": True, "message_id": "queued-compact"},
+            ))
+        if calls <= 3:
+            return LLMResponse(content=None, tool_calls=[ToolCallRequest(
+                id=f"list-{calls}", name="list_dir", arguments={"path": "."},
+            )])
+        if calls == 4:
+            assert "list-1" in str(kwargs["messages"]) and "list-3" in str(kwargs["messages"])
+            return LLMResponse(content=None, tool_calls=[ToolCallRequest(
+                id="block", name="update_goal", arguments={"action": "block", "recap": "Waiting for user input."},
+            )])
+        assert calls == 5
+        return LLMResponse(content="handled later")
+
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    loop.runner.run = AsyncMock(wraps=loop.runner.run)
+    committed, release = threading.Event(), threading.Event()
+    checkpoint_ready = asyncio.Event()
+    event_loop = asyncio.get_running_loop()
+    publish = loop.sessions.state._publish
+
+    def hold_after_commit(saved, *args, **kwargs):
+        checkpoint = saved.metadata.get(RUNTIME_CHECKPOINT_KEY, {})
+        if checkpoint.get("phase") == "tools_completed" and calls == 3 and not committed.is_set():
+            committed.set()
+            event_loop.call_soon_threadsafe(checkpoint_ready.set)
+            if not release.wait(5):
+                raise TimeoutError("test did not release the committed save")
+        return publish(saved, *args, **kwargs)
+
+    monkeypatch.setattr(loop.sessions.state, "_publish", hold_after_commit)
+    msg = InboundMessage(
+        channel="websocket", sender_id="user", chat_id="committed-checkpoint", content="Continue",
+        metadata={"webui": True, "message_id": "goal-input"},
+    )
+    completed = []
+    statuses = []
+    loop.bus.subscribe(completed.append, TurnCompleted)
+    loop.bus.subscribe(statuses.append, TurnRunStatusChanged)
+    stop_acknowledged = asyncio.Event()
+    publish_outbound = loop.bus.publish_outbound
+
+    async def observe_stop_reply(message):
+        await publish_outbound(message)
+        if message.metadata.get("message_id") == "stop-attempt" and message_text(message) == "Stopped.":
+            stop_acknowledged.set()
+
+    monkeypatch.setattr(loop.bus, "publish_outbound", observe_stop_reply)
+    bus_task = asyncio.create_task(loop.run())
+    try:
+        await loop.bus.publish_inbound(msg)
+        # Establish each preparation step before measuring Stop responsiveness.
+        # An async observer also cancels without leaving an executor thread waiting.
+        for expected_call in (1, 2, 3):
+            assert await asyncio.wait_for(model_progress.get(), 5) == expected_call
+        await asyncio.wait_for(checkpoint_ready.wait(), 5)
+        assert committed.is_set()
+        worker, = loop._active_tasks[msg.session_key]
+        assert gate.locked()
         assert loop._pending_queues[msg.session_key].qsize() == 1
         stop_msg = InboundMessage(
-            channel="websocket", sender_id="u1", chat_id=msg.chat_id, content="/stop",
+            channel="websocket", sender_id="user", chat_id=msg.chat_id, content="/stop",
+            metadata={"message_id": "stop-attempt"},
         )
-        result = await cmd_stop(CommandContext(
-            msg=stop_msg, session=None, key=msg.session_key, raw="/stop", loop=loop,
-        ))
-        assert "Stopped 1 task(s)" in result.content
-    finally:
-        await loop._cancel_active_tasks(msg.session_key)
+        await loop.bus.publish_inbound(stop_msg)
+        async with asyncio.timeout(5):
+            while not worker.cancelling():
+                await asyncio.sleep(0)
+        release.set()
+        await asyncio.wait_for(stop_acknowledged.wait(), 5)
+        assert not bus_task.done(), "Stop terminated the inbound loop"
+        assert not gate.locked()
+        saved = await loop.sessions.state.read(msg.session_key)
+        assert saved.metadata[GOAL_STATE_KEY]["status"] == "active"
+        assert RUNTIME_CHECKPOINT_KEY not in saved.metadata
+        assert [row["tool_call_id"] for row in saved.messages if row["role"] == "tool"] == [
+            "list-1", "list-2", "list-3",
+        ]
+        assert msg.session_key not in loop._pending_queues
+        assert not loop._active_tasks.get(msg.session_key)
+        assert calls == 3
+        loop.runner.run.assert_awaited_once()
+        assert [(event.context.metadata.get("message_id"), event.outcome) for event in completed
+                if event.context.metadata.get("message_id") in {"goal-input", "queued-compact"}] == [
+            ("goal-input", "cancelled"), ("queued-compact", "completed"),
+        ]
+        assert [(event.context.metadata.get("message_id"), event.status) for event in statuses] == [
+            ("goal-input", "running"), ("goal-input", "idle"),
+        ]
+        loop.consolidator.compact_idle_session.assert_not_awaited()
 
-    outbound = []
-    while loop.bus.outbound_size:
-        outbound.append(await loop.bus.consume_outbound())
-    statuses = [m.event.status for m in outbound if isinstance(m.event, GoalStatusEvent)]
-    assert statuses == ["running", "idle"]
-    assert calls == 1
-    assert msg.session_key not in loop._pending_queues
+        outbound = []
+        while loop.bus.outbound_size:
+            outbound.append(await loop.bus.consume_outbound())
+        stop_responses = [message_text(item) for item in outbound if message_text(item) == "Stopped."]
+        assert stop_responses == ["Stopped."]
+        endings = [item.event for item in outbound if isinstance(item.event, TurnEndEvent)]
+        cancelled = [event for event in endings if event.outcome == "cancelled"]
+        assert len(cancelled) == 1 and cancelled[0].goal_state["status"] == "active"
+        assert [item.event.status for item in outbound if isinstance(item.event, GoalStatusEvent)] == [
+            "running", "idle",
+        ]
+
+        followup = InboundMessage(
+            channel="websocket", sender_id="user", chat_id=msg.chat_id, content="Independent input",
+            metadata={"webui": True, "message_id": "independent-input"},
+        )
+        await loop.bus.publish_inbound(followup)
+        async with asyncio.timeout(5):
+            while msg.session_key in loop._pending_queues or not any(
+                event.context.metadata.get("message_id") == "independent-input"
+                for event in completed
+            ):
+                await asyncio.sleep(0)
+        assert calls == 5 and loop.runner.run.await_count == 2
+        assert msg.session_key not in loop._pending_queues
+        saved = await loop.sessions.state.read(msg.session_key)
+        assert saved.metadata[GOAL_STATE_KEY]["status"] == "blocked"
+        assert [event.outcome for event in completed
+                if event.context.metadata.get("message_id") == "independent-input"] == ["completed"]
+        followup_outbound = []
+        while loop.bus.outbound_size:
+            followup_outbound.append(await loop.bus.consume_outbound())
+        assert any(item.content == "handled later" for item in followup_outbound)
+        loop.consolidator.compact_idle_session.assert_not_awaited()
+    finally:
+        release.set()
+        loop.stop()
+        await asyncio.wait_for(asyncio.gather(bus_task, return_exceptions=True), 5)
+        await loop.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["reset", "delete"])
+async def test_active_goal_checkpoint_cannot_revive_an_old_generation(tmp_path: Path, operation):
+    loop = _make_full_loop(tmp_path)
+    loop.max_iterations = 1
+    session = await loop.sessions.state.get("websocket:old-generation")
+    await loop.sessions.state.update_metadata(session.key, {
+        GOAL_STATE_KEY: {"status": "active", "objective": "Old goal."},
+    })
+    waiting, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def respond(**kwargs):
+        nonlocal calls
+        calls += 1
+        assert calls <= 2
+        if calls == 1:
+            return LLMResponse(content=None, tool_calls=[ToolCallRequest(
+                id="list", name="list_dir", arguments={"path": "."},
+            )])
+        waiting.set()
+        await release.wait()
+        return LLMResponse(content="Old generation's late answer.")
+
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    worker = asyncio.create_task(run_session(loop, InboundMessage(
+        channel="websocket", sender_id="user", chat_id="old-generation", content="Continue",
+        metadata={"webui": True},
+    )))
+    try:
+        await asyncio.wait_for(waiting.wait(), 5)
+        if operation == "reset":
+            await loop.sessions.state.reset(session.key)
+        else:
+            assert await loop.sessions.state.delete(session.key, expected_generation=session.generation)
+        release.set()
+        await asyncio.wait_for(worker, 5)
+        current = await loop.sessions.state.read(session.key)
+        if operation == "reset":
+            assert current is not None and current.generation != session.generation
+            assert current.messages == []
+            assert GOAL_STATE_KEY not in current.metadata
+        else:
+            assert current is None
+        assert calls == 2
+    finally:
+        release.set()
+        await loop._cancel_active_tasks(session.key)
+        await asyncio.gather(worker, return_exceptions=True)
+        await loop.aclose()
 
 
 @pytest.mark.asyncio
@@ -1771,32 +1711,6 @@ async def test_process_direct_rejects_reserved_system_channel(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
-async def test_process_direct_skip_user_persist_does_not_save_retry_user(
-    tmp_path: Path,
-) -> None:
-    loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("api:default")
-    session.add_message("user", "hello")
-    session.add_message("assistant", "previous empty-response attempt")
-    loop.sessions.save(session)
-
-    await loop.process_direct(
-        "hello",
-        session_key=session.key,
-        channel="api",
-        chat_id="default",
-        persist_user_message=False,
-    )
-
-    session = loop.sessions.get_or_create("api:default")
-    assert [(m["role"], m["content"]) for m in session.messages] == [
-        ("user", "hello"),
-        ("assistant", "previous empty-response attempt"),
-        ("assistant", "Test title"),
-    ]
-
-
-@pytest.mark.asyncio
 async def test_request_context_uses_effective_key_for_subagent_tool(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     subagent_tool = loop.tools.get("subagent")
@@ -1822,7 +1736,7 @@ async def test_request_context_uses_effective_key_for_subagent_tool(tmp_path: Pa
 @pytest.mark.asyncio
 async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    loop.provider.chat_stream_with_retry = AsyncMock(return_value=MagicMock())  # unused because _run_agent_loop is stubbed
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=MagicMock())
 
     session = loop.sessions.get_or_create("feishu:c3")
     session.add_message("user", "old question")
@@ -1939,7 +1853,7 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
     stop_ctx = CommandContext(msg=stop_msg, session=None, key=stop_msg.session_key, raw="/stop", loop=loop)
     stop_result = await cmd_stop(stop_ctx)
 
-    assert "Stopped 1 task" in stop_result.content
+    assert message_text(stop_result) == "Stopped."
     assert task.done()
 
     loop.sessions.invalidate("feishu:c4")
@@ -1975,7 +1889,7 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
             "role": "tool",
             "tool_call_id": "call_pending",
             "name": "exec",
-            "content": "Error: Task interrupted before this tool finished.",
+            "content": "Error: Task interrupted; this tool's outcome is unknown. Check its effects before retrying.",
         },
         {"role": "user", "content": "continue here"},
         {"role": "assistant", "content": "next answer"},
@@ -2033,14 +1947,14 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     assert request.sender_id == "subagent"
     assert request.metadata == {"subagent_task_id": "sub-1"}
     assert request.turn_id
-    record_runtime.assert_called_once_with("cli:test", runtime)
+    assert record_runtime.call_count == 1
+    assert record_runtime.call_args.args == ("cli:test", runtime)
+    assert isinstance(record_runtime.call_args.kwargs["run_id"], str)
     initial_messages = seen["initial_messages"]
     assert isinstance(initial_messages, list)
     non_system = [m for m in initial_messages if m.get("role") != "system"]
     assert "question" in non_system[0]["content"]
     assert "working" in non_system[1]["content"]
-    # Persisted timestamps stay in session records, but replay content is not
-    # rewritten with volatile ``[Message Time: ...]`` prefixes.
     assert "[Message Time:" not in non_system[0]["content"]
     assert "[Message Time:" not in non_system[1]["content"]
     assert non_system[2]["role"] == "user"
@@ -2625,3 +2539,60 @@ def test_save_turn_drops_duplicate_tool_result_ids() -> None:
 
     assert [m["role"] for m in session.messages] == ["assistant", "tool"]
     assert session.messages[1]["content"] == "first"
+
+
+async def test_stop_during_goal_completion_publishes_one_terminal_event(tmp_path):
+    loop = _make_full_loop(tmp_path)
+    loop.max_iterations = 1
+    key = "websocket:goal-completion"
+    await loop.sessions.state.get(key)
+    await loop.sessions.state.update_metadata(key, {
+        GOAL_STATE_KEY: {"status": "active", "objective": "Verify the result."},
+        "title": "Goal completion", "title_user_edited": True,
+    })
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="complete", name="update_goal", arguments={"action": "complete", "recap": "Verified."},
+        )]),
+        LLMResponse(content="Verified."),
+    ])
+    publishing, release = asyncio.Event(), asyncio.Event()
+    completed = []
+
+    async def hold_completion(event):
+        completed.append(event)
+        publishing.set()
+        await release.wait()
+
+    loop.bus.subscribe(hold_completion, TurnCompleted)
+    stop = None
+    try:
+        await loop._enqueue_session_message(InboundMessage(
+            channel="websocket", sender_id="user", chat_id="goal-completion", content="Continue",
+            metadata={"webui": True},
+        ))
+        await asyncio.wait_for(publishing.wait(), 5)
+        worker, = loop._active_tasks[key]
+        stop = asyncio.create_task(loop._cancel_active_tasks(key))
+        async with asyncio.timeout(5):
+            while not worker.cancelling():
+                await asyncio.sleep(0)
+        release.set()
+        assert await asyncio.wait_for(stop, 5) == 1
+        assert [event.outcome for event in completed] == ["completed"]
+        outbound = []
+        while not loop.bus.outbound.empty():
+            outbound.append(loop.bus.outbound.get_nowait())
+        endings = [item.event for item in outbound if isinstance(item.event, TurnEndEvent)]
+        assert len(endings) == 1 and endings[0].outcome == "completed"
+        assert [item.event.status for item in outbound if isinstance(item.event, GoalStatusEvent)] == [
+            "running", "idle",
+        ]
+        saved = await loop.sessions.state.read(key)
+        assert saved.metadata[GOAL_STATE_KEY]["status"] == "completed"
+        assert saved.messages[-1]["content"] == "Verified."
+    finally:
+        release.set()
+        if stop is not None:
+            await asyncio.gather(stop, return_exceptions=True)
+        await loop.aclose()

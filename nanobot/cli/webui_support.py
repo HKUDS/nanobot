@@ -1,5 +1,3 @@
-"""Shared WebUI setup, URL, health, and browser helpers."""
-
 import os
 import re
 import shutil
@@ -70,7 +68,6 @@ _TEXT_ONLY_BROWSERS = frozenset({"elinks", "links", "links2", "lynx", "w3m"})
 
 
 def _launch_browser(url: str) -> bool:
-    """Open *url* and request a foreground browser window."""
     if sys.platform == "darwin":
         return _launch_macos_browser(url)
     if sys.platform == "win32" or _use_wsl_browser():
@@ -81,7 +78,6 @@ def _launch_browser(url: str) -> bool:
 
 
 def _use_wsl_browser() -> bool:
-    """Use the Windows desktop in WSL unless the user selected a browser."""
     return (
         sys.platform == "linux" and bool(os.environ.get("WSL_DISTRO_NAME"))
         and not os.environ.get("BROWSER")
@@ -89,7 +85,6 @@ def _use_wsl_browser() -> bool:
 
 
 def _launch_unix_browser(url: str) -> bool:
-    """Launch the selected Unix browser without exposing launcher diagnostics."""
     try:
         webbrowser.get()
     except webbrowser.Error:
@@ -113,7 +108,6 @@ def _launch_unix_browser(url: str) -> bool:
 
 
 def _launch_browser_command(command: list[str]) -> bool:
-    """Report an immediate launch failure while allowing a browser to stay open."""
     import subprocess
     import threading
 
@@ -133,7 +127,6 @@ def _launch_browser_command(command: list[str]) -> bool:
 
 
 def _text_only_browser_name() -> str | None:
-    """Return the configured text browser name when it cannot run the WebUI."""
     if sys.platform in {"darwin", "win32"} or _use_wsl_browser():
         return None
 
@@ -196,7 +189,6 @@ def _launch_macos_browser(url: str) -> bool:
 
 
 def _confirm_webui_action(message: str, *, yes: bool) -> None:
-    """Confirm a WebUI first-run mutation or fail clearly in non-interactive shells."""
     if yes:
         return
     if not _cli_can_prompt():
@@ -224,7 +216,6 @@ def _webui_build_mode_for_interactive(*, yes: bool = False) -> BuildMode:
 
 
 def _resolve_webui_config_path(config: str | None) -> Path:
-    """Resolve the config path used by ``nanobot webui`` and bind loader state."""
     from nanobot.config.loader import get_config_path, set_config_path
 
     if not config:
@@ -235,12 +226,10 @@ def _resolve_webui_config_path(config: str | None) -> Path:
 
 
 def _load_webui_setup_config(config_path: Path) -> Config:
-    """Load config for first-run mutation without resolving env-var placeholders."""
     return _load_config_for_cli(config_path)
 
 
 def _webui_config_dict(config: Config) -> dict[str, Any]:
-    """Return the current WebSocket config as a mutable alias-key dictionary."""
     from nanobot.channels.websocket.runtime import WebSocketConfig
 
     current: Any = getattr(config.channels, "websocket", None) or {}
@@ -256,7 +245,6 @@ def _webui_channel_enabled(config: Config) -> bool:
 
 
 def _validate_gateway_startup(config: Config) -> str | None:
-    """Validate gateway startup and return a provider error recoverable through WebUI."""
     from nanobot.config.loader import get_config_path
 
     config_path = get_config_path()
@@ -315,7 +303,6 @@ def _prepare_webui_bundle_for_gateway(
     mode: BuildMode,
     webui_static_dist: bool = True,
 ) -> None:
-    """Refresh or warn about stale bundled WebUI assets before gateway startup."""
     if not webui_static_dist or not _webui_channel_enabled(config):
         return
 
@@ -344,7 +331,6 @@ def _prepare_webui_bundle_for_gateway(
 
 
 def _host_for_local_browser(host: str) -> str:
-    """Map bind hosts to a browser-openable local host."""
     if host in {"0.0.0.0", ""}:
         return "127.0.0.1"
     if host == "::":
@@ -355,12 +341,10 @@ def _host_for_local_browser(host: str) -> str:
 
 
 def _gateway_health_url(host: str, port: int) -> str:
-    """Return a health URL that can be opened from this device."""
     return f"http://{_host_for_local_browser(host)}:{port}/health"
 
 
 def _gateway_health_bind_note(host: str) -> str:
-    """Describe a non-local bind without presenting it as a usable URL."""
     return "" if is_loopback_host(host) else f" [dim](listening on {host})[/dim]"
 
 
@@ -393,7 +377,6 @@ def _ensure_local_webui_channel(
     port: int | None,
     yes: bool,
 ) -> bool:
-    """Enable the local WebUI channel with safe localhost defaults."""
     from nanobot.channels.websocket.runtime import WebSocketConfig
 
     current: Any = getattr(config.channels, "websocket", None) or {}
@@ -442,7 +425,6 @@ def _warn_webui_bind_scope(config: Config) -> None:
 
 
 def _wait_for_webui(url: str, *, timeout_s: float = 5.0) -> bool:
-    """Return whether the WebUI listener becomes available within the timeout."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if _webui_endpoint_reachable(url, timeout_s=0.2):
@@ -452,7 +434,6 @@ def _wait_for_webui(url: str, *, timeout_s: float = 5.0) -> bool:
 
 
 def _tcp_endpoint_reachable(host: str, port: int, *, timeout_s: float = 0.25) -> bool:
-    """Return whether a local TCP endpoint accepts connections."""
     import socket
 
     try:
@@ -463,7 +444,6 @@ def _tcp_endpoint_reachable(host: str, port: int, *, timeout_s: float = 0.25) ->
 
 
 def _gateway_health_ready(host: str, port: int, *, timeout_s: float = 0.4) -> bool:
-    """Return whether the nanobot gateway health endpoint responds OK."""
     import json
     import urllib.error
     import urllib.request
@@ -488,7 +468,6 @@ def _gateway_health_ready(host: str, port: int, *, timeout_s: float = 0.4) -> bo
 
 
 def _webui_endpoint_reachable(url: str, *, timeout_s: float = 0.25) -> bool:
-    """Return whether the WebUI URL's TCP endpoint is already listening."""
     from urllib.parse import urlparse
 
     parsed = urlparse(url)
@@ -519,7 +498,6 @@ def _print_foreground_port_conflict(
 
 
 def _open_webui_browser(url: str, *, wait: bool = True) -> bool:
-    """Request a browser launch; the printed login link remains the fallback."""
     if wait:
         _wait_for_webui(url)
     text_browser = _text_only_browser_name()
@@ -551,7 +529,6 @@ def _print_webui_ready(
     provider_error: str | None = None,
     detached: bool = False,
 ) -> None:
-    """Show one ready state and a complete browser handoff in the local terminal."""
     ws_cfg = _webui_config_dict(config)
     console.print()
     console.print("[bold green]WebUI ready[/bold green]" + (" [dim](development)[/dim]" if dev else ""))
@@ -610,7 +587,6 @@ def _log_anchor(handle: BinaryIO, offset: int) -> bytes:
 
 
 def _start_gateway_log_cursor(log_path: Path) -> _GatewayLogCursor:
-    """Start following at the current end of *log_path*."""
     try:
         with log_path.open("rb") as handle:
             stat = os.fstat(handle.fileno())
@@ -630,7 +606,6 @@ def _read_new_gateway_logs(
     *,
     flush: bool = False,
 ) -> list[str]:
-    """Read complete gateway log lines appended after *cursor*."""
     try:
         with log_path.open("rb") as handle:
             stat = os.fstat(handle.fileno())
@@ -665,7 +640,6 @@ def _attach_to_background_gateway(
     poll_hook: Callable[[], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Keep the launcher attached and surface new gateway warnings and errors."""
     status = runtime.status()
     log_path = status.log_path
     cursor = log_cursor or _start_gateway_log_cursor(log_path)
@@ -674,7 +648,6 @@ def _attach_to_background_gateway(
     def print_logs(*, flush: bool = False) -> None:
         nonlocal show_detail
         for line in _read_new_gateway_logs(log_path, cursor, flush=flush):
-            # Full logs remain available through `nanobot gateway logs`.
             match = re.match(r"^\S+ \| (TRACE|DEBUG|INFO|SUCCESS|WARNING|ERROR|CRITICAL)\s+\|", line)
             if match:
                 show_detail = match[1] in {"WARNING", "ERROR", "CRITICAL"}
@@ -709,7 +682,6 @@ def _gateway_instance_command(
     config_path: Path,
     workspace: str | None,
 ) -> str:
-    """Return a copyable gateway command for the same config/workspace instance."""
     import shlex
 
     parts = ["nanobot", "gateway", subcommand, "--config", str(config_path)]

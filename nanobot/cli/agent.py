@@ -1,5 +1,3 @@
-"""Direct and interactive agent CLI command."""
-
 import asyncio
 import importlib
 import signal
@@ -131,7 +129,6 @@ def agent(
 
 def _run_classic(runtime_config: Config, *, message: str | None, session_id: str | None,
                  markdown: bool, logs: bool) -> None:
-    """Keep the data lease through writer initialization, execution and cleanup."""
     from nanobot.agent.hooks import create_file_edit_activity_hook
     from nanobot.agent.tools.image_generation import register_image_generation_tool
     from nanobot.agent.tools.mcp import MCPProvider
@@ -144,6 +141,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
     from nanobot.bus.queue import MessageBus
     from nanobot.cli import terminal as cli_terminal
     from nanobot.cli.stream import ThinkingSpinner
+    from nanobot.command.results import as_text_message
     from nanobot.cron.service import CronService
     from nanobot.providers.factory import make_provider
     from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates
@@ -151,6 +149,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
         format_restart_completed_message,
         should_show_cli_restart_notice,
     )
+    from nanobot.utils.tool_hints import format_tool_event_hints
 
     agent_loop_class = _classic_dependency("AgentLoop")
     stream_renderer_class = _classic_dependency("StreamRenderer")
@@ -174,7 +173,6 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
     if is_default_workspace(runtime_config.workspace_path):
         _migrate_cron_store(runtime_config)
 
-    # Create cron service with workspace-scoped store
     cron_store_path = runtime_config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
     tools = ToolRegistry()
@@ -182,6 +180,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
     mcp_provider = MCPProvider.from_config(runtime_config, tools)
 
     _set_nanobot_logs(logs)
+    from nanobot.goal.assembly import install_goal
 
     try:
         agent_loop = agent_loop_class.from_config(
@@ -191,6 +190,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             cron_service=cron,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
+            builtin_assembly=install_goal,
         )
     except ValueError as exc:
         _print_agent_start_error(exc)
@@ -208,7 +208,6 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
         finally:
             await mcp_provider.aclose()
 
-    # Shared reference for progress callbacks
     _thinking: ThinkingSpinner | None = None
 
     def _make_progress(
@@ -220,6 +219,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             content: str,
             *,
             tool_hint: bool = False,
+            tool_events: list[dict[str, Any]] | None = None,
             reasoning: bool = False,
             **_kwargs: Any,
         ) -> None:
@@ -244,12 +244,15 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                 return
             if ch and not tool_hint and not ch.send_progress:
                 return
+            if tool_hint and tool_events:
+                content = format_tool_event_hints(
+                    tool_events, max_length=runtime_config.agents.defaults.tool_hint_max_length,
+                )
             cli_terminal._print_cli_progress_line(content, _thinking, renderer)
 
         return _cli_progress
 
     if message is not None:
-        # Single message mode — direct call, no bus needed
         async def run_once() -> None:
             try:
                 await mcp_provider.connect()
@@ -281,7 +284,6 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
 
         asyncio.run(run_once())
     else:
-        # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
 
         cli_terminal._init_prompt_session()
@@ -325,7 +327,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             async def _consume_outbound() -> None:
                 while True:
                     try:
-                        msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+                        msg = as_text_message(await asyncio.wait_for(bus.consume_outbound(), timeout=1.0))
                         event = msg.event
 
                         if isinstance(event, StreamDeltaEvent):
@@ -359,6 +361,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                             agent_loop.channels_config,
                             renderer,
                             reasoning_buffer,
+                            tool_hint_max_length=runtime_config.agents.defaults.tool_hint_max_length,
                         ):
                             continue
 

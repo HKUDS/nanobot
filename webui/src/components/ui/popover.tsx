@@ -5,6 +5,7 @@ import {
   floatingSurfaceClassName,
   floatingSurfaceMotionClassName,
 } from "@/components/ui/floating-surface";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 import { useFloatingPortal } from "@/components/ui/floating-portal";
 
@@ -15,22 +16,25 @@ const PopoverTrigger = PopoverPrimitive.Trigger;
 interface PopoverContentProps
   extends React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content> {
   portalContainer?: HTMLElement | null;
+  motionClassName?: string;
 }
 
 const PopoverContent = React.forwardRef<
   React.ElementRef<typeof PopoverPrimitive.Content>,
   PopoverContentProps
->(({ className, sideOffset = 4, portalContainer, ...props }, ref) => {
+>(({ className, sideOffset = 4, portalContainer, motionClassName = floatingSurfaceMotionClassName, ...props }, ref) => {
   const dialogContainer = useFloatingPortal();
+  // Radix renders Popover.Content as role="dialog".
+  const surfaceRef = useOverlaySurfaceRef("dialog", ref);
   return (
   <PopoverPrimitive.Portal container={portalContainer ?? dialogContainer ?? undefined}>
     <PopoverPrimitive.Content
-      ref={ref}
+      ref={surfaceRef}
       sideOffset={sideOffset}
       className={cn(
         floatingSurfaceClassName,
-        floatingSurfaceMotionClassName,
-        "max-h-[min(var(--radix-popover-content-available-height),28rem)]",
+        motionClassName,
+        "origin-[var(--radix-popover-content-transform-origin)] max-h-[min(var(--radix-popover-content-available-height),28rem)]",
         className,
       )}
       {...props}

@@ -1,5 +1,3 @@
-"""Read-only local attachment checks shared by WebUI and native TUI ingress."""
-
 from __future__ import annotations
 
 import mimetypes

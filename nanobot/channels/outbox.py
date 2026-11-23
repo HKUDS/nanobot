@@ -1,5 +1,3 @@
-"""Bounded storage for scheduled results; never reruns an agent turn."""
-
 from __future__ import annotations
 
 import json

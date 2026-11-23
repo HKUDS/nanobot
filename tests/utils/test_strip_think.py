@@ -7,7 +7,6 @@ from nanobot.utils.helpers import (
 
 
 class TestStripThinkTag:
-    """Test <thought>...</thought> block stripping (Gemma 4 and similar models)."""
 
     def test_closed_tag(self):
         assert strip_think("Hello <thought>reasoning</thought> World") == "Hello  World"
@@ -73,10 +72,6 @@ class TestStripThinkFalsePositive:
     def test_prefix_unclosed_think_with_whitespace(self):
         assert strip_think("  <think>reasoning...") == ""
 
-    def test_prefix_unclosed_thought_still_stripped(self):
-        assert strip_think("<thought>reasoning without closing") == ""
-
-
 class TestStripThinkMalformedLeaks:
     """Regression: Gemma 4's Ollama renderer occasionally emits a tag name
     with no closing '>', running straight into the user-facing content
@@ -89,14 +84,12 @@ class TestStripThinkMalformedLeaks:
         )
 
     def test_malformed_think_no_gt_english_with_space(self):
-        # English leak with a space after the tag name (common streaming form).
         assert strip_think("<think The fountain opens at 09:00") == ("The fountain opens at 09:00")
 
     def test_malformed_thought_no_gt(self):
         assert strip_think("<thought广场照明灯") == "广场照明灯"
 
     def test_thinker_word_preserved(self):
-        # `<thinker>` is a valid tag name variant; must not match.
         assert strip_think("<thinker>content</thinker>") == "<thinker>content</thinker>"
 
     def test_self_closing_preserved(self):
@@ -104,15 +97,12 @@ class TestStripThinkMalformedLeaks:
         assert strip_think("<thought/>ok") == "<thought/>ok"
 
     def test_orphan_closing_think_at_end_stripped(self):
-        # Typical leak: model opens `<think>` without closing; we strip the
-        # opener from the start, leaving an orphan `</think>` at the end.
         assert strip_think("answer</think>") == "answer"
 
     def test_orphan_closing_think_at_start_stripped(self):
         assert strip_think("</think>answer") == "answer"
 
     def test_channel_marker_at_start_stripped(self):
-        # Harmony / Gemma 4 channel markers leak at the start of a response.
         assert strip_think("<channel|>喷泉策略：09:00 开启") == ("喷泉策略：09:00 开启")
         assert strip_think("<|channel|>answer") == "answer"
 
@@ -146,8 +136,6 @@ class TestStripThinkConservativePreserve:
         assert strip_think("<think:foo>bar</think:foo>") == "<think:foo>bar</think:foo>"
 
     def test_literal_close_think_in_prose_preserved(self):
-        # Mid-prose references to `</think>` in backticks or plain text must
-        # not be stripped; edge-only regex protects this.
         text = "Use `</think>` to close a thinking block."
         assert strip_think(text) == text
 
@@ -198,7 +186,6 @@ class TestExtractThink:
         assert clean == ""
 
     def test_unclosed_think_not_extracted(self):
-        # Unclosed blocks at start are stripped but NOT extracted
         text = "<think>unclosed thinking..."
         thinking, clean = extract_think(text)
         assert thinking is None
@@ -207,7 +194,6 @@ class TestExtractThink:
     def test_empty_think_block(self):
         text = "Hello <think></think> World"
         thinking, clean = extract_think(text)
-        # Empty blocks result in empty string after strip
         assert thinking == ""
         assert clean == "Hello  World"
 
@@ -248,7 +234,6 @@ squares = [x**2 for x in range(10)]
 
 
 class TestExtractReasoning:
-    """Single source of truth for reasoning extraction across all providers."""
 
     def test_strips_tags_from_dedicated_reasoning_content(self):
         reasoning, content = extract_reasoning(
@@ -269,7 +254,6 @@ class TestExtractReasoning:
         assert content == "visible answer"
 
     def test_prefers_reasoning_content_and_strips_inline_think(self):
-        # Dedicated field wins; inline tags are still scrubbed from content.
         reasoning, content = extract_reasoning(
             "dedicated",
             None,

@@ -1,187 +1,66 @@
 import { Suspense, lazy, type ReactNode } from "react";
-import type { SyntaxHighlighterProps } from "react-syntax-highlighter";
+import { useTranslation } from "react-i18next";
 
-import type { RenderableFileDiffLine } from "@/lib/file-diff";
+import type { RenderableFileDiff, RenderableFileDiffLine } from "@/lib/file-diff";
 import { cn } from "@/lib/utils";
 
-interface DiffSyntaxHighlightProps {
+export interface DiffSyntaxHighlightProps {
   language: string;
-  lines: RenderableFileDiffLine[];
+  text: string;
+  diff: RenderableFileDiff;
+  lineLimit: number;
 }
 
-type RendererArgs = Parameters<NonNullable<SyntaxHighlighterProps["renderer"]>>[0];
-type SyntaxNode = RendererArgs["rows"][number];
-
 const LazyDiffSyntaxHighlight = lazy(async () => {
-  const [
-    { default: SyntaxHighlighter },
-    { default: createSyntaxElement },
-  ] = await Promise.all([
-    import("react-syntax-highlighter/dist/esm/prism-async-light"),
-    import("react-syntax-highlighter/dist/esm/create-element"),
-  ]);
-  return {
-    default: function LoadedDiffSyntaxHighlight({
-      language,
-      lines,
-    }: DiffSyntaxHighlightProps) {
-      const code = lines.map((line) => line.content || " ").join("\n");
-      return (
-        <SyntaxHighlighter
-          language={language}
-          useInlineStyles={false}
-          style={{}}
-          PreTag="div"
-          CodeTag="div"
-          customStyle={{
-            background: "transparent",
-            margin: 0,
-            padding: 0,
-            overflow: "visible",
-            fontFamily: "inherit",
-            fontSize: "inherit",
-            lineHeight: "inherit",
-          }}
-          codeTagProps={{
-            style: {
-              background: "transparent",
-              fontFamily: "inherit",
-            },
-          }}
-          data-language={language}
-          className="code-content font-mono text-code-dense"
-          data-testid="syntax-highlighted-diff-hunk"
-          renderer={({ rows, stylesheet, useInlineStyles }) => (
-            <DiffLineTable
-              lines={lines}
-              renderCode={(line, index) => {
-                const node = rows[index];
-                if (!node) return line.content || " ";
-                return createSyntaxElement({
-                  node: stripConflictingTableClass(trimTrailingLineBreak(node)),
-                  stylesheet,
-                  useInlineStyles,
-                  key: `diff-code-${index}`,
-                });
-              }}
-            />
-          )}
-        >
-          {code}
-        </SyntaxHighlighter>
-      );
-    },
-  };
+  const renderer = await import("./PierreFileDiff");
+  await renderer.prepareDiffRenderer();
+  return { default: renderer.PierreFileDiff };
 });
 
-export function DiffSyntaxHighlight({ language, lines }: DiffSyntaxHighlightProps) {
+export function DiffSyntaxHighlight(props: DiffSyntaxHighlightProps) {
   return (
-    <Suspense fallback={<PlainDiffLines lines={lines} />}>
-      <LazyDiffSyntaxHighlight language={language} lines={lines} />
+    <Suspense fallback={<PlainDiffLines diff={props.diff} lineLimit={props.lineLimit} />}>
+      <LazyDiffSyntaxHighlight {...props} />
     </Suspense>
   );
 }
 
-function PlainDiffLines({ lines }: { lines: RenderableFileDiffLine[] }) {
+export function DiffHunkGap({ lineCount }: { lineCount: number }) {
+  const { t } = useTranslation();
   return (
-    <div data-testid="plain-diff-hunk">
-      <DiffLineTable lines={lines} renderCode={(line) => line.content || " "} />
+    <div className="nanobot-diff-gap flex items-center gap-2 bg-muted/35 px-2 text-[11px] text-muted-foreground" data-testid="file-edit-diff-hunk-gap">
+      <span className="select-none rounded border border-border/45 bg-background/70 px-1 font-mono text-muted-foreground/70" aria-hidden>...</span>
+      <span>{t("message.fileEditUnchangedLinesHidden", { count: lineCount, defaultValue: "{{count}} unchanged lines hidden" })}</span>
     </div>
   );
 }
 
-function DiffLineTable({
-  lines,
-  renderCode,
-}: {
-  lines: RenderableFileDiffLine[];
-  renderCode: (line: RenderableFileDiffLine, index: number) => ReactNode;
-}) {
-  return (
-    <table className="w-full border-collapse font-mono text-code-dense">
-      <tbody>
-        {lines.map((line, index) => (
-          <DiffLineRow
-            key={`${line.old_lineno ?? ""}:${line.new_lineno ?? ""}:${index}`}
-            line={line}
-          >
-            {renderCode(line, index)}
-          </DiffLineRow>
-        ))}
-      </tbody>
-    </table>
-  );
+export function PlainDiffLines({ diff, lineLimit }: { diff: RenderableFileDiff; lineLimit: number }) {
+  let remaining = lineLimit;
+  return <div data-testid="plain-diff-hunk">{diff.hunks.map((hunk, index) => {
+    const lines = hunk.lines.slice(0, Math.max(0, remaining));
+    remaining -= lines.length;
+    if (lines.length === 0) return null;
+    const previous = diff.hunks[index - 1];
+    const skipped = previous ? Math.max(0, hunk.old_start - previous.old_start - previous.old_lines, hunk.new_start - previous.new_start - previous.new_lines) : 0;
+    return <div key={index}>
+      {skipped > 0 ? <DiffHunkGap lineCount={skipped} /> : null}
+      <table className="w-full border-collapse font-mono text-code-dense"><tbody>
+        {lines.map((line, lineIndex) => <DiffLineRow key={lineIndex} line={line}>{line.content || " "}</DiffLineRow>)}
+      </tbody></table>
+    </div>;
+  })}</div>;
 }
 
-function DiffLineRow({
-  line,
-  children,
-}: {
-  line: RenderableFileDiffLine;
-  children: ReactNode;
-}) {
+function DiffLineRow({ line, children }: { line: RenderableFileDiffLine; children: ReactNode }) {
   const kind = line.kind === "add" || line.kind === "delete" ? line.kind : "context";
   const marker = kind === "add" ? "+" : kind === "delete" ? "-" : " ";
   return (
-    <tr
-      className={cn(
-        "border-0",
-        kind === "add" && "bg-diff-added",
-        kind === "delete" && "bg-diff-deleted",
-      )}
-    >
-      <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground">
-        {line.old_lineno ?? ""}
-      </td>
-      <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground">
-        {line.new_lineno ?? ""}
-      </td>
-      <td
-        className={cn(
-          "w-5 select-none px-1 text-center",
-          kind === "add" && "text-diff-added-foreground",
-          kind === "delete" && "text-diff-deleted-foreground",
-          kind === "context" && "text-muted-foreground",
-        )}
-      >
-        {marker}
-      </td>
-      <td className="min-w-[16rem] px-1.5 text-foreground/86">
-        <span className="whitespace-pre">{children}</span>
-      </td>
+    <tr className={cn("border-0", kind === "add" && "bg-diff-added", kind === "delete" && "bg-diff-deleted")}>
+      <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground">{line.old_lineno ?? ""}</td>
+      <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground">{line.new_lineno ?? ""}</td>
+      <td className={cn("w-5 select-none px-1 text-center", kind === "add" && "text-diff-added-foreground", kind === "delete" && "text-diff-deleted-foreground", kind === "context" && "text-muted-foreground")}>{marker}</td>
+      <td className="min-w-[16rem] px-1.5 text-foreground/86"><span className="whitespace-pre">{children}</span></td>
     </tr>
   );
-}
-
-function trimTrailingLineBreak(node: SyntaxNode): SyntaxNode {
-  if (node.type === "text" && typeof node.value === "string") {
-    return { ...node, value: node.value.replace(/\n$/, "") };
-  }
-  if (!node.children?.length) return node;
-  const children = [...node.children];
-  children[children.length - 1] = trimTrailingLineBreak(children[children.length - 1]!);
-  return { ...node, children };
-}
-
-function stripConflictingTableClass(node: SyntaxNode): SyntaxNode {
-  const className = node.properties?.className;
-  const children = node.children?.map(stripConflictingTableClass);
-  const hasTableClass = Array.isArray(className) && className.includes("table");
-
-  if (!hasTableClass && !children) return node;
-
-  return {
-    ...node,
-    ...(hasTableClass
-      ? {
-          properties: {
-            ...node.properties,
-            // Tailwind's global `.table` utility changes Prism's inline Markdown
-            // table tokens into CSS tables, splitting a single diff line vertically.
-            className: className.filter((name) => name !== "table"),
-          },
-        }
-      : {}),
-    ...(children ? { children } : {}),
-  };
 }

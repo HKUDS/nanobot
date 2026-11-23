@@ -1,5 +1,3 @@
-"""Durable JSON run records for automation executions."""
-
 from __future__ import annotations
 
 import json

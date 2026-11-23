@@ -1,5 +1,3 @@
-"""Discord management contract."""
-
 from nanobot.channels._manifest import DIRECT_GROUP_POLICIES, field, required
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.discord.validation import validate

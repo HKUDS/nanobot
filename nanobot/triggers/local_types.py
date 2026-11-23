@@ -1,5 +1,3 @@
-"""Persistent types for local triggers."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,12 +10,10 @@ TriggerStatus = Literal["ok", "error"]
 
 
 def _int_or_zero(value: Any) -> int:
-    """Coerce a stored JSON numeric, using zero for null or empty values."""
     return 0 if value is None or value == "" else int(value)
 
 
 def _optional_int(value: Any) -> int | None:
-    """Coerce a stored JSON numeric; null/blank stays None."""
     if value is None or value == "":
         return None
     return int(value)

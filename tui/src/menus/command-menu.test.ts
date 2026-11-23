@@ -15,9 +15,9 @@ const commands: SlashCommand[] = [
     acceptsArgs: false,
   },
   {
-    command: "/history",
+    command: "/inspect",
     title: "History",
-    description: "Show recent messages",
+    description: "Inspect a session",
     argHint: "[n]",
     lifecycle: "side_channel",
     acceptsArgs: true,
@@ -54,12 +54,44 @@ describe("CommandMenu", () => {
 
     const frame = setup.captureCharFrame()
     expect(frame).toContain("› /help")
-    expect(frame).toContain("/history [n]")
+    expect(frame).toContain("/inspect [n]")
     expect(menu.completion("/h")).toBe("/help")
 
     expect(menu.move(1)).toBe(true)
-    expect(menu.complete()).toBe("/history ")
+    expect(menu.complete()).toBe("/inspect ")
     expect(menu.visible).toBe(false)
+  })
+
+  test("searches translated gateway and local titles without changing slash tokens", async () => {
+    const lang = process.env.LC_ALL
+    process.env.LC_ALL = "fr_FR.UTF-8"
+    try {
+      setup = await createTestRenderer({ width: 90, height: 18, screenMode: "alternate-screen" })
+      const menu = new CommandMenu(setup.renderer, { text: "#FFFFFF", muted: "#999999", border: "#555555" })
+      setup.renderer.root.add(menu.root)
+      menu.setCommands(commands, LOCAL_COMMANDS)
+      menu.update("/aide")
+      await setup.renderOnce()
+      expect(setup.captureCharFrame()).toContain("Affichez les commandes slash disponibles.")
+      expect(menu.complete()).toBe("/help")
+      menu.update("/disponibles")
+      expect(menu.complete()).toBe("/help")
+      menu.update("/fichiers")
+      expect(menu.complete()).toBe("/diff")
+      menu.update("/", 2)
+      await setup.renderOnce()
+      expect(setup.captureCharFrame()).toContain("1–2 sur 12 ↓")
+      menu.update("/introuvable")
+      await setup.renderOnce()
+      expect(setup.captureCharFrame()).toContain("Aucun résultat")
+      menu.update("/quitter")
+      await setup.renderOnce()
+      expect(setup.captureCharFrame()).toContain("Fermer l’interface du terminal")
+      expect(menu.complete()).toBe("/exit")
+    } finally {
+      if (lang === undefined) delete process.env.LC_ALL
+      else process.env.LC_ALL = lang
+    }
   })
 
   test("prioritizes command prefixes while retaining title discovery and navigation", async () => {
@@ -100,7 +132,7 @@ describe("CommandMenu", () => {
     menu.setCommands(commands)
     menu.update("explain /help")
     expect(menu.visible).toBe(false)
-    menu.update("/history 5")
+    menu.update("/inspect 5")
     expect(menu.visible).toBe(false)
   })
 
@@ -127,32 +159,6 @@ describe("CommandMenu", () => {
     expect(menu.resolve("/sessions")).toMatchObject({
       source: "tui",
       command: { action: "sessions" },
-    })
-  })
-
-  test("discovers and completes the local exit action", async () => {
-    setup = await createTestRenderer({ width: 60, height: 12, screenMode: "alternate-screen" })
-    const menu = new CommandMenu(setup.renderer, {
-      text: "#FFFFFF",
-      muted: "#999999",
-      border: "#555555",
-    })
-    setup.renderer.root.add(menu.root)
-    menu.setCommands([], [{
-      command: "/exit",
-      title: "Exit",
-      description: "Close this terminal UI",
-      action: "exit",
-    }])
-
-    menu.update("/ex")
-    await setup.renderOnce()
-
-    expect(setup.captureCharFrame()).toContain("/exit")
-    expect(menu.completion("/ex")).toBe("/exit")
-    expect(menu.resolve("/exit")).toMatchObject({
-      source: "tui",
-      command: { action: "exit" },
     })
   })
 

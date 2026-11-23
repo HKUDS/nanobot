@@ -122,12 +122,12 @@ export async function setAppLanguage(locale: SupportedLocale): Promise<void> {
   await initializeI18n();
   await loadLocaleResources(locale);
   await i18n.changeLanguage(locale);
+  persistLocale(locale);
 }
 
 function syncLocaleSideEffects(language: string) {
   const locale = normalizeLocale(language);
   applyDocumentLocale(locale);
-  persistLocale(locale);
 }
 
 export default i18n;

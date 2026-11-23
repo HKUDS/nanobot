@@ -1,5 +1,3 @@
-"""Exercise Responses adapters through real SDK requests to a local endpoint."""
-
 from __future__ import annotations
 
 import json

@@ -3,6 +3,7 @@ import { ExternalLink, Sparkle, Star, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import starInvitation from "@/assets/star-invitation.webp";
+import starInvitationNight from "@/assets/star-invitation-night.webp";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
@@ -57,13 +58,17 @@ export function StarPromptView({ open, saving, error, starError = false, onOpenC
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent showCloseButton={false}
-        className="flex max-h-[calc(100dvh-32px)] max-w-[520px] flex-col gap-0 overflow-y-auto overscroll-contain p-5 pb-2.5 outline-none max-[480px]:p-4 max-[480px]:pb-2"
+        className="star-prompt-dialog flex max-h-[calc(100dvh-32px)] max-w-[520px] flex-col gap-0 overflow-y-auto overscroll-contain p-5 pb-2.5 outline-none max-[480px]:p-4 max-[480px]:pb-2"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           titleRef.current?.focus({ preventScroll: true });
         }} onCloseAutoFocus={onCloseAutoFocus}>
-        <img src={starInvitation} alt="" width={1672} height={941} draggable={false}
-          className="aspect-[1672/941] w-full shrink-0 select-none rounded-control bg-muted object-cover" />
+        <div className="star-prompt-art relative aspect-[1672/941] w-full shrink-0 overflow-hidden rounded-control bg-muted">
+          <img src={starInvitation} alt="" width={1672} height={941} draggable={false}
+            className="theme-art absolute inset-0 h-full w-full select-none object-cover dark:opacity-0" />
+          <img src={starInvitationNight} alt="" width={1672} height={941} draggable={false}
+            className="theme-art absolute inset-0 h-full w-full select-none object-cover opacity-0 dark:opacity-100" />
+        </div>
         <DialogClose aria-label={t("common.close")}
           className="absolute right-[23px] top-[23px] grid h-11 w-11 place-items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-white max-[480px]:right-[18px] max-[480px]:top-[18px]">
           <span className="grid h-[30px] w-[30px] place-items-center rounded-full bg-black/40 text-white backdrop-blur-sm transition-colors hover:bg-black/60 motion-reduce:transition-none">

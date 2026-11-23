@@ -46,7 +46,6 @@ def main() -> None:
     if not Path(python).is_absolute() or not Path(python).is_file():
         parser.error("The original base Python is missing. Restore it before repairing this environment.")
     command = [python, "-I", "-S", str(worker)]
-    # The frozen worker validates the full request, directory and plan binding.
     result = subprocess.run([*command, "--status", str(directory)], env=worker_env,
                             check=True, capture_output=True, text=True)
     status = json.loads(result.stdout)

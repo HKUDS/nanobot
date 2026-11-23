@@ -1,5 +1,3 @@
-"""Image generation provider helpers."""
-
 from __future__ import annotations
 
 import asyncio
@@ -7,15 +5,17 @@ import base64
 import binascii
 import re
 from abc import ABC, abstractmethod
+from contextlib import suppress
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urljoin
 
 import httpx
 from loguru import logger
 
 from nanobot.config.schema import ProviderConfig, ProvidersConfig
+from nanobot.execution.http import RedirectLimitError, open_redirected_get
 from nanobot.providers.registry import find_by_name
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
@@ -31,7 +31,6 @@ _OPENROUTER_ATTRIBUTION_HEADERS = {
 }
 _DEFAULT_TIMEOUT_S = 120.0
 _IMAGE_DOWNLOAD_MAX_BYTES = 32 * 1024 * 1024
-_IMAGE_DOWNLOAD_MAX_REDIRECTS = 5
 _AIHUBMIX_TIMEOUT_S = 300.0
 _AIHUBMIX_ASPECT_RATIO_SIZES = {
     "1:1": "1024x1024",
@@ -83,19 +82,16 @@ class GeneratedImageResponse:
 
 
 def _as_json_object(value: object) -> dict[str, Any] | None:
-    """Narrow an untrusted provider response value to a JSON object."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
 def _as_json_objects(value: object) -> list[dict[str, Any]]:
-    """Return object entries from an untrusted provider response array."""
     if not isinstance(value, list):
         return []
     return [cast(dict[str, Any], item) for item in cast(list[object], value) if isinstance(item, dict)]
 
 
 def _read_image_b64(path: str | Path) -> tuple[str, str]:
-    """Return ``(mime, base64)`` for the image at ``path``."""
     p = Path(path).expanduser()
     raw = p.read_bytes()
     mime = detect_image_mime(raw)
@@ -157,71 +153,42 @@ async def _download_image_data_url(
     proxy: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> str:
+    def check_proxy_target(target: str) -> tuple[bool, str]:
+        # The configured provider proxy owns final DNS and egress.
+        ok, error, _ = resolve_url_target(target, trust_remote_dns=True)
+        return ok, error
+
     try:
-        client_kwargs: dict[str, Any] = {
-            "follow_redirects": False,
-            "timeout": _DEFAULT_TIMEOUT_S,
-            "trust_env": False,
-        }
-        if proxy:
-            # An explicit provider proxy is a user-selected trusted egress boundary.
-            # Validate each URL locally, while the proxy owns final DNS resolution.
-            client_kwargs["proxy"] = proxy
-        else:
-            client_kwargs["transport"] = PinnedDNSAsyncTransport(inner=transport)
+        async with httpx.AsyncClient(
+            proxy=proxy or None,
+            transport=None if proxy else PinnedDNSAsyncTransport(inner=transport),
+            timeout=_DEFAULT_TIMEOUT_S,
+            trust_env=False,
+        ) as client:
+            async with open_redirected_get(
+                client, url, check_target=check_proxy_target if proxy else None,
+            ) as (response, _):
+                if response.is_redirect:
+                    raise ImageGenerationError("generated image URL redirected without a location")
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    raise ImageGenerationError(
+                        f"failed to download generated image (HTTP {response.status_code})"
+                    ) from exc
 
-        async with httpx.AsyncClient(**client_kwargs) as client:
-            current_url = url
-            for _ in range(_IMAGE_DOWNLOAD_MAX_REDIRECTS + 1):
-                if proxy:
-                    ok, error, _ = resolve_url_target(
-                        current_url,
-                        trust_remote_dns=True,
-                    )
-                    if not ok:
-                        raise ImageGenerationError(
-                            f"blocked unsafe generated image URL: {error}"
-                        )
-                async with client.stream("GET", current_url) as response:
-                    if response.is_redirect:
-                        location = response.headers.get("location")
-                        if not location:
-                            raise ImageGenerationError(
-                                "generated image URL redirected without a location"
-                            )
-                        current_url = urljoin(str(response.url), location)
-                        continue
-
-                    try:
-                        response.raise_for_status()
-                    except httpx.HTTPStatusError as exc:
-                        raise ImageGenerationError(
-                            f"failed to download generated image (HTTP {response.status_code})"
-                        ) from exc
-
-                    declared_size = response.headers.get("content-length")
-                    if declared_size:
-                        try:
-                            if int(declared_size) > _IMAGE_DOWNLOAD_MAX_BYTES:
-                                raise ImageGenerationError(
-                                    "generated image exceeded the 32 MiB download limit"
-                                )
-                        except ValueError:
-                            pass
-
-                    chunks: list[bytes] = []
-                    total = 0
+                limit_error = "generated image exceeded the 32 MiB download limit"
+                with suppress(ValueError):
+                    if int(response.headers.get("content-length", "0")) > _IMAGE_DOWNLOAD_MAX_BYTES:
+                        raise ImageGenerationError(limit_error)
+                with BytesIO() as body:
                     async for chunk in response.aiter_bytes():
-                        total += len(chunk)
-                        if total > _IMAGE_DOWNLOAD_MAX_BYTES:
-                            raise ImageGenerationError(
-                                "generated image exceeded the 32 MiB download limit"
-                            )
-                        chunks.append(chunk)
-                    raw = b"".join(chunks)
-                    break
-            else:
-                raise ImageGenerationError("generated image URL exceeded the redirect limit")
+                        if body.tell() + len(chunk) > _IMAGE_DOWNLOAD_MAX_BYTES:
+                            raise ImageGenerationError(limit_error)
+                        body.write(chunk)
+                    raw = body.getvalue()
+    except RedirectLimitError as exc:
+        raise ImageGenerationError("generated image URL exceeded the redirect limit") from exc
     except UnsafeURLRequestError as exc:
         raise ImageGenerationError(f"blocked unsafe generated image URL: {exc}") from exc
     except httpx.RequestError as exc:
@@ -233,10 +200,6 @@ async def _download_image_data_url(
     encoded = base64.b64encode(raw).decode("ascii")
     return f"data:{mime};base64,{encoded}"
 
-
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
 
 _IMAGE_GEN_PROVIDERS: dict[str, type[ImageGenerationProvider]] = {}
 
@@ -285,11 +248,6 @@ def image_gen_provider_configs(providers: ProvidersConfig | None) -> dict[str, P
         for name in image_gen_provider_names(providers)
         if (pc := getattr(providers, name, None)) is not None
     }
-
-
-# ---------------------------------------------------------------------------
-# Base class
-# ---------------------------------------------------------------------------
 
 
 class ImageGenerationProvider(ABC):
@@ -562,7 +520,6 @@ class AIHubMixImageGenerationClient(ImageGenerationProvider):
 
 
 def _http_error_detail(response: httpx.Response) -> str:
-    """Extract a readable error message from an HTTP error response."""
     try:
         data = _as_json_object(response.json())
         if data is not None:
@@ -904,7 +861,6 @@ def _gemini_flash_image_config(
 
 
 def _gemini_flash_supported_aspect_ratios(model: str) -> set[str]:
-    """Return the documented aspect ratios for a generateContent image model."""
     normalized = model.lower()
     if (
         "gemini-3.1-flash-lite-image" in normalized
@@ -1011,7 +967,7 @@ class MiniMaxImageGenerationClient(ImageGenerationProvider):
     """Async client for MiniMax image generation API."""
 
     provider_name = "minimax"
-    model_options = ("image-01",)
+    model_options = ("image-01", "MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed")
     missing_key_message = (
         "MiniMax API key is not configured. Set providers.minimax.apiKey."
     )
@@ -1036,6 +992,9 @@ class MiniMaxImageGenerationClient(ImageGenerationProvider):
     ) -> GeneratedImageResponse:
         if not self.api_key:
             raise ImageGenerationError(self.missing_key_message)
+
+        if model in ("MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed"):
+            return await self._generate_h3(prompt, model, reference_images, aspect_ratio, image_size)
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -1062,6 +1021,52 @@ class MiniMaxImageGenerationClient(ImageGenerationProvider):
         body.update(self.extra_body)
 
         return await self._generate_with_client(body, headers)
+
+    async def _generate_h3(
+        self, prompt: str, model: str, reference_images: list[str] | None,
+        aspect_ratio: str | None, image_size: str | None,
+    ) -> GeneratedImageResponse:
+        refs = reference_images or []
+        if len(refs) > 16:
+            raise ImageGenerationError("MiniMax H3 accepts at most 16 reference images")
+        body: dict[str, Any] = {"model": model, "prompt": prompt, "response_format": "b64_json"}
+        if image_size and image_size not in {"1K", "2K", "4K"}:
+            body["size"] = image_size
+        else:
+            if aspect_ratio:
+                body["aspect_ratio"] = aspect_ratio
+            if image_size:
+                body["area"] = image_size
+        if refs:
+            body["images"] = [{"image_url": image_path_to_data_url(path)} for path in refs]
+        body.update(self.extra_body)
+        body = {key: value for key, value in body.items() if value is not None}
+        _validate_minimax_h3_body(body)
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", **self.extra_headers}
+        endpoint = "edits" if refs else "generations"
+        try:
+            if self._client is not None:
+                response = await self._http_post(f"{self.api_base}/images/{endpoint}", headers=headers, body=body)
+            else:
+                client_kwargs = self._http_client_kwargs()
+                client_kwargs["timeout"] = max(self.timeout, 660.0)
+                async with httpx.AsyncClient(**client_kwargs) as client:
+                    response = await self._http_post(f"{self.api_base}/images/{endpoint}", headers=headers, body=body, client=client)
+            response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise ImageGenerationError("MiniMax H3 timed out; generation may still complete and be billed") from exc
+        except httpx.HTTPStatusError as exc:
+            raise ImageGenerationError(f"MiniMax H3 image generation failed: {exc.response.text[:500]}") from exc
+        except httpx.RequestError as exc:
+            raise ImageGenerationError(f"MiniMax H3 request failed; generation may still be billed: {exc}") from exc
+        payload = response.json()
+        images = await _openai_images_from_payload(payload, proxy=self.proxy)
+        if not images:
+            errors = [item["error"] for item in _as_json_objects(payload.get("data")) if item.get("error")]
+            if errors:
+                raise ImageGenerationError(f"MiniMax H3 returned no images: {errors}")
+        self._require_images(images, payload)
+        return GeneratedImageResponse(images=images, content="", raw=payload)
 
     async def _generate_with_client(
         self,
@@ -1090,11 +1095,36 @@ class MiniMaxImageGenerationClient(ImageGenerationProvider):
         return GeneratedImageResponse(images=images, content="", raw=payload)
 
 
-def _minimax_images_from_payload(payload: dict[str, Any]) -> list[str]:
-    """Extract base64 images from MiniMax API response.
+def _validate_minimax_h3_body(body: dict[str, Any]) -> None:
+    if body.get("stream"):
+        raise ImageGenerationError("MiniMax H3 streaming is not supported")
+    if body.get("n", 1) != 1:
+        raise ImageGenerationError("MiniMax H3 generates one image per request; use the tool's count parameter")
+    size = body.get("size")
+    if size and size != "auto":
+        match = re.fullmatch(r"(\d+)x(\d+)", str(size))
+        if not match:
+            raise ImageGenerationError("MiniMax H3 size must be WIDTHxHEIGHT or auto")
+        width, height = map(int, match.groups())
+        if not height or not 655_360 <= width * height <= 20_000_000 or not height <= 3 * width <= 9 * height:
+            raise ImageGenerationError("MiniMax H3 size is outside the supported area or aspect ratio")
+        if "aspect_ratio" in body or "area" in body:
+            raise ImageGenerationError("MiniMax H3 explicit size cannot be combined with aspect_ratio or area")
+    ratio = body.get("aspect_ratio")
+    if ratio and ratio != "auto":
+        match = re.fullmatch(r"(\d+):(\d+)", str(ratio))
+        if not match:
+            raise ImageGenerationError("MiniMax H3 aspect ratio must be X:Y")
+        width, height = map(int, match.groups())
+        if not (1 <= width <= 300 and 1 <= height <= 300 and height <= 3 * width <= 9 * height):
+            raise ImageGenerationError("MiniMax H3 aspect ratio is outside the supported range")
+    if body.get("area") not in (None, "1K", "2K", "4K"):
+        raise ImageGenerationError("MiniMax H3 area must be 1K, 2K, or 4K")
+    if body.get("disable_prompt_enhanced") and (not size or size == "auto") and (not ratio or ratio == "auto"):
+        raise ImageGenerationError("MiniMax H3 requires size or aspect ratio when prompt enhancement is disabled")
 
-    MiniMax returns images in ``data.image_base64`` (list of base64 strings).
-    """
+
+def _minimax_images_from_payload(payload: dict[str, Any]) -> list[str]:
     images: list[str] = []
     data = payload.get("data")
     data_object = _as_json_object(data)
@@ -1105,10 +1135,6 @@ def _minimax_images_from_payload(payload: dict[str, Any]) -> list[str]:
             images.append(_b64_image_data_url(b64))
     return images
 
-
-# ---------------------------------------------------------------------------
-# OpenAI image generation
-# ---------------------------------------------------------------------------
 
 _OPENAI_DALLE2_SUPPORTED_SIZES = {"256x256", "512x512", "1024x1024"}
 _OPENAI_DALLE3_SUPPORTED_SIZES = {"1024x1024", "1792x1024", "1024x1792"}
@@ -1145,7 +1171,7 @@ class OpenAIImageGenerationClient(ImageGenerationProvider):
     """OpenAI Images API using an API key (``providers.openai.apiKey``)."""
 
     provider_name = "openai"
-    model_options = ("gpt-image-2", "gpt-image-1", "dall-e-3", "dall-e-2")
+    model_options = ("gpt-image-2",)
     missing_key_message = (
         "OpenAI API key is not configured. Set providers.openai.apiKey."
     )
@@ -1379,11 +1405,6 @@ class CustomImageGenerationClient(ImageGenerationProvider):
         return GeneratedImageResponse(images=images, content="", raw=payload)
 
 
-# ---------------------------------------------------------------------------
-# OpenAI Codex image generation
-# ---------------------------------------------------------------------------
-
-
 class CodexImageGenerationClient(ImageGenerationProvider):
     """OpenAI image generation via Codex subscription OAuth.
 
@@ -1403,7 +1424,6 @@ class CodexImageGenerationClient(ImageGenerationProvider):
         return "https://chatgpt.com/backend-api"
 
     def _codex_model(self, model: str) -> str:
-        """Strip the ``openai-codex/`` prefix if present."""
         if model.startswith(("openai-codex/", "openai_codex/")):
             return model.split("/", 1)[1]
         return model
@@ -1490,7 +1510,6 @@ def _openai_size(
     aspect_ratio: str | None,
     image_size: str | None,
 ) -> str:
-    """Resolve aspect ratio or image_size to an OpenAI Images API size string."""
     sizes, supported_sizes = _openai_size_options(model)
     explicit_size = _normalize_openai_image_size(image_size)
     if explicit_size and _openai_explicit_size_supported(
@@ -1565,10 +1584,6 @@ async def _openai_images_from_payload(
     *,
     proxy: str | None = None,
 ) -> list[str]:
-    """Extract images from OpenAI Images API response.
-
-    Handles both ``b64_json`` (preferred) and ``url`` (downloaded) formats.
-    """
     images: list[str] = []
     for item in _as_json_objects(payload.get("data")):
         b64 = item.get("b64_json")
@@ -1580,10 +1595,6 @@ async def _openai_images_from_payload(
             images.append(await _download_image_data_url(url, proxy=proxy))
     return images
 
-
-# ---------------------------------------------------------------------------
-# StepFun (阶跃星辰) image generation
-# ---------------------------------------------------------------------------
 
 _STEPFUN_ASPECT_RATIO_SIZES = {
     "1:1": "1024x1024",
@@ -1637,7 +1648,6 @@ class StepFunImageGenerationClient(ImageGenerationProvider):
             "n": 1,
         }
 
-        # Map aspect ratio / image_size to StepFun size string
         size = _stepfun_size(aspect_ratio, image_size)
         if size:
             body["size"] = size
@@ -1691,10 +1701,6 @@ def _stepfun_size(
 
 
 def _stepfun_images_from_payload(payload: dict[str, Any]) -> list[str]:
-    """Extract base64 images from StepFun API response.
-
-    StepFun returns images in ``data[].b64_json`` (base64 strings).
-    """
     images: list[str] = []
     for item in _as_json_objects(payload.get("data")):
         b64 = item.get("b64_json")
@@ -1702,10 +1708,6 @@ def _stepfun_images_from_payload(payload: dict[str, Any]) -> list[str]:
             images.append(_b64_image_data_url(b64))
     return images
 
-
-# ---------------------------------------------------------------------------
-# Zhipu (智谱) image generation
-# ---------------------------------------------------------------------------
 
 _ZHIPU_TIMEOUT_S = 300.0
 
@@ -1846,13 +1848,9 @@ async def _zhipu_images_from_payload(
     return images
 
 
-# ---------------------------------------------------------------------------
-# ModelScope (魔搭) image generation
-# ---------------------------------------------------------------------------
-
 _MODELSCOPE_TIMEOUT_S = 300.0
 _MODELSCOPE_POLL_INTERVAL_S = 5.0
-_MODELSCOPE_POLL_MAX_ATTEMPTS = 60  # 5 min at 5s intervals
+_MODELSCOPE_POLL_MAX_ATTEMPTS = 60
 _MODELSCOPE_ASPECT_RATIOS = {
     "1:1": "1328x1328",
     "16:9": "1664x928",
@@ -1866,7 +1864,6 @@ def _modelscope_size(
     aspect_ratio: str | None,
     image_size: str | None,
 ) -> str:
-    """Resolve aspect ratio / image_size to a ModelScope size string."""
     if image_size and "x" in image_size.lower():
         return image_size
     if aspect_ratio and aspect_ratio in _MODELSCOPE_ASPECT_RATIOS:
@@ -2033,10 +2030,6 @@ class ModelScopeImageGenerationClient(ImageGenerationProvider):
                     )
         return images
 
-
-# ---------------------------------------------------------------------------
-# Provider registration
-# ---------------------------------------------------------------------------
 
 register_image_gen_provider(AIHubMixImageGenerationClient)
 register_image_gen_provider(CodexImageGenerationClient)

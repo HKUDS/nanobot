@@ -1,5 +1,3 @@
-"""Feishu-owned helpers for its persisted multi-instance configuration."""
-
 from __future__ import annotations
 
 import re

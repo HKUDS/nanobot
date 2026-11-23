@@ -1,1 +1,0 @@
-"""Microsoft Teams channel package."""

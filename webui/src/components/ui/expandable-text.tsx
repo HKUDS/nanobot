@@ -1,6 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
-/** Animate a line-limited preview without swapping or duplicating its text. */
 export function ExpandableText({
   children, expanded, lines, className, id,
 }: {

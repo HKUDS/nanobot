@@ -23,7 +23,6 @@ import {
 } from "@/components/settings/channels/ChannelIdentity";
 import { Button } from "@/components/ui/button";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
-import { logoFallbackUrls } from "@/lib/provider-brand";
 import type {
   NanobotChannelInstanceInfo,
   NanobotFeatureInfo,
@@ -137,7 +136,7 @@ export function ChannelInstancesPanelView({
         {instances.map((instance) => {
           const expanded = selected?.id === instance.id && editor?.expanded === true;
           const toggling = pendingToggle?.id === instance.id;
-          const checked = toggling ? pendingToggle.checked : instanceToggleChecked(instance);
+          const checked = toggling ? pendingToggle.checked : instance.enabled;
           const instanceSummary = customization.renderInstanceSummary
             ? customization.renderInstanceSummary(instance)
             : instance.id;
@@ -200,7 +199,7 @@ export function ChannelInstancesPanelView({
                     disabled={
                       Boolean(pendingToggle)
                       || savingFields
-                      || !instance.configured
+                      || (!instance.enabled && !instance.configured)
                     }
                     ariaLabel={customization.toggleAriaLabel?.(instance)
                       ?? t("settings.channels.toggleInstance", {
@@ -290,10 +289,6 @@ function channelInstanceDisplayName(instance: NanobotChannelInstanceInfo): strin
   return instance.id;
 }
 
-function instanceToggleChecked(instance: NanobotChannelInstanceInfo): boolean {
-  return instance.runtime_status === "running" || instance.runtime_status === "starting";
-}
-
 function ChannelInstanceStatusBadge({
   instance,
   configuredLabel,
@@ -344,8 +339,8 @@ function ChannelInstanceAvatar({
 }) {
   const presentation = channelUiPresentation(feature.name, feature.webui);
   const [avatarFailed, setAvatarFailed] = useState(false);
-  const fallbackLogoUrls = useMemo(() => logoFallbackUrls(presentation?.logoUrl), [presentation?.logoUrl]);
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(fallbackLogoUrls);
+  const brandLogoUrl = presentation?.logoUrl;
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brandLogoUrl ? [brandLogoUrl] : undefined);
   const remoteAvatarUrl = !avatarFailed ? instance.avatar_url?.trim() : "";
   const imageUrl = remoteAvatarUrl || (showBrandLogos ? logoUrl : "");
   const Icon = presentation?.icon;

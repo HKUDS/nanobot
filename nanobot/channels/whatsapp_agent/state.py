@@ -176,14 +176,12 @@ class WhatsAppAgentState:
 
 
 def _json_object(value: object) -> dict[str, Any] | None:
-    """Narrow decoded JSON to a string-keyed object."""
     if not isinstance(value, dict):
         return None
     return cast(dict[str, Any], value)
 
 
 def _string_map(value: object) -> dict[str, str]:
-    """Narrow a persisted JSON value to a flat string map."""
     if not isinstance(value, dict):
         return {}
     mapping = cast(dict[object, object], value)

@@ -251,8 +251,6 @@ def test_actual_gateway_is_parked_until_exact_runtime_activation(private_home, t
         assert _http(web_port, "/webui/bootstrap")[0] == 200
         with installation_access(), data_access([workspace / "sessions"]):
             pass
-        # Recover the real crash window after data cleanup but before unlinking
-        # the installation fence. Do not start another process or reinstall.
         JobStatus(spec.plan_id, Phase.FINALIZING, 1, True, "Verified; cleanup interrupted", int(time.time())).save(directory)
         write_record(pending_update_path(), {"schema_version": 2, "job_id": spec.plan_id, "version": spec.version})
         run_restarts(directory)

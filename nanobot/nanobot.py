@@ -1,5 +1,3 @@
-"""High-level programmatic interface to nanobot."""
-
 from __future__ import annotations
 
 import asyncio
@@ -134,10 +132,13 @@ class Nanobot:
         tools = ToolRegistry()
         register_image_generation_tool(config, tools, workspace=config.workspace_path)
         mcp_provider = MCPProvider.from_config(config, tools)
+        from nanobot.goal.assembly import install_goal
+
         loop = AgentLoop.from_config(
             config,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
+            builtin_assembly=install_goal,
         )
         return cls(loop, config=config, mcp_provider=mcp_provider)
 

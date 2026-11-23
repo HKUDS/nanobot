@@ -1,4 +1,3 @@
-"""Discord channel implementation using discord.py."""
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false
 
 from __future__ import annotations
@@ -18,7 +17,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent, ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.command.builtin import build_help_text
+from nanobot.command.application import build_help_text
+from nanobot.command_copy import catalog, command_text, locale_code
 from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
@@ -36,7 +36,7 @@ if DISCORD_AVAILABLE:
     from discord import app_commands
     from discord.abc import Messageable
 
-MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
 TYPING_INTERVAL_S = 8
 
@@ -70,6 +70,18 @@ class DiscordConfig(Base):
 
 if DISCORD_AVAILABLE:
 
+    def _description(key: str) -> app_commands.locale_str:
+        return app_commands.locale_str(command_text(key, "en"), key=key)
+
+    class _CommandTranslator(app_commands.Translator):
+        async def translate(
+            self, string: app_commands.locale_str, locale: discord.Locale,
+            context: app_commands.TranslationContextTypes,
+        ) -> str | None:
+            # Only descriptions carry a catalog key; command and option names stay literal.
+            key = string.extras.get("key")
+            return catalog()[key].get(locale_code(locale.value)) if key else None
+
     class DiscordBotClient(discord.Client):
         """discord.py client that forwards events to the channel."""
 
@@ -85,6 +97,9 @@ if DISCORD_AVAILABLE:
             self._channel = channel
             self.tree = app_commands.CommandTree(self)
             self._register_app_commands()
+
+        async def setup_hook(self) -> None:
+            await self.tree.set_translator(_CommandTranslator())
 
         async def on_ready(self) -> None:
             self._channel._bot_user_id = str(self.user.id) if self.user else None
@@ -110,7 +125,6 @@ if DISCORD_AVAILABLE:
                 self._channel._remember_channel(after)
 
         async def _reply_ephemeral(self, interaction: discord.Interaction, text: str) -> bool:
-            """Send an ephemeral interaction response and report success."""
             try:
                 await interaction.response.send_message(text, ephemeral=True)
                 return True
@@ -152,28 +166,30 @@ if DISCORD_AVAILABLE:
         async def _forward_slash_command(
             self,
             interaction: discord.Interaction,
-            command_text: str,
+            command: str,
         ) -> None:
+            locale = interaction.locale.value
             sender_id = str(interaction.user.id)
             channel_id = interaction.channel_id
 
             if channel_id is None:
-                self._channel.logger.warning("slash command missing channel_id: {}", command_text)
+                self._channel.logger.warning("slash command missing channel_id: {}", command)
                 return
 
             if not self._channel.is_allowed(sender_id):
-                await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
+                await self._reply_ephemeral(interaction, command_text("native.denied", locale))
                 return
 
             channel = await self._resolve_interaction_channel(interaction)
             if not await self._interaction_channel_allowed(interaction, channel):
-                await self._reply_ephemeral(interaction, "This channel is not allowed for this bot.")
+                await self._reply_ephemeral(interaction, command_text("native.channelDenied", locale))
                 return
 
-            await self._reply_ephemeral(interaction, f"Processing {command_text}...")
+            await self._reply_ephemeral(interaction, command_text("native.processing", locale, command=command))
 
             metadata: dict[str, Any] = {
                 "interaction_id": str(interaction.id),
+                "locale": locale,
                 "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
                 "is_slash_command": True,
             }
@@ -189,31 +205,22 @@ if DISCORD_AVAILABLE:
             await self._channel._handle_message(
                 sender_id=sender_id,
                 chat_id=str(channel_id),
-                content=command_text,
+                content=command,
                 metadata=metadata,
                 session_key=session_key,
             )
 
         def _register_app_commands(self) -> None:
-            commands = (
-                ("new", "Stop current task and start a new conversation", "/new"),
-                ("stop", "Stop the current task", "/stop"),
-                ("restart", "Restart the bot", "/restart"),
-                ("status", "Show bot status", "/status"),
-                ("history", "Show recent conversation messages", "/history"),
-            )
+            def register_simple(name: str) -> None:
+                @self.tree.command(name=name, description=_description(f"palette.{name}.description"))
+                async def command_handler(interaction: discord.Interaction) -> None:
+                    await self._forward_slash_command(interaction, f"/{name}")
 
-            for name, description, command_text in commands:
+            for name in ("new", "stop", "cancel_goal", "restart", "status"):
+                register_simple(name)
 
-                @self.tree.command(name=name, description=description)
-                async def command_handler(
-                    interaction: discord.Interaction,
-                    _command_text: str = command_text,
-                ) -> None:
-                    await self._forward_slash_command(interaction, _command_text)
-
-            @self.tree.command(name="model", description="Show or switch runtime model preset")
-            @app_commands.describe(preset="Optional model preset name, such as default")
+            @self.tree.command(name="model", description=_description("palette.model.description"))
+            @app_commands.describe(preset=_description("native.presetDescription"))
             async def model_command(
                 interaction: discord.Interaction,
                 preset: str | None = None,
@@ -222,8 +229,8 @@ if DISCORD_AVAILABLE:
                 command_text = f"/model {preset}" if preset else "/model"
                 await self._forward_slash_command(interaction, command_text)
 
-            @self.tree.command(name="trigger", description="Create a named local trigger for this chat")
-            @app_commands.describe(name="Trigger name")
+            @self.tree.command(name="trigger", description=_description("palette.trigger.description"))
+            @app_commands.describe(name=_description("native.triggerNameDescription"))
             async def trigger_command(
                 interaction: discord.Interaction,
                 name: str,
@@ -232,17 +239,17 @@ if DISCORD_AVAILABLE:
                 command_text = f"/trigger {name}" if name else "/trigger"
                 await self._forward_slash_command(interaction, command_text)
 
-            @self.tree.command(name="help", description="Show available commands")
+            @self.tree.command(name="help", description=_description("palette.help.description"))
             async def help_command(interaction: discord.Interaction) -> None:
-                sender_id = str(interaction.user.id)
-                if not self._channel.is_allowed(sender_id):
-                    await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
+                locale = interaction.locale.value
+                if not self._channel.is_allowed(str(interaction.user.id)):
+                    await self._reply_ephemeral(interaction, command_text("native.denied", locale))
                     return
                 channel = await self._resolve_interaction_channel(interaction)
                 if not await self._interaction_channel_allowed(interaction, channel):
-                    await self._reply_ephemeral(interaction, "This channel is not allowed for this bot.")
+                    await self._reply_ephemeral(interaction, command_text("native.channelDenied", locale))
                     return
-                await self._reply_ephemeral(interaction, build_help_text())
+                await self._reply_ephemeral(interaction, build_help_text(locale=locale))
 
             @self.tree.error
             async def on_app_command_error(
@@ -323,7 +330,6 @@ if DISCORD_AVAILABLE:
                     )
 
         async def _edit_compaction_notice(self, notice: discord.Message, content: str) -> bool:
-            """Replace a start notice's text with the outcome; False when Discord refused."""
             if not content:
                 return False
             try:
@@ -341,7 +347,6 @@ if DISCORD_AVAILABLE:
             reference: discord.MessageReference | None,
             mention_settings: discord.AllowedMentions,
         ) -> bool:
-            """Send a file attachment via discord.py."""
             path = Path(file_path)
             if not path.is_file():
                 self._channel.logger.warning("file not found, skipping: {}", file_path)
@@ -415,7 +420,6 @@ class DiscordChannel(BaseChannel):
         *,
         explicit: str | None = None,
     ) -> str | None:
-        """Choose an explicit reply target, or the triggering message when enabled."""
         if explicit:
             return explicit
         if not self.config.reply_to_message or not metadata:
@@ -430,7 +434,6 @@ class DiscordChannel(BaseChannel):
         *,
         fail_if_not_exists: bool,
     ) -> tuple[discord.MessageReference | None, discord.AllowedMentions]:
-        """Build a native Discord reply without pinging the replied-to user."""
         mention_settings = discord.AllowedMentions(replied_user=False)
         if not reply_to:
             return None, mention_settings
@@ -454,7 +457,7 @@ class DiscordChannel(BaseChannel):
         self._client: DiscordBotClient | None = None
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._bot_user_id: str | None = None
-        self._pending_reactions: dict[str, Any] = {}  # chat_id -> message object
+        self._pending_reactions: dict[str, Any] = {}
         self._compaction_notices: dict[tuple[str, str], discord.Message] = {}
         self._working_emoji_tasks: dict[str, set[asyncio.Task[None]]] = {}
         self._inbound_tasks: set[asyncio.Task[Any]] = set()
@@ -503,12 +506,12 @@ class DiscordChannel(BaseChannel):
             self.logger.exception("client startup failed")
         finally:
             self._running = False
-            await self._reset_runtime_state(close_client=True)
+            await self._reset_runtime_state()
 
     async def stop(self) -> None:
         """Stop the Discord channel."""
         self._running = False
-        await self._reset_runtime_state(close_client=True)
+        await self._reset_runtime_state()
 
     def _remember_compaction_notice(
         self,
@@ -516,7 +519,6 @@ class DiscordChannel(BaseChannel):
         compaction_id: str,
         message: discord.Message,
     ) -> None:
-        """Keep a start notice until its matching outcome consumes it."""
         self._compaction_notices[(chat_id, compaction_id)] = message
 
     async def send(self, msg: OutboundMessage) -> None:
@@ -616,7 +618,6 @@ class DiscordChannel(BaseChannel):
             raise
 
     async def _handle_discord_message(self, message: discord.Message) -> None:
-        """Own in-flight callbacks until they finish or runtime reset drains them."""
         task = asyncio.current_task()
         if task is not None:
             self._inbound_tasks.add(task)
@@ -661,7 +662,6 @@ class DiscordChannel(BaseChannel):
 
         await self._start_typing(message.channel)
 
-        # Add read receipt reaction immediately, working emoji after delay
         try:
             await message.add_reaction(self.config.read_receipt_emoji)
             self._pending_reactions[channel_id] = message
@@ -706,7 +706,6 @@ class DiscordChannel(BaseChannel):
         await self._handle_discord_message(message)
 
     async def _resolve_channel(self, chat_id: str) -> Any | None:
-        """Resolve a Discord channel from cache first, then network fetch."""
         client = self._client
         if client is None or not client.is_ready():
             return None
@@ -729,7 +728,6 @@ class DiscordChannel(BaseChannel):
         buf: _StreamBuf,
         message: discord.Message,
     ) -> None:
-        """Commit the final streamed content and flush overflow chunks."""
         chunks = DiscordBotClient._build_chunks(buf.text, [], False)
         if not chunks:
             self._stream_bufs.pop(chat_id, None)
@@ -756,12 +754,10 @@ class DiscordChannel(BaseChannel):
         sender_id: str,
         content: str,
     ) -> bool:
-        """Check if inbound Discord message should be processed."""
         # Reject unauthorized guild messages before any side effects, but let DMs
         # reach BaseChannel._handle_message so it can issue a pairing code.
         if message.guild is not None and not self.is_allowed(sender_id):
             return False
-        # Channel-based filtering: only respond in allowed channels
         allow_channels = self.config.allow_channels
         if allow_channels:
             channel_ids = self._channel_allow_keys(message.channel)
@@ -775,7 +771,6 @@ class DiscordChannel(BaseChannel):
         self,
         attachments: list[discord.Attachment],
     ) -> tuple[list[str], list[str]]:
-        """Download supported attachments and return paths + display markers."""
         media_paths: list[str] = []
         markers: list[str] = []
         media_dir = get_media_dir("discord")
@@ -826,7 +821,6 @@ class DiscordChannel(BaseChannel):
         }
 
     def _should_respond_in_group(self, message: discord.Message, content: str) -> bool:
-        """Check if the bot should respond in a guild channel based on policy."""
         if self.config.group_policy == "open":
             return True
 
@@ -867,7 +861,6 @@ class DiscordChannel(BaseChannel):
         return str(getattr(author, "id", "")) == bot_user_id
 
     async def _start_typing(self, channel: Messageable) -> None:
-        """Start periodic typing indicator for a channel."""
         channel_id = self._channel_key(channel)
         await self._stop_typing(channel_id)
 
@@ -885,7 +878,6 @@ class DiscordChannel(BaseChannel):
         self._typing_tasks[channel_id] = asyncio.create_task(typing_loop())
 
     async def _stop_typing(self, channel_id: str) -> None:
-        """Stop typing indicator for a channel."""
         task = self._typing_tasks.pop(self._channel_key(channel_id), None)
         if task is None:
             return
@@ -894,7 +886,6 @@ class DiscordChannel(BaseChannel):
             await task
 
     async def _clear_reactions(self, chat_id: str) -> None:
-        """Remove all pending reactions after bot replies."""
         # Keep tasks owned until done, so a concurrent reset can drain them too.
         tasks = tuple(self._working_emoji_tasks.get(chat_id, ()))
         # Snapshot before yielding; a newer receipt must survive this cleanup.
@@ -912,13 +903,11 @@ class DiscordChannel(BaseChannel):
                 await msg_obj.remove_reaction(emoji, bot_user)
 
     async def _cancel_all_typing(self) -> None:
-        """Stop all typing tasks."""
         channel_ids = list(self._typing_tasks)
         for channel_id in channel_ids:
             await self._stop_typing(channel_id)
 
     async def _cancel_all_reactions(self) -> None:
-        """Stop delayed reactions and release their retained messages."""
         tasks = tuple(task for group in self._working_emoji_tasks.values() for task in group)
         self._pending_reactions.clear()
         for task in tasks:
@@ -927,8 +916,7 @@ class DiscordChannel(BaseChannel):
             await asyncio.gather(*tasks, return_exceptions=True)
         self._working_emoji_tasks.clear()
 
-    async def _reset_runtime_state(self, close_client: bool) -> None:
-        """Reset client and transient runtime state."""
+    async def _reset_runtime_state(self) -> None:
         self._running = False
         # Drain callbacks before clearing the state they can still create after an await.
         current = asyncio.current_task()
@@ -942,7 +930,7 @@ class DiscordChannel(BaseChannel):
         self._compaction_notices.clear()
         self._stream_bufs.clear()
         self._known_channels.clear()
-        if close_client and self._client is not None and not self._client.is_closed():
+        if self._client is not None and not self._client.is_closed():
             try:
                 await self._client.close()
             except Exception as e:

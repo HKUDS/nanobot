@@ -1,5 +1,3 @@
-"""Gateway delivery loop for local triggers."""
-
 from __future__ import annotations
 
 import asyncio

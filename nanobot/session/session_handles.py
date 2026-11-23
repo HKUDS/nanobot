@@ -1,5 +1,3 @@
-"""Short, pronounceable public handles for persisted sessions."""
-
 from __future__ import annotations
 
 import hashlib
@@ -103,7 +101,6 @@ def _tier_size(syllable_count: int) -> int:
 
 
 def _name_parts_at(syllable_count: int, index: int) -> tuple[str, ...]:
-    """Decode one permutation index without materializing the candidate space."""
     size = _tier_size(syllable_count)
     if not 0 <= index < size:
         raise ValueError("session handle candidate index is invalid")
@@ -118,7 +115,6 @@ def _name_parts_at(syllable_count: int, index: int) -> tuple[str, ...]:
 
 
 def _candidate_indexes(syllable_count: int):
-    """Visit every candidate once in a stable, non-alphabetical order."""
     size = _tier_size(syllable_count)
     seed = hashlib.sha256(f"nanobot-handle-v1:{syllable_count}".encode()).digest()
     start = int.from_bytes(seed[:8], "big") % size

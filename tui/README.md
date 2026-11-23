@@ -21,7 +21,7 @@ Assistant math written with `$...$`, `$$...$$`, `\\(...\\)`, or `\\[...\\]` is p
 
 Mermaid diagrams appear after a reply finishes. Press `Ctrl+G` or run `/diagrams` to open the viewer, where you can zoom, pan, switch diagrams, and view or copy the source. Keyboard shortcuts are shown at the bottom. Press `q` or `Esc` to return without losing your draft or reading position. If a diagram cannot be displayed, its source remains available.
 
-On macOS, diagrams use the installed PingFang fonts. The system resolves their location automatically; no font-path configuration is needed. If the font lookup fails, check that PingFang is available in Font Book. Diagram source remains available while fonts are unavailable.
+On macOS, diagrams use installed Heiti SC Light and Medium fonts. The system resolves their location automatically; no font-path configuration or download is needed. If the font lookup fails, check that Heiti SC is available in Font Book. On Linux, Chinese diagram labels require Noto Sans CJK; Debian and Ubuntu provide it through the `fonts-noto-cjk` package. DejaVu Sans supports diagrams whose labels fit its character set, but does not provide Chinese glyphs. Windows uses Microsoft YaHei. Diagram source remains available while fonts or required glyphs are unavailable.
 
 Automatic theme selection follows the terminal's OSC 10/11 responses. Until a response arrives, the TUI uses the terminal's default foreground and background without semantic colors or color animations. Terminals that do not answer keep this readable fallback. Use `nanobot --theme light` or `nanobot --theme dark` to select a color palette explicitly.
 

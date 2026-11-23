@@ -1,5 +1,3 @@
-"""Runtime state facts and turn-scoped publication through MessageBus."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -116,10 +114,10 @@ class RuntimeEventPublisher:
 
     def __init__(self, bus: MessageBus) -> None:
         self.bus = bus
-        self._turn_latency_ms: dict[str, int] = {}
-        self._turn_runtime: dict[str, LLMRuntime] = {}
-        self._turn_usage: dict[str, LLMUsage] = {}
-        self._turn_round_usages: dict[str, tuple[LLMUsage, ...]] = {}
+        self._turn_latency_ms: dict[tuple[str, str | None], int] = {}
+        self._turn_runtime: dict[tuple[str, str | None], LLMRuntime] = {}
+        self._turn_usage: dict[tuple[str, str | None], LLMUsage] = {}
+        self._turn_round_usages: dict[tuple[str, str | None], tuple[LLMUsage, ...]] = {}
 
     @staticmethod
     def _context(
@@ -140,17 +138,22 @@ class RuntimeEventPublisher:
             attributes=dict(attributes or {}),
         )
 
-    def record_turn_runtime(self, session_key: str, runtime: LLMRuntime) -> None:
-        self._turn_runtime[session_key] = runtime
+    def record_turn_runtime(
+        self, session_key: str, runtime: LLMRuntime, *, run_id: str | None = None,
+    ) -> None:
+        self._turn_runtime[(session_key, run_id)] = runtime
 
-    def record_turn_latency(self, session_key: str, latency_ms: int | None) -> None:
+    def record_turn_latency(
+        self, session_key: str, latency_ms: int | None, *, run_id: str | None = None,
+    ) -> None:
         if latency_ms is not None:
-            self._turn_latency_ms[session_key] = int(latency_ms)
+            self._turn_latency_ms[(session_key, run_id)] = int(latency_ms)
 
     def record_turn_usage(
         self,
         session_key: str,
         round_usages: list[LLMUsage],
+        *, run_id: str | None = None,
     ) -> None:
         if not round_usages:
             return
@@ -158,18 +161,16 @@ class RuntimeEventPublisher:
         usage = round_usages[0]
         for round_usage in round_usages[1:]:
             usage += round_usage
-        previous = self._turn_usage.get(session_key)
-        self._turn_usage[session_key] = usage if previous is None else previous + usage
-        self._turn_round_usages[session_key] = (
-            *self._turn_round_usages.get(session_key, ()),
-            *round_usages,
-        )
+        key = (session_key, run_id)
+        self._turn_usage[key] = usage
+        self._turn_round_usages[key] = tuple(round_usages)
 
-    def clear_turn(self, session_key: str) -> None:
-        self._turn_latency_ms.pop(session_key, None)
-        self._turn_runtime.pop(session_key, None)
-        self._turn_usage.pop(session_key, None)
-        self._turn_round_usages.pop(session_key, None)
+    def clear_turn(self, session_key: str, *, run_id: str | None = None) -> None:
+        key = (session_key, run_id)
+        self._turn_latency_ms.pop(key, None)
+        self._turn_runtime.pop(key, None)
+        self._turn_usage.pop(key, None)
+        self._turn_round_usages.pop(key, None)
 
     async def user_input_accepted(
         self,
@@ -211,9 +212,10 @@ class RuntimeEventPublisher:
         msg: InboundMessage,
         session_key: str,
         runtime: LLMRuntime,
+        *, run_id: str | None = None,
     ) -> None:
         """Record and publish the runtime selected for one turn."""
-        self.record_turn_runtime(session_key, runtime)
+        self.record_turn_runtime(session_key, runtime, run_id=run_id)
         await self.bus.publish(
             TurnRuntimeAdmitted(
                 context=self._context(
@@ -283,7 +285,9 @@ class RuntimeEventPublisher:
         failure_kind: str | None = None,
         failure_error_kind: str | None = None,
         failure_attempts: int | None = None,
+        run_id: str | None = None,
     ) -> None:
+        key = (session_key, run_id)
         await self.bus.publish(
             TurnCompleted(
                 context=self._context(
@@ -292,10 +296,10 @@ class RuntimeEventPublisher:
                     session_key=session_key,
                     metadata=metadata,
                 ),
-                latency_ms=self._turn_latency_ms.pop(session_key, None),
-                runtime=self._turn_runtime.pop(session_key, None),
-                usage=self._turn_usage.pop(session_key, None),
-                round_usages=self._turn_round_usages.pop(session_key, ()),
+                latency_ms=self._turn_latency_ms.pop(key, None),
+                runtime=self._turn_runtime.pop(key, None),
+                usage=self._turn_usage.pop(key, None),
+                round_usages=self._turn_round_usages.pop(key, ()),
                 outcome=outcome,
                 failure_kind=failure_kind,
                 failure_error_kind=failure_error_kind,

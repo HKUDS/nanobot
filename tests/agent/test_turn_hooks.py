@@ -42,6 +42,7 @@ async def test_tool_log_privacy_preserves_user_visible_progress(ephemeral, hoste
             })
         else:
             await hook.before_execute_tools(context)
+            await hook.on_tool_execution_event(context)
     finally:
         logger.remove(sink)
 

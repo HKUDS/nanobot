@@ -1,5 +1,3 @@
-"""Typer commands for OAuth provider authentication."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -66,7 +64,6 @@ class _FileTokenStorageFactory(Protocol):
 
 
 def _required_module_attribute(module_name: str, attribute: str) -> object:
-    """Load an optional dependency attribute with import-compatible errors."""
     module = import_module(module_name)
     try:
         return getattr(module, attribute)
@@ -75,7 +72,6 @@ def _required_module_attribute(module_name: str, attribute: str) -> object:
 
 
 def _load_openai_oauth_client() -> tuple[_GetOAuthToken, _LoginOAuthInteractive]:
-    """Load the untyped OAuth client behind a typed boundary."""
     return (
         cast(_GetOAuthToken, _required_module_attribute("oauth_cli_kit", "get_token")),
         cast(
@@ -86,7 +82,6 @@ def _load_openai_oauth_client() -> tuple[_GetOAuthToken, _LoginOAuthInteractive]
 
 
 def _load_openai_oauth_storage() -> tuple[_OAuthProviderConfig, _FileTokenStorageFactory]:
-    """Load the untyped OAuth storage API behind a typed boundary."""
     return (
         cast(
             _OAuthProviderConfig,
@@ -103,7 +98,6 @@ def _load_openai_oauth_storage() -> tuple[_OAuthProviderConfig, _FileTokenStorag
 
 
 def _resolve_oauth_provider(provider: str) -> ProviderSpec:
-    """Resolve and validate an OAuth provider configuration."""
     from nanobot.providers.registry import PROVIDERS
 
     key = provider.replace("-", "_")
@@ -121,7 +115,6 @@ def _set_oauth_provider_as_main(
     model: str | None = None,
     config_path: str | None = None,
 ) -> None:
-    """Persist an OAuth provider as the active agent provider."""
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
@@ -251,7 +244,6 @@ def _login_openai_codex() -> None:
 
 
 def _logout_openai_codex() -> None:
-    """Clear local OAuth credentials for OpenAI Codex."""
     try:
         provider_config, storage_factory = _load_openai_oauth_storage()
     except ImportError:
@@ -263,7 +255,6 @@ def _logout_openai_codex() -> None:
 
 
 def _login_xai_grok() -> None:
-    """Authenticate with xAI using the Grok subscription OAuth contract."""
     from nanobot.config.loader import load_config, resolve_config_env_vars
     from nanobot.providers.xai_oauth import get_xai_oauth_token, login_xai_oauth
 
@@ -298,7 +289,6 @@ def _login_xai_grok() -> None:
 
 
 def _logout_xai_grok() -> None:
-    """Clear local xAI OAuth credentials for this nanobot instance."""
     from nanobot.providers.xai_oauth import get_xai_oauth_storage_path, logout_xai_oauth
 
     token_path = get_xai_oauth_storage_path()
@@ -311,7 +301,6 @@ def _logout_xai_grok() -> None:
 
 
 def _logout_github_copilot() -> None:
-    """Clear local OAuth credentials for GitHub Copilot."""
     try:
         from nanobot.providers.github_copilot_provider import get_storage
     except ImportError:
@@ -323,7 +312,6 @@ def _logout_github_copilot() -> None:
 
 
 def _delete_oauth_files(token_path: Path, provider_label: str) -> None:
-    """Delete OAuth token and lock files, reporting the result."""
     removed_paths: list[Path] = []
     skipped: list[tuple[Path, OSError]] = []
     for path in (token_path, token_path.with_suffix(".lock")):

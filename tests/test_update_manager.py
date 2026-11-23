@@ -1,5 +1,3 @@
-"""Receipt fixtures match uv 0.11.16 and pipx 1.7.1/1.17.13 private-manager probes."""
-
 import hashlib
 import json
 

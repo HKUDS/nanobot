@@ -1,7 +1,6 @@
-"""Tests for transcription retry behavior on transient errors (B10)."""
-
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 from pathlib import Path
@@ -26,6 +25,7 @@ from nanobot.providers.transcription import (
     GroqTranscriptionProvider,
     OpenAITranscriptionProvider,
     OpenRouterTranscriptionProvider,
+    StepFunTranscriptionProvider,
     XiaomiMiMoTranscriptionProvider,
     _audio_format,
     _resolve_chat_completions_url,
@@ -158,9 +158,6 @@ def test_resolver_supports_siliconflow_transcription_api_key_env() -> None:
 
 
 def test_resolver_interpolates_env_ref_in_api_key() -> None:
-    # load_config() does not interpolate ${VAR}; the transcription path receives
-    # the raw config, so an env reference in the key must be resolved here rather
-    # than sent verbatim to the provider (which yields a 401).
     config = Config()
     config.transcription.provider = "groq"
     config.providers.groq.api_key = "${MY_GROQ_KEY}"
@@ -179,8 +176,6 @@ def test_resolver_env_ref_missing_var_degrades_to_not_configured() -> None:
     with patch.dict(os.environ, {}, clear=True):
         resolved = resolve_transcription_config(config)
 
-    # Unresolved reference degrades to a falsy key rather than the literal
-    # "${...}" string, so the config reports itself as not configured.
     assert resolved.api_key == ""
     assert resolved.configured is False
 
@@ -413,51 +408,30 @@ def test_resolver_keeps_enabled_and_limits_on_effective_config() -> None:
     assert resolved.max_upload_mb == 12
 
 
-# ---------------------------------------------------------------------------
-# OpenAI provider — retry on transient HTTP + network errors
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
-async def test_openai_does_not_retry_on_auth_error(audio_file: Path) -> None:
-    """401 is the user's misconfiguration — retrying wastes time and rate-limit quota."""
+@pytest.mark.parametrize("outcome", [_response(401), _response(501), httpx.LocalProtocolError("bad")])
+async def test_openai_does_not_retry_terminal_errors(audio_file: Path, outcome) -> None:
     provider = OpenAITranscriptionProvider(api_key="sk-test")
-    post = AsyncMock(return_value=_response(401, {"error": {"message": "bad key"}}))
-    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
+    post = AsyncMock(side_effect=[outcome])
+    sleep = AsyncMock()
+    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", sleep):
         result = await provider.transcribe(audio_file)
     assert result == ""
     assert post.await_count == 1
+    sleep.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_openai_gives_up_after_max_attempts(audio_file: Path) -> None:
-    """Persistent 503 returns "" after the final retry — never hangs."""
+@pytest.mark.parametrize("outcome", [_response(503), httpx.ConnectError("offline")])
+async def test_openai_gives_up_after_max_attempts(audio_file: Path, outcome) -> None:
     provider = OpenAITranscriptionProvider(api_key="sk-test")
-    post = AsyncMock(return_value=_response(503))
+    post = AsyncMock(side_effect=[outcome] * 4)
     sleep = AsyncMock()
     with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", sleep):
         result = await provider.transcribe(audio_file)
     assert result == ""
-    # 4 attempts total (initial + 3 retries) with 3 sleeps between them.
     assert post.await_count == 4
-    assert sleep.await_count == 3
-
-
-@pytest.mark.asyncio
-async def test_openai_backoff_grows_exponentially(audio_file: Path) -> None:
-    """Verify the backoff schedule is exponential (1s, 2s, 4s)."""
-    provider = OpenAITranscriptionProvider(api_key="sk-test")
-    post = AsyncMock(return_value=_response(503))
-    sleep = AsyncMock()
-    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", sleep):
-        await provider.transcribe(audio_file)
-    delays = [call.args[0] for call in sleep.await_args_list]
-    assert delays == [1.0, 2.0, 4.0]
-
-
-# ---------------------------------------------------------------------------
-# Groq provider — same semantics (both go through the shared helper)
-# ---------------------------------------------------------------------------
+    assert [call.args[0] for call in sleep.await_args_list] == [1.0, 2.0, 4.0]
 
 
 @pytest.mark.asyncio
@@ -480,14 +454,8 @@ async def test_groq_does_not_retry_on_auth_error(audio_file: Path) -> None:
     assert post.await_count == 1
 
 
-# ---------------------------------------------------------------------------
-# Regression: missing file / missing key must still short-circuit
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_openai_missing_api_key_short_circuits(audio_file: Path) -> None:
-    """Missing API key short-circuits before any HTTP call, even when the file exists."""
     with patch.dict("os.environ", {}, clear=True):
         provider = OpenAITranscriptionProvider(api_key=None)
         post = AsyncMock()
@@ -507,7 +475,6 @@ async def test_openai_missing_file_short_circuits() -> None:
 
 @pytest.mark.asyncio
 async def test_returns_empty_when_file_unreadable(audio_file: Path) -> None:
-    """Existing file that cannot be read (PermissionError/OSError): "" with no HTTP attempt."""
     provider = OpenAITranscriptionProvider(api_key="sk-test")
     post = AsyncMock()
     with patch("pathlib.Path.read_bytes", side_effect=PermissionError("denied")), patch(
@@ -516,11 +483,6 @@ async def test_returns_empty_when_file_unreadable(audio_file: Path) -> None:
         result = await provider.transcribe(audio_file)
     assert result == ""
     assert post.await_count == 0
-
-
-# ---------------------------------------------------------------------------
-# language: forwarded through the helper to the multipart body, on every attempt
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -532,7 +494,6 @@ async def test_returns_empty_when_file_unreadable(audio_file: Path) -> None:
 async def test_provider_forwards_language_in_multipart(
     audio_file: Path, provider_cls: type, language: str
 ) -> None:
-    """When ``language`` is set, the helper sends it as a multipart field."""
     provider = provider_cls(api_key="k", language=language)
     post = AsyncMock(return_value=_response(200, {"text": "ok"}))
     with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
@@ -552,7 +513,6 @@ async def test_provider_forwards_language_in_multipart(
 async def test_provider_omits_language_when_unset(
     audio_file: Path, provider_cls: type
 ) -> None:
-    """When ``language`` is None, no ``language`` field is sent."""
     provider = provider_cls(api_key="k")
     post = AsyncMock(return_value=_response(200, {"text": "ok"}))
     with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
@@ -590,26 +550,37 @@ async def test_provider_forwards_file_mime_type(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_language_survives_retry(audio_file: Path) -> None:
-    """Regression: language must be present on every retry attempt, not just the first."""
-    provider = OpenAITranscriptionProvider(api_key="sk-test", language="ja")
-    post = AsyncMock(side_effect=[_response(503), _response(200, {"text": "konnichiwa"})])
-    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
-        result = await provider.transcribe(audio_file)
-    assert result == "konnichiwa"
-    assert post.await_count == 2
+@pytest.mark.parametrize("provider_cls", [OpenAITranscriptionProvider, OpenRouterTranscriptionProvider])
+async def test_json_retry_shares_budget_and_rebuilds_cached_audio(audio_file: Path, provider_cls):
+    original_audio = audio_file.read_bytes()
+    provider = provider_cls(api_key="sk-test", model="contract-model", language="ja")
+    post = AsyncMock(side_effect=[
+        httpx.ReadError("lost"), _response(503), httpx.WriteError("lost"),
+        _response(200, {"text": "konnichiwa"}),
+    ])
+    sleep = AsyncMock(side_effect=lambda _: audio_file.write_bytes(b"changed-after-request"))
+    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", sleep):
+        assert await provider.transcribe(audio_file) == "konnichiwa"
+    assert post.await_count == 4
+    assert [call.args[0] for call in sleep.await_args_list] == [1.0, 2.0, 4.0]
+    field = "files" if provider_cls is OpenAITranscriptionProvider else "json"
+    bodies = [call.kwargs[field] for call in post.await_args_list]
+    assert len({id(body) for body in bodies}) == 4
+    expected = (
+        {"file": (audio_file.name, original_audio, "audio/ogg"),
+         "model": (None, "contract-model"), "language": (None, "ja")}
+        if field == "files" else
+        {"model": "contract-model", "language": "ja",
+         "input_audio": {"data": base64.b64encode(original_audio).decode(), "format": "ogg"}}
+    )
+    assert bodies == [expected] * 4
     for call in post.await_args_list:
-        assert call.kwargs["files"]["language"] == (None, "ja")
-
-
-# ---------------------------------------------------------------------------
-# Malformed / unexpected response bodies must short-circuit, not escape
-# ---------------------------------------------------------------------------
+        assert call.kwargs["headers"]["Authorization"] == "Bearer sk-test"
+        assert call.kwargs["timeout"] == 60.0
 
 
 @pytest.mark.asyncio
 async def test_returns_empty_on_malformed_json_body(audio_file: Path) -> None:
-    """200 with invalid JSON: log and return "" immediately (no retry, no exception)."""
     provider = OpenAITranscriptionProvider(api_key="sk-test")
     post = AsyncMock(return_value=_raw_response(200, b"<html>not json</html>"))
     with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
@@ -620,23 +591,12 @@ async def test_returns_empty_on_malformed_json_body(audio_file: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_returns_empty_on_non_dict_json_body(audio_file: Path) -> None:
-    """200 with a JSON array (not dict): no AttributeError leak; return "" immediately."""
     provider = OpenAITranscriptionProvider(api_key="sk-test")
     post = AsyncMock(return_value=_raw_response(200, b"[]"))
     with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
         result = await provider.transcribe(audio_file)
     assert result == ""
     assert post.await_count == 1
-
-
-# ---------------------------------------------------------------------------
-# Pin the full advertised retry contract: all retryable statuses + exceptions
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Configurable model: forwarded to the multipart "model" field on all providers
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -663,17 +623,12 @@ async def test_multipart_provider_sends_configured_model(audio_file: Path, provi
     assert post.await_args_list[0].kwargs["files"]["model"] == (None, "my-stt-model")
 
 
-# ---------------------------------------------------------------------------
-# OpenRouter provider — JSON body with base64 audio + configurable STT model
-# ---------------------------------------------------------------------------
-
-
 def test_audio_format_maps_known_extensions() -> None:
-    assert _audio_format(Path("v.oga")) == "ogg"  # Telegram voice notes
+    assert _audio_format(Path("v.oga")) == "ogg"
     assert _audio_format(Path("v.opus")) == "ogg"
     assert _audio_format(Path("v.mp4")) == "m4a"
     assert _audio_format(Path("v.mp3")) == "mp3"
-    assert _audio_format(Path("v.wav")) == "wav"  # passthrough for unknown
+    assert _audio_format(Path("v.wav")) == "wav"
 
 
 def test_openrouter_defaults_and_chat_base_normalization() -> None:
@@ -681,14 +636,12 @@ def test_openrouter_defaults_and_chat_base_normalization() -> None:
     assert default.api_url == "https://openrouter.ai/api/v1/audio/transcriptions"
     assert default.model == "openai/whisper-1"
 
-    # A chat-style base (what users copy from provider config) gets the path appended.
     chat_base = OpenRouterTranscriptionProvider(api_key="k", api_base="https://openrouter.ai/api/v1")
     assert chat_base.api_url == "https://openrouter.ai/api/v1/audio/transcriptions"
 
 
 @pytest.mark.asyncio
 async def test_openrouter_sends_json_base64_body(audio_file: Path) -> None:
-    """OpenRouter gets a JSON body with base64 audio + format — never multipart."""
     provider = OpenRouterTranscriptionProvider(
         api_key="k", model="nvidia/parakeet-tdt-0.6b-v3", language="en"
     )
@@ -696,11 +649,11 @@ async def test_openrouter_sends_json_base64_body(audio_file: Path) -> None:
     with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
         assert await provider.transcribe(audio_file) == "hi"
     call = post.await_args_list[0].kwargs
-    assert "files" not in call  # not multipart
+    assert "files" not in call
     body = call["json"]
     assert body["model"] == "nvidia/parakeet-tdt-0.6b-v3"
     assert body["language"] == "en"
-    assert body["input_audio"]["format"] == "ogg"  # .ogg fixture
+    assert body["input_audio"]["format"] == "ogg"
     assert base64.b64decode(body["input_audio"]["data"]) == audio_file.read_bytes()
 
 
@@ -711,16 +664,6 @@ async def test_openrouter_omits_language_when_unset(audio_file: Path) -> None:
     with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
         assert await provider.transcribe(audio_file) == "ok"
     assert "language" not in post.await_args_list[0].kwargs["json"]
-
-
-@pytest.mark.asyncio
-async def test_openrouter_shares_retry_contract(audio_file: Path) -> None:
-    """OpenRouter goes through the same retry helper: 503 retried, then 200."""
-    provider = OpenRouterTranscriptionProvider(api_key="k", model="openai/whisper-1")
-    post = AsyncMock(side_effect=[_response(503), _response(200, {"text": "recovered"})])
-    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
-        assert await provider.transcribe(audio_file) == "recovered"
-    assert post.await_count == 2
 
 
 def test_resolve_chat_completions_url_appends_path_to_base() -> None:
@@ -971,9 +914,61 @@ async def test_retries_on_every_advertised_transient_exception(
     assert post.await_count == 2
 
 
-# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_cls", [OpenAITranscriptionProvider, StepFunTranscriptionProvider])
+@pytest.mark.parametrize("phase", ["request", "stream", "sleep"])
+async def test_transcription_cancellation_releases_client(monkeypatch, audio_file, provider_cls, phase):
+    entered, blocked = asyncio.Event(), asyncio.Event()
+    requests, streams, waits = [], [], []
+
+    class Stream(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            if phase == "stream":
+                entered.set()
+                await blocked.wait()
+            yield b""
+
+        async def aclose(self):
+            self.closed = True
+
+    async def handle(request):
+        requests.append(request)
+        if phase == "request":
+            entered.set()
+            await blocked.wait()
+        stream = Stream()
+        streams.append(stream)
+        return httpx.Response(200 if phase == "stream" else 503, stream=stream)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+
+    async def sleep(delay):
+        waits.append(delay)
+        assert streams[-1].closed
+        entered.set()
+        await blocked.wait()
+
+    monkeypatch.setattr("nanobot.providers.transcription.httpx.AsyncClient", lambda: client)
+    monkeypatch.setattr("nanobot.providers.transcription.asyncio.sleep", sleep)
+    task = asyncio.create_task(provider_cls(api_key="sk-test").transcribe(audio_file))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert len(requests) == 1
+        assert all(stream.closed for stream in streams)
+        assert client.is_closed
+        assert waits == ([1.0] if phase == "sleep" else [])
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await client.aclose()
+
+
 # apiBase normalization (#3637): a chat-style base must not be POSTed verbatim
-# ---------------------------------------------------------------------------
 
 
 def test_resolve_transcription_url_falls_back_to_default() -> None:
@@ -987,7 +982,6 @@ def test_resolve_transcription_url_appends_path_to_chat_style_base() -> None:
         _resolve_transcription_url("https://api.groq.com/openai/v1", "https://x/audio/transcriptions")
         == "https://api.groq.com/openai/v1/audio/transcriptions"
     )
-    # Trailing slash must not produce a doubled separator.
     assert (
         _resolve_transcription_url("https://api.groq.com/openai/v1/", "https://x/audio/transcriptions")
         == "https://api.groq.com/openai/v1/audio/transcriptions"

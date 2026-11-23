@@ -1,5 +1,3 @@
-"""Boundary tests for pure WebSocket protocol helpers."""
-
 from __future__ import annotations
 
 import pytest
@@ -20,6 +18,7 @@ def test_chat_id_validator_accepts_only_compact_capability_keys() -> None:
         "",
         "x" * 65,
         "../escape",
+        "a.b",
         "chat/id",
         "chat id",
         "chat\nid",
@@ -40,6 +39,7 @@ def test_chat_id_validator_accepts_only_compact_capability_keys() -> None:
         ("{not json", None),
         ("[]", None),
         ("{}", None),
+        ('{"content": "hi"}', None),
         ('{"type": 42}', None),
         ('{"type": "message", "content": "hi"}', "message"),
         ('  {"type": "new_chat"}  ', "new_chat"),

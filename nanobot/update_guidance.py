@@ -1,5 +1,3 @@
-"""Read-only, installation-bound instructions; never an alternative executor."""
-
 from __future__ import annotations
 
 import os

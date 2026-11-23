@@ -20,6 +20,7 @@ from nanobot.agent.tools.exec_session import (
 )
 from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.execution import processes
 
 
 def _python(code: str) -> list[str]:
@@ -74,7 +75,7 @@ def _pid_running(pid: int) -> bool:
         kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
         kernel32.WaitForSingleObject.restype = wintypes.DWORD
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-        handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        handle = kernel32.OpenProcess(0x00100000, False, pid)
         if not handle:
             error = ctypes.get_last_error()
             assert error == 87, f"OpenProcess({pid}) failed: {error}"
@@ -82,7 +83,7 @@ def _pid_running(pid: int) -> bool:
         try:
             status = kernel32.WaitForSingleObject(handle, 0)
             assert status in (0, 258), f"WaitForSingleObject({pid}) failed: {status}"
-            return status == 258  # WAIT_TIMEOUT
+            return status == 258
         finally:
             kernel32.CloseHandle(handle)
 
@@ -302,7 +303,6 @@ async def test_partial_stdout_and_stderr_bytes_refresh_idle_without_log_reads(tm
                 info, = await manager.list()
                 assert info.session_id == sid
                 assert info.returncode is None
-                # This anchor stays fixed between bytes, even if observation is delayed.
                 output_at = info.elapsed_s - info.idle_s
                 if output_at > after:
                     return output_at
@@ -349,7 +349,6 @@ async def test_idle_termination_stops_owned_tree_without_tool_activity(tmp_path)
         assert _pid_running(parent_pid)
         assert _pid_running(child_pid)
 
-        # Observe OS process exit before making another tool or manager call.
         await _pid_stopped(parent_pid)
         await _pid_stopped(child_pid, timeout=3)
         final = await session_tool.execute(session_id=sid, until_exit=True, timeout_ms=3000)
@@ -445,13 +444,13 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
     if not early_root_exit:
         parent_code += f"while not Path({str(release_root)!r}).exists(): time.sleep(0.02)\n"
 
-    real_spawn = ExecTool._spawn
+    real_spawn = processes.spawn_process_tree
     spawn_returned = asyncio.Event()
 
     async def spawn_with_exit_order(*args, **kwargs):
-        process = await real_spawn(*args, **kwargs)
+        tree = await real_spawn(*args, **kwargs)
+        process = tree.process
         if early_root_exit:
-            # Root exit may precede spawn return; inherited pipes must remain intact.
             async with asyncio.timeout(5):
                 while process.returncode is None:
                     await asyncio.sleep(0.005)
@@ -459,9 +458,9 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
         else:
             assert process.returncode is None
         spawn_returned.set()
-        return process
+        return tree
 
-    monkeypatch.setattr(ExecTool, "_spawn", staticmethod(spawn_with_exit_order))
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn_with_exit_order)
     owner = RequestContext(channel="cli", chat_id="pipe-budget", session_key="cli:pipe-budget")
     manager = ExecSessionManager()
     max_runtime = 12 if stop_reason == "owner_closed" else 2
@@ -499,7 +498,7 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
             assert not is_tool_error_result(final), final
             assert "Session terminated. Reason: owner_closed." in final
         assert "worker launched" in final
-        assert _exit_code(final) == 0  # Only the root exited successfully.
+        assert _exit_code(final) == 0
         assert not delayed_effect.exists()
         assert await manager.list(owner_session_key=owner.session_key) == []
     finally:

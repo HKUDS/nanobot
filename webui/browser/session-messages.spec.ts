@@ -16,7 +16,19 @@ for (const theme of ["light", "dark"] as const) {
       const code = incoming.last().locator("pre");
       await expect(code).toBeVisible();
 
-      const layout = await page.getByRole("main", { name: "Session messages" }).evaluate((main) => {
+      const pane = page.locator('main[aria-label="Session messages"]');
+      const row = pane.locator("[data-thread-display-unit]").filter({ has: page.getByText("@mira", { exact: true }) });
+      const menu = row.getByRole("button", { name: "Message actions" });
+      if (width >= 768) {
+        await pane.evaluate(node => { node.style.maxWidth = "550px"; });
+        await expect(row).toHaveCSS("padding-left", "16px");
+        await menu.click();
+        const sheet = page.getByRole("dialog", { name: "Message actions" });
+        await expect(sheet).toBeVisible();
+        await pane.evaluate(node => { node.style.maxWidth = "none"; });
+        await expect(sheet).toBeHidden();
+      }
+      const layout = await pane.evaluate((main) => {
         const rows = [...main.querySelectorAll<HTMLElement>("[data-session-message]")];
         const own = main.querySelector<HTMLElement>("[data-user-text-bubble] > p")!;
         const ownStyle = getComputedStyle(own);
@@ -58,14 +70,38 @@ for (const theme of ["light", "dark"] as const) {
         expect(Math.abs(bubble.handleLeft - bubble.bodyLeft)).toBeLessThan(1);
       }
 
-      const row = page.locator("[data-thread-display-unit]").filter({ has: page.getByText("@mira", { exact: true }) });
-      await row.hover();
-      await row.getByRole("button", { name: "Message actions", exact: true }).click();
-      await expect(page.locator("[data-message-block-menu]")).toBeVisible();
+      const copy = row.getByRole("button", { name: "Copy", exact: true });
+      if (width >= 768) {
+        const side = row.locator("[data-message-side-actions]");
+        await expect(side).toHaveCSS("opacity", "0");
+        const before = await incoming.first().boundingBox();
+        await incoming.first().hover();
+        await expect(side).toHaveCSS("opacity", "1");
+        expect(await incoming.first().boundingBox()).toEqual(before);
+        const bounds = (await side.boundingBox())!;
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(layout.left);
+        for (const message of [incoming.first(), page.locator("[data-assistant-message]").last()]) {
+          const { firstLineOffset, timestampIndent } = await message.evaluate((node) => {
+            const firstLine = node.querySelector(".markdown-content p")!;
+            const icon = node.querySelector("[data-message-block-copy-action] svg")!.getBoundingClientRect();
+            const time = node.querySelector("[data-message-hover-time]")!.getBoundingClientRect();
+            return {
+              firstLineOffset: icon.y + icon.height / 2 - (firstLine.getBoundingClientRect().y + parseFloat(getComputedStyle(firstLine).lineHeight) / 2),
+              timestampIndent: time.x - icon.x,
+            };
+          });
+          expect(Math.abs(firstLineOffset)).toBeLessThan(1);
+          expect(Math.abs(timestampIndent)).toBeLessThan(1);
+        }
+        await copy.hover();
+      }
       await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-      if (width < 768) await page.keyboard.press("Escape");
-      await (width < 768 ? row : page.locator("[data-message-block-menu]")).getByRole("button", { name: "Copy", exact: true }).click();
+      await copy.click();
       await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("Looks good.");
+      if (width >= 768) {
+        await pane.evaluate(node => { node.style.maxWidth = "550px"; });
+        await expect(menu).toHaveAttribute("aria-expanded", "false");
+      }
     });
   }
 }

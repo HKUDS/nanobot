@@ -1,5 +1,3 @@
-"""Authenticated, refresh-safe review and job reads; no installer or server process runs."""
-
 import asyncio
 import json
 import os
@@ -56,22 +54,20 @@ async def test_channel_mutation_preserves_authority_and_invalidates_old_reviews(
 
     fixture = preparation_gateway
     gateway, plan = await preparation_plan(fixture)
-    # Plain HTTP cannot mutate; remote callers do not acquire install authority.
     response = await fetch(gateway, "/api/settings/nanobot-update/channel")
     assert response.status_code == 405
     response = await gateway.http.dispatch_webui_mutation(connection(), CHANNEL, {"channel": "preview", "revision": 0})
     assert response.status_code == 403
     assert read_update_channel().revision == 0
     response = await gateway.http.dispatch_webui_mutation(connection(local=True), CHANNEL, {"channel": "preview", "revision": 0})
-    assert response.status_code == 200, response.body
-    assert json.loads(response.body) == {"channel": "preview", "revision": 1}
+    assert response.status_code == 200, response.message
+    assert response.result == {"channel": "preview", "revision": 1}
     assert "webui.update-channels.v1" in webui_contract()["capabilities"]
     reviewed = await fetch(gateway, READ + "?id=" + plan.id)
     assert json.loads(reviewed.body)["plan"]["validity"] == "channel_changed"
     prepared = await gateway.http.dispatch_webui_mutation(connection(local=True), PREPARE, {"id": plan.id})
     assert prepared.status_code == 409
     assert not (fixture.directory / "jobs" / plan.id / "status.json").exists()
-    # Stale tabs cannot overwrite the newer selection; native uses its distributor.
     assert (await gateway.http.dispatch_webui_mutation(connection(local=True), CHANNEL,
                                                      {"channel": "stable", "revision": 0})).status_code == 409
     assert (await fixture.gateway("native").http.dispatch_webui_mutation(connection(local=True), CHANNEL,
@@ -108,13 +104,12 @@ async def test_review_uses_saved_channel_and_rejects_a_change_during_discovery(p
             observed.append(channel)
             if race:
                 service.change_channel(UpdateChannelRequest(channel="stable", revision=1))
-            # Preview subscriptions can receive a final release too.
             return stable.target
 
     monkeypatch.setattr(update_plan, "ReleaseFeed", lambda _: Feed())
     response = await gateway.http.dispatch_webui_mutation(connection(local=True), "settings.nanobot.update.plan", {"extras": []})
     assert response.status_code == 200
-    saved = UpdatePlans(fixture.directory / "plans").load(json.loads(response.body)["plan"]["id"])
+    saved = UpdatePlans(fixture.directory / "plans").load(response.result["plan"]["id"])
     assert (saved.channel, saved.channel_revision) == ("preview", 1)
     race = True
     response = await gateway.http.dispatch_webui_mutation(connection(local=True), "settings.nanobot.update.plan", {"extras": []})
@@ -211,8 +206,8 @@ async def preparation_plan(fixture):
     response = await gateway.http.dispatch_webui_mutation(
         connection(local=True), "settings.nanobot.update.plan", {"extras": []},
     )
-    assert response.status_code == 200, response.body
-    return gateway, UpdatePlans(fixture.directory / "plans").load(json.loads(response.body)["plan"]["id"])
+    assert response.status_code == 200, response.message
+    return gateway, UpdatePlans(fixture.directory / "plans").load(response.result["plan"]["id"])
 
 
 async def execution_plan(fixture):
@@ -261,12 +256,12 @@ async def test_execution_consent_survives_cancelled_response_and_duplicate_reque
         assert not operation.done(), "A lost requester cannot abandon a still-running launch thread"
         fresh = fixture.gateway()
         duplicate = await fresh.http.dispatch_webui_mutation(connection(local=True), EXECUTE, payload)
-        assert duplicate.status_code == 200, duplicate.body
-        assert duplicate.headers["Cache-Control"] == "no-store"
-        saved = json.loads(duplicate.body)["job"]
+        assert duplicate.status_code == 200, duplicate.message
+        saved = duplicate.result["job"]
         assert saved["execution_confirmation_id"] == confirmation.id
         assert saved["recorded_phase"] == "checking" and not saved["mutation_started"]
         restored = await fetch(fresh, JOB + "?id=" + plan.id)
+        assert restored.headers["Cache-Control"] == "no-store"
         assert json.loads(restored.body)["job"] == saved
     finally:
         release.set()
@@ -331,13 +326,12 @@ async def test_retry_is_explicit_authorized_and_old_submissions_only_read_histor
         assert (await gateway.http.dispatch_webui_mutation(connection(local=True), RETRY, bad)).status_code == 400
     assert not calls
     first = await gateway.http.dispatch_webui_mutation(connection(local=True), RETRY, payload)
-    assert first.status_code == 200, first.body
-    assert first.headers["Cache-Control"] == "no-store"
-    assert json.loads(first.body)["job"]["execution_confirmation_id"] == current.id
+    assert first.status_code == 200, first.message
+    assert first.result["job"]["execution_confirmation_id"] == current.id
     fresh = fixture.gateway()
     for action, body in ((RETRY, payload), (EXECUTE, {"id": plan.id, "confirm_restart": True})):
         repeated = await fresh.http.dispatch_webui_mutation(connection(local=True), action, body)
-        assert repeated.status_code == 200 and json.loads(repeated.body) == json.loads(first.body)
+        assert repeated.status_code == 200 and repeated.result == first.result
     assert calls == [previous.id]
     assert "webui.update-jobs.retry-handoff.v1" in webui_contract()["capabilities"]
 
@@ -354,7 +348,8 @@ async def test_busy_retry_does_not_look_like_an_accepted_new_confirmation(prepar
     response = await gateway.http.dispatch_webui_mutation(connection(local=True), RETRY,
         {"id": plan.id, "previous_confirmation_id": previous.id, "confirm_restart": True})
     assert response.status_code == 409
-    assert b"private lease" not in response.body
+    assert response.message is not None
+    assert "private lease" not in response.message
     assert ExecutionConfirmation.read(directory) == previous
 
 
@@ -378,10 +373,11 @@ async def test_handoff_settlement_route_preserves_permission_and_reads_cancelled
     assert (await gateway.http.dispatch_webui_mutation(connection(), SETTLE, {"id": plan.id})).status_code == 403
     assert calls == []
     response = await gateway.http.dispatch_webui_mutation(connection(local=True), SETTLE, {"id": plan.id})
-    assert response.status_code == 200, response.body
-    assert json.loads(response.body)["job"]["recorded_phase"] == "cancelled"
-    assert json.loads(response.body)["job"]["execution_confirmation_id"] == previous.id
-    assert (await fetch(gateway, JOB + "?id=" + plan.id)).body == response.body
+    assert response.status_code == 200, response.message
+    assert response.result["job"]["recorded_phase"] == "cancelled"
+    assert response.result["job"]["execution_confirmation_id"] == previous.id
+    restored = await fetch(gateway, JOB + "?id=" + plan.id)
+    assert json.loads(restored.body) == response.result
     assert calls == [directory]
     assert "webui.update-jobs.settle-handoff.v1" in webui_contract()["capabilities"]
 
@@ -407,7 +403,7 @@ async def test_execution_refuses_unreviewed_gateway_lifecycle(preparation_gatewa
     monkeypatch.setattr(update_service, "start_handoff", forbidden)
     result = await gateway.http.dispatch_webui_mutation(connection(local=True), EXECUTE,
                                                         {"id": plan.id, "confirm_restart": True})
-    assert result.status_code == 409, result.body
+    assert result.status_code == 409, result.message
     assert ExecutionConfirmation.read(directory) is None
 
 
@@ -434,18 +430,18 @@ async def test_preparation_is_durable_idempotent_and_independent_of_browser(prep
     close = None
     try:
         response = await gateway.http.dispatch_webui_mutation(connection(local=True), PREPARE, {"id": plan.id})
-        assert response.status_code == 200, response.body
-        assert json.loads(response.body)["job"]["recorded_phase"] == "preparation_requested"
-        assert response.headers["Cache-Control"] == "no-store"
+        assert response.status_code == 200, response.message
+        assert response.result["job"]["recorded_phase"] == "preparation_requested"
         directory = fixture.directory / "jobs" / plan.id
         assert JobStatus.read(directory).phase == Phase.PREPARATION_REQUESTED
         await asyncio.wait_for(entered.wait(), 5)
-        # A recreated router has no reference to the original browser's task.
         fresh = fixture.gateway()
         duplicate = await fresh.http.dispatch_webui_mutation(connection(local=True), PREPARE, {"id": plan.id})
         assert duplicate.status_code == 200
-        assert json.loads(duplicate.body)["job"]["recorded_phase"] == "preparing"
-        assert (await fetch(fresh, JOB + "?id=" + plan.id)).status_code == 200
+        assert duplicate.result["job"]["recorded_phase"] == "preparing"
+        restored = await fetch(fresh, JOB + "?id=" + plan.id)
+        assert restored.status_code == 200
+        assert restored.headers["Cache-Control"] == "no-store"
         assert (await fresh.http.dispatch_webui_mutation(connection(local=True), SETTLE, {"id": plan.id})).status_code == 409
         other = plan.model_copy(update={"id": str(uuid4())})
         UpdatePlans(fixture.directory / "plans").save(other)
@@ -500,8 +496,8 @@ async def test_preparation_revalidation_failure_is_saved_and_never_retried_by_re
     await gateway.http.settings_routes.close()
     duplicate = await fixture.gateway().http.dispatch_webui_mutation(connection(local=True), PREPARE, {"id": plan.id})
     assert duplicate.status_code == 200
-    assert json.loads(duplicate.body)["job"]["recorded_phase"] == "preparation_failed"
-    assert b"secret" not in duplicate.body
+    assert duplicate.result["job"]["recorded_phase"] == "preparation_failed"
+    assert "secret" not in json.dumps(duplicate.result)
     directory = fixture.directory / "jobs" / plan.id
     assert "secret" not in (directory / "status.json").read_text()
     assert targets == [plan.target]
@@ -561,20 +557,20 @@ async def test_explicit_settlement_checks_ownership_and_does_not_retry(preparati
 
     monkeypatch.setattr(update_service.ReleaseFeed, "revalidate", forbidden)
     restored = await gateway.http.dispatch_webui_mutation(connection(local=True), PREPARE, {"id": plan.id})
-    assert json.loads(restored.body)["job"]["recorded_phase"] == phase.value
+    assert restored.result["job"]["recorded_phase"] == phase.value
     lock = "prepare-native.lock" if phase == Phase.PREPARING else "preparation-controller.lock"
     with file_access(fixture.directory / lock, exclusive=True):
         blocked = await gateway.http.dispatch_webui_mutation(connection(local=True), SETTLE, {"id": plan.id})
     assert blocked.status_code == 409
     assert JobStatus.read(directory).phase == phase
     settled = await gateway.http.dispatch_webui_mutation(connection(local=True), SETTLE, {"id": plan.id})
-    assert settled.status_code == 200, settled.body
-    assert json.loads(settled.body)["job"]["recorded_phase"] == "preparation_failed"
+    assert settled.status_code == 200, settled.message
+    assert settled.result["job"]["recorded_phase"] == "preparation_failed"
     if phase == Phase.PREPARING:
         assert PreparationProcess.load(directory).active is False
     assert not (directory / "request.json").exists()
     duplicate = await fixture.gateway().http.dispatch_webui_mutation(connection(local=True), PREPARE, {"id": plan.id})
-    assert json.loads(duplicate.body)["job"]["recorded_phase"] == "preparation_failed"
+    assert duplicate.result["job"]["recorded_phase"] == "preparation_failed"
 
 
 async def test_exact_review_survives_router_recreation_without_reselection_or_install(review_gateway):
@@ -587,9 +583,8 @@ async def test_exact_review_survives_router_recreation_without_reselection_or_in
     response = await gateway.http.dispatch_webui_mutation(
         connection(), "settings.nanobot.update.plan", {"channel": "stable", "restart_running": True},
     )
-    assert response.status_code == 200, response.body
-    assert response.headers["Cache-Control"] == "no-store"
-    payload = json.loads(response.body)
+    assert response.status_code == 200, response.message
+    payload = response.result
     review = payload["plan"]
     assert payload["installation_allowed"] is False
     assert payload["execution_available"] is False
@@ -624,7 +619,7 @@ async def test_live_update_review_requires_this_gateway_and_preserves_owner_poli
     response = await gateway.http.dispatch_webui_mutation(
         connection(local=True), "settings.nanobot.update.plan", {"restart_running": True},
     )
-    payload = json.loads(response.body)
+    payload = response.result
     assert payload["installation_allowed"] is True
     assert payload["execution_available"] is (os.name == "posix")
     assert payload["plan"]["extras"] == ["webui"]
@@ -647,7 +642,7 @@ async def test_review_routes_unverified_uv_versions_to_the_installation_owner(re
         connection(local=True), "settings.nanobot.update.plan", {"restart_running": True},
     )
     assert response.status_code == 200
-    payload = json.loads(response.body)
+    payload = response.result
     assert payload["execution_available"] is False
     plan = UpdatePlans(fixture.directory / "plans").load(payload["plan"]["id"])
     assert update_plan.inline_update_blocked_reason(plan) == "installation_owner"
@@ -659,7 +654,7 @@ async def test_review_reports_profile_and_installation_changes_without_replacing
     gateway = fixture.gateway()
     created = await gateway.http.dispatch_webui_mutation(connection(local=True), "settings.nanobot.update.plan", {})
     assert created.status_code == 200
-    payload = json.loads(created.body)
+    payload = created.result
     assert payload["installation_allowed"] is True
     review = payload["plan"]
     assert not any(item["stop"] or item["restart"] for item in review["profiles"])
@@ -697,7 +692,7 @@ async def test_expired_unknown_and_foreign_plans_have_explicit_results(review_ga
     fixture = review_gateway
     gateway = fixture.gateway()
     response = await gateway.http.dispatch_webui_mutation(connection(), "settings.nanobot.update.plan", {})
-    review = json.loads(response.body)["plan"]
+    review = response.result["plan"]
     now = time.time()
     monkeypatch.setattr(update_plan.time, "time", lambda: now + 901)
     response = await fetch(gateway, READ + "?id=" + review["id"])
@@ -725,7 +720,8 @@ async def test_desktop_and_failed_discovery_do_not_claim_executable_or_current(r
     monkeypatch.setattr(update_plan, "inspect_installation", failed_probe)
     failed = await fixture.gateway().http.dispatch_webui_mutation(connection(), "settings.nanobot.update.plan", {})
     assert failed.status_code == 409
-    assert b"secret" not in failed.body
+    assert failed.message is not None
+    assert "secret" not in failed.message
     assert not (fixture.directory / "plans").exists()
 
 
@@ -745,7 +741,7 @@ async def test_environment_replaced_during_discovery_does_not_return_a_valid_rev
         connection(), "settings.nanobot.update.plan", {},
     )
     assert response.status_code == 409
-    assert response.body == b"Could not verify an update plan for this installation. No update was started."
+    assert response.message == "Could not verify an update plan for this installation. No update was started."
     assert calls == 2
     assert not (fixture.directory / "jobs").exists()
 
@@ -754,7 +750,7 @@ async def test_missing_interpreter_is_not_misreported_as_a_missing_plan(review_g
     fixture = review_gateway
     gateway = fixture.gateway()
     response = await gateway.http.dispatch_webui_mutation(connection(), "settings.nanobot.update.plan", {})
-    plan_id = json.loads(response.body)["plan"]["id"]
+    plan_id = response.result["plan"]["id"]
 
     def removed_python():
         raise FileNotFoundError("/private/installation/bin/python")
@@ -770,7 +766,7 @@ async def test_job_reads_survive_refresh_expiry_and_unavailable_installation(rev
     fixture = review_gateway
     gateway = fixture.gateway()
     response = await gateway.http.dispatch_webui_mutation(connection(), "settings.nanobot.update.plan", {})
-    plan_id = json.loads(response.body)["plan"]["id"]
+    plan_id = response.result["plan"]["id"]
     plan = UpdatePlans(fixture.directory / "plans").load(plan_id)
     directory = fixture.directory / "jobs" / plan_id
     directory.mkdir(parents=True)
@@ -804,8 +800,6 @@ async def test_job_reads_survive_refresh_expiry_and_unavailable_installation(rev
     assert not (directory / "request.json").exists(), "An early journal must not require committed staging"
     assert "webui.update-jobs.read.v1" in webui_contract()["capabilities"]
 
-    # A journal is recoverable without revalidating the expired plan or reading
-    # package metadata; it is not permission to retry or proof a worker is live.
     monkeypatch.setattr(update_plan.time, "time", lambda: plan.expires_at + 1)
     JobStatus(plan_id, Phase.FAILED, 1, True, "https://user:secret@private.example", plan.expires_at).save(directory)
     pending = pending_update_path()
@@ -819,16 +813,12 @@ async def test_job_reads_survive_refresh_expiry_and_unavailable_installation(rev
     assert job["recorded_phase"] == "failed" and job["mutation_started"] is True
     assert job["attempt"] == 1 and job["updated_at"] == plan.expires_at
     assert b"secret" not in response.body
-    # Only the explicit recovery command exposes the launcher's exact location;
-    # job diagnostics and profile paths must remain out of the status payload.
     assert job.pop("recovery_command") == recovery
     assert "private account" not in json.dumps(job)
     assert {"message", "running", "can_retry", "python", "url", "profiles"}.isdisjoint(job)
     assert len(fixture.requests) == 1
     assert not (directory / "approval.json").exists()
 
-    # A completed program restoration is not a successful installation. Keep
-    # the legacy wire phase readable while exposing the precise new result.
     JobStatus(plan_id, Phase.RESTORED, 2, True, "Private recovery detail", plan.expires_at).save(directory)
     response = await fetch(fixture.gateway(), JOB + "?id=" + plan_id)
     job = json.loads(response.body)["job"]
@@ -840,7 +830,7 @@ async def test_job_reads_reject_missing_foreign_and_corrupt_records(review_gatew
     fixture = review_gateway
     gateway = fixture.gateway()
     response = await gateway.http.dispatch_webui_mutation(connection(), "settings.nanobot.update.plan", {})
-    plan_id = json.loads(response.body)["plan"]["id"]
+    plan_id = response.result["plan"]["id"]
     plan = UpdatePlans(fixture.directory / "plans").load(plan_id)
     monkeypatch.setattr(sys, "prefix", fixture.snapshot.environment)
     for query in ("", "?id=../../config", "?id=not-a-uuid"):
@@ -889,7 +879,6 @@ async def test_cancelled_request_keeps_probe_lease_until_native_work_exits(revie
         assert fixture.requests == []
     finally:
         release.set()
-        # Wait for the probe's actual lease release before restoring Path.home.
         async with asyncio.timeout(5):
             while True:
                 try:
@@ -917,7 +906,7 @@ async def test_plan_cannot_invent_restart_ownership_or_replace_manager_extras(re
         assert not (fixture.directory / "plans").exists()
     else:
         assert response.status_code == 200
-        payload = json.loads(response.body)
+        payload = response.result
         assert payload["execution_available"] is False
         assert payload["plan"]["execution_blocked_reason"] == (
             "external_restart" if os.name == "posix" else "installation_owner"

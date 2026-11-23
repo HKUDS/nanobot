@@ -13,7 +13,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["scripts/check_client_import_boundaries*.mjs"],
+    files: ["scripts/check_client_import_boundaries*.mjs", "webui/scripts/**/*.mjs"],
     languageOptions: {
       globals: { ...globals.node, Bun: "readonly" },
     },

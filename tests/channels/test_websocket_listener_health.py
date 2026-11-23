@@ -1,5 +1,3 @@
-"""Regression tests for WebSocket listener health probing portability."""
-
 from __future__ import annotations
 
 import errno
@@ -70,24 +68,10 @@ def test_closed_socket_is_not_accepting() -> None:
     assert WebSocketChannel._socket_is_accepting(sock) is False
 
 
-@pytest.mark.parametrize(
-    "unsupported_errno",
-    [errno.ENOPROTOOPT, errno.EOPNOTSUPP],
-)
-def test_unsupported_sockopt_falls_back_to_fd_liveness(unsupported_errno: int) -> None:
-    """macOS/BSD reject ``SO_ACCEPTCONN`` even on healthy listeners.
-
-    Treating that rejection as "not serving" made the listener look permanently
-    degraded, so the channel retried forever and never became ready.
-    """
+@pytest.mark.parametrize("unsupported_errno", [errno.ENOPROTOOPT, errno.EOPNOTSUPP])
+def test_listener_health_uses_unsupported_sockopt_fallback(unsupported_errno: int) -> None:
+    # BSD/macOS may reject SO_ACCEPTCONN even on a healthy listener.
     sock = _StubSocket(fileno=3, error=OSError(unsupported_errno, "Protocol not available"))
-
-    assert WebSocketChannel._socket_is_accepting(sock) is True
-
-
-def test_listener_health_uses_unsupported_sockopt_fallback() -> None:
-    """The fallback must be wired into the health check that controls readiness."""
-    sock = _StubSocket(fileno=3, error=OSError(errno.ENOPROTOOPT, "Protocol not available"))
     server: Any = _StubServer(sock)
 
     assert WebSocketChannel._listener_is_serving(server) is True
@@ -103,7 +87,6 @@ def test_unexpected_oserror_propagates() -> None:
 
 
 def test_listener_health_rejects_invalid_socket_state() -> None:
-    """``EINVAL`` can mean that a live socket isn't actually listening."""
     sock = _StubSocket(fileno=3, error=OSError(errno.EINVAL, "Invalid argument"))
     server: Any = _StubServer(sock)
 
@@ -111,7 +94,6 @@ def test_listener_health_rejects_invalid_socket_state() -> None:
 
 
 def test_unsupported_sockopt_still_rejects_dead_fd() -> None:
-    """The portability fallback must not mask an already-closed listener."""
     sock = _StubSocket(fileno=-1, error=OSError(errno.ENOPROTOOPT, "Protocol not available"))
 
     assert WebSocketChannel._socket_is_accepting(sock) is False

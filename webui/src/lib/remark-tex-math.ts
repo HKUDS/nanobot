@@ -1,10 +1,12 @@
 import type { Root } from "mdast";
+import { codeText } from "micromark-core-commonmark";
 import { factorySpace } from "micromark-factory-space";
-import type { Code, Construct, Effects, Extension, State, Token } from "micromark-util-types";
+import type { Code, Construct, Effects, Extension, State, Token, TokenizeContext } from "micromark-util-types";
 import type { Plugin } from "unified";
 import type {} from "micromark-extension-math";
 
 const BACKSLASH = 92;
+const BACKTICK = 96;
 const DOLLAR = 36;
 const LEFT_PAREN = 40;
 const RIGHT_PAREN = 41;
@@ -120,11 +122,24 @@ const nonLazyContinuation: Construct = {
 };
 
 // Model output commonly uses `$...$`; numeric-only spans are usually prices, not formulas.
-function tokenizeGuardedDollarMathText(effects: Effects, ok: State, nok: State): State {
+function tokenizeGuardedDollarMathText(
+  this: TokenizeContext, effects: Effects, ok: State, nok: State,
+): State {
+  const currentOffset = () => this.now().offset;
   let hasMathSignal = false;
   let hasContent = false;
   let firstDataCode: Code = null;
   let previousDataCode: Code = null;
+  let codeSpanEnd = 0;
+  const codeSpan: Construct = {
+    partial: true,
+    tokenize(effects, ok, nok) {
+      return codeText.tokenize.call(this, effects, (code) => {
+        codeSpanEnd = this.events[this.events.length - 1][1].end.offset;
+        return ok(code);
+      }, nok);
+    },
+  };
 
   return start;
 
@@ -149,7 +164,14 @@ function tokenizeGuardedDollarMathText(effects: Effects, ok: State, nok: State):
       return nok(code);
     }
 
+    if (code === BACKTICK && currentOffset() >= codeSpanEnd) {
+      return effects.check(codeSpan, data, unmatchedBackticks)(code);
+    }
+
     if (code === DOLLAR) {
+      // A single-dollar formula cannot end inside a complete Markdown code span.
+      // Formulas with crossing backticks can use the explicit TeX delimiters.
+      if (currentOffset() < codeSpanEnd) return nok(code);
       effects.exit("mathTextData");
       effects.enter("mathTextSequence");
       effects.consume(code);
@@ -160,6 +182,12 @@ function tokenizeGuardedDollarMathText(effects: Effects, ok: State, nok: State):
 
     consumeData(code);
     return code === BACKSLASH ? escaped : data;
+  }
+
+  function unmatchedBackticks(code: Code): State | undefined {
+    if (code !== BACKTICK) return data(code);
+    consumeData(code);
+    return unmatchedBackticks;
   }
 
   function escaped(code: Code): State | undefined {

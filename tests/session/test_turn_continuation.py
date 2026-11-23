@@ -1,166 +1,107 @@
-"""Tests for internal turn continuation policy."""
-
 from __future__ import annotations
-
-import asyncio
-from types import SimpleNamespace
 
 import pytest
 
 from nanobot.agent.tools.context import RequestContext
-from nanobot.bus.events import InboundMessage
-from nanobot.session.goal_state import (
-    GOAL_STATE_KEY,
-    explicit_goal_requested,
-    sustained_goal_turn,
-)
-from nanobot.session.recovery import REQUEST_ORIGIN_METADATA_KEY
+from nanobot.goal.runtime import GoalExecutionPolicy
+from nanobot.session.goal_state import GOAL_STATE_KEY
+from nanobot.session.manager import SessionManager
 from nanobot.session.turn_continuation import (
-    INTERNAL_CONTINUATION_KIND_META,
     INTERNAL_CONTINUATION_META,
-    INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
-    _save_skip_for_turn,
-    internal_continuation_run_started_at,
-    maybe_continue_turn,
-    should_finalize_on_max_iterations,
-    should_stream_budget_response,
-    sustained_goal_continuation_inbound,
+    iteration_limit_context,
+    record_iteration_limit,
+    save_skip_for_turn,
+    should_persist_user_message,
 )
 
 
-@pytest.mark.asyncio
-async def test_maybe_continue_turn_queues_internal_message():
-    meta = {
-        GOAL_STATE_KEY: {
-            "status": "active",
-            "objective": "Finish the migration.",
-            "ui_summary": "migration",
-        },
-    }
-    messages = [
-        {"role": "system", "content": "system"},
-        {"role": "user", "content": "start"},
-        {"role": "assistant", "content": "paused"},
-    ]
-    pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
-    ctx = SimpleNamespace(
-        session=SimpleNamespace(metadata=meta),
-        msg=InboundMessage(
-            channel="feishu",
-            sender_id="u1",
-            chat_id="c1",
-            content="start",
-            metadata={
-                "message_id": "msg-1",
-                "origin_message_id": "msg-0",
-                "_wants_stream": True,
-                "webui": True,
-                "original_command": "/goal",
-                "goal_requested": True,
-            },
-        ),
-        session_key="feishu:c1",
-        request_context=RequestContext(
-            channel="feishu", chat_id="c1", message_id="msg-1", turn_id="turn-1",
-        ),
-        pending_queue=pending,
-        stop_reason="max_iterations",
-        final_content="paused",
-        all_messages=messages,
-        suppress_response=False,
-        visible_run_started_at=1234.5,
-    )
-
-    assert await maybe_continue_turn(ctx, session_metadata=ctx.session.metadata) is True
-
-    queued = pending.get_nowait()
-    assert queued.sender_id == "system:continuation"
-    assert queued.metadata[INTERNAL_CONTINUATION_META] is True
-    assert queued.metadata[INTERNAL_CONTINUATION_KIND_META] == "sustained_goal"
-    assert sustained_goal_continuation_inbound(queued.metadata) is True
-    assert queued.metadata[INTERNAL_CONTINUATION_RUN_STARTED_AT_META] == 1234.5
-    assert internal_continuation_run_started_at(queued.metadata) == 1234.5
-    assert queued.metadata["webui"] is True
-    assert queued.metadata["message_id"] == "msg-1"
-    assert queued.metadata[REQUEST_ORIGIN_METADATA_KEY] == {
-        "message_id": "msg-1", "turn_id": "turn-1",
-    }
-    assert REQUEST_ORIGIN_METADATA_KEY not in ctx.msg.metadata
-    assert queued.metadata["origin_message_id"] == "msg-0"
-    assert queued.metadata["_wants_stream"] is True
-    assert not explicit_goal_requested(queued.metadata)
-    assert sustained_goal_turn(meta, message_metadata=queued.metadata)
-    assert "Finish the migration." in queued.content
-    assert ctx.all_messages == messages[:-1]
-    assert ctx.final_content == ""
-    assert ctx.suppress_response is True
-    assert meta["_sustained_goal_continuation_rounds"] == 1
+@pytest.mark.parametrize("status", ["completed", "cancelled", "blocked"])
+async def test_goal_scope_reads_current_objective_and_closure(tmp_path, status):
+    sessions = SessionManager(tmp_path)
+    session = await sessions.state.get("feishu:c1")
+    try:
+        with GoalExecutionPolicy(sessions.state).scope(session.key, session.generation, persistent=True) as scope:
+            assert await scope.continuation_prompt() is None
+            await sessions.state.update_metadata(session.key, {
+                GOAL_STATE_KEY: {"status": "active", "objective": "Finish the migration."},
+            })
+            assert "Finish the migration." in await scope.continuation_prompt()
+            await sessions.state.update_metadata(session.key, {
+                GOAL_STATE_KEY: {"status": "active", "objective": "A replacement."},
+            })
+            prompt = await scope.continuation_prompt()
+            assert "A replacement." in prompt and "Finish the migration." not in prompt
+            await sessions.state.update_metadata(session.key, {
+                GOAL_STATE_KEY: {"status": status, "objective": "A replacement."},
+            })
+            assert await scope.continuation_prompt() is None
+    finally:
+        await sessions.state.aclose()
 
 
-def test_generic_internal_continuation_is_not_a_sustained_goal_continuation() -> None:
-    assert sustained_goal_continuation_inbound({INTERNAL_CONTINUATION_META: True}) is False
+@pytest.mark.parametrize("operation", ["reset", "delete"])
+async def test_goal_scope_does_not_continue_a_replaced_generation(tmp_path, operation):
+    sessions = SessionManager(tmp_path)
+    session = await sessions.state.get("cli:test")
+    await sessions.state.update_metadata(session.key, {
+        GOAL_STATE_KEY: {"status": "active", "objective": "Old objective."},
+    })
+    try:
+        with GoalExecutionPolicy(sessions.state).scope(session.key, session.generation, persistent=True) as scope:
+            assert "Old objective." in await scope.continuation_prompt()
+            if operation == "reset":
+                await sessions.state.reset(session.key)
+            else:
+                assert await sessions.state.delete(session.key)
+            assert await scope.continuation_prompt() is None
+            replacement = await sessions.state.get(session.key)
+            await sessions.state.update_metadata(session.key, {
+                GOAL_STATE_KEY: {"status": "active", "objective": "New generation's objective."},
+            })
+            assert replacement.generation != session.generation
+            assert await scope.continuation_prompt() is None
+        with GoalExecutionPolicy(sessions.state).scope(session.key, replacement.generation, persistent=True) as scope:
+            assert "New generation's objective." in await scope.continuation_prompt()
+    finally:
+        await sessions.state.aclose()
 
 
-@pytest.mark.asyncio
-async def test_internal_continuation_respects_round_limit():
-    meta = {
-        GOAL_STATE_KEY: {"status": "active", "objective": "x"},
-        "_sustained_goal_continuation_rounds": 12,
-    }
-    ctx = SimpleNamespace(
-        session=SimpleNamespace(metadata=meta),
-        msg=InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="start"),
-        session_key="feishu:c1",
-        pending_queue=asyncio.Queue(),
-        stop_reason="max_iterations",
-        final_content="paused",
-        all_messages=[],
-    )
+async def test_iteration_limit_guidance_is_for_the_next_user_request_not_recovery(tmp_path):
+    sessions = SessionManager(tmp_path)
+    session = await sessions.state.get("cli:test")
+    request = RequestContext(channel="cli", chat_id="test", session_key=session.key)
+    try:
+        await sessions.state.mutate_metadata(
+            session.key, lambda metadata: record_iteration_limit(metadata, "max_iterations"),
+        )
+        context = await iteration_limit_context(sessions.state, request)
+        assert context is not None and "Follow the current request" in context.content
+        recovery = RequestContext(
+            channel="cli", chat_id="test", session_key=session.key,
+            metadata={INTERNAL_CONTINUATION_META: True},
+        )
+        assert await iteration_limit_context(sessions.state, recovery) is None
+        await sessions.state.mutate_metadata(
+            session.key, lambda metadata: record_iteration_limit(metadata, "completed"),
+        )
+        assert await iteration_limit_context(sessions.state, request) is None
+    finally:
+        await sessions.state.aclose()
 
-    assert should_stream_budget_response(
-        stop_reason="max_iterations",
-        pending_queue_available=True,
-        session_metadata=meta,
-    )
-    assert await maybe_continue_turn(ctx, session_metadata=ctx.session.metadata) is False
 
-
-def test_internal_continuation_requires_budget_boundary_and_queue():
-    meta = {GOAL_STATE_KEY: {"status": "active", "objective": "x"}}
-
-    assert should_stream_budget_response(
-        stop_reason="completed",
-        pending_queue_available=True,
-        session_metadata=meta,
-    )
-    assert should_stream_budget_response(
-        stop_reason="max_iterations",
-        pending_queue_available=False,
-        session_metadata=meta,
-    )
-    assert not should_finalize_on_max_iterations(
-        pending_queue_available=True,
-        session_metadata=meta,
-    )
-    assert should_finalize_on_max_iterations(
-        pending_queue_available=False,
-        session_metadata=meta,
-    )
-    assert should_finalize_on_max_iterations(
-        pending_queue_available=True,
-        session_metadata={},
-    )
+def test_explicit_recovery_does_not_persist_a_synthetic_user_input():
+    metadata = {INTERNAL_CONTINUATION_META: True}
+    assert not should_persist_user_message(metadata)
+    assert save_skip_for_turn(
+        message_metadata=metadata, initial_message_count=3, input_persisted_early=False,
+    ) == 3
+    assert should_persist_user_message(None)
 
 
 def test_save_skip_unchanged_for_standalone_current_message():
-    # [system, history user, current user] with the current user already saved.
-    assert _save_skip_for_turn(
-        message_metadata=None,
-        initial_message_count=3,
-        input_persisted_early=True,
+    assert save_skip_for_turn(
+        message_metadata=None, initial_message_count=3, input_persisted_early=True,
     ) == 3
-    assert _save_skip_for_turn(
-        message_metadata=None,
-        initial_message_count=3,
-        input_persisted_early=False,
+    assert save_skip_for_turn(
+        message_metadata=None, initial_message_count=3, input_persisted_early=False,
     ) == 2

@@ -89,6 +89,17 @@ def test_list_sessions_includes_user_preview(tmp_path):
     assert rows[0]["preview"] == "帮我总结一下 OpenAI 的最新硬件计划"
 
 
+def test_list_sessions_previews_literal_image_marker_as_text(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-image-marker")
+    marker = "[image: /tmp/example.png]"
+    session.add_message("user", marker)
+    session.add_message("assistant", "That's an image marker.")
+    manager.save(session)
+
+    assert manager.list_sessions()[0]["preview"] == marker
+
+
 def test_list_sessions_bounds_preview_scan(tmp_path):
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:chat-long-preview")
@@ -120,10 +131,7 @@ def test_get_history_drops_orphan_tool_results_when_window_cuts_tool_calls():
     assert history[-1]["content"] == "new telegram question"
 
 
-# --- Positive test: legitimate pairs survive trimming ---
-
 def test_legitimate_tool_pairs_preserved_after_trim():
-    """Complete tool-call groups within the window must not be dropped."""
     session = Session(key="test:positive")
     session.messages.append({"role": "user", "content": "hello"})
     for i in range(5):
@@ -137,10 +145,7 @@ def test_legitimate_tool_pairs_preserved_after_trim():
     assert history[0]["role"] == "user"
 
 
-# --- last_archived > 0 ---
-
 def test_orphan_trim_with_last_archived():
-    """Orphan trimming works correctly when a session is partially archived."""
     session = Session(key="test:consolidated")
     for i in range(10):
         session.messages.append({"role": "user", "content": f"old {i}"})
@@ -241,8 +246,6 @@ def test_archived_tool_turn_stays_out_of_replay():
     assert len(session.messages) > 8
 
 
-# --- Edge: no tool messages at all ---
-
 def test_no_tool_messages_unchanged():
     session = Session(key="test:plain")
     for i in range(5):
@@ -254,10 +257,7 @@ def test_no_tool_messages_unchanged():
     _assert_no_orphans(history)
 
 
-# --- Edge: all leading messages are orphan tool results ---
-
 def test_all_orphan_prefix_stripped():
-    """If the window starts with orphan tool results and nothing else, they're all dropped."""
     session = Session(key="test:all-orphan")
     session.messages.append({"role": "tool", "tool_call_id": "gone_1", "name": "x", "content": "ok"})
     session.messages.append({"role": "tool", "tool_call_id": "gone_2", "name": "y", "content": "ok"})
@@ -269,8 +269,6 @@ def test_all_orphan_prefix_stripped():
     assert history[0]["role"] == "user"
     assert len(history) == 2
 
-
-# --- Edge: empty session ---
 
 def test_empty_session_history():
     session = Session(key="test:empty")
@@ -306,7 +304,6 @@ def test_get_history_preserves_reasoning_content():
 
 
 def test_get_history_does_not_inject_persisted_timestamps_into_replay_content():
-    """Persisted timestamps are session metadata, not prompt content."""
     session = Session(key="test:timestamps")
     session.messages.append({
         "role": "user",
@@ -336,7 +333,6 @@ def test_get_history_does_not_inject_persisted_timestamps_into_replay_content():
 
 
 def test_get_history_keeps_proactive_delivery_timestamps_out_of_replay_content():
-    """Timestamp metadata remains persisted without becoming prompt text."""
     session = Session(key="test:proactive-timestamps")
     session.messages.append({
         "role": "assistant",
@@ -379,10 +375,7 @@ def test_get_history_does_not_inject_tool_result_timestamps():
     assert tool_result["content"] == "ok"
 
 
-# --- Window cuts mid-group: assistant present but some tool results orphaned ---
-
 def test_window_cuts_mid_tool_group():
-    """If the window starts between an assistant's tool results, the partial group is trimmed."""
     session = Session(key="test:mid-cut")
     session.messages.append({"role": "user", "content": "setup"})
     session.messages.append({
@@ -398,45 +391,29 @@ def test_window_cuts_mid_tool_group():
     session.messages.extend(_tool_turn("intact", 0))
     session.messages.append({"role": "assistant", "content": "final"})
 
-    # Window of 6 should cut off the "setup" user msg and the assistant with split_a/split_b,
-    # leaving orphan tool results for split_a at the front.
     history = session.get_history(max_messages=6)
     _assert_no_orphans(history)
     assert history[0]["role"] == "user"
 
 
-# --- Image breadcrumbs: media kwarg is synthesized into content for replay ---
-
-
-def test_get_history_synthesizes_image_breadcrumb_from_media_kwarg():
-    """Persisted user turns carry image paths as a ``media`` kwarg; LLM
-    replay must still see an ``[image: path]`` breadcrumb so the assistant's
-    follow-up reply has a referent instead of trailing an empty user row."""
+def test_get_history_preserves_user_text_with_media_metadata():
     session = Session(key="test:media")
-    session.messages.append(
-        {"role": "user", "content": "look", "media": ["/m/a.png", "/m/b.png"]}
-    )
-    session.messages.append({"role": "assistant", "content": "nice"})
+    session.add_message("user", "look", media=["/m/pic.png"])
 
-    history = session.get_history(max_messages=500)
+    assert session.get_history() == [{"role": "user", "content": "look"}]
 
-    assert history == [
-        {"role": "user", "content": "look\n[image: /m/a.png]\n[image: /m/b.png]"},
-        {"role": "assistant", "content": "nice"},
+
+def test_get_history_marks_missing_image_snapshot():
+    session = Session(key="test:missing-image")
+    session.add_message("user", [
+        {"type": "image_attachment", "id": "a" * 64},
+        {"type": "text", "text": "look"},
+    ])
+
+    assert session.get_history()[0]["content"] == [
+        {"type": "text", "text": "[Previous image unavailable]"},
+        {"type": "text", "text": "look"},
     ]
-
-
-def test_get_history_synthesizes_breadcrumb_for_image_only_turn():
-    """Turns with no text but attached images must not replay as empty
-    strings — the LLM would otherwise see a bare user turn followed by an
-    unexplained assistant answer."""
-    session = Session(key="test:image-only")
-    session.messages.append({"role": "user", "content": "", "media": ["/m/pic.png"]})
-    session.messages.append({"role": "assistant", "content": "I see a cat"})
-
-    history = session.get_history(max_messages=500)
-
-    assert history[0] == {"role": "user", "content": "[image: /m/pic.png]"}
 
 
 def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
@@ -481,6 +458,7 @@ def test_get_history_does_not_duplicate_persisted_cli_app_runtime_context():
             "entry_point": "cli-anything-drawio",
         }],
         RUNTIME_CONTEXT_HISTORY_META: marker,
+        "input_id": "user:cli-app",
     })
 
     model_history = session.get_history(max_messages=500)
@@ -489,7 +467,7 @@ def test_get_history_does_not_duplicate_persisted_cli_app_runtime_context():
         include_runtime_context=False,
     )
 
-    assert model_history == [{"role": "user", "content": content}]
+    assert model_history == [{"role": "user", "content": content, "_meta": {"input_id": "user:cli-app"}}]
     assert model_history[0]["content"].count("CLI App Attachment: @drawio") == 1
     assert public_history == [{"role": "user", "content": "please use @drawio"}]
 
@@ -514,11 +492,15 @@ def test_public_history_omits_cli_app_breadcrumb():
 
 
 def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
+    from nanobot.goal.runtime import GOAL_GENERATION_VOLATILE_KEYS
+
     manager = SessionManager(tmp_path)
+    manager.exclude_generation_metadata(GOAL_GENERATION_VOLATILE_KEYS)
     source = manager.get_or_create("websocket:source")
     source.metadata["webui"] = True
     source.metadata["title"] = "Old title"
     source.metadata["goal_state"] = {"status": "active", "objective": "do not inherit"}
+    source.metadata["_sustained_goal_continuation_rounds"] = 7
     source.add_message("user", "round1")
     source.add_message("assistant", "answer1")
     source.add_message("user", "round2 fork me")
@@ -537,6 +519,7 @@ def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
     assert forked.metadata["webui"] is True
     assert "title" not in forked.metadata
     assert "goal_state" not in forked.metadata
+    assert "_sustained_goal_continuation_rounds" not in forked.metadata
     saved = manager.read_session_file("websocket:fork")
     assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
 
@@ -663,20 +646,15 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_archived_prefix(tm
 
 
 def test_get_history_ignores_media_kwarg_on_non_user_rows():
-    """``media`` only ever appears on user entries in practice, but the
-    synthesizer must be defensive: assistants / tools with list content
-    don't get the breadcrumb pasted on top."""
     session = Session(key="test:defensive")
     session.messages.append(
         {
             "role": "assistant",
             "content": [{"type": "text", "text": "structured"}],
-            "media": ["/m/x.png"],  # nonsense but shouldn't crash
+            "media": ["/m/x.png"],
         }
     )
     history = session.get_history(max_messages=500)
-    # List content is passed through verbatim — the synthesizer only
-    # rewrites plain-string content.
     assert history[0]["content"] == [{"type": "text", "text": "structured"}]
 
 
@@ -695,24 +673,30 @@ def test_get_history_does_not_paste_assistant_media_paths_into_replay():
     assert history == [{"role": "assistant", "content": "来了 🎨"}]
 
 
-def test_get_history_sanitizes_existing_assistant_replay_artifacts():
-    session = Session(key="test:polluted-assistant")
-    session.messages.append(
-        {
-            "role": "assistant",
-            "content": (
-                "[Message Time: 2026-05-09 00:33:48]\n"
-                "来了 🎨\n"
-                "[image: /home/user/.nanobot/media/generated/img_old.png]\n\n"
-                "generate_image(\"16:9\")\n"
-                "message(\"来了 🎨\")"
-            ),
-        }
+def test_get_history_preserves_assistant_text_verbatim():
+    session = Session(key="test:assistant-example")
+    draft = 'message("欢迎加入")'
+    image_marker = "[image: /tmp/example.png]"
+    example = (
+        "[Message Time: 2026-05-09 00:33:48]\r\n"
+        "Here is the photo delivery example:\r\n"
+        '    generate_image("16:9")\r\n'
+        '    message("来了 🎨")\r\n'
     )
+    session.add_message("user", "Draft a welcome message.")
+    session.add_message("assistant", draft)
+    session.add_message("user", "Show a photo delivery example.")
+    session.add_message("assistant", example)
+    session.add_message("user", "Repeat the image marker exactly.")
+    session.add_message("assistant", image_marker)
 
-    history = session.get_history(max_messages=500)
+    history = session.get_history()
 
-    assert history == [{"role": "assistant", "content": "来了 🎨"}]
+    assert [message["content"] for message in history if message["role"] == "assistant"] == [
+        draft,
+        example,
+        image_marker,
+    ]
 
 
 def test_get_history_respects_max_tokens(monkeypatch):

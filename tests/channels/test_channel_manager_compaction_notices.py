@@ -1,5 +1,3 @@
-"""Channel transports decide whether to render compaction lifecycle events."""
-
 from __future__ import annotations
 
 import asyncio
@@ -87,7 +85,6 @@ async def test_dispatch_forwards_all_compaction_phases_before_adapter_filtering(
         with suppress(asyncio.CancelledError):
             await asyncio.wait_for(task, timeout=2)
 
-    # The recorder sees the manager -> adapter boundary, not a fake presentation rule.
     received = [call.args[0] for call in channel._send_mock.await_args_list]
     assert received == [*messages, final]
     assert [msg.event for msg in received] == [*events, None]
@@ -113,7 +110,6 @@ def test_global_notice_config_round_trip_and_rebuild(manager):
     manager.config = Config.model_validate({"channels": {"showCompactionNotices": True}})
     manager.config = Config.model_validate_json(manager.config.model_dump_json(by_alias=True))
     assert manager._build_channel(_MockChannel, {}).show_compaction_notices is True
-    # Rebuilding an adapter after a config change must resolve the new default.
     manager.config.channels.show_compaction_notices = False
     assert manager._build_channel(_MockChannel, {}).show_compaction_notices is False
     assert manager._build_channel(

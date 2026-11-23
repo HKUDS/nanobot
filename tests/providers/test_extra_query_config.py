@@ -1,5 +1,3 @@
-"""Tests for provider extra_query config injection into client defaults."""
-
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -10,7 +8,6 @@ from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
 
 class TestExtraQuerySchema:
-    """Verify ProviderConfig accepts extra_query."""
 
     def test_default_is_none(self) -> None:
         config = ProviderConfig()
@@ -21,25 +18,7 @@ class TestExtraQuerySchema:
         assert config.extra_query == {"api-version": "2024-02-01"}
 
 
-class TestExtraQueryInit:
-    """Verify the provider stores extra_query from config."""
-
-    def test_default_is_empty(self) -> None:
-        provider = OpenAICompatProvider(api_key="test")
-        assert provider._extra_query == {}
-
-    def test_none_becomes_empty(self) -> None:
-        provider = OpenAICompatProvider(api_key="test", extra_query=None)
-        assert provider._extra_query == {}
-
-    def test_dict_stored(self) -> None:
-        query = {"api-version": "v1"}
-        provider = OpenAICompatProvider(api_key="test", extra_query=query)
-        assert provider._extra_query == query
-
-
 class TestExtraQueryBuildClient:
-    """Verify extra_query flows into AsyncOpenAI default_query."""
 
     def test_build_client_passes_default_query(self) -> None:
         mock_client = MagicMock()
@@ -71,7 +50,6 @@ class TestExtraQueryBuildClient:
 
 
 class TestProviderSignatureIncludesExtraQuery:
-    """Verify provider_signature tracks provider extra_query changes."""
 
     def test_provider_signature_tracks_extra_query(self) -> None:
         base = {

@@ -1,5 +1,3 @@
-"""Cooperative shutdown protocol tests; no installer or real account is touched."""
-
 import asyncio
 import hashlib
 import json
@@ -143,8 +141,6 @@ async def test_handoff_rejects_approval_before_requesting_gateway_shutdown(proto
     directory, _, _, stops = protocol
     state = JobStatus.read(directory)
     state.advance(directory, Phase.CHECKING, "Checking approval", mutation_started=False)
-    # Environment inspection is covered by the real installed-process tests;
-    # exercise the actual handoff ordering and durable status here.
     monkeypatch.setattr(update_handoff, "current_environment", lambda **_: None)
     monkeypatch.setattr(update_handoff, "check_environment", lambda *_, **__: None)
     monkeypatch.setattr(update_handoff.ReleaseFeed, "revalidate", AsyncMock(side_effect=failure))
@@ -211,8 +207,6 @@ async def test_handoff_rejects_observed_catalogue_rollback_before_gateway_shutdo
             super().__init__(cache_dir, transport=httpx.MockTransport(respond),
                              supported_tags=[Tag("py3", "none", "win_amd64")])
 
-    # Publication authority is independent of catalogue freshness. These fixture
-    # bytes stand for a previously approved release that has since been withdrawn.
     monkeypatch.setattr(ReleaseFeed, "_authorize", AsyncMock())
     root = installation_state_dir(plan.installation.environment)
     spec = WorkerSpec.read(directory)
@@ -293,7 +287,6 @@ async def test_all_selected_runs_hold_admission_through_committed_shutdown(proto
         assert read_record(installation_state_dir() / "stop.json")["phase"] == "stopped"
         assert JobStatus.read(directory).phase == Phase.READY
         assert not (directory / "approval.json").exists()
-        # Retrying completed handoff is a read/exit check, not a fresh stop.
         await stop_reviewed_gateways(directory)
     finally:
         for watcher in watchers:
@@ -325,8 +318,6 @@ async def test_precommit_failure_releases_every_hold_without_shutdown(protocol, 
                 await operation
         else:
             if reason == "timeout":
-                # Expire only after a participant actually holds admission, so
-                # this proves release rather than racing slow filesystem I/O.
                 await wait_until(lambda: gates[0].paused)
                 expire_stop_deadline()
             with pytest.raises(ValueError if reason == "busy" else TimeoutError,
@@ -453,7 +444,7 @@ def expire_stop_deadline(monkeypatch):
 
     def expire():
         nonlocal now
-        now += 31  # The production stop deadline is 30 seconds.
+        now += 31
 
     return expire
 
@@ -534,7 +525,6 @@ def test_old_or_externally_owned_gateway_cannot_be_selected_for_stop(protocol, c
 
 
 async def test_actual_gateway_exits_normally_before_installation_and_data_leases_are_available(private_home, tmp_path):
-    """Actual gateway stop, not a public download/install/restart E2E."""
     profile = tmp_path / "gateway home"
     workspace = tmp_path / "中文 workspace"
     profile.mkdir()

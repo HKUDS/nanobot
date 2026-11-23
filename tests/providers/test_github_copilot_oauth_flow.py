@@ -1,5 +1,3 @@
-"""Device authorization exposes its prompt before waiting for browser approval."""
-
 import threading
 import time
 from types import SimpleNamespace

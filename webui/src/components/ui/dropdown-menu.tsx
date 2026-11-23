@@ -8,6 +8,7 @@ import {
   floatingSurfaceClassName,
   floatingSurfaceMotionClassName,
 } from "@/components/ui/floating-surface";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 import { useFloatingPortal } from "@/components/ui/floating-portal";
 
@@ -29,15 +30,16 @@ const DropdownMenuContent = React.forwardRef<
   DropdownMenuContentProps
 >(({ className, sideOffset = 4, portalContainer, ...props }, ref) => {
   const dialogContainer = useFloatingPortal();
+  const surfaceRef = useOverlaySurfaceRef("overlay", ref);
   return (
   <DropdownMenuPrimitive.Portal container={portalContainer ?? dialogContainer ?? undefined}>
     <DropdownMenuPrimitive.Content
-      ref={ref}
+      ref={surfaceRef}
       sideOffset={sideOffset}
       className={cn(
         floatingSurfaceClassName,
         floatingSurfaceMotionClassName,
-        "max-h-[min(var(--radix-dropdown-menu-content-available-height),28rem)] min-w-[10rem]",
+        "origin-[var(--radix-dropdown-menu-content-transform-origin)] max-h-[min(var(--radix-dropdown-menu-content-available-height),28rem)] min-w-[10rem]",
         className,
       )}
       {...props}
@@ -140,19 +142,22 @@ DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayNam
 const DropdownMenuSubContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
->(({ className, sideOffset = 6, ...props }, ref) => (
-  <DropdownMenuPrimitive.SubContent
-    ref={ref}
-    sideOffset={sideOffset}
-    className={cn(
-      floatingSurfaceClassName,
-      floatingSurfaceMotionClassName,
-      "max-h-[min(var(--radix-dropdown-menu-content-available-height),22rem)] min-w-[11rem] overflow-y-auto",
-      className,
-    )}
-    {...props}
-  />
-));
+>(({ className, sideOffset = 6, ...props }, ref) => {
+  const surfaceRef = useOverlaySurfaceRef("overlay", ref);
+  return (
+    <DropdownMenuPrimitive.SubContent
+      ref={surfaceRef}
+      sideOffset={sideOffset}
+      className={cn(
+        floatingSurfaceClassName,
+        floatingSurfaceMotionClassName,
+        "origin-[var(--radix-dropdown-menu-content-transform-origin)] max-h-[min(var(--radix-dropdown-menu-content-available-height),22rem)] min-w-[11rem] overflow-y-auto",
+        className,
+      )}
+      {...props}
+    />
+  );
+});
 DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName;
 
 export {

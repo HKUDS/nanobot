@@ -1,5 +1,3 @@
-"""Runtime log visibility controls shared by CLI commands."""
-
 from loguru import logger
 
 __all__ = ["_set_nanobot_logs"]

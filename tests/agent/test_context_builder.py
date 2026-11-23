@@ -1,5 +1,3 @@
-"""Tests for ContextBuilder — system prompt and message assembly."""
-
 from pathlib import Path
 
 import pytest
@@ -7,17 +5,9 @@ import pytest
 from nanobot.agent.context import ContextBuilder, TranscriptInput
 from nanobot.runtime_context import RuntimeContextBlock
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _builder(tmp_path: Path, **kw) -> ContextBuilder:
     return ContextBuilder(workspace=tmp_path, **kw)
-
-
-# ---------------------------------------------------------------------------
-# _merge_message_content (static)
-# ---------------------------------------------------------------------------
 
 
 class TestMergeMessageContent:
@@ -66,11 +56,6 @@ class TestMergeMessageContent:
     def test_list_items_not_dicts_wrapped(self):
         result = ContextBuilder._merge_message_content(["raw_item"], None)
         assert result == [{"type": "text", "text": "raw_item"}]
-
-
-# ---------------------------------------------------------------------------
-# _load_bootstrap_files
-# ---------------------------------------------------------------------------
 
 
 class TestLoadBootstrapFiles:
@@ -142,6 +127,23 @@ class TestLoadBootstrapFiles:
         assert "project soul collision" not in result
         assert "project user collision" not in result
 
+    def test_resident_memory_keeps_navigation_without_loading_wiki_pages(self, tmp_path):
+        builder = _builder(tmp_path)
+        builder.memory.write_soul("Always verify corrections.")
+        builder.memory.write_user("Prefer concise Chinese replies.")
+        builder.memory.write_memory("Deployment details: [Wiki](wiki/index.md).")
+        builder.memory.wiki_dir.mkdir()
+        (builder.memory.wiki_dir / "index.md").write_text(
+            "Detailed deployment uses region-west.\n", encoding="utf-8",
+        )
+
+        prompt = builder.build_system_prompt()
+
+        assert "Always verify corrections." in prompt
+        assert "Prefer concise Chinese replies." in prompt
+        assert "Deployment details: [Wiki](wiki/index.md)." in prompt
+        assert "Detailed deployment uses region-west." not in prompt
+
     def test_selected_project_without_agents_does_not_fall_back(self, tmp_path):
         agent_home = tmp_path / "agent-home"
         project = tmp_path / "project"
@@ -176,11 +178,6 @@ class TestLoadBootstrapFiles:
         assert "User prefers Chinese." in result
 
 
-# ---------------------------------------------------------------------------
-# _is_template_content (static)
-# ---------------------------------------------------------------------------
-
-
 class TestIsTemplateContent:
     def test_nonexistent_template_returns_false(self):
         assert ContextBuilder._is_template_content("anything", "nonexistent/path.md") is False
@@ -201,11 +198,6 @@ class TestIsTemplateContent:
         assert ContextBuilder._is_template_content("totally different", "memory/MEMORY.md") is False
 
 
-# ---------------------------------------------------------------------------
-# Bundled bootstrap templates
-# ---------------------------------------------------------------------------
-
-
 class TestBundledToolContract:
     def test_tool_contract_contains_shared_execution_policy(self):
         from importlib.resources import files as pkg_files
@@ -224,11 +216,6 @@ class TestBundledToolContract:
 
         assert "# Tool Usage Notes" in prompt
         assert "clear user request as authorization" in prompt
-
-
-# ---------------------------------------------------------------------------
-# build_user_content
-# ---------------------------------------------------------------------------
 
 
 class TestBuildUserContent:
@@ -260,14 +247,12 @@ class TestBuildUserContent:
         builder = _builder(tmp_path)
         result = builder.build_user_content("hello", [str(png)])
         assert isinstance(result, list)
-        assert len(result) == 3
-        assert result[0] == {"type": "text", "text": f"[image: {png}]"}
-        assert result[1]["type"] == "image_url"
-        assert result[1]["image_url"]["url"].startswith("data:image/png;base64,")
-        assert result[2]["type"] == "text"
-        assert result[2]["text"] == "hello"
+        assert len(result) == 2
+        assert result[0]["type"] == "image_url"
+        assert result[0]["image_url"]["url"].startswith("data:image/png;base64,")
+        assert result[1] == {"type": "text", "text": "hello"}
 
-    def test_images_keep_paired_paths_in_provider_visible_content(self, tmp_path):
+    def test_images_convert_to_structured_provider_content(self, tmp_path):
         from nanobot.providers.base import LLMProvider
         from nanobot.providers.openai_responses.converters import convert_user_message
 
@@ -279,22 +264,8 @@ class TestBuildUserContent:
         converted = convert_user_message(clean["content"])["content"]
         image_indexes = [index for index, block in enumerate(converted) if block["type"] == "input_image"]
         assert len(image_indexes) == 2
-        for index, path in zip(image_indexes, paths, strict=True):
-            assert index > 0
-            assert converted[index - 1] == {"type": "input_text", "text": f"[image: {path}]"}
-        assert converted[-1] == {"type": "input_text", "text": "compare these"}
-
-    def test_image_meta_includes_path(self, tmp_path):
-        png = tmp_path / "test.png"
-        png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
-        builder = _builder(tmp_path)
-        result = builder.build_user_content("hello", [str(png)])
-        assert result[1]["_meta"]["path"] == str(png)
-
-
-# ---------------------------------------------------------------------------
-# build_system_prompt
-# ---------------------------------------------------------------------------
+        assert image_indexes == [0, 1]
+        assert converted[2:] == [{"type": "input_text", "text": "compare these"}]
 
 
 class TestBuildSystemPrompt:
@@ -303,14 +274,11 @@ class TestBuildSystemPrompt:
         result = builder.build_system_prompt()
 
         assert "## Runtime\n" in result
-        assert "Agent profile: SOUL.md and USER.md" in result
-        assert "History log: memory/history.jsonl" in result
 
     def test_default_identity_uses_relative_agent_paths(self, tmp_path):
         result = ContextBuilder(tmp_path)._get_identity()
 
-        assert "Agent profile: SOUL.md and USER.md" in result
-        assert "History log: memory/history.jsonl" in result
+        assert "`memory/wiki/index.md` in the agent workspace" in result
         assert "Custom skills: skills/{skill-name}/SKILL.md" in result
 
     def test_selected_project_identity_keeps_agent_data_in_agent_workspace(self, tmp_path):
@@ -322,7 +290,7 @@ class TestBuildSystemPrompt:
         result = ContextBuilder(agent_home)._get_identity(workspace=project)
 
         assert f"agent workspace is at: {agent_home.resolve()}" in result
-        assert f"{agent_home.resolve()}/SOUL.md" in result
+        assert "`memory/wiki/index.md` in the agent workspace" in result
         assert f"Custom skills: {agent_home.resolve()}/skills/" in result
 
     def test_includes_bootstrap_files(self, tmp_path):
@@ -358,11 +326,6 @@ class TestBuildSystemPrompt:
         result = builder.build_system_prompt()
         assert "## AGENTS.md" not in result
         assert "[Archived Context Summary]" not in result
-
-
-# ---------------------------------------------------------------------------
-# build_messages
-# ---------------------------------------------------------------------------
 
 
 class TestBuildMessages:
@@ -475,7 +438,7 @@ class TestBuildMessages:
         builder = _builder(tmp_path)
         history = [{"role": "user", "content": "previous user message"}]
         messages = builder.build_messages(history, "new message")
-        assert len(messages) == 2  # system + merged user
+        assert len(messages) == 2
         assert "previous user message" in str(messages[1]["content"])
         assert "new message" in str(messages[1]["content"])
 
@@ -511,7 +474,7 @@ class TestBuildMessages:
         builder = _builder(tmp_path)
         history = [{"role": "assistant", "content": "previous response"}]
         messages = builder.build_messages(history, "new message")
-        assert len(messages) == 3  # system + assistant + user
+        assert len(messages) == 3
 
     def test_media_with_history(self, tmp_path):
         png = tmp_path / "img.png"

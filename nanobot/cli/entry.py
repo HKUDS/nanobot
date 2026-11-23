@@ -1,5 +1,3 @@
-"""Low-overhead console entrypoint for the native terminal client."""
-
 from __future__ import annotations
 
 import os
@@ -23,7 +21,6 @@ _ROOT_OPTIONS = frozenset(
 
 
 def _agent_invocation_args(args: list[str]) -> list[str] | None:
-    """Return agent arguments when the root command should act as ``agent``."""
     if not args:
         return []
     if args[0] == "agent":
@@ -34,7 +31,6 @@ def _agent_invocation_args(args: list[str]) -> list[str] | None:
 
 
 def _native_tui_candidate(args: list[str]) -> bool:
-    """Return whether ``agent`` can start without the classic agent stack."""
     if not args or args[0] != "agent":
         return False
     for argument in args[1:]:
@@ -60,7 +56,6 @@ def configure_windows_console() -> None:
 
 
 def _run_agent(args: list[str], *, prog_name: str) -> None:
-    """Run the shared agent command without importing the complete CLI graph."""
     from nanobot.utils.log_config import configure_console_logging
 
     configure_console_logging(sys.stderr)
@@ -75,7 +70,6 @@ def _run_agent(args: list[str], *, prog_name: str) -> None:
 
 
 def _command_args(args: list[str]) -> list[str]:
-    """Skip only global home selectors, not arguments belonging to a subcommand."""
     position = 0
     while position < len(args):
         argument = args[position]
@@ -111,7 +105,6 @@ def main() -> None:
 
 
 def _dispatch() -> None:
-    """Dispatch native TUI startup without importing the complete CLI graph."""
     from nanobot.utils.rotating_output import configure_background_output_from_env
 
     configure_background_output_from_env()

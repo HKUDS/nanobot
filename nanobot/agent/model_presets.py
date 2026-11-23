@@ -1,5 +1,3 @@
-"""Helpers for runtime model preset selection."""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
@@ -12,6 +10,12 @@ from nanobot.providers.factory import ProviderSnapshot, build_provider_snapshot
 
 PresetSnapshotLoader = Callable[[str], ProviderSnapshot]
 PresetCatalogLoader = Callable[[], Mapping[str, ModelPresetConfig]]
+
+
+class UnknownModelPresetError(KeyError):
+    def __init__(self, name: str, available: Mapping[str, ModelPresetConfig]) -> None:
+        self.name = name
+        super().__init__(f"model_preset {name!r} not found. Available: {', '.join(available) or '(none)'}")
 
 
 def default_selection_signature(
@@ -84,4 +88,4 @@ def normalize_preset_name(name: str | None, presets: dict[str, ModelPresetConfig
     matches = [candidate for candidate in presets if candidate.casefold() == name.casefold()]
     if len(matches) == 1:
         return matches[0]
-    raise KeyError(f"model_preset {name!r} not found. Available: {', '.join(presets) or '(none)'}")
+    raise UnknownModelPresetError(name, presets)

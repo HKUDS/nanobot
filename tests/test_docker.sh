@@ -41,7 +41,7 @@ echo "=== Validating output ==="
 PASS=true
 
 check() {
-    if echo "$STATUS_OUTPUT" | grep -q "$1"; then
+    if [[ "$STATUS_OUTPUT" == *"$1"* ]]; then
         echo "  PASS: found '$1'"
     else
         echo "  FAIL: missing '$1'"

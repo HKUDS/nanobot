@@ -39,6 +39,7 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
   const [expandedHeight, setExpandedHeight] = useState(0);
   const [dragHeight, setDragHeight] = useState<number | null>(null);
   const { open, setOpen, tasks } = useSubagentActivity(allTasks, inputKey, context.detailOpen || focused || hovered || dragHeight !== null);
+  const visible = tasks.length > 0;
   const running = allTasks.filter(isActiveSubagentTask).length;
   const composerInput = () => root.current?.closest(".thread-composer-stack")?.querySelector("textarea");
   const changeOpen = (next: boolean, returnFocus = false, preserveFeedback = false) => {
@@ -57,6 +58,17 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
     setDragHeight(null);
     changeOpen(start.wasOpen, false, true);
   };
+
+  useLayoutEffect(() => {
+    const node = trigger.current;
+    if (!node) return;
+    const preventNativeDrag = (event: TouchEvent) => {
+      if (gesture.current && suppressClick.current) event.preventDefault();
+    };
+    // React touch handlers are passive; cancel native inertia only after tap slop.
+    node.addEventListener("touchmove", preventNativeDrag, { passive: false });
+    return () => node.removeEventListener("touchmove", preventNativeDrag);
+  }, [visible]);
 
   useLayoutEffect(() => {
     if (!treeMounted || !root.current) return;
@@ -138,7 +150,7 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
       : t("thread.subagents.finished", { count: tasks.length });
   const title = t("thread.subagents.workTitle");
 
-  if (!tasks.length) return null;
+  if (!visible) return null;
   return <div ref={root} data-testid="subagent-task-dock" className="subagent-task-dock relative mx-auto h-11 sm:h-7"
     onPointerDownCapture={event => { ownedPointerDown.current = event.nativeEvent; }}>
     <div className="absolute inset-x-0 bottom-0 z-30 overflow-hidden rounded-t-2xl border border-b-0 border-border/70 bg-card shadow-[0_-4px_20px_rgba(15,23,42,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.24)]">

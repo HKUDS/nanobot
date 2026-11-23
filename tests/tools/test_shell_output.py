@@ -1,5 +1,3 @@
-"""Plain-text output through shell tools and streaming filters."""
-
 from __future__ import annotations
 
 import re

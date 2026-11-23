@@ -1,4 +1,5 @@
-"""Tests for multi-provider web search."""
+import asyncio
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
@@ -70,7 +71,8 @@ def test_search_concurrency_without_api_key(
 
 
 @pytest.mark.asyncio
-async def test_brave_search(monkeypatch):
+@pytest.mark.parametrize("count", [1, 1.0])
+async def test_brave_search(monkeypatch, count):
     async def mock_get(self, url, **kw):
         assert "brave" in url
         assert kw["headers"]["X-Subscription-Token"] == "brave-key"
@@ -81,7 +83,7 @@ async def test_brave_search(monkeypatch):
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
     tool = _tool(provider="brave", api_key="brave-key", user_agent="nanobot-search-test")
-    result = await tool.execute(query="nanobot", count=1)
+    result = await tool.execute(query="nanobot", count=count)
     assert "NanoBot" in result
     assert "https://example.com" in result
 
@@ -97,7 +99,9 @@ async def test_brave_search_retries_rate_limit_once(monkeypatch):
     async def mock_get(self, url, **kw):
         calls["n"] += 1
         if calls["n"] == 1:
-            return _response(status=429, json={"error": "rate limit"})
+            response = _response(status=429, json={"error": "rate limit"})
+            response.headers["Retry-After"] = "3600"
+            return response
         return _response(json={
             "web": {"results": [{"title": "Recovered", "url": "https://example.com", "description": "ok"}]}
         })
@@ -585,8 +589,6 @@ async def test_deepseek_search_rejects_blank_query(monkeypatch):
     [(0, 1), (100, 50), (50, 50), (1, 1)],
 )
 async def test_deepseek_provider_clamps_count_to_api_range(monkeypatch, requested, expected):
-    # execute() caps tool-level count at 10 for every provider and the schema
-    # advertises the same bound, so the 1-50 API window is only exercised here.
     captured: dict[str, object] = {}
 
     async def mock_post(self, url, **kw):
@@ -683,7 +685,9 @@ async def test_deepseek_search_retries_transient_errors_then_succeeds(
     async def mock_post(self, url, **kw):
         calls["n"] += 1
         if calls["n"] == 1:
-            return _response(status=status, json={"error": {"message": "transient"}})
+            response = _response(status=status, json={"error": {"message": "transient"}})
+            response.headers["Retry-After"] = "3600"
+            return response
         return _response(json={
             "results": [{"title": "Recovered", "url": "https://example.com/ok", "snippet": "ok"}]
         })
@@ -725,12 +729,16 @@ async def test_deepseek_search_gives_up_after_retry_budget(
     tool = _tool(provider="deepseek", api_key="deepseek-key")
     result = await tool.execute(query="retry", count=1)
 
-    # One retry after the initial attempt, then a bounded failure.
     assert calls["n"] == 2
     assert sleeps == [1.0]
     assert is_tool_error_result(result)
     assert expected_text in result
     assert "after retry" in result
+    if status == 429:
+        assert result == (
+            "Error: DeepSeek search rate limited after retry. "
+            "Retry later or reduce the frequency of concurrent web_search calls."
+        )
 
 
 @pytest.mark.asyncio
@@ -812,7 +820,6 @@ async def test_deepseek_whitespace_only_summary_falls_back_to_snippet(monkeypatc
 
 @pytest.mark.asyncio
 async def test_deepseek_caps_oversized_summary(monkeypatch):
-    """Real responses carry summaries far longer than the documented 600-800."""
     async def mock_post(self, url, **kw):
         return _response(json={
             "results": [
@@ -917,24 +924,6 @@ async def test_bocha_search(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_bocha_missing_key_falls_back_to_duckduckgo(monkeypatch):
-    class MockDDGS:
-        def __init__(self, **kw):
-            pass
-
-        def text(self, query, max_results=5):
-            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
-
-    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
-    monkeypatch.delenv("BOCHA_API_KEY", raising=False)
-
-    tool = _tool(provider="bocha")
-    result = await tool.execute(query="test")
-
-    assert "DuckDuckGo fallback" in result
-
-
-@pytest.mark.asyncio
 async def test_bocha_rate_limited(monkeypatch):
     async def mock_post(self, url, **kw):
         return _response(status=429, json={"error": "rate limit"})
@@ -985,25 +974,6 @@ async def test_volcengine_search(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_volcengine_missing_key_falls_back_to_duckduckgo(monkeypatch):
-    class MockDDGS:
-        def __init__(self, **kw):
-            pass
-
-        def text(self, query, max_results=5):
-            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
-
-    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
-    monkeypatch.delenv("VOLCENGINE_SEARCH_API_KEY", raising=False)
-    monkeypatch.delenv("WEB_SEARCH_API_KEY", raising=False)
-
-    tool = _tool(provider="volcengine")
-    result = await tool.execute(query="test")
-
-    assert "DuckDuckGo fallback" in result
-
-
-@pytest.mark.asyncio
 async def test_volcengine_invalid_time_range_returns_error():
     tool = _tool(provider="volcengine", api_key="volc-key")
     result = await tool.execute(query="test", timeRange="Yesterday")
@@ -1048,7 +1018,6 @@ async def test_duckduckgo_search(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_duckduckgo_search_passes_proxy(monkeypatch):
-    """DDGS client must receive the configured proxy so search works behind a proxy."""
     captured: dict = {}
     proxy_url = "http://proxy.example:8080"
 
@@ -1078,6 +1047,8 @@ async def test_duckduckgo_search_passes_proxy(monkeypatch):
         pytest.param("BRAVE_API_KEY", "brave", id="brave_fallback_to_duckduckgo_when_no_key"),
         pytest.param("KAGI_API_KEY", "kagi", id="kagi_fallback_to_duckduckgo_when_no_key"),
         pytest.param("EXA_API_KEY", "exa", id="exa_fallback_to_duckduckgo_when_no_key"),
+        pytest.param("BOCHA_API_KEY", "bocha", id="bocha_fallback_to_duckduckgo_when_no_key"),
+        pytest.param("VOLCENGINE_SEARCH_API_KEY", "volcengine", id="volcengine_fallback_to_duckduckgo_when_no_key"),
     ],
 )
 async def test_provider_falls_back_to_duckduckgo_without_key(monkeypatch, env_key, provider):
@@ -1090,10 +1061,11 @@ async def test_provider_falls_back_to_duckduckgo_without_key(monkeypatch, env_ke
 
     monkeypatch.setattr("ddgs.DDGS", MockDDGS)
     monkeypatch.delenv(env_key, raising=False)
+    monkeypatch.delenv("WEB_SEARCH_API_KEY", raising=False)
 
     tool = _tool(provider=provider, api_key="")
     result = await tool.execute(query="test")
-    assert "Fallback" in result
+    assert "DuckDuckGo fallback" in result
 
 
 @pytest.mark.asyncio
@@ -1293,7 +1265,6 @@ async def test_jina_search_uses_path_encoded_query(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_duckduckgo_timeout_returns_error(monkeypatch):
-    """asyncio.wait_for guard should fire when DDG search hangs."""
     import threading
     gate = threading.Event()
 
@@ -1396,3 +1367,71 @@ async def test_olostep_package_missing_returns_install_hint(monkeypatch):
     assert result == (
         "Error: Olostep support is not installed. Run `nanobot plugins enable olostep`."
     )
+
+
+@pytest.mark.parametrize("provider,outcome", [
+    ("brave", 500),
+    ("brave", httpx.ReadTimeout("slow")),
+    ("deepseek", httpx.ConnectError("offline")),
+])
+async def test_search_does_not_retry_unclassified_failures(monkeypatch, provider, outcome):
+    calls = []
+
+    async def request(*args, **kwargs):
+        calls.append(args)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return _response(status=outcome)
+
+    method = "get" if provider == "brave" else "post"
+    monkeypatch.setattr(httpx.AsyncClient, method, request)
+    result = await _tool(provider=provider, api_key="test-key").execute(query="failure")
+    assert is_tool_error_result(result)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("provider", ["brave", "deepseek"])
+@pytest.mark.parametrize("phase", ["request", "backoff"])
+async def test_search_task_cancellation_closes_client_without_replay(monkeypatch, provider, phase):
+    entered, closed = asyncio.Event(), asyncio.Event()
+    calls = []
+    real_client = httpx.AsyncClient
+
+    async def block():
+        entered.set()
+        await asyncio.Event().wait()
+
+    async def handle(request):
+        calls.append(request)
+        if phase == "request":
+            await block()
+        return httpx.Response(429, json={})
+
+    @asynccontextmanager
+    async def client(**kwargs):
+        instance = real_client(transport=httpx.MockTransport(handle), **kwargs)
+        try:
+            async with instance:
+                yield instance
+        finally:
+            assert instance.is_closed
+            closed.set()
+
+    async def sleep(delay):
+        assert delay == 1.0
+        await block()
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", client)
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", sleep)
+    task = asyncio.create_task(_tool(provider=provider, api_key="test-key").execute(query="cancel"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    assert len(calls) == 1
+    assert closed.is_set()

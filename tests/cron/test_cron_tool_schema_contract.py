@@ -53,12 +53,10 @@ def registry() -> Iterator[ToolRegistry]:
 
 class TestSchemaContract:
     def test_list_accepted_without_message(self, registry: ToolRegistry) -> None:
-        # action='list' must pass schema validation with nothing but 'action'.
         _, _, err = registry.prepare_call("cron", {"action": "list"})
         assert err is None
 
     def test_remove_accepted_without_message(self, registry: ToolRegistry) -> None:
-        # action='remove' must pass schema validation with just 'action' + 'job_id'.
         _, _, err = registry.prepare_call("cron", {"action": "remove", "job_id": "abc"})
         assert err is None
 
@@ -83,22 +81,13 @@ class TestSchemaContract:
         assert "Retry" in out or "retry" in out
 
 
-class TestSchemaSelfDescribesRequirements:
-    def test_message_description_flags_add_requirement(self) -> None:
-        # LLMs rely on field descriptions to infer when something is actually
-        # needed. Without this hint, #3113's loop returns.
-        tool = CronTool(_SvcStub())
-        desc = tool.parameters["properties"]["message"]["description"]
-        assert "REQUIRED" in desc and "action='add'" in desc
+async def test_invalid_action_returns_tool_error_and_allows_correction(registry):
+    from nanobot.agent.tools.registry import is_tool_error_result
 
-    def test_job_id_description_flags_remove_requirement(self) -> None:
-        tool = CronTool(_SvcStub())
-        desc = tool.parameters["properties"]["job_id"]["description"]
-        assert "REQUIRED" in desc and "action='remove'" in desc
+    arguments = {"action": ["list"]}
+    result = await registry.execute("cron", arguments)
 
-    def test_top_level_required_stays_narrow(self) -> None:
-        # If 'message' or 'job_id' ever creep back into top-level required,
-        # list/remove start failing schema validation (the bug PR #3163 v1
-        # accidentally introduced).
-        tool = CronTool(_SvcStub())
-        assert tool.parameters["required"] == ["action"]
+    assert is_tool_error_result(result)
+    assert "action:" in result and "string" in result
+    assert arguments == {"action": ["list"]}
+    assert await registry.execute("cron", {"action": "list"}) == "No scheduled jobs."

@@ -1,5 +1,3 @@
-"""Windows redirect, secret transport and cleanup regressions."""
-
 import base64
 import ctypes
 import io
@@ -405,8 +403,8 @@ def test_private_file_checks_precede_secret_write_and_failures_clean_up(tmp_path
         with browser._private_redirect(b"synthetic-only") as path:
             assert path.read_bytes() == b"synthetic-only"
             assert events.index(("private", path, False)) < events.index(("write", path))
-            assert ("close", path, 0x40020080) in events  # No live write handle for browser.
-            assert ("close", path.parent, 0x20080) not in events  # Directory is pinned.
+            assert ("close", path, 0x40020080) in events
+            assert ("close", path.parent, 0x20080) not in events
         assert not path.exists()
     assert not list(tmp_path.glob("*/*.html"))
     if failure in {"reparse", "filesystem", "root_acl", "file_acl"}:
@@ -453,7 +451,7 @@ def test_stale_cleanup_preserves_active_unsafe_and_unrelated_entries(tmp_path):
     for path in paths:
         path.write_text("synthetic")
         os.utime(path, (0, 0))
-    paths[1].touch()  # fresh / active
+    paths[1].touch()
     (tmp_path / ("d" * 32 + ".html")).mkdir()
 
     @contextmanager
@@ -481,7 +479,7 @@ def test_native_private_file_permissions_sharing_and_cleanup(tmp_path, monkeypat
         with api.opened(path) as handle:
             api.check_private(handle, directory=False)
         with pytest.raises(PermissionError):
-            path.unlink()  # A live handoff cannot be removed by stale cleanup.
+            path.unlink()
     assert not path.exists()
 
 

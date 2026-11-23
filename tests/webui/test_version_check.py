@@ -113,8 +113,6 @@ async def test_leaving_preview_can_find_a_newer_stable_when_catalogue_is_unavail
     assert result["updateAvailable"]["latestVersion"] == "0.3.7"
     assert result["releaseStatus"]["state"] == "available"
     assert read_update_channel().channel == "stable"
-    # A broken Preview index cannot authorize a partial release or a downgrade,
-    # or turn unverified withdrawal status into a green 'up to date'.
     releases.partial = True
     assert (await version_check.check_for_update())["updateAvailable"] is None
     releases.partial = False

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Exercise the TUI through the native Windows ConPTY boundary."""
 
 from __future__ import annotations
 
 import os
 import shutil
-import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -54,7 +52,7 @@ def _wait_for_exit(process: Any, timeout: float) -> int:
     return int(process.exitstatus or 0)
 
 
-def main() -> int:
+def smoke(executable: Path | None = None, *, cwd: Path = ROOT) -> float:
     if os.name != "nt":
         raise SystemExit("ConPTY smoke test requires Windows")
 
@@ -64,9 +62,10 @@ def main() -> int:
     from winpty import PtyProcess  # type: ignore[import-not-found]
     from winpty.enums import Backend  # type: ignore[import-not-found]
 
-    bun = shutil.which("bun")
-    if not bun:
+    bun = shutil.which("bun") if executable is None else None
+    if executable is None and not bun:
         raise SystemExit("bun is required")
+    command = [str(executable)] if executable else [bun, str(ROOT / "src/index.ts")]
     env = {
         **os.environ,
         "NANOBOT_TUI_WS_URL": "ws://127.0.0.1:9/ws",
@@ -84,9 +83,10 @@ def main() -> int:
     }
     env.pop("HERDR_ENV", None)
     env.pop("HERDR_PANE_ID", None)
+    started = time.perf_counter()
     process = PtyProcess.spawn(
-        [bun, "src/index.ts"],
-        cwd=str(ROOT),
+        command,
+        cwd=str(cwd),
         env=env,
         dimensions=(24, 80),
         backend=Backend.ConPTY,
@@ -94,7 +94,10 @@ def main() -> int:
 
     output: list[str] = []
     try:
-        output.append(_wait_for(process, ENTER_ALT_SCREEN, 15))
+        output.append(_wait_for(process, "Ask nanobot anything", 15))
+        first_screen_ms = (time.perf_counter() - started) * 1000
+        if ENTER_ALT_SCREEN not in "".join(output):
+            raise AssertionError("TUI did not enter its alternate screen")
         for grapheme in "abc中文🙂":
             process.write(grapheme)
             time.sleep(0.03)
@@ -131,8 +134,8 @@ def main() -> int:
     if text.index(RESUME_COMMAND) < text.index(LEAVE_ALT_SCREEN):
         raise AssertionError("TUI printed the session command before restoring the terminal")
     print("ConPTY smoke test passed: Unicode input, resize, restoration, and session resume")
-    return 0
+    return first_screen_ms
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    smoke()

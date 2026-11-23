@@ -1,5 +1,3 @@
-"""Tests for SessionManager.delete_session and read_session_file."""
-
 from pathlib import Path
 
 from nanobot.session.manager import Session, SessionManager
@@ -17,13 +15,11 @@ def _seed(workspace: Path, key: str = "telegram:abc") -> SessionManager:
 def test_delete_session_removes_file_and_invalidates_cache(tmp_path: Path) -> None:
     sm = _seed(tmp_path, "telegram:abc")
     assert sm.read_session_snapshot("telegram:abc") is not None
-    # Populate cache as a real consumer would.
     cached = sm.get_or_create("telegram:abc")
     assert cached.messages
 
     assert sm.delete_session("telegram:abc") is True
     assert sm.read_session_snapshot("telegram:abc") is None
-    # Subsequent get_or_create returns a fresh, empty Session (no stale cache).
     fresh = sm.get_or_create("telegram:abc")
     assert fresh.messages == []
 

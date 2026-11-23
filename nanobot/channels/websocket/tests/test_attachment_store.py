@@ -1,5 +1,3 @@
-"""Binary staging regressions; these do not exercise the gateway HTTP listener."""
-
 import asyncio
 import re
 from pathlib import Path
@@ -28,10 +26,10 @@ async def test_binary_larger_than_websocket_limit_preserves_layout(tmp_path):
     paths = store.resolve([ref], owner="owner")
     assert re.fullmatch(r"[0-9a-f]{12}\.png", Path(paths[0]).name)
     assert Path(paths[0]).read_bytes() == raw
-    assert store.resolve([ref], owner="owner") == paths  # a failed send is retryable
+    assert store.resolve([ref], owner="owner") == paths
     assert store.commit([ref], owner="owner") == paths
     store.clear()
-    assert Path(paths[0]).read_bytes() == raw  # cleanup must not delete session media
+    assert Path(paths[0]).read_bytes() == raw
     with pytest.raises(AttachmentUploadError):
         store.resolve([ref], owner="owner")
 
@@ -192,7 +190,7 @@ async def test_filename_collision_never_unlinks_existing_file(tmp_path, monkeypa
     assert existing.read_bytes() == b"keep"
 
 
-async def test_committed_paths_persist_and_replay_without_reference_format(tmp_path):
+async def test_committed_paths_persist_as_media_metadata(tmp_path):
     from nanobot.session.manager import SessionManager
 
     store = AttachmentStore(tmp_path / "media")
@@ -207,9 +205,7 @@ async def test_committed_paths_persist_and_replay_without_reference_format(tmp_p
     replay = replay_manager.get_or_create("websocket:binary-upload")
     assert replay.messages[0]["media"] == paths
     assert reference not in str(replay.messages)
-    assert replay.get_history()[0] == {
-        "role": "user", "content": f"look\n[image: {paths[0]}]",
-    }
+    assert replay.get_history()[0] == {"role": "user", "content": "look"}
     store.clear()
     assert Path(paths[0]).exists()
 

@@ -20,7 +20,6 @@ interface StreamErrorNoticeProps {
  */
 export function StreamErrorNotice({ error, onDismiss, onOpenSettings }: StreamErrorNoticeProps) {
   const { t } = useTranslation();
-
   const { title, body } = resolveCopy(error, t);
 
   return (
@@ -77,13 +76,12 @@ function resolveCopy(
     case "turn_rejected":
       return {
         title: t("errors.turnRejected.title"),
-        body: t("errors.turnRejected.body"),
+        body: error.detail === "temporary_chat_command_rejected"
+          ? t("errors.turnRejected.temporaryCommand") : t("errors.turnRejected.body"),
       };
     case "model_request_failed":
       return resolveModelRequestFailureCopy(error, t);
     default: {
-      // Exhaustiveness guard: if a new StreamError kind is added, TS will
-      // complain here until we add a corresponding i18n branch.
       const _exhaustive: never = error;
       return { title: String(_exhaustive), body: "" };
     }

@@ -4,6 +4,30 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/**", (route) => route.abort());
 });
 
+test("reading preview and theme cards let a custom background through", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/browser/fixture.html?case=appearance");
+  const card = page.locator(".appearance-reading-card");
+  const preview = page.locator(".appearance-reading-preview");
+  const theme = page.locator(".appearance-theme-card").first();
+  const canvas = page.locator("[data-appearance-fixture]");
+  await canvas.evaluate(element => element.setAttribute("data-theme-surface", ""));
+  await expect(canvas).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await page.evaluate(() => { document.documentElement.dataset.customBackground = ""; });
+  await expect(canvas).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  for (const surface of [card, preview, theme]) {
+    expect(await surface.evaluate(node => getComputedStyle(node).backgroundColor)).toMatch(/^rgba\(/);
+  }
+  await page.getByRole("radio", { name: "Dark", exact: true }).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  for (const surface of [card, preview, theme]) {
+    expect(await surface.evaluate(node => getComputedStyle(node).backgroundColor)).toMatch(/^rgba\(/);
+  }
+  await page.evaluate(() => { delete document.documentElement.dataset.customBackground; });
+  await expect(canvas).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  expect(await card.evaluate(node => getComputedStyle(node).backgroundColor)).toMatch(/^rgb\(/);
+});
+
 test("system theme stays live, explicit choices persist, and tabs agree", async ({ page, context }) => {
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/browser/fixture.html?case=appearance");
@@ -52,8 +76,9 @@ test("custom reading size previews, persists and survives preset changes", async
   await page.reload();
   await expect(input).toHaveValue("24");
   await page.getByRole("radio", { name: "Small reading text", exact: true }).click();
-  await expect(paragraph).toHaveCSS("font-size", "16px");
-  await page.getByRole("spinbutton", { name: "Custom text size", exact: true }).click();
+  await expect(paragraph).toHaveCSS("font-size", "15px");
+  await page.locator(".appearance-custom-label").click();
+  await expect(input).toBeFocused();
   await expect(input).toHaveValue("24");
   await expect(paragraph).toHaveCSS("font-size", "24px");
   await expect(title).toHaveCSS("font-size", titleSize);
@@ -88,10 +113,13 @@ for (const narrow of [false, true]) {
 
 test("appearance explanations open on demand and follow the selected display modes", async ({ page }) => {
   await page.goto("/browser/fixture.html?case=appearance");
+  await expect(page.locator(".appearance-page > section > h2")).toHaveText([
+    "Theme", "Reading", "Interface", "Activity display",
+  ]);
   const explanations = [
     ["Reading text size", "Adjust messages, code and the composer—not navigation."],
     ["Activity display", "Choose how much detail appears as nanobot works."],
-    ["Activity details", "Show progress while working; keep finished work compact."],
+    ["Activity details", "Keep details collapsed by default. Show the latest activity while working."],
     ["Edit preview", "Show changed files and line counts."],
   ];
   for (const [label, description] of explanations) {
@@ -102,12 +130,20 @@ test("appearance explanations open on demand and follow the selected display mod
     await expect(page.getByRole("tooltip")).toBeHidden();
   }
 
-  await page.getByRole("button", { name: "Expanded", exact: true }).click();
+  const collapsed = page.getByRole("button", { name: "Collapsed", exact: true });
+  const expanded = page.getByRole("button", { name: "Expanded", exact: true });
+  await expect(collapsed).toHaveAttribute("aria-pressed", "true");
+  await expanded.click();
+  await page.reload();
+  await expect(expanded).toHaveAttribute("aria-pressed", "true");
   const activity = page.getByRole("button", { name: "Activity details", exact: true });
   await activity.focus();
   await expect(page.getByRole("tooltip")).toHaveText("Keep activity details expanded by default.");
   await activity.press("Escape");
   await expect(page.getByRole("tooltip")).toBeHidden();
+  await collapsed.click();
+  await page.reload();
+  await expect(collapsed).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Diff", exact: true }).click();
   const edits = page.getByRole("button", { name: "Edit preview", exact: true });
   await edits.focus();
@@ -211,23 +247,6 @@ test("reading-size guidance opens on hover and focus, and invalid entries explai
   await expect(input).toHaveValue("22");
 });
 
-test("the visible Custom label activates the same inline editor from a preset", async ({ page }) => {
-  await page.goto("/browser/fixture.html?case=appearance");
-  const label = page.locator(".appearance-custom-label");
-  const input = page.getByRole("spinbutton", { name: "Custom text size", exact: true });
-  await label.click();
-  await expect(input).toBeFocused();
-  await input.pressSequentially("23");
-  await input.press("Enter");
-  await expect(page.locator("[data-reading-preview-content] .markdown-content p").first()).toHaveCSS("font-size", "23px");
-  await page.getByRole("radio", { name: "Small reading text", exact: true }).click();
-  await label.click();
-  await expect(input).toBeFocused();
-  await expect(input).toHaveValue("23");
-  await expect(page.locator("[data-reading-preview-content] .markdown-content p").first()).toHaveCSS("font-size", "23px");
-});
-
-
 test("unfinished numeric input reports an error instead of acting like a cleared field", async ({ page }) => {
   await page.goto("/browser/fixture.html?case=appearance");
   const input = page.getByRole("spinbutton", { name: "Custom text size", exact: true });
@@ -238,7 +257,10 @@ test("unfinished numeric input reports an error instead of acting like a cleared
     expect(await input.evaluate((element: HTMLInputElement) => element.validity.badInput)).toBe(true);
     await input.press("Enter");
     await expect(input).toHaveAttribute("aria-invalid", "true");
+    // The pointer can leave the editor while the user reads the validation hint.
+    await page.mouse.move(0, 0);
     await expect(page.getByRole("tooltip", { name: /Your text remains at 18 px\./ })).toBeVisible();
+    await expect(input).toBeFocused();
     await expect(paragraph).toHaveCSS("font-size", "18px");
     await input.click();
     await input.press("Escape");

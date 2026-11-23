@@ -161,3 +161,18 @@ def test_encode_turn_end_projects_complete_wire_contract() -> None:
         "failure_attempts": 4,
         "failure_message": "Connection refused",
     }
+
+
+@pytest.mark.parametrize("preserved", [False, True])
+def test_encode_recovery_state_reports_reply_preservation(preserved: bool) -> None:
+    payload = encode_recovery_state(
+        "chat-1",
+        RecoveryStateEvent(
+            status="awaiting_user", recovery_id="recovery-1",
+            reason="model_request_failed", failure_error_kind="connection",
+            reply_preserved=preserved,
+        ),
+    )
+    assert payload["reply_preserved"] is preserved
+    assert payload["status"] == "awaiting_user"
+    assert payload["failure_error_kind"] == "connection"

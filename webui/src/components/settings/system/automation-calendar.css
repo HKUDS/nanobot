@@ -1,0 +1,29 @@
+.automation-calendar-grid { display: none; }
+.automation-calendar-agenda { display: block; }
+@container automations (min-width: 44rem) {
+  .automation-calendar-grid { display: block; }
+  .automation-calendar-agenda { display: none; }
+  .automation-calendar-weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+  .automation-calendar-weekdays > div {
+    padding: 8px 10px;
+    color: hsl(var(--muted-foreground));
+    font-size: 10px;
+    line-height: 16px;
+    text-align: end;
+  }
+  .automation-calendar-month {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+  .automation-calendar-day {
+    min-block-size: 112px;
+    min-inline-size: 0;
+    border-inline-end: 1px solid hsl(var(--border) / 0.55);
+    border-block-end: 1px solid hsl(var(--border) / 0.55);
+  }
+  .automation-calendar-day:nth-child(7n) { border-inline-end: 0; }
+  .automation-calendar-day:nth-last-child(-n + 7) { border-block-end: 0; }
+}

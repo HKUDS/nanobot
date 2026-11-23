@@ -1,5 +1,3 @@
-"""Session keys remain distinct even when their display filenames collide."""
-
 from nanobot.session.manager import Session, SessionManager
 
 

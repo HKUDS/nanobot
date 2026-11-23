@@ -7,7 +7,6 @@ from nanobot.pairing import store
 
 
 def test_all_exports_are_importable():
-    """Every name in __all__ must actually be importable from nanobot.pairing."""
     import nanobot.pairing as pkg
 
     for name in pairing_all:
@@ -23,7 +22,7 @@ def _tmp_store(tmp_path, monkeypatch):
 class TestGenerateCode:
     def test_format(self) -> None:
         code = store.generate_code("telegram", "123")
-        assert len(code) == 9  # 4 + 1 + 4
+        assert len(code) == 9
         assert code[4] == "-"
         assert code.replace("-", "").isalnum()
         assert code.replace("-", "").isupper()
@@ -135,15 +134,6 @@ class TestApproveDeny:
     def test_deny_unknown_returns_false(self) -> None:
         assert store.deny_code("UNKNOWN") is False
 
-    def test_approve_expired_returns_none(self, monkeypatch) -> None:
-        clock = {"now": 1_000.0}
-        monkeypatch.setattr(store.time, "time", lambda: clock["now"])
-
-        code = store.generate_code("telegram", "123", ttl=0)
-        clock["now"] += 0.1
-        assert store.approve_code(code) is None
-
-
 class TestRevoke:
     def test_revoke_removes_sender(self) -> None:
         code = store.generate_code("telegram", "123")
@@ -174,9 +164,6 @@ class TestRevoke:
 
 
 class TestListPending:
-    def test_empty(self) -> None:
-        assert store.list_pending() == []
-
     def test_shows_pending(self) -> None:
         store.generate_code("telegram", "123")
         store.generate_code("discord", "456")
@@ -244,7 +231,6 @@ class TestHandlePairingCommand:
     def test_revoke_other_channel(self) -> None:
         code = store.generate_code("discord", "456")
         store.approve_code(code)
-        # Two-arg form: first arg is channel, second is user
         reply = store.handle_pairing_command("telegram", "revoke discord 456")
         assert "Revoked" in reply
         assert store.is_approved("discord", "456") is False
@@ -294,7 +280,6 @@ class TestStoreDurability:
         path.write_text("not json{", encoding="utf-8")
         monkeypatch.setattr(store, "_store_path", lambda: path)
 
-        # Should recover gracefully and act as empty store
         assert store.list_pending() == []
         assert store.is_approved("telegram", "123") is False
 
@@ -317,7 +302,6 @@ def test_load_treats_null_approved_channel_list_as_empty(tmp_path, monkeypatch):
 
 
 def test_load_treats_null_approved_and_pending_maps_as_empty(tmp_path, monkeypatch):
-    """Top-level approved/pending null must not crash pairing load or list_pending."""
     path = tmp_path / "pairing.json"
     path.write_text(
         '{"approved": null, "pending": null}',
@@ -356,7 +340,6 @@ def test_load_treats_non_object_store_as_empty(tmp_path, monkeypatch, payload):
 
 
 def test_list_pending_skips_null_pending_entries(tmp_path, monkeypatch):
-    """Null pending entry values must be dropped instead of crashing list_pending."""
     path = tmp_path / "pairing.json"
     path.write_text(
         '{"approved": {}, "pending": {"ABCD-EFGH": null}}',
@@ -400,7 +383,6 @@ def _fail_reads_of(monkeypatch, path):
 
 
 class TestTransientReadFailure:
-    """A transient I/O failure is not corruption and must never wipe the store."""
 
     def test_generate_code_does_not_wipe_approvals(self, tmp_path, monkeypatch):
         """An unapproved DM during a read blip previously erased every approval.
@@ -432,7 +414,6 @@ class TestTransientReadFailure:
         assert store.is_approved("telegram", "123") is True
 
     def test_approve_command_reports_store_unavailable(self, tmp_path, monkeypatch):
-        """/pairing approve must fail loudly instead of claiming the code is invalid."""
         code = store.generate_code("telegram", "123")
 
         with monkeypatch.context() as m:

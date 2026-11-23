@@ -28,8 +28,12 @@
         "choices": {
           "mention": "멘션만",
           "open": "모든 메시지",
-          "allowlist": "허용 목록"
+          "allowlist": "허용 목록",
+          "listen": "경청(멘션 시 응답)"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "방별 규칙 예외(JSON)"
       },
       "allowFrom": {
         "label": "허용 사용자"
@@ -62,6 +66,13 @@
       },
       "allowRoomMentions": {
         "label": "방 멘션",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "replyToMessage": {
+        "label": "인용 답장",
         "choices": {
           "true": "켜기",
           "false": "끄기"

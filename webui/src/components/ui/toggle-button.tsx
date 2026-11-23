@@ -1,22 +1,25 @@
-import type { ComponentProps } from "react";
+import { forwardRef, type ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
-export function ToggleButton({
+type ToggleButtonProps = {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+  ariaLabel?: string;
+  label: string;
+} & Pick<ComponentProps<"button">, "id" | "aria-describedby" | "aria-invalid">;
+
+export const ToggleButton = forwardRef<HTMLButtonElement, ToggleButtonProps>(function ToggleButton({
   checked,
   disabled,
   onChange,
   ariaLabel,
   label,
   ...accessibility
-}: {
-  checked: boolean;
-  disabled?: boolean;
-  onChange: (checked: boolean) => void;
-  ariaLabel?: string;
-  label: string;
-} & Pick<ComponentProps<"button">, "id" | "aria-describedby" | "aria-invalid">) {
+}, ref) {
   return (
     <button
+      ref={ref}
       {...accessibility}
       type="button"
       role="switch"
@@ -48,4 +51,4 @@ export function ToggleButton({
       <span className="sr-only">{label}</span>
     </button>
   );
-}
+});

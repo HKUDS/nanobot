@@ -1,13 +1,3 @@
-"""Tests for QQ channel ack_message feature.
-
-Covers the four verification points from the PR:
-1. C2C message: ack appears instantly
-2. Group message: ack appears instantly
-3. ack_message set to "": no ack sent
-4. Custom ack_message text: correct text delivered
-Each test also verifies that normal message processing is not blocked.
-"""
-
 from types import SimpleNamespace
 
 import pytest
@@ -45,7 +35,6 @@ class _FakeClient:
 
 @pytest.mark.asyncio
 async def test_ack_sent_on_c2c_message() -> None:
-    """Ack is sent immediately for C2C messages, then normal processing continues."""
     channel = QQChannel(
         QQConfig(
             app_id="app",
@@ -79,7 +68,6 @@ async def test_ack_sent_on_c2c_message() -> None:
 
 @pytest.mark.asyncio
 async def test_ack_sent_on_group_message() -> None:
-    """Ack is sent immediately for group messages, then normal processing continues."""
     channel = QQChannel(
         QQConfig(
             app_id="app",
@@ -114,7 +102,6 @@ async def test_ack_sent_on_group_message() -> None:
 
 @pytest.mark.asyncio
 async def test_no_ack_when_ack_message_empty() -> None:
-    """Setting ack_message to empty string disables the ack entirely."""
     channel = QQChannel(
         QQConfig(
             app_id="app",
@@ -143,7 +130,6 @@ async def test_no_ack_when_ack_message_empty() -> None:
 
 @pytest.mark.asyncio
 async def test_custom_ack_message_text() -> None:
-    """Custom Chinese ack_message text is delivered correctly."""
     custom = "正在处理中，请稍候..."
     channel = QQChannel(
         QQConfig(

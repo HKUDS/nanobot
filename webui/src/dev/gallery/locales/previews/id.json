@@ -1,18 +1,18 @@
 {
+  "goal": {
+    "title": "GoalIsland · Tujuan",
+    "description": "Pratinjau tujuan dan detailnya.",
+    "options": "Berikan status, ringkasan, tujuan, dan laporan opsional.",
+    "state": "Status",
+    "summary": "Siapkan rilis",
+    "objective": "Tinjau perubahan dan verifikasi rilis.\n\n- Periksa pengujian\n- Tinjau dokumentasi\n- Pastikan rilis siap",
+    "recap": "Menunggu persetujuan."
+  },
   "rename": {
     "title": "RenameDialog · Ubah nama grup dan proyek",
     "description": "Coba dialog pengubahan nama grup dan proyek. Nama topik diubah langsung di daftar percakapan.",
     "options": "Pemanggil menyediakan dialogTitle, description, dan placeholder. title menentukan nilai awal; onConfirm menerima judul tanpa spasi di kedua ujung. Judul kosong tidak dapat disimpan.",
     "hint": "Menyimpan akan memperbarui judul di atas."
-  },
-  "delete": {
-    "title": "DeleteConfirm · Konfirmasi penghapusan",
-    "description": "Bandingkan penghapusan satu percakapan, beberapa percakapan, atau percakapan dengan otomatisasi.",
-    "options": "count mengatur teks penghapusan massal. automations menampilkan tugas terkait, jadwal, dan waktu eksekusi berikutnya. Konfirmasi memanggil onConfirm.",
-    "scenario": "Skenario penghapusan",
-    "open": "Buka konfirmasi penghapusan",
-    "confirmed": "Penghapusan contoh dikonfirmasi.",
-    "hint": "Pilih satu percakapan, beberapa percakapan, atau percakapan dengan otomatisasi."
   },
   "inlineTokens": {
     "title": "Inline tokens · Perintah dan pengenal sesi",
@@ -178,6 +178,18 @@
     "dismissed": "Pemberitahuan pemulihan ditutup.",
     "reset": "Atur ulang pratinjau",
     "hint": "Pilih status pemulihan, lalu coba lanjutkan atau tutup."
+  },
+  "sandbox": {
+    "gateway": "Contoh gateway",
+    "unknownGateway": "Tidak ditentukan",
+    "title": "Pemberitahuan perintah",
+    "description": "Bandingkan komponen yang hilang, pemasangan tidak terlindungi, dan kegagalan awal dengan komponen produksi.",
+    "options": "Pemberitahuan tidak mengambil fokus atau mengulang perintah. Ubah status, tutup, lalu lanjutkan mengetik.",
+    "missing": "Komponen tidak ditemukan",
+    "permissions": "Pemasangan perlu diperiksa",
+    "startup": "Tidak dapat dimulai",
+    "hint": "Hanya demo komponen. Tidak ada perintah atau perubahan pengaturan.",
+    "settingsAction": "Pengaturan sandbox diminta (demo)."
   },
   "fallback": {
     "title": "ModelFallbackNotice · Model cadangan",

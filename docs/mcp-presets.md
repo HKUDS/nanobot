@@ -1,12 +1,13 @@
-# MCP service presets
+# MCP Service Presets
 
-Open **Apps → MCP** to find a service, configure its connection, and select **Connect**. Presets save MCP server configuration; the gateway discovers and runs the tools. Each service still requires its own account access and permissions. The tables below list all built-in presets.
+Open **Apps → MCP** in the WebUI to pick a built-in service preset, enter its credentials (or sign in through your browser), and click **Connect**. Each service still requires your own account and permissions.
 
-For a remote HTTP/SSE service that needs a proxy, first set the shared address in **Settings → Advanced → Shared proxy**, then turn on **Use proxy** in its connection dialog before selecting **Connect**. The gateway uses that route for MCP requests and authorization. The browser's sign-in page still uses your browser's own network settings. Local stdio servers keep their own networking configuration.
+> [!TIP]
+> If a remote HTTP/SSE service needs a proxy, configure **Settings → Advanced → Shared proxy** first, then enable **Use proxy** in that service's connection dialog before clicking **Connect**.
 
-## Hosted services
+## Hosted Services
 
-Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the credential listed below and add it to the required HTTP header or URL parameter. Paste the token itself into the credential field.
+Browser OAuth presets open your provider's sign-in page directly. API-key presets ask for your token and attach it automatically.
 
 | Service | Authentication | Setup |
 | --- | --- | --- |
@@ -120,13 +121,9 @@ Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the c
 | Databricks Genie | API key or token; service MCP URL required | [Official guide](https://docs.databricks.com/aws/en/agents/mcp-tools/authentication-networking) |
 | TickTick | Browser OAuth | [Server metadata](https://mcp.ticktick.com/.well-known/oauth-protected-resource) |
 
-Datadog uses the MCP endpoint for your Datadog site and a Personal or Service Access Token. DigitalOcean publishes separate endpoints for its services; copy the endpoint for the service you need. Metabase requires an instance with MCP enabled. Copy Sigma's URL from **Profile → Integrations** and Descript's URL from **Settings → Descript MCP**.
+## Local Servers
 
-Figma uses the desktop app's local MCP endpoint. Supabase starts a local server in read-only mode; **Supabase (remote)** uses browser sign-in. GitHub uses Docker; **GitHub (remote)** uses a personal access token. Changes to credentials retain the connection's tool selection, timeout, and other saved settings.
-
-## Local servers
-
-Local servers run on the gateway computer. Install the runtime or application listed for each service. Stdio servers use a managed working directory under the nanobot data directory so their runtime files stay outside the source checkout. Figma connects over HTTP to the local desktop app.
+Local servers run on the gateway computer. Make sure the listed runtime (such as Node.js/`npx`, `uvx`, or Docker) is installed first.
 
 | Service | Requirements | Setup |
 | --- | --- | --- |
@@ -143,44 +140,31 @@ Local servers run on the gateway computer. Install the runtime or application li
 | ClickHouse | uvx and ClickHouse connection credentials | [Server guide](https://github.com/ClickHouse/mcp-clickhouse) |
 | Redis | uvx and Redis connection URL | [Server guide](https://github.com/redis/mcp-redis) |
 | dbt | uvx and dbt account with a static subdomain | [Server guide](https://docs.getdbt.com/docs/dbt-ai/setup-local-mcp) |
-| Google Workspace | uvx and Google Cloud OAuth app with the required APIs enabled | [Server guide](https://github.com/taylorwilsdon/google_workspace_mcp) |
+| Google Workspace | uvx and Google Cloud OAuth app with required APIs enabled | [Server guide](https://github.com/taylorwilsdon/google_workspace_mcp) |
 | Microsoft 365 | Node.js, npx, and Microsoft work or school account | [Server guide](https://github.com/Softeria/ms-365-mcp-server) |
 | Adobe Express Developer | Node.js and npx | [Server guide](https://developer.adobe.com/express/add-ons/docs/guides/getting-started/local-development/mcp-server) |
 | Azure | Node.js, npx, Azure CLI, and Azure sign-in | [Server guide](https://github.com/microsoft/mcp/tree/main/servers/Azure.Mcp.Server) |
-| Tableau | Node.js 22.7.5 or later, npx, and Tableau personal access token | [Server guide](https://github.com/tableau/tableau-mcp) |
-| BigQuery | Node.js, npx, Google Application Default Credentials, and BigQuery access | [Server guide](https://docs.cloud.google.com/bigquery/docs/pre-built-tools-with-mcp-toolbox) |
-| Salesforce DX | Node.js, npx, Salesforce CLI, and an authorized default target org | [Server guide](https://developer.salesforce.com/docs/platform/sfdx-dev/guide/sfdx-dev-mcp-server.html) |
-| Shopify Developer | Node.js 18 or later and npx | [Server guide](https://shopify.dev/docs/apps/build/ai-toolkit) |
-| AWS | uvx, AWS CLI, configured IAM credentials, and AWS MCP permissions | [Server guide](https://docs.aws.amazon.com/agent-toolkit/latest/userguide/getting-started-aws-mcp-server.html) |
+| Tableau | Node.js 22.7.5+ and npx; Tableau personal access token | [Server guide](https://github.com/tableau/tableau-mcp) |
+| BigQuery | Node.js, npx, Google Application Default Credentials | [Server guide](https://docs.cloud.google.com/bigquery/docs/pre-built-tools-with-mcp-toolbox) |
+| Salesforce DX | Node.js, npx, Salesforce CLI, and default target org | [Server guide](https://developer.salesforce.com/docs/platform/sfdx-dev/guide/sfdx-dev-mcp-server.html) |
+| Shopify Developer | Node.js 18+ and npx | [Server guide](https://shopify.dev/docs/apps/build/ai-toolkit) |
+| AWS | uvx, AWS CLI, configured IAM credentials | [Server guide](https://docs.aws.amazon.com/agent-toolkit/latest/userguide/getting-started-aws-mcp-server.html) |
 | Alation | uvx and Alation service-account integration | [Server guide](https://github.com/Alation/alation-ai-agent-sdk/tree/main/python/dist-mcp) |
-| Expedia Travel Recommendations | uvx and Expedia Travel Recommendations API key | [Server guide](https://github.com/ExpediaGroup/expedia-travel-recommendations-mcp) |
+| Expedia Travel Recommendations | uvx and Expedia API key | [Server guide](https://github.com/ExpediaGroup/expedia-travel-recommendations-mcp) |
 
-Google Workspace uses the community `workspace-mcp` server by Taylor Wilsdon. Create a Google Cloud OAuth app, enable the APIs you need, and follow the server's sign-in instructions. It provides Gmail, Drive, Calendar, Docs, Sheets, Slides, Contacts, and other Workspace tools. Microsoft 365 uses Softeria's community server for work or school accounts; ask its login tool to start the device-code flow. Tenant administrators may need to approve access. Personal Outlook accounts can use a custom configuration without `--org-mode`.
+## Service-Specific Notes
 
-Firebase uses your Firebase CLI sign-in. The dbt server completes its own browser sign-in and requires an account with a static subdomain. MongoDB starts with `--readOnly`; ClickHouse uses HTTPS and read-only queries by default. Redis takes a connection URL such as `rediss://default:password@your-redis-host:6379/0`; use `rediss://` for TLS and the port supplied by your deployment.
+<details>
+<summary>Setup notes for specific presets (Datadog, Google Workspace, Microsoft 365, databases, admin-gated services)</summary>
 
-Azure uses your Azure CLI sign-in. BigQuery uses Google Application Default Credentials and the project ID you provide. Salesforce DX uses your authorized default target org and enables its data, orgs, and metadata toolsets. AWS uses the official SigV4 proxy with your IAM credentials; its preset connects to the `us-east-1` managed endpoint. Alation uses a service-account integration. Tableau uses a personal access token and requires a site name for Tableau Cloud.
+- **Local vs. remote pairs:** **Supabase** runs locally in read-only mode while **Supabase (remote)** uses browser OAuth. **GitHub** runs locally via Docker while **GitHub (remote)** uses a personal access token. **Figma** connects to the local Figma desktop app.
+- **Custom endpoint URLs:** Datadog, DigitalOcean, Metabase, Sigma (**Profile → Integrations**), Descript (**Settings → Descript MCP**), Snowflake, and Zoho CRM require copying your organization's MCP URL from their setup guide.
+- **Google Workspace & Microsoft 365:** Google Workspace uses the community `workspace-mcp` server (create a Google Cloud OAuth app and enable the APIs you need). Microsoft 365 targets work/school accounts and may require tenant admin approval (personal Outlook accounts can use a custom MCP config without `--org-mode`).
+- **Databases:** MongoDB and ClickHouse default to read-only queries. Redis expects a connection URL such as `rediss://default:password@your-host:6379/0`.
+- **Admin approval required:** Gong, Vanta, Omni, and Clay require an organization admin to enable MCP integration first.
+- **Documentation-only presets:** OpenAI Developers, Redis Docs, Adobe Express Developer, Shopify Developer, and ThoughtSpot Developer expose developer documentation rather than private account administration.
+- **Services needing a custom MCP connection:** Services that require fixed OAuth clients or custom app registration (such as Asana, HubSpot, Slack, Canva, Dropbox, Box, Docusign, Zoom, and QuickBooks Online) are not built-in presets—add them through **Apps → Add MCP server** after completing their setup guide.
 
-For Gong, a Tech admin must create an **Automatic** MCP integration and register nanobot's callback URL. Vanta requires an Admin account. Omni requires administrator-enabled AI, MCP, and personal access tokens. Supermetrics requires a subscription with API access. Zoho CRM provides separate server URLs for Data Insights, Data Operations, Module Customization, and Automation; copy the one you need from its setup guide.
+</details>
 
-Semrush's preset uses an API key and adds the `Apikey` authorization prefix. Snowflake requires a managed MCP server URL, a programmatic access token, and grants on the tools exposed by that server. Provider guides list regional alternatives for services whose presets use a US endpoint.
-
-Clay workspace administrators must enable MCP and allow **Unknown** clients for dynamic registration. Databricks' access-token preset supports provided and registered MCP services for local testing; servers hosted on Databricks Apps require OAuth with a registered client. Pocket, Hostinger Mail, GSC Wizard, and Talarion use the API keys or tokens issued by their own account settings.
-
-## Access and capability limits
-
-A listing in another product's plugin directory does not supply a portable MCP URL or reusable credentials. Native OAuth presets require authorization-server discovery and dynamic client registration. Services that require a fixed OAuth client, client allowlisting, or additional onboarding need their own setup. This includes [Asana](https://developers.asana.com/docs/integrating-with-asanas-mcp-server), [HubSpot](https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server), [Slack](https://docs.slack.dev/ai/slack-mcp-server/), [Canva](https://www.canva.dev/docs/apps/mcp/verify-app/), and [Dropbox](https://help.dropbox.com/integrations/connect-dropbox-mcp-server). Use a compatible local server or custom connection when you have completed the service's requirements.
-
-Provider plans, quotas, enabled tools, and organization policies still apply. A configured connection is distinct from a connected runtime; test it from Apps to inspect the actual tool list. Tool access follows your provider permissions and nanobot's configured policy. [MCP configuration](./configuration.md#mcp-model-context-protocol) describes tool allowlists, timeouts, OAuth token storage, and private-host access.
-
-OpenAI Developers, Redis Docs, and Adobe Express Developer provide documentation. They do not grant access to private OpenAI accounts, Redis databases, or Adobe designs. Instacart's Developer Platform server creates recipe pages and shopping lists; it does not reproduce the account-based shopping plugin. MCP tools also do not imply support for another host's embedded plugin UI.
-
-Shopify Developer provides developer resources and validation; it does not supply an authenticated store-administration connection. The separate [Shop MCP](https://shopify.dev/changelog/posts/add-shopping-and-shop-pay-checkout-to-any-agent-with-shop-mcp) currently requires a protocol version unsupported by nanobot's MCP SDK. [tldraw's MCP App](https://tldraw.dev/blog/tldraw-mcp-app) depends on an embedded interactive canvas, which nanobot does not render.
-
-[Box](https://developer.box.com/guides/box-mcp), [G2](https://documentation.g2.com/docs/g2-mcp-server), [Lovable](https://github.com/lovablelabs/mcp), and [Docusign](https://developers.docusign.com/platform/mcp-server/) require client-specific OAuth setup. [QuickBooks Online's local server](https://github.com/intuit/quickbooks-online-mcp-server) requires an Intuit OAuth app, an initial authorization handshake, and a local build. These services need a custom connection rather than a native browser-sign-in preset.
-
-Expedia Travel Recommendations provides API-based travel recommendations and needs an Expedia API key. GoDaddy's preset searches public domain data. ThoughtSpot Developer provides documentation; its authenticated administrative endpoint needs a custom connection. [Zoom](https://developers.zoom.us/docs/mcp/servers/) and [Tredict](https://www.tredict.com/blog/mcp_server_docs/) also require provider-specific OAuth setup.
-
-## Maintaining presets
-
-The built-in catalogue is maintained in [`nanobot/webui/mcp_presets.json`](../nanobot/webui/mcp_presets.json). Each entry declares its server configuration and setup fields. Field types and defaults are defined in [`mcp_presets.py`](../nanobot/webui/mcp_presets.py); the gateway validates the catalogue when loading it. Add service connections to the JSON file and document their requirements here.
+Test any newly saved connection from **Apps** to inspect the tools it exposes. For advanced options like tool allowlists and timeouts, see [Configuration: MCP](./configuration.md#mcp-model-context-protocol).

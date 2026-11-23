@@ -21,27 +21,20 @@ test("a new page retains waiting content without executing it", async ({ page })
   await expect(page.getByRole("group", { name: "Waiting to send" })).toHaveCount(0);
 });
 
-for (const interaction of ["refocus", "clear edits"] as const) {
-  test(`empty Enter sends waiting content after ${interaction}`, async ({ page }) => {
-    await page.goto(fixture);
-    await queue(page);
-    const input = page.getByRole("textbox", { name: "Message input", exact: true });
-    if (interaction === "refocus") {
-      await input.press("Shift+Tab");
-      await expect(input).not.toBeFocused();
-      await page.keyboard.press("Tab");
-    } else {
-      await input.press("x");
-      await input.press("Backspace");
-    }
-    await expect(input).toBeFocused();
-    await expect(input).toHaveValue("");
-    await expect(page.getByLabel("Submitted messages")).toHaveText("[]");
-    await input.press("Enter");
-    await expect(page.getByLabel("Submitted messages")).toHaveText('[{"text":"Confirm this instruction","options":{"continueActiveTurn":true}}]');
-    await expect(page.getByRole("group", { name: "Waiting to send" })).toHaveCount(0);
-  });
-}
+test("empty Enter sends waiting content after refocus", async ({ page }) => {
+  await page.goto(fixture);
+  await queue(page);
+  const input = page.getByRole("textbox", { name: "Message input", exact: true });
+  await input.press("Shift+Tab");
+  await expect(input).not.toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue("");
+  await expect(page.getByLabel("Submitted messages")).toHaveText("[]");
+  await input.press("Enter");
+  await expect(page.getByLabel("Submitted messages")).toHaveText('[{"text":"Confirm this instruction","options":{"continueActiveTurn":true}}]');
+  await expect(page.getByRole("group", { name: "Waiting to send" })).toHaveCount(0);
+});
 
 test("desktop Shift+Enter keeps waiting content until the editor is empty again", async ({ page }) => {
   await page.goto(fixture);
@@ -52,10 +45,13 @@ test("desktop Shift+Enter keeps waiting content until the editor is empty again"
   await input.press("Enter");
   await expect(page.getByLabel("Submitted messages")).toHaveText("[]");
   await expect(page.getByRole("group", { name: "Waiting to send" })).toContainText("Confirm this instruction");
+  await input.press("x");
+  await input.press("Backspace");
   await input.press("Backspace");
   await expect(input).toHaveValue("");
   await input.press("Enter");
   await expect(page.getByLabel("Submitted messages")).toHaveText('[{"text":"Confirm this instruction","options":{"continueActiveTurn":true}}]');
+  await expect(page.getByRole("group", { name: "Waiting to send" })).toHaveCount(0);
 });
 
 test("empty Enter sends waiting content after switching away and back", async ({ page }) => {

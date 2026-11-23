@@ -175,7 +175,6 @@ test("an enlarged diagram keeps its camera through resize and recoloring", async
   await expect(dialog).toBeVisible();
   await expect(fit).toHaveText("150%");
   await expect(dialog.locator("img")).toHaveAttribute("src", before!);
-  // Change the trusted document palette without closing the reader.
   await page.evaluate(() => document.documentElement.classList.toggle("dark"));
   await expect(dialog.locator("img")).not.toHaveAttribute("src", before!);
   await expect(fit).toHaveText("150%");

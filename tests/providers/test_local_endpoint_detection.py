@@ -1,5 +1,3 @@
-"""Tests for _is_local_endpoint detection and keepalive configuration."""
-
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,7 +15,6 @@ def _make_spec(is_local: bool = False) -> MagicMock:
 
 
 class TestIsLocalEndpoint:
-    """Test the _is_local_endpoint helper."""
 
     def test_spec_is_local_true(self):
         assert _is_local_endpoint(_make_spec(is_local=True), None) is True
@@ -62,11 +59,9 @@ class TestIsLocalEndpoint:
         assert _is_local_endpoint(None, api_base) is expected
 
     def test_spec_overrides_public_url(self):
-        """spec.is_local=True takes precedence even with a public-looking URL."""
         assert _is_local_endpoint(_make_spec(is_local=True), "https://api.example.com/v1") is True
 
 class TestLocalKeepaliveConfig:
-    """Verify that local endpoints get keepalive_expiry=0."""
 
     async def test_local_spec_disables_keepalive(self):
         spec = _make_spec(is_local=True)
@@ -80,7 +75,6 @@ class TestLocalKeepaliveConfig:
         assert pool._keepalive_expiry == 0
 
     async def test_lan_ip_disables_keepalive(self):
-        """A generic 'openai' spec with a LAN IP should still disable keepalive."""
         spec = _make_spec(is_local=False)
         spec.env_key = ""
         spec.default_api_base = None
@@ -100,5 +94,4 @@ class TestLocalKeepaliveConfig:
         )
         await provider._ensure_client()
         pool = provider._client._client._transport._pool
-        # Default httpx keepalive is 5.0s
         assert pool._keepalive_expiry == 5.0

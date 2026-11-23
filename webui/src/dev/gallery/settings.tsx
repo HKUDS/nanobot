@@ -63,7 +63,7 @@ export const settings: SettingsPayload = {
   transcription: { enabled: true, provider: "groq", provider_configured: true, model: "whisper-large-v3", language: null,
     max_duration_sec: 120, max_upload_mb: 25, providers: [{ name: "groq", label: "Groq", configured: true }] },
   runtime: { config_path: "config.json", workspace_path: "workspace", gateway_host: "127.0.0.1", gateway_port: 8765,
-    heartbeat: { enabled: true, interval_s: 1800 }, dream: { schedule: "0 3 * * *" }, unified_session: false },
+    heartbeat: { enabled: true, interval_s: 1800 }, dream: { schedule: "0 3 * * *" } },
   advanced: { restrict_to_workspace: true, ssrf_whitelist_count: 0, webui_allow_local_service_access: true,
     webui_default_access_mode: "default", private_service_protection_enabled: true, mcp_server_count: 0,
     exec_enabled: true, exec_path_prepend_set: false, exec_path_append_set: false },
@@ -220,10 +220,15 @@ const usage: Usage = (() => {
   return { days, total_tokens: total, total_tokens_30d: total, total_tokens_365d: total,
     peak_day_tokens: Math.max(...days.map((day) => day.total_tokens)), current_streak_days: 3, longest_streak_days: 6,
     active_days_30d: days.filter((day) => day.total_tokens > 0).length, requests_30d: days.reduce((sum, day) => sum + day.requests, 0),
-    model_days_30d: days.flatMap((day) => [
-      { date: day.date, provider: "openai", model: "gpt-5.4", total_tokens: day.total_tokens * 0.6 },
-      { date: day.date, provider: "anthropic", model: "claude-sonnet-4", total_tokens: day.total_tokens * 0.4 },
-    ]) };
+    model_days_30d: days.flatMap((day, index) => [
+      { provider: "openai", model: "gpt-5.4", share: 0.6, speed: 48 + index % 7 },
+      { provider: "anthropic", model: "claude-sonnet-4", share: 0.4, speed: 33 + index % 5 },
+    ].map(({ provider, model, share, speed }) => {
+      const totalTokens = day.total_tokens * share;
+      const measured = Math.round(totalTokens * 0.4);
+      const generationMs = Math.round(measured / speed * 1000);
+      return { date: day.date, provider, model, total_tokens: totalTokens, measured_output_tokens: measured, generation_ms: generationMs, ttft_ms: Math.round(generationMs * 0.6), timed_requests: 1, cache_read_tokens: Math.round(totalTokens * 0.5), cache_read_observed_input_tokens: Math.round(totalTokens * 0.8) };
+    })) };
 })();
 
 function UsagePreview() {

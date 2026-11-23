@@ -1,5 +1,3 @@
-"""Real browser-side HTTP/WS, real gateway auth, and an owned SSH-pipe fixture."""
-
 import asyncio
 import base64
 import json
@@ -244,6 +242,23 @@ async def test_remote_credentials_never_leave_the_backend(remote):
         assert request.headers["Authorization"] != "Bearer " + issued["api_token"]
 
 
+async def test_public_websocket_url_does_not_redirect_the_ssh_proxy(remote):
+    public_url = "wss://public.test/custom/ws"
+    remote.services.http.config.public_ws_url = public_url
+    host = f"http://127.0.0.1:{remote.port}"
+    direct = await remote.client.get(host + "/webui/bootstrap", headers={"X-Nanobot-Auth": ROOT})
+    assert direct.status_code == 200 and direct.json()["ws_url"] == public_url
+
+    for attempt in range(2):
+        issued = await bootstrap(remote)
+        assert issued["ws_url"].startswith(f"ws://127.0.0.1:{remote.proxy.port}/remote-session/")
+        assert public_url not in json.dumps(issued)
+        async with connect(issued["ws_url"] + "?token=" + issued["token"], origin=remote.proxy.origin) as ws:
+            assert json.loads(await ws.recv())["ready"] is True
+            await ws.send(f'{{"synthetic_turn":{attempt}}}')
+            assert json.loads(await ws.recv())["synthetic_turn"] == attempt
+
+
 @pytest.mark.parametrize("query", ["?token={token}&token=evil", "?%74oken={token}&token=evil"])
 async def test_ambiguous_auth_aliases_are_rejected(remote, query):
     issued = await bootstrap(remote)
@@ -431,8 +446,6 @@ async def test_shutdown_replay_contains_only_dead_local_capabilities(remote):
         writer.close()
         await writer.wait_closed()
 
-    # The same browser retries after the local gateway exits. The new process
-    # receives credentials that the actual remote gateway cannot authenticate.
     async with await asyncio.start_server(replacement, "127.0.0.1", remote.proxy.port):
         await remote.client.get(origin + "/webui/bootstrap", headers={"X-Nanobot-Auth": secret})
         await remote.client.get(origin + "/api/fixture", headers={"Authorization": "Bearer " + issued["api_token"]})

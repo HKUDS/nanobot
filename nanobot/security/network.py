@@ -1,5 +1,3 @@
-"""Network security utilities — SSRF protection and internal URL detection."""
-
 from __future__ import annotations
 
 import asyncio
@@ -28,6 +26,7 @@ _BLOCKED_NETWORKS = [
 ]
 
 _URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
+_URL_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
 
 
@@ -97,6 +96,10 @@ def resolve_url_target(
     resolved_ips contains the public IPs that were validated for this URL, or
     is empty when an unresolved hostname is delegated to a trusted proxy.
     """
+    # urlparse silently strips some control characters.
+    if _URL_CONTROL_RE.search(url):
+        return False, "Invalid URL: control characters are not allowed", ()
+
     try:
         p = urlparse(url)
     except Exception as e:
@@ -110,6 +113,8 @@ def resolve_url_target(
     hostname = p.hostname
     if not hostname:
         return False, "Missing hostname", ()
+    if any(char.isspace() for char in hostname):
+        return False, "Invalid hostname: whitespace is not allowed", ()
 
     try:
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
@@ -234,7 +239,7 @@ def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
         host: Any,
         port: Any,
         family: int = 0,
-        type: int = 0,  # noqa: A002
+        type: int = 0,
         proto: int = 0,
         flags: int = 0,
     ) -> list[Any]:
@@ -305,7 +310,6 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
         if _is_private(addr):
             return False, f"Redirect target is a private address: {addr}"
     except ValueError:
-        # hostname is a domain name, resolve it
         try:
             infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         except socket.gaierror:

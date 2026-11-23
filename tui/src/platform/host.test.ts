@@ -32,23 +32,15 @@ describe("TUI host integration", () => {
     expect(nonWindows.OPENTUI_FORCE_EXPLICIT_WIDTH).toBeUndefined()
   })
 
-  test("standalone terminals remain a no-op", async () => {
-    const commands: string[][] = []
-    const host = createTuiHost({}, async (command) => { commands.push([...command]) })
-
-    host.reportTitle("task")
-    host.release()
-    await settle()
-
-    expect(commands).toEqual([])
-  })
-
-  test("requires both Herdr environment markers", async () => {
+  test("standalone and partially configured terminals never report or clear pane metadata", async () => {
     const commands: string[][] = []
     const run = async (command: readonly string[]) => { commands.push([...command]) }
 
-    createTuiHost({ HERDR_ENV: "1" }, run).reportTitle("missing pane")
-    createTuiHost({ HERDR_PANE_ID: "w1:p2" }, run).reportTitle("missing host")
+    for (const environment of [{}, { HERDR_ENV: "1" }, { HERDR_PANE_ID: "w1:p2" }]) {
+      const host = createTuiHost(environment, run)
+      host.reportTitle("task")
+      host.release()
+    }
     await settle()
 
     expect(commands).toEqual([])

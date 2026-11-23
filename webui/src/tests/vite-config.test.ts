@@ -31,7 +31,6 @@ describe("development diagram Worker dependencies", () => {
 describe("gzipWebuiAssets", () => {
   it("compresses finalized files after Rollup writes the bundle", async () => {
     const plugin = gzipWebuiAssets();
-    expect(plugin.generateBundle).toBeUndefined();
     const outputDir = mkdtempSync(path.join(tmpdir(), "nanobot-vite-gzip-"));
     const assetPath = path.join(outputDir, "assets", "index-final.js");
     const finalized = Buffer.from(
@@ -70,14 +69,18 @@ describe("entryLazyFeatureImports", () => {
     expect(entryLazyFeatureImports(["assets/react-vendor-abc.js"])).toEqual([]);
     expect(entryLazyFeatureImports([
       "assets/markdown-vendor-abc.js",
-      "assets/syntax-highlight-def.js",
-      "assets/katex-ghi.js",
-      "assets/MermaidBlock-jkl.js",
+      "assets/HighlightedCode-def.js",
+      "assets/code-highlighter-ghi.js",
+      "assets/PierreFileDiff-jkl.js",
+      "assets/katex-mno.js",
+      "assets/MermaidBlock-pqr.js",
     ])).toEqual([
       "assets/markdown-vendor-abc.js",
-      "assets/syntax-highlight-def.js",
-      "assets/katex-ghi.js",
-      "assets/MermaidBlock-jkl.js",
+      "assets/HighlightedCode-def.js",
+      "assets/code-highlighter-ghi.js",
+      "assets/PierreFileDiff-jkl.js",
+      "assets/katex-mno.js",
+      "assets/MermaidBlock-pqr.js",
     ]);
   });
 });
@@ -98,12 +101,6 @@ describe("webuiManualChunk", () => {
     expect(webuiManualChunk("/repo/node_modules/scheduler/index.js")).toBe("react-vendor");
     expect(webuiManualChunk("/repo/node_modules/clsx/dist/clsx.mjs")).toBe("react-vendor");
     expect(webuiManualChunk("\0vite/preload-helper.js")).toBe("react-vendor");
-  });
-
-  it("keeps Refractor's selector parser in the syntax highlighting chunk", () => {
-    expect(
-      webuiManualChunk("/repo/node_modules/hast-util-parse-selector/index.js"),
-    ).toBe("syntax-highlight");
   });
 
   it("keeps markdown-only hast utilities in the markdown chunk", () => {
@@ -132,6 +129,6 @@ describe("webuiManualChunk", () => {
   });
 
   it("leaves language grammars as independently loaded chunks", () => {
-    expect(webuiManualChunk("/repo/node_modules/refractor/lang/python.js")).toBeUndefined();
+    expect(webuiManualChunk("/repo/node_modules/@shikijs/langs/dist/ini.mjs")).toBeUndefined();
   });
 });

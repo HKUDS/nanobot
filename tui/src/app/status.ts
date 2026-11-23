@@ -31,6 +31,9 @@ function retryFailureLabel(errorKind: string): string {
 }
 
 export function terminalModelFailureLine(errorKind?: string, attempts?: number): string {
+  if (errorKind === "unsupported_image") {
+    return "Image input is off for this preset. Check the preset or select a model that supports images."
+  }
   const reason = retryFailureLabel(errorKind || "unknown")
   if (errorKind === "billing") {
     return `${reason}. Add credit or check billing for the provider account, then try again.`

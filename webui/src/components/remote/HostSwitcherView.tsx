@@ -23,6 +23,7 @@ function HostMenuContent({ picker, portalContainer }: { picker: HostPicker; port
 /** Mounted with the menu so every opening starts with a fresh, stable list. */
 function HostMenuItems({ picker }: { picker: HostPicker }) {
   const { t } = useTranslation();
+  useEffect(() => picker.watchDirectory?.(), [picker.watchDirectory]);
   const [searchable] = useState(() => picker.profiles.length > 5);
   const [query, setQuery] = useState("");
   const [order] = useState(() => [picker.currentId, ...picker.recentIds]);
@@ -100,11 +101,12 @@ function HostMenuItems({ picker }: { picker: HostPicker }) {
 }
 
 /** Shared sidebar control. Remote frames can only open the trusted shell's menu. */
-export function HostSwitcherView({ picker, status, collapsed = false, portalContainer }: {
+export function HostSwitcherView({ picker, status, collapsed = false, portalContainer, className }: {
   picker: HostPicker | EmbeddedPicker | null;
   status: ConnectionStatus;
   collapsed?: boolean;
   portalContainer?: HTMLElement | null;
+  className?: string;
 }) {
   const { t } = useTranslation();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -127,7 +129,7 @@ export function HostSwitcherView({ picker, status, collapsed = false, portalCont
   const detail = pendingName ? `${current}. ${t("remote.preparing", { name: pendingName })}` : current;
   const button = <Button ref={buttonRef} variant="ghost" size="sm" aria-label={t("remote.switchHost")}
     data-host-switcher data-theme-surface data-theme-ink className={cn("host-no-drag touch-target h-8 min-w-0 gap-2 rounded-xl px-2 text-xs font-normal text-sidebar-content/75 hover:text-sidebar-content",
-      collapsed ? "w-8 justify-center px-0" : "max-w-full flex-1 justify-start")}
+      collapsed ? "w-8 justify-center px-0" : "max-w-full flex-1 justify-start", className)}
     onClick={picker.kind === "embedded" ? () => {
       const rect = buttonRef.current?.getBoundingClientRect();
       if (rect) picker.open({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
@@ -137,7 +139,7 @@ export function HostSwitcherView({ picker, status, collapsed = false, portalCont
         : remote ? <Server className="h-4 w-4" /> : <Laptop className="h-4 w-4" />}
       {!waiting && !failed && <span aria-hidden className={cn("absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full ring-2 ring-sidebar", currentStatus === "open" ? "bg-emerald-500" : "bg-muted-foreground")} />}
     </span>
-    {!collapsed && <><span className="truncate">{label}</span><ChevronUp className="ml-auto h-3 w-3 shrink-0 opacity-60" /></>}
+    {!collapsed && <><span className="truncate" data-sidebar-host-label>{label}</span><ChevronUp className="ml-auto h-3 w-3 shrink-0 opacity-60" data-sidebar-host-label /></>}
     <span className="sr-only" role="status">{detail}</span>
   </Button>;
   const trigger = <TooltipTrigger asChild>{button}</TooltipTrigger>;

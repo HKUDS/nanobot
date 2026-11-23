@@ -1,5 +1,3 @@
-"""Read the response of a selected automation run without exposing its audit metadata."""
-
 from __future__ import annotations
 
 import json

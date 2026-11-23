@@ -1,5 +1,3 @@
-"""Create one self-contained, licensed native TUI release archive."""
-
 from __future__ import annotations
 
 import hashlib
@@ -62,6 +60,8 @@ def _source_archive(root: Path) -> bytes:
             if not path.exists():
                 raise FileNotFoundError(path)
             archive.add(path, arcname=Path("nanobot-tui-source/tui") / relative)
+        archive.add(root.parent / "nanobot/command/locales",
+                    arcname="nanobot-tui-source/nanobot/command/locales")
         archive.add(root.parent / "packages/client-events",
                     arcname="nanobot-tui-source/packages/client-events")
         for name in ("check_client_import_boundaries.mjs", "check_client_import_boundaries.test.mjs"):

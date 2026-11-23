@@ -1,5 +1,3 @@
-"""Instance-scoped outbound proxy configuration."""
-
 import os
 import re
 from typing import Any, cast
@@ -76,6 +74,7 @@ def _config_object(value: object) -> dict[str, Any] | None:
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
+# TODO(0.5.0): Remove legacy proxy migration and its Config validator; retain throughout 0.4.x.
 def migrate_legacy_proxy_config(value: Any) -> Any:
     """Consolidate legacy addresses after settings sources have been merged."""
     if not isinstance(value, dict):

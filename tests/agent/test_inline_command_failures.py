@@ -85,6 +85,12 @@ async def test_status_configuration_failure_preserves_other_work(loop, status_ch
         assert failed.content == "Sorry, I encountered an error."
         assert failed.metadata["message_id"] == "status-request"
         assert failed.metadata["thread_id"] == "status-thread"
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="telegram", sender_id="u", chat_id="other", content="hello",
+        ))
+        assert (await _reply(loop.bus, "other")).content == "still responsive"
+        # The error reply is queued before completion publication finishes.
+        # Serving the next inbound message proves inline dispatch has settled.
         status_completions = [
             event for event in completions if event.context.chat_id == status_chat
         ]
@@ -93,11 +99,6 @@ async def test_status_configuration_failure_preserves_other_work(loop, status_ch
             assert status_completions[0].outcome == "failed"
         else:
             assert status_completions == []
-
-        await loop.bus.publish_inbound(InboundMessage(
-            channel="telegram", sender_id="u", chat_id="other", content="hello",
-        ))
-        assert (await _reply(loop.bus, "other")).content == "still responsive"
         assert not run_task.done()
         assert not model_cancelled.is_set()
         loop.provider.aclose.assert_not_awaited()

@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { ComposerUsagePopover } from "@/components/thread/ComposerUsagePopover";
+import { ToastProvider } from "@/components/ui/toast";
 import { ComposerDraftStore } from "@/lib/composer-draft";
 import { encodeImage } from "@/lib/imageEncode";
 import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
@@ -49,9 +51,9 @@ const COMMANDS: SlashCommand[] = [
     acceptsArgs: false,
   },
   {
-    command: "/history",
-    title: "Show conversation history",
-    description: "Print the last N persisted messages.",
+    command: "/inspect",
+    title: "Inspect session",
+    description: "Inspect a session.",
     icon: "history",
     argHint: "[n]",
     lifecycle: "side_channel",
@@ -489,13 +491,13 @@ describe("ThreadComposer", () => {
 
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "/" } });
-    expect(screen.getByRole("option", { name: /\/history/i })).toHaveAttribute(
+    expect(screen.getByRole("option", { name: /\/inspect/i })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(input).toHaveValue("/history ");
+    expect(input).toHaveValue("/inspect ");
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -648,17 +650,16 @@ describe("ThreadComposer", () => {
 
   it("shows a compact context meter beside the model selector", async () => {
     render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        modelLabel="gpt-5.6-sol"
-        modelPreset="gpt-5-6-sol"
-        modelProvider="openai_codex"
-        contextUsage={{
-          contextTokens: 74_900,
-          contextWindowTokens: 1_000_000,
-        }}
-        placeholder="Ask anything..."
-      />,
+      <ComposerUsagePopover context={{ contextTokens: 74_900, contextWindowTokens: 1_000_000 }} rounds={[]}>
+        {(renderContextUsage) => <ThreadComposer
+          onSend={vi.fn()}
+          modelLabel="gpt-5.6-sol"
+          modelPreset="gpt-5-6-sol"
+          modelProvider="openai_codex"
+          renderContextUsage={renderContextUsage}
+          placeholder="Ask anything..."
+        />}
+      </ComposerUsagePopover>,
     );
 
     const context = screen.getByTestId("composer-context-usage");
@@ -672,130 +673,58 @@ describe("ThreadComposer", () => {
     fireEvent.focus(context);
     const tooltip = await screen.findByRole("tooltip");
     expect(tooltip).toHaveTextContent("Context 7%");
-    expect(tooltip.parentElement).toHaveClass("rounded-full", "px-2.5", "py-1");
     expect(tooltip.parentElement).not.toHaveTextContent("Available");
   });
 
-  it("opens an input-token chart with one bar for each logical round", () => {
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        modelLabel="gpt-5.6-sol"
-        modelPreset="gpt-5-6-sol"
-        modelProvider="openai_codex"
-        contextUsage={{
-          contextTokens: 14_700,
-          contextWindowTokens: 200_000,
-        }}
-        recentRoundUsage={[
-          {
-            id: "turn-1",
-            timestamp: Date.UTC(2026, 8, 3, 7, 20),
-            inputTokens: 18_000,
-            outputTokens: 280,
-            cachedTokens: 12_000,
-            generationMs: 12_000,
-          },
-          {
-            id: "turn-2",
-            timestamp: Date.UTC(2026, 8, 3, 8, 22),
-            inputTokens: 29_400,
-            outputTokens: 416,
-            cachedTokens: 26_180,
-            generationMs: 40_000,
-          },
-        ]}
-        placeholder="Ask anything..."
-      />,
-    );
-
+  it("opens the current graph and replays its request snapshots from the beginning", async () => {
+    // Happy DOM has no canvas renderer; supply the operations used by graph paint
+    // so replay can receive the same painted-frame acknowledgement as a browser.
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      setTransform: vi.fn(), clearRect: vi.fn(), setLineDash: vi.fn(), beginPath: vi.fn(),
+      moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(), arc: vi.fn(), fill: vi.fn(),
+      roundRect: vi.fn(), fillText: vi.fn(), measureText: (text: string) => ({ width: text.length * 6 }),
+    } as unknown as CanvasRenderingContext2D);
+    render(<ComposerUsagePopover context={{ contextTokens: 200, contextWindowTokens: 1000 }} rounds={[]}
+      snapshots={[
+        { id: "first", contextWindowTokens: 1000, usage: { prompt_tokens: 100 }, graph: { nodes: [{ path: "/a.md", name: "a.md", state: "loaded", tokens: 40 }], edges: [] } },
+        { id: "second", contextWindowTokens: 1000, usage: { prompt_tokens: 200 }, graph: { nodes: [{ path: "/b.md", name: "b.md", state: "loaded", tokens: 60 }], edges: [] } },
+      ]}>
+      {(renderContextUsage) => <ThreadComposer onSend={vi.fn()} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     fireEvent.click(screen.getByTestId("composer-context-usage"));
-
-    expect(screen.getByText("Context")).toBeInTheDocument();
-    expect(screen.getByText("14.7K / 200K")).toBeInTheDocument();
-    expect(screen.getByText("Recent rounds")).toBeInTheDocument();
-    expect(screen.getByText("Input tokens")).toBeInTheDocument();
-    expect(screen.getAllByTestId("round-usage-bar")).toHaveLength(2);
-    const [smallerBar, largerBar] = screen.getAllByTestId("round-usage-bar");
-    expect(
-      Number.parseFloat(smallerBar.style.height) / Number.parseFloat(largerBar.style.height),
-    ).toBeCloseTo(18_000 / 29_400, 5);
-    expect(largerBar.querySelector(".kv-cache-reused")).toBeInTheDocument();
-    expect(largerBar.querySelector(".kv-cache-not-reused")).toBeInTheDocument();
-    expect(screen.queryByText("Reused")).not.toBeInTheDocument();
-    expect(screen.queryByText("Not reused")).not.toBeInTheDocument();
-    expect(screen.getByRole("img", {
-      name: /input tokens 29,400.*KV cache hit rate 89%.*output tokens 416.*generation time 40/i,
-    })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "b.md" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "20");
+    const replay = screen.getByRole("button", { name: "Play context history" });
+    fireEvent.click(replay);
+    expect(replay).toBeDisabled();
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "10");
+    expect(await screen.findByRole("button", { name: "a.md" })).toBeInTheDocument();
+    await waitFor(() => expect(replay).toBeEnabled(), { timeout: 2500 });
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "20");
   });
 
-  it("uses each visible bar as its round detail trigger", async () => {
-    const user = userEvent.setup();
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        contextUsage={{ contextTokens: 14_700, contextWindowTokens: 200_000 }}
-        recentRoundUsage={[
-          {
-            id: "turn-1",
-            timestamp: Date.UTC(2026, 8, 3, 7, 20),
-            inputTokens: 18_000,
-            outputTokens: 280,
-            cachedTokens: 12_000,
-          },
-          {
-            id: "turn-2",
-            timestamp: Date.UTC(2026, 8, 3, 8, 22),
-            inputTokens: 29_400,
-            outputTokens: 416,
-            cachedTokens: 26_180,
-          },
-        ]}
-        placeholder="Ask anything..."
-      />,
-    );
-
-    await user.click(screen.getByTestId("composer-context-usage"));
-    const firstBar = screen.getByRole("img", { name: /input tokens 18,000/i });
-    const secondBar = screen.getByRole("img", { name: /input tokens 29,400/i });
-    expect(firstBar).toHaveAttribute("data-testid", "round-usage-bar");
-    expect(secondBar).toHaveAttribute("data-testid", "round-usage-bar");
-    await user.hover(firstBar);
-    const firstTooltip = await screen.findByRole("tooltip");
-    expect(within(firstTooltip).getByText("Input tokens")).toBeInTheDocument();
-    expect(within(firstTooltip).getByText("18,000")).toBeInTheDocument();
-    await user.click(firstBar);
-    await user.unhover(firstBar);
-    await user.hover(secondBar);
-    const secondTooltip = await screen.findByRole("tooltip");
-    expect(within(secondTooltip).getByText("Input tokens")).toBeInTheDocument();
-    expect(within(secondTooltip).getByText("29,400")).toBeInTheDocument();
+  it("shows the latest round cache metrics when inspecting legacy history", () => {
+    render(<ComposerUsagePopover context={{ contextTokens: 14700, contextWindowTokens: 200000 }}
+      rounds={[{ inputTokens: 18000, cachedTokens: 12000 }, { inputTokens: 29400, cachedTokens: 26180 }]}>
+      {(renderContextUsage) => <ThreadComposer onSend={vi.fn()} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
+    fireEvent.click(screen.getByTestId("composer-context-usage"));
+    const meter = screen.getByRole("progressbar", { name: "Context" });
+    fireEvent.pointerEnter(meter.parentElement!.parentElement!);
+    expect(screen.getByText("Cache hit rate")).toBeInTheDocument();
+    expect(screen.getByText("89%")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play context history" })).toBeDisabled();
   });
 
   it("keeps context usage visible when the provider omits cache metrics", () => {
-    render(
-      <ThreadComposer
-        onSend={() => {}}
-        contextUsage={{ contextTokens: 14_700, contextWindowTokens: 200_000 }}
-        recentRoundUsage={[{
-          id: "turn-without-cache-metrics",
-          timestamp: new Date(2026, 8, 3, 16, 22).getTime(),
-          inputTokens: 29_400,
-          outputTokens: 416,
-        }]}
-        placeholder="Ask anything..."
-      />,
-    );
-
+    render(<ComposerUsagePopover context={{ contextTokens: 14700, contextWindowTokens: 200000 }} rounds={[{ inputTokens: 29400 }]}>
+      {(renderContextUsage) => <ThreadComposer onSend={vi.fn()} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     fireEvent.click(screen.getByTestId("composer-context-usage"));
-
-    expect(screen.getByRole("progressbar", { name: "Context 7%" })).toHaveAttribute(
-      "aria-valuenow",
-      "7",
-    );
-    const [bar] = screen.getAllByTestId("round-usage-bar");
-    expect(bar.firstElementChild).toHaveClass("bg-muted-foreground/25");
-    expect(screen.queryByText("Reused")).not.toBeInTheDocument();
+    const meter = screen.getByRole("progressbar", { name: "Context" });
+    expect(meter).toHaveAttribute("aria-valuenow", "7");
+    fireEvent.pointerEnter(meter.parentElement!.parentElement!);
+    expect(screen.queryByText("Cache hit rate")).not.toBeInTheDocument();
   });
 
   it("keeps the thread composer compact while matching the hero style", () => {
@@ -961,7 +890,10 @@ describe("ThreadComposer", () => {
           + "Open this WebUI over HTTPS to use voice input.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveClass("max-h-24");
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: "Continue by typing" } });
+    expect(screen.getByRole("alert").closest("form")).toBe(input.closest("form"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Open this WebUI over HTTPS");
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 
@@ -970,11 +902,8 @@ describe("ThreadComposer", () => {
     vi.stubGlobal("isSecureContext", true);
     vi.stubGlobal("MediaRecorder", undefined);
     render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        onTranscribeAudio={vi.fn(async () => "unused")}
-        placeholder="Type your message..."
-      />,
+      <ThreadComposer onSend={vi.fn()} onTranscribeAudio={vi.fn(async () => "unused")} />,
+      { wrapper: ToastProvider },
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
@@ -1060,24 +989,23 @@ describe("ThreadComposer", () => {
     await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("one recording"));
   });
 
-  it("distinguishes a missing microphone from a blocked permission", async () => {
+  it("shows microphone-not-found as one toast across repeated attempts", async () => {
     const { getUserMedia } = mockVoiceRecorder();
-    getUserMedia.mockRejectedValue(Object.assign(new Error("no microphone"), {
-      name: "NotFoundError",
-    }));
+    getUserMedia.mockRejectedValue(new DOMException("No microphone", "NotFoundError"));
     render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        onTranscribeAudio={vi.fn(async () => "unused")}
-        placeholder="Type your message..."
-      />,
+      <ThreadComposer onSend={vi.fn()} onTranscribeAudio={vi.fn(async () => "unused")} />,
+      { wrapper: ToastProvider },
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("No microphone was found. Connect a microphone and try again.")).toBeInTheDocument();
-    });
+    const retry = screen.getByRole("button", { name: "Voice input" });
+    fireEvent.click(retry);
+    const first = await screen.findByRole("alert");
+    expect(first.closest("[data-toast-tone=error]")).not.toBeNull();
+    expect(first).toHaveTextContent("Connect a microphone to record.");
+    fireEvent.click(retry);
+    await waitFor(() => expect(first).not.toBeInTheDocument());
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("alert")).toHaveTextContent("Connect a microphone to record.");
   });
 
   it("clears a previous voice error when retrying microphone access", async () => {
@@ -1094,7 +1022,9 @@ describe("ThreadComposer", () => {
 
     const voiceButton = screen.getByRole("button", { name: "Voice input" });
     fireEvent.click(voiceButton);
-    await waitFor(() => expect(screen.getByText("Allow microphone access in the address bar, then retry.")).toBeInTheDocument());
+    const permission = await screen.findByRole("alert");
+    expect(permission).toHaveTextContent("Allow microphone access in the address bar, then retry.");
+    expect(permission.closest("form")).not.toBeNull();
 
     fireEvent.click(voiceButton);
 
@@ -1224,11 +1154,8 @@ describe("ThreadComposer", () => {
     mockVoiceRecorder();
     const onTranscribeAudio = vi.fn(async () => "should not appear");
     render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        onTranscribeAudio={onTranscribeAudio}
-        placeholder="Type your message..."
-      />,
+      <ThreadComposer onSend={vi.fn()} onTranscribeAudio={onTranscribeAudio} />,
+      { wrapper: ToastProvider },
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
@@ -1292,21 +1219,24 @@ describe("ThreadComposer", () => {
 
   it.each(["thread", "hero"] as const)("keeps narrow %s permissions inline and usage below without losing the draft", async (variant) => {
     let width = 390;
+    vi.stubGlobal("innerWidth", width);
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(
       () => rect({ width, height: 160 }),
     );
     const onSend = vi.fn();
     const onWorkspaceScopeChange = vi.fn();
     const { container } = render(
-      <ThreadComposer
-        variant={variant}
-        compactWhenIdle
-        onSend={onSend}
-        modelLabel="codex"
-        workspaceScope={{ project_path: "/tmp/project", project_name: "project", access_mode: "full", restrict_to_workspace: false }}
-        onWorkspaceScopeChange={onWorkspaceScopeChange}
-        contextUsage={{ contextTokens: 500, contextWindowTokens: 1000 }}
-      />,
+      <ComposerUsagePopover context={{ contextTokens: 500, contextWindowTokens: 1000 }} rounds={[]}>
+        {(renderContextUsage) => <ThreadComposer
+          variant={variant}
+          compactWhenIdle
+          onSend={onSend}
+          modelLabel="codex"
+          workspaceScope={{ project_path: "/tmp/project", project_name: "project", access_mode: "full", restrict_to_workspace: false }}
+          onWorkspaceScopeChange={onWorkspaceScopeChange}
+          renderContextUsage={renderContextUsage}
+        />}
+      </ComposerUsagePopover>,
     );
     const form = container.querySelector("form")!;
     const input = screen.getByRole("textbox");
@@ -1323,6 +1253,7 @@ describe("ThreadComposer", () => {
 
     // A narrow desktop panel uses the same layout; resizing must not replace the textarea.
     width = 800;
+    vi.stubGlobal("innerWidth", width);
     fireEvent(window, new Event("resize"));
     expect(form).not.toHaveAttribute("data-compact-controls");
     expect(primary).toContainElement(access);
@@ -1350,9 +1281,11 @@ describe("ThreadComposer", () => {
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue(rect({ width: 320, height: 160 }));
     const scope = { project_path: "/srv/workspace", project_name: "workspace", access_mode: "full" as const };
     const onWorkspaceScopeChange = vi.fn();
-    const { container } = render(<ThreadComposer variant={variant} onSend={vi.fn()} workspaceScope={scope}
-      workspaceDefaultScope={scope} {...workspacePickerProps(scope)} workspaceControls={{ can_change_project: true }}
-      onWorkspaceScopeChange={onWorkspaceScopeChange} contextUsage={{ contextTokens: 500, contextWindowTokens: 1000 }} />);
+    const { container } = render(<ComposerUsagePopover context={{ contextTokens: 500, contextWindowTokens: 1000 }} rounds={[]}>
+      {(renderContextUsage) => <ThreadComposer variant={variant} onSend={vi.fn()} workspaceScope={scope}
+        workspaceDefaultScope={scope} {...workspacePickerProps(scope)} workspaceControls={{ can_change_project: true }}
+        onWorkspaceScopeChange={onWorkspaceScopeChange} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     const meta = container.querySelector(".thread-composer-meta")!;
     const workspace = screen.getByRole("button", { name: "Switch directory" });
     const access = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
@@ -1374,30 +1307,23 @@ describe("ThreadComposer", () => {
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue(
       rect({ width: 390, height: 160 }),
     );
+    vi.stubGlobal("innerWidth", 390);
     const user = userEvent.setup();
     const onSend = vi.fn();
     render(
-      <ThreadComposer
-        onSend={onSend}
-        contextUsage={{ contextTokens: 10000, contextWindowTokens: 200000 }}
-        recentRoundUsage={[{
-          id: "turn-1",
-          timestamp: Date.UTC(2026, 8, 13, 7, 20),
-          inputTokens: 10000,
-          outputTokens: 280,
-          cachedTokens: 8000,
-        }]}
-      />,
+      <ComposerUsagePopover context={{ contextTokens: 10000, contextWindowTokens: 200000 }}
+        rounds={[{ inputTokens: 10000, cachedTokens: 8000 }]}>
+        {(renderContextUsage) => <ThreadComposer onSend={onSend} renderContextUsage={renderContextUsage} />}
+      </ComposerUsagePopover>,
     );
     const trigger = screen.getByTestId("composer-context-usage");
     await user.click(trigger);
     const sheet = screen.getByRole("dialog", { name: "Context usage" });
-    expect(sheet).toHaveClass("bottom-0", "max-h-[60dvh]");
-    expect(sheet).toHaveFocus();
-    expect(within(sheet).getByRole("heading", { name: "Context usage" })).toBeVisible();
-    expect(within(sheet).getByText("10K / 200K")).toBeVisible();
-    expect(within(sheet).getByTestId("round-usage-bar")).toBeVisible();
-    expect(sheet).toContainElement(within(sheet).getByRole("group", { name: "Input tokens" }));
+    expect(sheet).toHaveClass("mt-auto", "h-[85%]");
+    expect(sheet.contains(document.activeElement)).toBe(true);
+    expect(within(sheet).getByRole("heading", { name: "Context usage" })).toBeInTheDocument();
+    expect(within(sheet).getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "5");
+    expect(within(sheet).getByRole("button", { name: "Play context history" })).toBeDisabled();
     expect(document.body).toHaveStyle({ pointerEvents: "none" });
 
     if (dismissal === "Escape") await user.keyboard("{Escape}");
@@ -1410,23 +1336,26 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("still works", undefined, undefined);
   });
 
-  it("releases the mobile sheet when resizing to desktop and keeps the desktop popover", async () => {
+  it("releases the mobile modal lock when resizing and keeps the desktop sidebar open", async () => {
     let width = 390;
+    vi.stubGlobal("innerWidth", width);
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(
       () => rect({ width, height: 160 }),
     );
     const user = userEvent.setup();
-    render(<ThreadComposer onSend={vi.fn()} contextUsage={{ contextTokens: 500, contextWindowTokens: 1000 }} />);
+    render(<ComposerUsagePopover context={{ contextTokens: 500, contextWindowTokens: 1000 }} rounds={[]}>
+      {(renderContextUsage) => <ThreadComposer onSend={vi.fn()} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     await user.click(screen.getByTestId("composer-context-usage"));
-    expect(screen.getByRole("dialog")).toHaveClass("bottom-0");
+    expect(screen.getByRole("dialog")).toHaveClass("mt-auto");
 
     width = 800;
+    vi.stubGlobal("innerWidth", width);
     fireEvent(window, new Event("resize"));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(document.body).not.toHaveStyle({ pointerEvents: "none" });
-    await user.click(screen.getByTestId("composer-context-usage"));
-    expect(screen.getByRole("dialog", { name: "Context usage" })).not.toHaveClass("bottom-0");
-    expect(screen.getByRole("progressbar", { name: "Context 50%" })).toBeVisible();
+    expect(screen.getByRole("complementary", { name: "Context usage" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "50");
   });
 
   it.each([
@@ -1627,7 +1556,6 @@ describe("ThreadComposer", () => {
     expect(screen.getByRole("button", { name: "Switch directory" })).toBeEnabled();
     rerender(composer(false, "thread", true));
     expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
-    expect(container.querySelector(".thread-composer-workspace-label")).not.toBeInTheDocument();
     const accessAfterLock = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
     await user.click(accessAfterLock);
     await user.click(screen.getByRole("menuitemradio", { name: "Default Permission" }));
@@ -1640,6 +1568,7 @@ describe("ThreadComposer", () => {
 
   it("keeps the inline permission menu and directory picker mounted across composer widths", () => {
     let width = 390;
+    vi.stubGlobal("innerWidth", width);
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(() => rect({ width, height: 160 }));
     const defaultScope = { project_path: "/srv/workspace", project_name: "workspace", access_mode: "full" as const };
     const { container } = render(<ThreadComposer variant="hero" onSend={vi.fn()} workspaceScope={defaultScope}
@@ -1652,6 +1581,7 @@ describe("ThreadComposer", () => {
     expect(row.querySelector(".thread-composer-workspace-group")).toContainElement(trigger);
     expect(container.querySelector(".thread-composer-footer-primary")).toContainElement(access);
     width = 800;
+    vi.stubGlobal("innerWidth", width);
     fireEvent(window, new Event("resize"));
     expect(container.querySelector(".thread-composer-meta")).toBe(row);
     expect(screen.getByRole("button", { name: "Switch directory" })).toBe(trigger);
@@ -1765,87 +1695,6 @@ describe("ThreadComposer", () => {
   });
 
 
-  it("closes the sustained goal through its existing drawer", () => {
-    const { container, rerender } = render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        goalState={{
-          active: true,
-          objective: "Ship the release",
-          ui_summary: "Preparing release",
-        }}
-      />,
-    );
-
-    const drawer = container.querySelector("[data-composer-status-drawer]");
-    expect(drawer).not.toBeNull();
-    expect(drawer).toHaveAttribute("data-state", "open");
-    expect(drawer).not.toHaveAttribute("aria-hidden");
-    const status = screen.getByRole("status");
-    expect(status).toHaveClass("composer-status-drawer-content");
-
-    rerender(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        goalState={{ active: false }}
-      />,
-    );
-
-    expect(container.querySelector("[data-composer-status-drawer]")).toBe(drawer);
-    expect(drawer).toHaveAttribute("data-state", "closed");
-    expect(drawer).toHaveAttribute("aria-hidden", "true");
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(drawer?.querySelector('[role="status"]')).toBe(status);
-
-    fireEvent.transitionEnd(drawer as Element, { propertyName: "grid-template-rows" });
-    expect(container.querySelector("[data-composer-status-drawer]")).toBeNull();
-  });
-
-  it("shows full goal content and dismisses it without losing the composer draft", async () => {
-    const user = userEvent.setup();
-    const longObjective =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz0123456789GoalTail";
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        persistDraft={false}
-        placeholder="Type your message..."
-        goalState={{
-          active: true,
-          objective: longObjective,
-          ui_summary: "Short summary for strip",
-        }}
-      />,
-    );
-
-    const input = screen.getByRole("textbox", { name: "Message input" });
-    const trigger = screen.getByRole("button", { name: "Show full goal" });
-    await user.type(input, "Keep my draft");
-    await user.click(trigger);
-
-    const dialog = await screen.findByRole("dialog", { name: "Goal" });
-    expect(dialog).toHaveTextContent("Short summary for strip");
-    expect(dialog).toHaveTextContent(longObjective);
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
-
-    await user.click(trigger);
-    expect(screen.queryByRole("dialog", { name: "Goal" })).not.toBeInTheDocument();
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
-
-    await user.click(trigger);
-    expect(await screen.findByRole("dialog", { name: "Goal" })).toBeVisible();
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "Goal" })).not.toBeInTheDocument();
-
-    await user.click(trigger);
-    expect(await screen.findByRole("dialog", { name: "Goal" })).toBeVisible();
-    await user.click(input);
-    expect(screen.queryByRole("dialog", { name: "Goal" })).not.toBeInTheDocument();
-    expect(input).toHaveValue("Keep my draft");
-  });
-
   it("opens a slash command palette and inserts the selected command", () => {
     const onSend = vi.fn();
     render(
@@ -1863,15 +1712,15 @@ describe("ThreadComposer", () => {
     expect(palette).toBeInTheDocument();
     expect(palette).toHaveStyle({ maxHeight: "288px" });
     expect(screen.queryByRole("option", { name: /\/stop/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /\/history/i })).toHaveAttribute(
+    expect(screen.getByRole("option", { name: /\/inspect/i })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(input).toHaveValue("/history ");
-    expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/history");
-    expect(input.previousElementSibling?.textContent).toBe("/history ");
+    expect(input).toHaveValue("/inspect ");
+    expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/inspect");
+    expect(input.previousElementSibling?.textContent).toBe("/inspect ");
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
   });
@@ -1956,7 +1805,7 @@ describe("ThreadComposer", () => {
   });
 
   it("orders recent slash commands first for the blank slash menu", () => {
-    window.localStorage.setItem("nanobot.webui.slashCommandRecents", JSON.stringify(["/history"]));
+    window.localStorage.setItem("nanobot.webui.slashCommandRecents", JSON.stringify(["/inspect"]));
     render(
       <ThreadComposer
         onSend={vi.fn()}
@@ -1969,7 +1818,7 @@ describe("ThreadComposer", () => {
       target: { value: "/" },
     });
 
-    expect(screen.getByRole("option", { name: /\/history/i })).toHaveAttribute(
+    expect(screen.getByRole("option", { name: /\/inspect/i })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -2044,7 +1893,6 @@ describe("ThreadComposer", () => {
 
     expect(input).toHaveValue("@Blender ");
     expect(screen.getByTestId("composer-cli-mention-blender")).toHaveTextContent("@Blender");
-    expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.queryByRole("listbox", { name: "Mentions" })).not.toBeInTheDocument();
 
@@ -2568,12 +2416,12 @@ describe("ThreadComposer", () => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} slashCommands={COMMANDS} />);
     const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
-    const text = "/history $workflow 中文 English";
+    const text = "/inspect $workflow 中文 English";
     fireEvent.change(input, { target: { value: text, selectionStart: text.length } });
 
     const command = screen.getByTestId("composer-slash-command");
     const skill = screen.getByTestId("composer-skill-reference-workflow");
-    expect(command).toHaveTextContent("/history");
+    expect(command).toHaveTextContent("/inspect");
     expect(command.className).toBe(skill.className);
     expect(command.getAttribute("style")).toBe(skill.getAttribute("style"));
     expect(input.previousElementSibling).toHaveAttribute("aria-hidden", "true");
@@ -2582,15 +2430,15 @@ describe("ThreadComposer", () => {
     input.setSelectionRange(1, 4);
     const setData = vi.fn();
     fireEvent.copy(input, { clipboardData: { setData } });
-    expect(setData).toHaveBeenCalledWith("text/plain", "his");
+    expect(setData).toHaveBeenCalledWith("text/plain", "ins");
     fireEvent.cut(input, { clipboardData: { setData } });
-    expect(input).toHaveValue("/tory $workflow 中文 English");
+    expect(input).toHaveValue("/pect $workflow 中文 English");
     expect(screen.queryByTestId("composer-slash-command")).not.toBeInTheDocument();
     fireEvent.keyDown(input, { key: "z", ctrlKey: true });
     expect(input).toHaveValue(text);
     expect(input.selectionStart).toBe(1);
     expect(input.selectionEnd).toBe(4);
-    expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/history");
+    expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/inspect");
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(onSend).toHaveBeenCalledWith(text, undefined, { sideChannel: true });
@@ -2644,14 +2492,14 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith(command.trim(), undefined, { sideChannel: true, userShell: true });
   });
 
-  it.each(["", "/history "])("mirrors inline references during composition without submitting the IME confirmation: %s", (prefix) => {
+  it.each(["", "/inspect "])("mirrors inline references during composition without submitting the IME confirmation: %s", (prefix) => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} slashCommands={COMMANDS} />);
     const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: `${prefix}$workflow ` } });
     fireEvent.compositionStart(input);
     fireEvent.change(input, { target: { value: `${prefix}$workflow zhong` } });
-    if (prefix) expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/history");
+    if (prefix) expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/inspect");
     expect(screen.getByTestId("composer-skill-reference-workflow")).toHaveTextContent(/^\$workflow$/);
     expect(input.previousElementSibling?.textContent).toBe(input.value);
     expect(input.previousElementSibling).toHaveClass("z-20");
@@ -2698,15 +2546,15 @@ describe("ThreadComposer", () => {
 
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "/git", selectionStart: 4 } });
-    expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "please use $arxiv", selectionStart: 17 } });
 
-    const palette = screen.getByRole("listbox", { name: "Slash commands" });
+    const palette = screen.getByRole("listbox", { name: "Skills" });
     const option = within(palette).getByRole("option", { name: new RegExp(skillName, "i") });
-    const name = within(option).getByText(skillName);
+    const name = option.querySelector("[data-palette-skill-name]");
+    expect(name).toHaveTextContent(skillName);
     expect(name).not.toHaveClass("truncate");
-    expect(within(option).queryByText(`$${skillName}`)).not.toBeInTheDocument();
     expect(within(palette).queryByText("arxiv-disabled")).not.toBeInTheDocument();
     expect(within(palette).queryByText("arxiv-unavailable")).not.toBeInTheDocument();
     expect(within(palette).queryByText("/model")).not.toBeInTheDocument();
@@ -2737,8 +2585,8 @@ describe("ThreadComposer", () => {
             available: true,
           },
           {
-            name: "update-setup",
-            description: "One-time setup wizard",
+            name: "upload-files",
+            description: "Transfer local files",
             source: "builtin",
             available: true,
           },
@@ -2755,23 +2603,31 @@ describe("ThreadComposer", () => {
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "$up", selectionStart: 3 } });
 
-    const options = within(screen.getByRole("listbox", { name: "Slash commands" }))
+    const options = within(screen.getByRole("listbox", { name: "Skills" }))
       .getAllByRole("option");
-    expect(options.map((option) => option.textContent)).toEqual([
-      "upExact match",
-      "update-setupOne-time setup wizard",
-      "setup-updateConfigure upgrades",
-      "skill-creatorCreate or update AgentSkills",
-    ]);
+    expect(options).toHaveLength(4);
+    expect(options[0]).toHaveTextContent("$up");
+    expect(options[0]).toHaveTextContent("Custom");
+    expect(options[1]).toHaveTextContent("$upload-files");
+    expect(options[2]).toHaveTextContent("$setup-update");
+    expect(options[3]).toHaveTextContent("$skill-creator");
   });
 
-  it("keeps a recently selected skill visible at the top of the blank skill menu", () => {
-    const skills = Array.from({ length: 9 }, (_, index) => ({
-      name: `skill-${index}`,
-      description: `Skill ${index}`,
-      source: "builtin",
-      available: true,
-    }));
+  it("groups mixed-source skills and keeps a recently selected skill at the top of the blank menu", () => {
+    const skills = [
+      ...Array.from({ length: 8 }, (_, index) => ({
+        name: `skill-${index}`,
+        description: `Skill ${index}`,
+        source: "builtin",
+        available: true,
+      })),
+      {
+        name: "workspace-deploy",
+        description: "Deploy workspace build",
+        source: "workspace",
+        available: true,
+      },
+    ];
     render(
       <ThreadComposer
         onSend={vi.fn()}
@@ -2781,15 +2637,18 @@ describe("ThreadComposer", () => {
     );
 
     const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "$skill-8", selectionStart: 8 } });
+    fireEvent.change(input, { target: { value: "$skill-7", selectionStart: 8 } });
     fireEvent.keyDown(input, { key: "Tab" });
     fireEvent.change(input, { target: { value: "$", selectionStart: 1 } });
 
-    const options = within(screen.getByRole("listbox", { name: "Slash commands" }))
-      .getAllByRole("option");
-    expect(options).toHaveLength(8);
-    expect(options[0]).toHaveTextContent("skill-8");
-    expect(options[0]).toHaveTextContent("Recent");
+    const palette = screen.getByRole("listbox", { name: "Skills" });
+    expect(within(palette).getByRole("group", { name: "Recent" })).toBeInTheDocument();
+    expect(within(palette).getByRole("group", { name: "Custom" })).toBeInTheDocument();
+    expect(within(palette).getByRole("group", { name: "Built-in" })).toBeInTheDocument();
+    const options = within(palette).getAllByRole("option");
+    expect(options).toHaveLength(9);
+    expect(options[0]).toHaveTextContent("$skill-7");
+    expect(options[1]).toHaveTextContent("$workspace-deploy");
   });
 
   it("shows session handles without an icon and preserves app icons after their identifiers", () => {
@@ -2833,7 +2692,6 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText("MCP servers")).not.toBeInTheDocument();
     const gimp = screen.getByRole("option", { name: /@gimp GIMP .* CLI/i });
     const browserbase = screen.getByRole("option", { name: /@browserbase Browserbase .* MCP/i });
-    // Reuse the app's 44px coarse-pointer targets without changing desktop density.
     expect(gimp).toHaveClass("touch-target");
     expect(browserbase).toHaveClass("touch-target");
     expect(within(gimp).getByText("CLI")).toBeInTheDocument();
@@ -2901,7 +2759,6 @@ describe("ThreadComposer", () => {
     expect(token.className).not.toContain("mx-");
     expect(token).toHaveClass("text-foreground");
     expect(token.style.textShadow).toBe("");
-    expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
     const logo = screen.getByTestId("composer-cli-mention-logo-gimp");
     expect(logo.className).toContain("top-1/2");
     expect(logo.className).toContain("left-0");
@@ -3214,7 +3071,6 @@ describe("ThreadComposer", () => {
     expect(palette).toHaveStyle({ maxHeight: "84px" });
     expect(input.closest("form")).toHaveAttribute("data-palette-beside", "true");
 
-    // Rotation restores the ordinary floating menu, without changing the draft.
     landscape = false;
     document.getElementById("root")!.classList.remove("short-visual-viewport");
     Object.assign(window.visualViewport!, { height: 396, offsetTop: 350 });
@@ -3264,25 +3120,6 @@ describe("ThreadComposer", () => {
     fireEvent.pointerDown(screen.getByRole("button", { name: "outside" }));
 
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
-  });
-
-  it("keeps image generation mode out of the composer chrome", () => {
-    const onSend = vi.fn();
-    render(
-      <ThreadComposer
-        onSend={onSend}
-        placeholder="Type your message..."
-      />,
-    );
-
-    expect(screen.queryByRole("button", { name: "Image mode" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Image aspect ratio" })).not.toBeInTheDocument();
-
-    const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "Draw a friendly robot" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-
-    expect(onSend).toHaveBeenCalledWith("Draw a friendly robot", undefined, undefined);
   });
 
   it.each(["!pwd", "  ! pwd  ", "!Write-Output first\nWrite-Output second", "!"])("runs bang input directly without a configured model: %s", (command) => {
@@ -3388,10 +3225,10 @@ describe("ThreadComposer", () => {
     );
 
     const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "/history" } });
+    fireEvent.change(input, { target: { value: "/inspect" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(onSend).toHaveBeenCalledWith("/history", undefined, { sideChannel: true });
+    expect(onSend).toHaveBeenCalledWith("/inspect", undefined, { sideChannel: true });
   });
 
   it("does not infer side-channel behavior before command metadata loads", () => {
@@ -3480,14 +3317,14 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("/new with a title", undefined, undefined);
   });
 
-  it("routes a manually submitted stop command through the stop handler", () => {
+  it.each([false, true])("routes /stop through the stop handler (streaming=%s)", (isStreaming) => {
     const onSend = vi.fn();
     const onStop = vi.fn();
     render(
       <ThreadComposer
         onSend={onSend}
         onStop={onStop}
-        isStreaming
+        isStreaming={isStreaming}
         placeholder="Type your message..."
         slashCommands={COMMANDS}
       />,
@@ -3620,7 +3457,6 @@ describe("ThreadComposer", () => {
     const keyEvent = createEvent.keyDown(input, { key: "Enter" });
     fireEvent(input, keyEvent);
 
-    // Enter inserts a newline on touch; the send button is the interject path.
     expect(keyEvent.defaultPrevented).toBe(false);
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
@@ -3649,10 +3485,10 @@ describe("ThreadComposer", () => {
   it("does not mark side-channel commands as guidance during an active turn", () => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} onStop={vi.fn()} isStreaming slashCommands={COMMANDS} />);
-    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "/history 5" } });
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "/inspect 5" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(onSend).toHaveBeenCalledWith("/history 5", undefined, { sideChannel: true });
+    expect(onSend).toHaveBeenCalledWith("/inspect 5", undefined, { sideChannel: true });
   });
 
   it("keeps Stop available while a draft attachment is encoding", () => {
@@ -3726,7 +3562,7 @@ describe("ThreadComposer", () => {
     },
   );
 
-  it.each(["/history 5", "/stop now", "/STOP@nanobot now"])(
+  it.each(["/inspect 5", "/stop now", "/STOP@nanobot now"])(
     "sends registered command %s to the gateway without queuing it",
     (content) => {
       const onSend = vi.fn();
@@ -4537,6 +4373,7 @@ describe("session composer drafts", () => {
     view.rerender(composer("unchanged-draft"));
     expect(screen.getByRole("textbox")).toHaveValue("send once");
     if (attachment) await screen.findByRole("img", { name: "draft.png" });
+    fireEvent.click(screen.getByRole("textbox"));
     await act(async () => resolveSend(true));
     view.unmount();
     expect(new ComposerDraftStore().get("unchanged-draft", true)).toBeUndefined();

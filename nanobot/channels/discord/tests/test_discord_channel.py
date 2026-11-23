@@ -21,11 +21,11 @@ from nanobot.channels.discord.runtime import (
     DiscordChannel,
     DiscordConfig,
 )
-from nanobot.command.builtin import build_help_text
+from nanobot.command.application import build_help_text
+from nanobot.command_copy import command_text
 from nanobot.config.network import NetworkConfig
 
 
-# Minimal Discord client test double used to control startup/readiness behavior.
 class _FakeDiscordClient:
     instances: list["_FakeDiscordClient"] = []
     start_error: Exception | None = None
@@ -66,7 +66,6 @@ class _FakeDiscordClient:
 
 
 class _FakeAttachment:
-    # Attachment double that can simulate successful or failing save() calls.
     def __init__(
         self, attachment_id: int, filename: str, *, size: int = 1, fail: bool = False
     ) -> None:
@@ -82,7 +81,6 @@ class _FakeAttachment:
 
 
 class _FakePartialMessage:
-    # Lightweight stand-in for Discord partial message references used in replies.
     def __init__(self, message_id: int, channel_id: int) -> None:
         self.id = message_id
         self.channel_id = channel_id
@@ -96,7 +94,6 @@ class _FakePartialMessage:
 
 
 class _FakeSentMessage:
-    # Sent-message double supporting edit() for streaming tests.
     def __init__(self, channel, content: str) -> None:
         self.channel = channel
         self.content = content
@@ -109,7 +106,6 @@ class _FakeSentMessage:
 
 
 class _FakeChannel:
-    # Channel double that records outbound payloads and typing activity.
     def __init__(
         self,
         channel_id: int = 123,
@@ -167,9 +163,11 @@ def _make_interaction(
     channel=None,
     guild_id: int | None = None,
     interaction_id: int = 999,
+    locale: discord.Locale = discord.Locale.american_english,
 ):
     return SimpleNamespace(
         user=SimpleNamespace(id=user_id),
+        locale=locale,
         channel_id=channel_id,
         channel=channel,
         guild_id=guild_id,
@@ -194,7 +192,6 @@ def _make_message(
     reply_author_id: int | None = None,
     message_type=None,
 ):
-    # Factory for incoming Discord message objects with optional guild/reply/attachments.
     guild = SimpleNamespace(id=guild_id) if guild_id is not None else None
     referenced_message = (
         SimpleNamespace(author=SimpleNamespace(id=reply_author_id))
@@ -222,7 +219,6 @@ def _make_message(
 
 @pytest.mark.asyncio
 async def test_start_returns_when_token_missing() -> None:
-    # If no token is configured, startup should no-op and leave channel stopped.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
 
     await channel.start()
@@ -247,7 +243,6 @@ async def test_start_returns_when_discord_dependency_missing(monkeypatch) -> Non
 
 @pytest.mark.asyncio
 async def test_start_handles_client_construction_failure(monkeypatch) -> None:
-    # Construction errors from the Discord client should be swallowed and keep state clean.
     channel = DiscordChannel(
         DiscordConfig(enabled=True, token="token", allow_from=["*"]),
         MessageBus(),
@@ -266,7 +261,6 @@ async def test_start_handles_client_construction_failure(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_start_handles_client_start_failure(monkeypatch) -> None:
-    # If client.start fails, the partially created client should be closed and detached.
     channel = DiscordChannel(
         DiscordConfig(enabled=True, token="token", allow_from=["*"]),
         MessageBus(),
@@ -288,7 +282,6 @@ async def test_start_handles_client_start_failure(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_stop_is_safe_after_partial_start(monkeypatch) -> None:
-    # stop() should close/discard the client even when startup was only partially completed.
     channel = DiscordChannel(
         DiscordConfig(enabled=True, token="token", allow_from=["*"]),
         MessageBus(),
@@ -383,7 +376,6 @@ async def test_stop_drains_inflight_message_before_reaction_cleanup(blocked_stag
     assert not channel._working_emoji_tasks
     assert not channel._pending_reactions
     channel._handle_message.assert_not_awaited()
-    # A queued event from the closed client must not run, even after a new runtime starts.
     channel._client = DiscordBotClient(channel, intents=discord.Intents.default())
     channel._running = True
     await client.on_message(_make_message())
@@ -554,7 +546,7 @@ async def test_stop_waits_for_reaction_already_draining(monkeypatch, cleanup_kin
 async def test_on_message_ignores_self_messages() -> None:
     # Self-loop guard: messages from this bot's own account must be dropped (#3217).
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
-    channel._bot_user_id = "999"  # simulate bot identity populated in on_ready()
+    channel._bot_user_id = "999"
     handled: list[dict] = []
     channel._handle_message = lambda **kwargs: handled.append(kwargs)  # type: ignore[method-assign]
 
@@ -583,7 +575,6 @@ async def test_on_message_accepts_messages_from_other_bots() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_stops_typing_on_handle_exception() -> None:
-    # If inbound handling raises, typing should be stopped for that channel.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
 
     async def fail_handle(**kwargs) -> None:
@@ -599,7 +590,6 @@ async def test_on_message_stops_typing_on_handle_exception() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_accepts_allowlisted_dm() -> None:
-    # Allowed direct messages should be forwarded with normalized metadata.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["123"]), MessageBus())
     handled: list[dict] = []
 
@@ -637,7 +627,6 @@ async def test_on_message_unauthorized_dm_sends_pairing_code(monkeypatch) -> Non
 
 @pytest.mark.asyncio
 async def test_on_message_accepts_when_channel_in_allow_channels() -> None:
-    # When allow_channels is set, messages from listed channels should be forwarded.
     channel = DiscordChannel(
         DiscordConfig(enabled=True, allow_from=["*"], allow_channels=["456"]),
         MessageBus(),
@@ -798,7 +787,6 @@ async def test_on_message_drops_thread_when_neither_thread_nor_parent_allowed() 
 
 @pytest.mark.asyncio
 async def test_on_message_drops_when_channel_not_in_allow_channels() -> None:
-    # When allow_channels is set and incoming channel is not listed, drop silently.
     channel = DiscordChannel(
         DiscordConfig(enabled=True, allow_from=["*"], allow_channels=["999"]),
         MessageBus(),
@@ -817,7 +805,6 @@ async def test_on_message_drops_when_channel_not_in_allow_channels() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_ignores_unmentioned_guild_message() -> None:
-    # With mention-only group policy, guild messages without a bot mention are dropped.
     channel = DiscordChannel(
         DiscordConfig(enabled=True, allow_from=["*"], group_policy="mention"),
         MessageBus(),
@@ -837,7 +824,6 @@ async def test_on_message_ignores_unmentioned_guild_message() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_accepts_mentioned_guild_message() -> None:
-    # Mentioned guild messages should be accepted and preserve reply threading metadata.
     channel = DiscordChannel(
         DiscordConfig(enabled=True, allow_from=["*"], group_policy="mention"),
         MessageBus(),
@@ -865,7 +851,6 @@ async def test_on_message_accepts_mentioned_guild_message() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_downloads_attachments(tmp_path, monkeypatch) -> None:
-    # Attachment downloads should be saved and referenced in forwarded content/media.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     handled: list[dict] = []
 
@@ -889,7 +874,6 @@ async def test_on_message_downloads_attachments(tmp_path, monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_marks_failed_attachment_download(tmp_path, monkeypatch) -> None:
-    # Failed attachment downloads should emit a readable placeholder and no media path.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     handled: list[dict] = []
 
@@ -913,7 +897,6 @@ async def test_on_message_marks_failed_attachment_download(tmp_path, monkeypatch
 
 @pytest.mark.asyncio
 async def test_send_raises_when_client_not_ready() -> None:
-    # The manager must be able to retry while Discord is still connecting.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
 
     with pytest.raises(RuntimeError, match="client is not ready"):
@@ -924,7 +907,6 @@ async def test_send_raises_when_client_not_ready() -> None:
 
 @pytest.mark.asyncio
 async def test_send_raises_when_channel_cannot_be_resolved() -> None:
-    # The manager must be able to retry transient channel-resolution failures.
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = DiscordBotClient(owner, intents=discord.Intents.none())
     fetch_calls: list[int] = []
@@ -1090,6 +1072,32 @@ async def test_send_delta_stream_end_splits_oversized_reply(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_native_menu_sync_payload_localizes_descriptions_but_keeps_command_syntax() -> None:
+    channel = DiscordChannel(DiscordConfig(), MessageBus())
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
+    await client.setup_hook()
+    tree = client.tree
+    locales = {"zh-CN", "zh-TW", "fr", "es-ES", "es-419", "pt-BR", "vi", "ja", "ko", "id"}
+    for cmd in tree.get_commands():
+        payload = await cmd.get_translated_payload(tree, tree.translator)
+        key = f"palette.{cmd.name}.description"
+        assert payload["description"] == command_text(key, "en")
+        translations = payload["description_localizations"]
+        assert {tag: translations[tag] for tag in locales} == {tag: command_text(key, tag) for tag in locales}
+        assert "de" not in translations  # Discord uses the base description.
+        assert payload["name_localizations"] == {}
+        options = payload["options"]
+        if cmd.name in {"model", "trigger"}:
+            option, = options
+            assert option["name"] == ("preset" if cmd.name == "model" else "name")
+            assert not option.get("name_localizations")
+            key = "native.presetDescription" if cmd.name == "model" else "native.triggerNameDescription"
+            assert option["description_localizations"]["ja"] == command_text(key, "ja")
+        else:
+            assert options == []
+
+
+@pytest.mark.asyncio
 async def test_slash_new_forwards_when_user_is_allowlisted() -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["123"]), MessageBus())
     handled: list[dict] = []
@@ -1099,15 +1107,16 @@ async def test_slash_new_forwards_when_user_is_allowlisted() -> None:
 
     channel._handle_message = capture_handle  # type: ignore[method-assign]
     client = DiscordBotClient(channel, intents=discord.Intents.none())
-    interaction = _make_interaction(user_id=123, channel_id=456, interaction_id=321)
+    interaction = _make_interaction(user_id=123, channel_id=456, interaction_id=321, locale=discord.Locale.taiwan_chinese)
 
     new_cmd = client.tree.get_command("new")
     assert new_cmd is not None
     await new_cmd.callback(interaction)
 
-    assert interaction.response.messages == [{"content": "Processing /new...", "ephemeral": True}]
+    assert interaction.response.messages == [{"content": "正在處理 /new…", "ephemeral": True}]
     assert len(handled) == 1
     assert handled[0]["content"] == "/new"
+    assert handled[0]["metadata"]["locale"] == "zh-TW"
     assert handled[0]["sender_id"] == "123"
     assert handled[0]["chat_id"] == "456"
     assert handled[0]["metadata"]["interaction_id"] == "321"
@@ -1189,19 +1198,19 @@ async def test_slash_new_is_blocked_for_disallowed_user() -> None:
 
     channel._handle_message = capture_handle  # type: ignore[method-assign]
     client = DiscordBotClient(channel, intents=discord.Intents.none())
-    interaction = _make_interaction(user_id=123, channel_id=456)
+    interaction = _make_interaction(user_id=123, channel_id=456, locale=discord.Locale.japanese)
 
     new_cmd = client.tree.get_command("new")
     assert new_cmd is not None
     await new_cmd.callback(interaction)
 
     assert interaction.response.messages == [
-        {"content": "You are not allowed to use this bot.", "ephemeral": True}
+        {"content": command_text("native.denied", "ja"), "ephemeral": True}
     ]
     assert handled == []
 
 
-@pytest.mark.parametrize("slash_name", ["stop", "restart", "status", "history", "model"])
+@pytest.mark.parametrize("slash_name", ["stop", "cancel_goal", "restart", "status", "model"])
 @pytest.mark.asyncio
 async def test_slash_commands_forward_via_handle_message(slash_name: str) -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
@@ -1287,14 +1296,14 @@ async def test_slash_help_returns_ephemeral_help_text() -> None:
 
     channel._handle_message = capture_handle  # type: ignore[method-assign]
     client = DiscordBotClient(channel, intents=discord.Intents.none())
-    interaction = _make_interaction()
+    interaction = _make_interaction(locale=discord.Locale.french)
     interaction.command.qualified_name = "help"
 
     help_cmd = client.tree.get_command("help")
     assert help_cmd is not None
     await help_cmd.callback(interaction)
 
-    assert interaction.response.messages == [{"content": build_help_text(), "ephemeral": True}]
+    assert interaction.response.messages == [{"content": build_help_text(locale="fr"), "ephemeral": True}]
     assert handled == []
 
 
@@ -1309,6 +1318,7 @@ async def test_slash_help_respects_allow_channels() -> None:
         channel_id=777,
         channel=_FakeChannel(channel_id=777, parent_id=456),
         guild_id=1,
+        locale=discord.Locale.spain_spanish,
     )
     interaction.command.qualified_name = "help"
 
@@ -1317,7 +1327,7 @@ async def test_slash_help_respects_allow_channels() -> None:
     await help_cmd.callback(interaction)
 
     assert interaction.response.messages == [
-        {"content": "This channel is not allowed for this bot.", "ephemeral": True}
+        {"content": command_text("native.channelDenied", "es"), "ephemeral": True}
     ]
 
 
@@ -1339,7 +1349,6 @@ async def test_thread_delete_and_archive_remove_known_channel() -> None:
 
 @pytest.mark.asyncio
 async def test_client_send_outbound_chunks_text_replies_and_uploads_files(tmp_path) -> None:
-    # Outbound payloads should upload files, attach reply references, and chunk long text.
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = DiscordBotClient(owner, intents=discord.Intents.none())
     target = _FakeChannel(channel_id=123)
@@ -1444,7 +1453,6 @@ async def test_client_send_outbound_replies_on_first_successful_attachment(tmp_p
 
 @pytest.mark.asyncio
 async def test_client_send_outbound_reports_failed_attachments_when_no_text(tmp_path) -> None:
-    # If all attachment sends fail and no text exists, emit a failure placeholder message.
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = DiscordBotClient(owner, intents=discord.Intents.none())
     target = _FakeChannel(channel_id=123)
@@ -1466,7 +1474,6 @@ async def test_client_send_outbound_reports_failed_attachments_when_no_text(tmp_
 
 @pytest.mark.asyncio
 async def test_send_stops_typing_after_send() -> None:
-    # Active typing indicators should be cancelled/cleared after a successful send.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = _FakeDiscordClient(channel, intents=None)
     channel._client = client
@@ -1491,7 +1498,6 @@ async def test_send_stops_typing_after_send() -> None:
 
     assert channel._typing_tasks == {}
 
-    # Progress messages should keep typing active until a final (non-progress) send.
     start = asyncio.Event()
     release = asyncio.Event()
 
@@ -1546,7 +1552,6 @@ async def test_start_typing_uses_typing_context_when_trigger_typing_missing() ->
             async def _waiter():
                 await release.wait()
 
-            # Hold the loop so task remains active until explicitly stopped.
             class _Ctx(_TypingCtx):
                 async def __aenter__(self):
                     await super().__aenter__()
@@ -1670,13 +1675,8 @@ def test_proxy_opt_in_without_shared_address_fails_before_start() -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# Tests for the send() exception propagation fix
-# ---------------------------------------------------------------------------
-
 @pytest.mark.asyncio
 async def test_send_re_raises_network_error() -> None:
-    """Network errors during send must propagate so ChannelManager can retry."""
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = _FakeDiscordClient(channel, intents=None)
     channel._client = client
@@ -1693,7 +1693,6 @@ async def test_send_re_raises_network_error() -> None:
 
 @pytest.mark.asyncio
 async def test_send_re_raises_generic_exception() -> None:
-    """Any exception from send_outbound must propagate, not be swallowed."""
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = _FakeDiscordClient(channel, intents=None)
     channel._client = client
@@ -1710,13 +1709,11 @@ async def test_send_re_raises_generic_exception() -> None:
 
 @pytest.mark.asyncio
 async def test_send_still_stops_typing_on_error() -> None:
-    """Typing cleanup must still run in the finally block even when send raises."""
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = _FakeDiscordClient(channel, intents=None)
     channel._client = client
     channel._running = True
 
-    # Start a typing task so we can verify it gets cleaned up
     start = asyncio.Event()
     release = asyncio.Event()
 
@@ -1740,13 +1737,11 @@ async def test_send_still_stops_typing_on_error() -> None:
     release.set()
     await asyncio.sleep(0)
 
-    # Typing should have been cleaned up by the finally block
     assert channel._typing_tasks == {}
 
 
 @pytest.mark.asyncio
 async def test_send_succeeds_normally() -> None:
-    """Successful sends should work without raising."""
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = _FakeDiscordClient(channel, intents=None)
     channel._client = client
@@ -1829,7 +1824,6 @@ async def test_automatic_compaction_is_received_but_not_sent() -> None:
 
 @pytest.mark.asyncio
 async def test_compaction_outcome_without_a_start_notice_is_sent() -> None:
-    # After a restart (or when the edit is refused) the outcome still arrives.
     target = _FakeChannel(channel_id=123)
     owner, client = _client_with_channel(target)
 
@@ -1887,6 +1881,6 @@ async def test_reset_discards_in_flight_compaction_notices() -> None:
     owner, client = _client_with_channel(target)
     await client.send_outbound(_compaction_message("Compressing context…", "started"))
 
-    await owner._reset_runtime_state(close_client=False)
+    await owner._reset_runtime_state()
 
     assert owner._compaction_notices == {}

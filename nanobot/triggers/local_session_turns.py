@@ -1,5 +1,3 @@
-"""Shared metadata helpers for local trigger session turns."""
-
 from __future__ import annotations
 
 from typing import Any, Mapping

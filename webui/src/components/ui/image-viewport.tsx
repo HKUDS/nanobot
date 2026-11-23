@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent } from "rea
 import { Minus, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { markKeyboardFocus } from "@/lib/focus-modality";
 import { cn } from "@/lib/utils";
 
 type Point = { x: number; y: number };
@@ -122,7 +123,7 @@ export function ImageViewport({
 
   return <>
     <div ref={viewport} data-testid={testId} tabIndex={0} role="group" aria-label={t("lightbox.gestures")}
-      className={cn("flex min-h-0 min-w-0 touch-none select-none items-center justify-center overflow-hidden focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring", view.scale > 1 ? dragging ? "cursor-grabbing" : "cursor-grab" : "cursor-zoom-in", className)}
+      className={cn("flex min-h-0 min-w-0 touch-none select-none items-center justify-center overflow-hidden outline-none focus-visible:ring-1 focus-visible:ring-ring", view.scale > 1 ? dragging ? "cursor-grabbing" : "cursor-grab" : "cursor-zoom-in", className)}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endPointer} onPointerCancel={endPointer} onLostPointerCapture={endPointer}
       onDoubleClick={(event) => zoom(viewRef.current.scale > 1 ? 1 : 2, { x: event.clientX, y: event.clientY })}
       onKeyDown={(event) => {
@@ -136,6 +137,7 @@ export function ImageViewport({
         else if (panWithArrows && event.key === "ArrowUp") apply({ ...current, y: current.y + PAN_STEP });
         else if (panWithArrows && event.key === "ArrowDown") apply({ ...current, y: current.y - PAN_STEP });
         else return;
+        markKeyboardFocus(event.currentTarget.ownerDocument);
         event.preventDefault();
         event.stopPropagation();
       }}>

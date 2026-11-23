@@ -8,18 +8,19 @@ import {
   completedActivityDurationMs,
   formatActivityDuration,
 } from "@/components/thread/AgentActivityCluster";
+import { sameHistoryRowIdentity, type HistoryRowIdentity, type HistoryRowSource } from "@/components/thread/history-row-identity";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
-import { fmtDateTime, formatMessageHoverTime } from "@/lib/format-time";
-import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
+import { leadingDisplayNoopCount, projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
+import { filterThreadDisplayUnits } from "@/lib/thread-display-projection";
+import { withoutSubagentCreateActivity } from "@/lib/subagent-create-activity";
 import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
+  historyRows?: WeakMap<HTMLElement, HistoryRowIdentity>;
   messages: UIMessage[];
   beforeMessages?: ReactNode;
   beforeUnit?: { key: string; content: ReactNode };
@@ -80,6 +81,7 @@ export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
 }
 
 export function ThreadMessages({
+  historyRows,
   messages,
   beforeMessages,
   beforeUnit,
@@ -106,15 +108,25 @@ export function ThreadMessages({
   const { t } = useTranslation();
   const { activityMode } = useLocalPreferences();
   const messageListRef = useRef<HTMLDivElement>(null);
-  const mobileActions = useMediaQuery("(max-width: 767px)");
-  const units = useMemo(
-    () => buildDisplayUnits(messages),
-    [messages],
-  );
-  const forkBoundaryAfterUnitIndex = useMemo(
-    () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
-    [forkBoundaryMessageCount, units],
-  );
+  const noHover = useMediaQuery("(hover: none)");
+  const [narrowList, setNarrowList] = useState(false);
+  useLayoutEffect(() => {
+    const list = messageListRef.current;
+    if (!list || noHover) return;
+    const measure = (width: number) => setNarrowList(width > 0 && width < 768);
+    measure(list.getBoundingClientRect().width);
+    const observer = new ResizeObserver(([entry]) => measure(entry.contentRect.width));
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [noHover]);
+  const mobileActions = noHover || narrowList;
+  const rawUnits = useMemo(() => buildDisplayUnits(messages), [messages]);
+  const units = useMemo(() => filterThreadDisplayUnits(rawUnits), [rawUnits]);
+  const forkBoundaryAfterUnitIndex = useMemo(() => {
+    if (forkBoundaryMessageCount != null && forkBoundaryMessageCount > 0
+      && forkBoundaryMessageCount <= leadingDisplayNoopCount(messages)) return -1;
+    return unitIndexAfterMessageCount(units, forkBoundaryMessageCount);
+  }, [forkBoundaryMessageCount, messages, units]);
   const forkFlags = useMemo(() => assistantForkFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
     () => isStreaming
@@ -135,7 +147,8 @@ export function ThreadMessages({
   const currentTurnStartIndex = isStreaming
     ? activeTurnStartIndex(units, activeTurnId)
     : units.length;
-  const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
+  const unitKeys = useMemo(() => unitKeysForDisplay(rawUnits), [rawUnits]);
+  const scrollAnchors = useMemo(() => scrollAnchorsForUnits(rawUnits), [rawUnits]);
   const messageBlocks = useMemo(
     () => completedMessageBlocks(
       units,
@@ -152,6 +165,7 @@ export function ThreadMessages({
   }, [activityMode]);
   const [activeContextBlockKey, setActiveContextBlockKey] = useState<string | null>(null);
   const [openContextBlockKey, setOpenContextBlockKey] = useState<string | null>(null);
+  if (!mobileActions && openContextBlockKey !== null) setOpenContextBlockKey(null);
   const pointedContextBlockRef = useRef<string | null>(null);
   const setActivityExpanded = useCallback((key: string, expanded: boolean) => {
     onActivityToggle?.();
@@ -184,7 +198,7 @@ export function ThreadMessages({
     ? <div key="thread-prelude" className={cn("flow-root", marginTop)}>{prefix}{preludeInset}{beforeMessages}</div> : null;
 
   return (
-    <div ref={messageListRef} className="flex w-full flex-col">
+    <div ref={messageListRef} data-compact-message-actions={mobileActions || undefined} className="flex w-full flex-col">
       <AssistantSelectionAction
         containerRef={messageListRef}
         onQuoteSelection={onQuoteSelection}
@@ -247,10 +261,15 @@ export function ThreadMessages({
         const prelude = index === preludeIndex ? renderPrelude(prefix, marginTop) : null;
         return [
           prelude,
+          index === 0 && forkBoundaryAfterUnitIndex === -1
+            ? <ForkBoundaryDivider key="leading-fork-boundary" label={t("thread.forkedFromHistory")} />
+            : null,
           <Fragment key={`unit:${unitKeys[index]}`}>
           <ThreadDisplayUnit
             key={unitKeys[index]}
             unitKey={unitKeys[index]}
+            scrollAnchor={scrollAnchors[index]}
+            historyRows={historyRows}
             unit={unit}
             mobileActions={mobileActions}
             marginTop={prelude ? "" : marginTop}
@@ -268,6 +287,7 @@ export function ThreadMessages({
             contextBlockMenuOpen={contextBlockKey === openContextBlockKey}
             deferOffscreenRender={deferOffscreenRender}
             isTurnStreaming={unitTurnStreaming}
+            runStartedAtMs={unit.type === "activity" && unitTurnStreaming && runStartedAt != null ? runStartedAt * 1000 : undefined}
             retryStatus={
               unit.type === "activity" && liveActivityClusterIndices.has(index)
                 ? retryStatus
@@ -335,23 +355,25 @@ function pendingTurnProjection(
       break;
     }
   }
-  if (promptIndex < 0) return null;
+  if (promptIndex < 0 && activeTurnId === null) return null;
 
   const prompt = messages[promptIndex];
   const hasVisibleOutput = messages.slice(promptIndex + 1).some((message) => {
     if (message.role === "user") return false;
-    if (activeTurnId && message.turnId && message.turnId !== activeTurnId) return false;
-    return (
-      message.content.trim().length > 0
-      || !!message.reasoning?.trim()
-      || !!message.reasoningStreaming
-      || message.kind === "trace"
-      || !!message.media?.length
+    // Assistant-only runs have no prompt boundary; only their own turn's rows count.
+    if (activeTurnId && (message.turnId ? message.turnId !== activeTurnId : promptIndex < 0)) return false;
+    const visible = withoutSubagentCreateActivity(message);
+    return visible !== null && (
+      visible.content.trim().length > 0
+      || !!visible.reasoning?.trim()
+      || !!visible.reasoningStreaming
+      || visible.kind === "trace"
+      || !!visible.media?.length
     );
   });
 
   return {
-    ...(typeof prompt.createdAt === "number" && Number.isFinite(prompt.createdAt)
+    ...(typeof prompt?.createdAt === "number" && Number.isFinite(prompt.createdAt)
       ? { startedAtMs: prompt.createdAt }
       : {}),
     hasVisibleOutput,
@@ -361,6 +383,8 @@ function pendingTurnProjection(
 interface ThreadDisplayUnitProps {
   mobileActions: boolean;
   unitKey: string;
+  scrollAnchor: HistoryRowIdentity;
+  historyRows?: WeakMap<HTMLElement, HistoryRowIdentity>;
   unit: DisplayUnit;
   marginTop: string;
   userPromptId?: string;
@@ -374,6 +398,7 @@ interface ThreadDisplayUnitProps {
   contextBlockMenuOpen: boolean;
   deferOffscreenRender: boolean;
   isTurnStreaming: boolean;
+  runStartedAtMs?: number;
   retryStatus: RetryStatus | null;
   forkIndex?: number;
   showForkBoundary: boolean;
@@ -397,10 +422,8 @@ interface MessageBlockMenuProps {
   message: UIMessage;
   isTurnStreaming: boolean;
   contextBlockKey: string;
-  contextActive: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onContextActiveChange: (key: string | null) => void;
   onForkFromHere?: () => void;
   activity?: {
     label: string;
@@ -415,36 +438,13 @@ function MessageBlockMenu({
   message,
   isTurnStreaming,
   contextBlockKey,
-  contextActive,
   open,
   onOpenChange,
-  onContextActiveChange,
   onForkFromHere,
   activity,
 }: MessageBlockMenuProps) {
   const { t } = useTranslation();
-  const contentRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const [triggerHeight, setTriggerHeight] = useState(28);
-  useLayoutEffect(() => {
-    const trigger = triggerRef.current;
-    if (!open || !trigger) return;
-    const measure = () => setTriggerHeight(trigger.getBoundingClientRect().height || 28);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(trigger);
-    return () => observer.disconnect();
-  }, [open]);
-  const contextActiveRef = useRef(contextActive);
-  contextActiveRef.current = contextActive;
   const label = t("message.actions");
-  const timestamp = message.role === "assistant" && Number.isFinite(message.completedAt)
-    ? message.completedAt
-    : message.createdAt;
-  // Re-evaluated when this message becomes active, including after an overnight idle.
-  const shortTime = mobileActions ? "" : formatMessageHoverTime(timestamp);
-  const fullTime = shortTime ? fmtDateTime(timestamp) : "";
   const actions = <MessageBlockMenuActions
     message={message}
     isTurnStreaming={isTurnStreaming}
@@ -457,111 +457,31 @@ function MessageBlockMenu({
       <MessageCopyButton message={message} className="h-11 w-8 [&_svg]:h-4 [&_svg]:w-4" />
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogTrigger asChild>
-          <button ref={triggerRef} type="button" data-message-block-menu-trigger aria-label={label}
+          <button type="button" data-message-block-menu-trigger aria-label={label}
             className="inline-flex h-11 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} aria-hidden />
           </button>
         </DialogTrigger>
-        <DialogContent ref={contentRef} placement="bottom" aria-describedby={undefined}
-          data-message-block-menu data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
+        <DialogContent placement="bottom" aria-describedby={undefined}
+          data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
           className="gap-2 p-4 pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] outline-none"
           onCloseAutoFocus={(event) => { if (activity?.expanded) event.preventDefault(); }}>
-          <DialogTitle className="px-2 pb-2 pe-10 text-sm font-medium text-muted-foreground">{label}</DialogTitle>
+          <DialogTitle className="px-2 pb-2 text-sm font-medium text-muted-foreground">{label}</DialogTitle>
           {actions}
         </DialogContent>
       </Dialog>
     </div>;
   }
-  return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <button
-          ref={triggerRef}
-          type="button"
-          data-message-block-menu-trigger
-          aria-label={label}
-          className={cn(
-            "message-block-menu-trigger group touch-target absolute -start-[var(--message-block-trigger-offset)] top-0 z-20",
-            "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-control-size)] items-center justify-center text-muted-foreground/70",
-            "transition-[color,opacity] hover:text-foreground focus-visible:outline-none",
-            "motion-reduce:transform-none motion-reduce:transition-none",
-          )}
-        >
-          <span
-            data-message-block-menu-highlight
-            className={cn(
-              "inline-flex h-4 w-7 items-center justify-center rounded-full",
-              "transition-colors",
-              "group-focus-visible:ring-2 group-focus-visible:ring-ring",
-              "motion-reduce:transform-none motion-reduce:transition-none",
-            )}
-          >
-            <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-          </span>
-        </button>
-      </PopoverTrigger>
-      {shortTime && fullTime && typeof timestamp === "number" ? (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <time data-message-hover-time dateTime={new Date(timestamp).toISOString()}
-                tabIndex={0} aria-label={fullTime}
-                className="message-block-hover-time absolute start-[calc(-1*var(--message-block-trigger-offset)-2px)] top-[var(--message-block-control-size)] z-10 w-[calc(var(--message-block-control-size)+4px)] truncate rounded-mark text-center text-[10px] leading-4 tabular-nums text-muted-foreground outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none">
-                {shortTime}
-              </time>
-            </TooltipTrigger>
-            <TooltipContent side="right" align="start" collisionPadding={12}
-              data-message-context-menu-block={contextBlockKey}>{fullTime}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      ) : null}
-      <PopoverContent
-        ref={contentRef}
-        data-message-block-menu
-        data-message-context-menu-block={contextBlockKey}
-        side="bottom"
-        align="end"
-        sideOffset={-triggerHeight}
-        collisionPadding={12}
-        tabIndex={-1}
-        aria-label={label}
-        onKeyDownCapture={(event) => {
-          if (event.key !== "Escape"
-            || !(event.target instanceof Node)
-            || !event.currentTarget.contains(event.target)) return;
-          event.preventDefault();
-          event.stopPropagation();
-          onOpenChange(false);
-        }}
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          contentRef.current?.focus({ preventScroll: true });
-        }}
-        onCloseAutoFocus={(event) => {
-          if (!contextActiveRef.current || activity?.expanded) event.preventDefault();
-        }}
-        onPointerEnter={(event) => {
-          if (event.pointerType === "touch") return;
-          onContextActiveChange(contextBlockKey);
-        }}
-        onPointerLeave={(event) => {
-          if (event.pointerType === "touch") return;
-          onContextActiveChange(contextBlockKeyForTarget(event.relatedTarget) ?? null);
-        }}
-        className={cn(
-          "w-max max-w-64 overflow-y-auto outline-none",
-          "shadow-[0_2px_10px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.24)]",
-        )}
-      >
-        {actions}
-      </PopoverContent>
-    </Popover>
-  );
+  return <div data-message-side-actions className="message-side-actions" data-side={message.role === "user" && !message.sessionMessage ? "right" : "left"}>
+    {actions}
+  </div>;
 }
 
 const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   mobileActions,
   unitKey,
+  scrollAnchor,
+  historyRows,
   unit,
   marginTop,
   userPromptId,
@@ -575,6 +495,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   contextBlockMenuOpen,
   deferOffscreenRender,
   isTurnStreaming,
+  runStartedAtMs,
   retryStatus,
   forkIndex,
   showForkBoundary,
@@ -594,6 +515,12 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
 }: ThreadDisplayUnitProps) {
   const { t } = useTranslation();
   const elementRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = elementRef.current;
+    if (!element || !historyRows) return;
+    historyRows.set(element, scrollAnchor);
+    return () => { historyRows.delete(element); };
+  }, [historyRows, scrollAnchor]);
   const activityDetailsId = useId();
   const heightRef = useRef(0);
   const [nearViewport, setNearViewport] = useState(true);
@@ -615,9 +542,6 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
     observer.observe(element);
     return () => observer.disconnect();
   }, [deferOffscreenRender, interacted]);
-  const onForkFromHere = useCallback(() => {
-    if (forkIndex !== undefined) onForkFromMessage?.(forkIndex);
-  }, [forkIndex, onForkFromMessage]);
   const onBlockActivityExpandedChange = useCallback((expanded: boolean) => {
     if (contextBlockKey !== undefined) {
       onActivityExpandedChange(contextBlockKey, expanded);
@@ -625,12 +549,12 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         const focusTarget = elementRef.current?.querySelector<HTMLElement>(
           expanded
             ? "[data-contextual-activity-collapse]"
-            : "[data-message-block-menu-trigger]",
+            : mobileActions ? "[data-message-block-menu-trigger]" : "[data-message-block-activity-action]",
         );
         focusTarget?.focus({ preventScroll: true });
       }, 0);
     }
-  }, [contextBlockKey, onActivityExpandedChange]);
+  }, [contextBlockKey, mobileActions, onActivityExpandedChange]);
   const activityDurationMs = blockActivity
     ? completedActivityDurationMs(blockActivity.messages, blockActivity.turnLatencyMs)
     : 0;
@@ -658,11 +582,9 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
       message={unit.message}
       isTurnStreaming={isTurnStreaming}
       contextBlockKey={contextBlockKey}
-      contextActive={contextBlockActive}
       open={contextBlockMenuOpen}
       onOpenChange={(open) => onContextBlockMenuOpenChange(contextBlockKey, open)}
-      onContextActiveChange={onContextBlockActiveChange}
-      onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
+      onForkFromHere={onForkFromMessage && forkIndex !== undefined ? () => onForkFromMessage(forkIndex) : undefined}
       activity={activityLabel ? {
         label: activityLabel,
         expanded: blockActivityExpanded,
@@ -689,7 +611,6 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         data-user-prompt-id={userPromptId}
         data-message-context-block={contextBlockKey}
         data-context-block-active={contextBlockActive || undefined}
-        data-message-context-menu-open={contextBlockMenuOpen || undefined}
         onPointerEnter={(event) => {
           if (event.pointerType === "touch") return;
           onContextBlockActiveChange(contextBlockKey ?? null);
@@ -714,7 +635,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
               retryStatus={retryStatus}
               hasBodyBelow={hasBodyBelow}
               turnLatencyMs={unit.turnLatencyMs}
-              startedAtMs={unit.startedAtMs}
+              startedAtMs={unit.startedAtMs ?? (isTurnStreaming ? runStartedAtMs : undefined)}
               cliApps={cliApps}
               mcpPresets={mcpPresets}
               traceDetailScope={traceDetailScope}
@@ -723,8 +644,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             />
           )
         ) : (
-          <div className={unit.message.role === "assistant" ? "relative" : undefined}>
-            {unit.message.role === "assistant" && !mobileActions ? blockMenu : null}
+          <div>
             {showBlockContext && blockActivity ? (
               <div className={blockActivityExpanded ? "mb-2" : undefined}>
                 <AgentActivityCluster
@@ -753,7 +673,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
               mcpPresets={mcpPresets}
               slashCommands={slashCommands}
               onOpenFilePreview={onOpenFilePreview}
-              contextMenu={unit.message.role === "user" && !mobileActions ? blockMenu : undefined}
+              contextMenu={!mobileActions ? blockMenu : undefined}
             />
             {mobileActions ? blockMenu : null}
             {unit.message.role === "assistant"
@@ -778,6 +698,8 @@ function threadDisplayUnitPropsEqual(
 ): boolean {
   return (
     displayUnitsEqual(previous.unit, next.unit)
+    && previous.historyRows === next.historyRows
+    && sameHistoryRowIdentity(previous.scrollAnchor, next.scrollAnchor)
     && previous.mobileActions === next.mobileActions
     && previous.marginTop === next.marginTop
     && previous.userPromptId === next.userPromptId
@@ -791,6 +713,7 @@ function threadDisplayUnitPropsEqual(
     && previous.contextBlockMenuOpen === next.contextBlockMenuOpen
     && previous.deferOffscreenRender === next.deferOffscreenRender
     && previous.isTurnStreaming === next.isTurnStreaming
+    && previous.runStartedAtMs === next.runStartedAtMs
     && previous.retryStatus === next.retryStatus
     && previous.forkIndex === next.forkIndex
     && previous.showForkBoundary === next.showForkBoundary
@@ -911,7 +834,10 @@ function currentActivityClusterIndices(
   let markedCurrentActivity = false;
   for (let i = units.length - 1; i >= 0; i -= 1) {
     const unit = units[i];
+    const turnId = displayUnitTurnId(unit);
+    if (activeTurnId && turnId && turnId !== activeTurnId) break;
     if (unit.type === "activity") {
+      if (!unit.messages.length) continue;
       if (!markedCurrentActivity) {
         indices.add(i);
         markedCurrentActivity = true;
@@ -933,6 +859,41 @@ export function unitKeysForDisplay(units: DisplayUnit[]): string[] {
     occurrences.set(base, next);
     return base.endsWith("-user") && next === 1 ? base : `${base}-${next}`;
   });
+}
+
+function scrollAnchorsForUnits(units: DisplayUnit[]): HistoryRowIdentity[] {
+  const sourceKeys = units.map((unit) => {
+    const messages = unit.type === "message" ? [unit.message] : unit.messages;
+    // Either edge of an activity cluster can survive when the other grows.
+    const edges = messages.length > 1 ? [messages[0], messages[messages.length - 1]] : messages;
+    const streams: HistoryRowSource[] = [];
+    const sequences: HistoryRowSource[] = [];
+    const ids: HistoryRowSource[] = [];
+    for (const message of edges) {
+      const stream = unit.type === "message" ? message.streamId : message.reasoningStreamId;
+      if (message.turnId && stream) streams.push({ kind: "stream", key: JSON.stringify([unit.type, "stream", message.turnId, stream]) });
+      const sequence = message.projectionStartSeq ?? message.turnSeq;
+      if (message.turnId && Number.isFinite(sequence)) {
+        sequences.push({ kind: "sequence", key: JSON.stringify([unit.type, "sequence", message.turnId, sequence]) });
+      }
+      ids.push({ kind: "id", key: JSON.stringify([unit.type, "id", message.id]) });
+    }
+    return Array.from(new Map([...streams, ...sequences, ...ids].map((source) => [source.key, source])).values());
+  });
+  const sourceCounts = new Map<string, number>();
+  const bases = units.map(unitKeyBase);
+  const baseCounts = new Map<string, number>();
+  for (const sources of sourceKeys) for (const source of sources) {
+    sourceCounts.set(source.key, (sourceCounts.get(source.key) ?? 0) + 1);
+  }
+  for (const base of bases) baseCounts.set(base, (baseCounts.get(base) ?? 0) + 1);
+  return sourceKeys.map((sources, index) => ({
+    sources: sources.filter((source) => sourceCounts.get(source.key) === 1),
+    // A sole turn/phase row can keep its live identity when replay replaces
+    // both its source id and sequence. Occurrence keys are unsafe otherwise.
+    ...(bases[index].startsWith("turn-") && baseCounts.get(bases[index]) === 1
+      ? { fallback: bases[index] } : {}),
+  }));
 }
 
 function unitKeyBase(unit: DisplayUnit, index: number): string {
@@ -998,7 +959,8 @@ function completedMessageBlocks(
   const result: CompletedMessageBlocks = {
     blockKeys: new Array<string | undefined>(units.length),
     blockIndices: new Set<number>(),
-    suppressedActivityIndices: new Set<number>(),
+    suppressedActivityIndices: new Set(units.flatMap((unit, index) =>
+      unit.type === "activity" && !unit.messages.length ? [index] : [])),
     activityByBlock: new Map(),
   };
   let groupStart = 0;
@@ -1029,7 +991,7 @@ function completedMessageBlocks(
     const activityByBlock = new Map<number, Array<Extract<DisplayUnit, { type: "activity" }>>>();
     for (const index of indices) {
       const unit = units[index];
-      if (unit.type !== "activity") continue;
+      if (unit.type !== "activity" || !unit.messages.length) continue;
       const blockIndex = blockIndices.find((candidate) => candidate > index) ?? blockIndices.at(-1);
       if (blockIndex === undefined) continue;
       result.suppressedActivityIndices.add(index);

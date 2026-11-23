@@ -26,8 +26,8 @@ from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPr
 # sub-millisecond operations) the brief block is acceptable.
 _LOCK = threading.Lock()
 _ALPHABET = string.ascii_uppercase + string.digits
-_CODE_LENGTH = 8  # e.g. ABCD-EFGH
-_TTL_DEFAULT_S = 600  # 10 minutes
+_CODE_LENGTH = 8
+_TTL_DEFAULT_S = 600
 
 
 def _store_path() -> Path:
@@ -63,7 +63,6 @@ def _load() -> dict[str, Any]:
     pending = cast(dict[str, Any], raw_pending) if isinstance(raw_pending, dict) else {}
     data["pending"] = pending
 
-    # Convert approved lists to str sets for O(1) lookup.
     for channel, users in approved.items():
         if not isinstance(users, list):
             users = []
@@ -74,7 +73,6 @@ def _load() -> dict[str, Any]:
 def _save(data: dict[str, Any]) -> None:
     path = _store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Convert sets back to lists for JSON serialization
     raw_approved = data.get("approved")
     approved = cast(dict[str, Any], raw_approved) if isinstance(raw_approved, dict) else {}
     raw_pending = data.get("pending")
@@ -97,7 +95,6 @@ def _notify_changed(on_change: Callable[[], object] | None) -> None:
 
 
 def _gc_pending(data: dict[str, Any]) -> None:
-    """Remove expired pending entries in-place."""
     now = time.time()
     pending: dict[str, Any] = data.get("pending") or {}
     expired: list[str] = []
@@ -348,70 +345,8 @@ def format_expiry(expires_at: float) -> str:
 def handle_pairing_command(
     channel: str, subcommand_text: str, *, on_change: Callable[[], object] | None = None,
 ) -> str:
-    """Execute a pairing subcommand and return the reply text.
+    """Run the command and render its English text for text-only callers."""
+    from nanobot.command.results import render
+    from nanobot.pairing.command import pairing_command_lines
 
-    CLI and agent commands share the same mutations. The optional notifier runs
-    only after a successful persistent change, without changing the reply text.
-    """
-    try:
-        return _handle_pairing_subcommand(channel, subcommand_text, on_change=on_change)
-    except OSError:
-        # Mutations fail loudly on a transient I/O error instead of lying
-        # ("invalid code") or silently rewriting the store from an empty view.
-        return "The pairing store is temporarily unavailable. Please try again."
-
-
-def _handle_pairing_subcommand(
-    channel: str, subcommand_text: str, *, on_change: Callable[[], object] | None,
-) -> str:
-    parts = subcommand_text.split()
-    sub = parts[0] if parts else "list"
-    arg = parts[1] if len(parts) > 1 else None
-
-    if sub in ("list",):
-        pending = list_pending()
-        if not pending:
-            return "No pending pairing requests."
-        lines = ["Pending pairing requests:"]
-        for item in pending:
-            expiry = format_expiry(item.get("expires_at", 0))
-            lines.append(
-                f"- `{item['code']}` | {item['channel']} | {item['sender_id']} | {expiry}"
-            )
-        return "\n".join(lines)
-
-    elif sub == "approve":
-        if arg is None:
-            return "Usage: `/pairing approve <code>`"
-        result = approve_code(arg, on_change=on_change)
-        if result is None:
-            return f"Invalid or expired pairing code: `{arg}`"
-        ch, sid = result
-        return f"Approved pairing code `{arg}` — {sid} can now access {ch}"
-
-    elif sub == "deny":
-        if arg is None:
-            return "Usage: `/pairing deny <code>`"
-        if deny_code(arg, on_change=on_change):
-            return f"Denied pairing code `{arg}`"
-        return f"Pairing code `{arg}` not found or already expired"
-
-    elif sub == "revoke":
-        if len(parts) == 2:
-            return (
-                f"Revoked {arg} from {channel}"
-                if revoke(channel, parts[1], on_change=on_change)
-                else f"{arg} was not in the approved list for {channel}"
-            )
-        if len(parts) == 3:
-            return (
-                f"Revoked {parts[2]} from {arg}"
-                if revoke(parts[1], parts[2], on_change=on_change)
-                else f"{parts[2]} was not in the approved list for {arg}"
-            )
-        return "Usage: `/pairing revoke <user_id>` or `/pairing revoke <channel> <user_id>`"
-
-    return (
-        "Unknown pairing command.\n"
-        "Usage: `/pairing [list|approve <code>|deny <code>|revoke <user_id>|revoke <channel> <user_id>]`"
-    )
+    return render(tuple(pairing_command_lines(channel, subcommand_text, on_change=on_change)), "en")

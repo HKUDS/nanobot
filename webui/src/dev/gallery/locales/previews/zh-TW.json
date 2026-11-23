@@ -1,18 +1,18 @@
 {
+  "goal": {
+    "title": "GoalIsland · 目標",
+    "description": "預覽目標及其詳情。",
+    "options": "傳入目標狀態、摘要、內容及選用的進度說明。",
+    "state": "狀態",
+    "summary": "準備發布",
+    "objective": "檢查變更並驗證發布。\n\n- 檢查測試\n- 審閱文件\n- 確認發布準備就緒",
+    "recap": "等待批准。"
+  },
   "rename": {
     "title": "RenameDialog · 群組與專案改名",
     "description": "預覽群組與專案改名；話題在清單內改名。",
     "options": "呼叫端提供 dialogTitle、description 與 placeholder。title 設定初始值，onConfirm 接收去除頭尾空白的標題。空標題無法儲存。",
     "hint": "儲存後更新上方標題。"
-  },
-  "delete": {
-    "title": "DeleteConfirm · 刪除確認",
-    "description": "比較單筆、多筆與含自動任務的刪除確認。",
-    "options": "count 控制批次刪除文案；automations 顯示關聯任務、排程與下次執行時間。確認按鈕呼叫 onConfirm。",
-    "scenario": "刪除情境",
-    "open": "開啟刪除確認",
-    "confirmed": "已確認刪除範例。",
-    "hint": "選擇單一、多個或含自動任務的對話。"
   },
   "inlineTokens": {
     "title": "Inline tokens · 指令與對話識別",
@@ -178,6 +178,18 @@
     "dismissed": "已關閉復原提示。",
     "reset": "重設預覽",
     "hint": "選擇復原狀態，再試用繼續或關閉。"
+  },
+  "sandbox": {
+    "gateway": "範例閘道系統",
+    "unknownGateway": "未指定",
+    "title": "指令提示",
+    "description": "使用正式提示元件，體驗缺少元件、安裝位置受限與啟動異常三種狀態。",
+    "options": "提示不會搶焦點，也不會自動重試指令。可切換狀態、關閉提示並繼續輸入。",
+    "missing": "找不到元件",
+    "permissions": "安裝位置受限",
+    "startup": "啟動異常",
+    "hint": "這裡僅示範元件，不會執行指令或修改設定。",
+    "settingsAction": "已要求開啟沙箱設定（示範）。"
   },
   "fallback": {
     "title": "ModelFallbackNotice · 模型備援",

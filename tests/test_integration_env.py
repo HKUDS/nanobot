@@ -1,5 +1,3 @@
-"""Real offline seed/install checks for disposable integration environments."""
-
 import ensurepip
 import json
 import os

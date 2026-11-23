@@ -18,8 +18,6 @@ export default {
     },
   },
   presentation: {
-    logoUrl: "https://www.larksuite.com/favicon.ico",
-    logoLayout: "tile",
     displayName: "Feishu",
     initials: "FS",
     color: "#3370FF",

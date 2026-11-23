@@ -12,7 +12,7 @@ describe("model request failure copy", () => {
     expect(titles).toEqual([
       "Model provider authorization failed",
       "Model provider quota is unavailable",
-      "Could not connect to the model provider",
+      "Model connection failed",
       "Model provider request timed out",
       "Model provider rate limit reached",
       "Model provider service error",

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { switchModelPreset } from "@/lib/switch-model-preset";
 import { useClient } from "@/providers/ClientProvider";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import {
@@ -19,7 +20,6 @@ import type {
 
 const CHAT_CREATE_TIMEOUT_MS = 60_000;
 
-/** Sidebar state: fetches the full session list and exposes create / delete actions. */
 export function useSessions(): {
   sessions: ChatSummary[];
   loading: boolean;
@@ -122,6 +122,7 @@ export function useSessions(): {
     modelPreset?: string | null,
   ): Promise<string> => {
     const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
+    const preset = modelPreset ? await switchModelPreset(client, chatId, modelPreset) : null;
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
     // Optimistic insert; a subsequent refresh will replace it with the
@@ -135,8 +136,9 @@ export function useSessions(): {
         updatedAt: new Date().toISOString(),
         title: "",
         preview: "",
-        modelPreset: modelPreset ?? null,
+        modelPreset: preset,
         workspaceScope: workspaceScope ?? null,
+        projectLocked: false,
       },
       ...prev.filter((s) => s.key !== key),
     ]);
@@ -205,10 +207,9 @@ export function useSessions(): {
   };
 }
 
-/** Read-only history view backed by the conversation owner. */
 export function useSessionHistory(key: string | null) {
-  const { messages, history, refreshHistory, loadOlder } = useNanobotStream(
+  const { messages, messagesKey, messagesReady, history, refreshHistory, loadOlder } = useNanobotStream(
     null, undefined, false, undefined, undefined, undefined, { key },
   );
-  return { messages, ...history, refresh: refreshHistory, loadOlder };
+  return { messages, messagesKey, messagesReady, ...history, refresh: refreshHistory, loadOlder };
 }

@@ -1,17 +1,15 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
+
+import type { ToolsCatalog } from "@/lib/tools-catalog-cache";
 
 import type { AutomationFilter } from "@/components/settings/system/AutomationsSettings";
 import {
   DEFAULT_CUSTOM_MCP_FORM,
-  type AppsKindFilter,
   type CustomMcpForm,
 } from "@/components/settings/system/AppsSettings";
 import type {
-  ApiServicePayload,
   AutomationsPayload,
-  CliAppsPayload,
   McpOAuthFlowPayload,
-  McpPresetsPayload,
   NanobotFeatureInfo,
   NanobotFeaturesPayload,
   SessionAutomationJob,
@@ -22,10 +20,10 @@ export type NanobotFeatureInstallRequest = {
   installOnly: boolean;
 };
 
-export function useSystemSettingsState() {
-  const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
+export function useSystemSettingsState(toolsCatalog: ToolsCatalog) {
+  const { cliApps, mcpPresets, invalidation: toolsCatalogInvalidation } = useSyncExternalStore(toolsCatalog.subscribe, toolsCatalog.getSnapshot);
+  const { setCliApps, setMcpPresets } = toolsCatalog;
   const [nanobotFeatures, setNanobotFeatures] = useState<NanobotFeaturesPayload | null>(null);
-  const [mcpPresets, setMcpPresets] = useState<McpPresetsPayload | null>(null);
   const [automations, setAutomations] = useState<AutomationsPayload | null>(null);
   const [cliAppsLoading, setCliAppsLoading] = useState(true);
   const [nanobotFeaturesLoading, setNanobotFeaturesLoading] = useState(true);
@@ -45,20 +43,16 @@ export function useSystemSettingsState() {
   const [mcpOAuthCallbackUrl, setMcpOAuthCallbackUrl] = useState("");
   const [mcpOAuthCompleting, setMcpOAuthCompleting] = useState(false);
   const [mcpOAuthCallbackError, setMcpOAuthCallbackError] = useState<string | null>(null);
-  const [apiService, setApiService] = useState<ApiServicePayload | null>(null);
-  const [apiServiceLoading, setApiServiceLoading] = useState(false);
-  const [apiServiceAction, setApiServiceAction] = useState<"start" | "stop" | null>(null);
-  const [apiServiceError, setApiServiceError] = useState<string | null>(null);
   const [appsQuery, setAppsQuery] = useState("");
   const [automationsFilter, setAutomationsFilter] = useState<AutomationFilter>("all");
   const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
   const [nanobotFeaturesError, setNanobotFeaturesError] = useState<string | null>(null);
   const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
-  const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("cli");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [automationsError, setAutomationsError] = useState<string | null>(null);
+  const [automationDialogError, setAutomationDialogError] = useState<string | null>(null);
   const [automationAction, setAutomationAction] = useState<string | null>(null);
   const [automationPendingDelete, setAutomationPendingDelete] =
     useState<SessionAutomationJob | null>(null);
@@ -69,11 +63,8 @@ export function useSystemSettingsState() {
   const [mcpConfigImport, setMcpConfigImport] = useState("");
 
   return {
-    apiService,
-    apiServiceAction,
-    apiServiceError,
-    apiServiceLoading,
-    appsKindFilter,
+    toolsCatalog,
+    toolsCatalogInvalidation,
     appsQuery,
     automationAction,
     automationPendingDelete,
@@ -110,17 +101,14 @@ export function useSystemSettingsState() {
     nanobotFeatures,
     nanobotFeaturesError,
     nanobotFeaturesLoading,
-    setApiService,
-    setApiServiceAction,
-    setApiServiceError,
-    setApiServiceLoading,
-    setAppsKindFilter,
     setAppsQuery,
     setAutomationAction,
     setAutomationPendingDelete,
     setAutomationPendingEdit,
     setAutomations,
     setAutomationsError,
+    automationDialogError,
+    setAutomationDialogError,
     setAutomationsFilter,
     setAutomationsLoading,
     setCliApps,

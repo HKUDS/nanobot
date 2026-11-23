@@ -20,6 +20,12 @@ export type SettingsSectionKey =
   | "runtime"
   | "advanced";
 
+export type AppsSectionKey = "apps" | "skills" | "channels";
+
+export function isAppsSection(section: SettingsSectionKey): section is AppsSectionKey {
+  return section === "apps" || section === "skills" || section === "channels";
+}
+
 export function isCapabilitySection(section: SettingsSectionKey): boolean {
   return ["capabilities", "image", "voice", "browser", "memory"].includes(section);
 }
@@ -40,3 +46,8 @@ export type ApplySettingsPayload = (
 ) => void;
 
 export type MaybeRestartHostEngine = (payload: RestartAwarePayload) => Promise<void>;
+export type SettingsFocusTarget = "sandbox" | "sandbox-launcher" | `image-input:${string}`;
+
+export function imageInputPresetFromFocus(target?: SettingsFocusTarget): string | undefined {
+  return target?.startsWith("image-input:") ? target.slice("image-input:".length) : undefined;
+}

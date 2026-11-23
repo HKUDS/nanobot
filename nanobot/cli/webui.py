@@ -1,5 +1,3 @@
-"""WebUI CLI command."""
-
 import hashlib
 import sys
 from contextlib import ExitStack
@@ -55,7 +53,6 @@ def _wait_with_existing_foreground_gateway(
     gateway_port: int,
     dev_server: WebUIDevServer,
 ) -> None:
-    """Keep a Vite sidecar alive without taking ownership of an external gateway."""
     import time
 
     try:
@@ -87,6 +84,7 @@ def webui(
         "--dev",
         help="Run the Vite development server with live frontend updates",
     ),
+    dev_port: int = typer.Option(5173, "--dev-port", min=1, max=65535, help="Vite development port (with --dev)"),
     no_open: bool = typer.Option(False, "--no-open", help="Do not open a browser"),
     no_dock: bool = typer.Option(False, "--no-dock", help="Do not show the macOS Dock icon"),
     detach: bool = typer.Option(False, "--detach", help="Keep the gateway running and return to the terminal"),
@@ -187,7 +185,7 @@ def webui(
     runtime_config = resolved_webui_config
     effective_gateway_port = gateway_port if gateway_port is not None else runtime_config.gateway.port
 
-    dev_browser_url = webui_dev_browser_url(webui_url) if dev else None
+    dev_browser_url = webui_dev_browser_url(webui_url, port=dev_port) if dev else None
     if not dev:
         webui_bundle_mode = _webui_build_mode_for_interactive(yes=yes)
         _prepare_webui_bundle_for_gateway(runtime_config, mode=webui_bundle_mode)
@@ -282,6 +280,7 @@ def webui(
             try:
                 with run_webui_dev_server(
                     target_url=webui_dev_proxy_target(webui_url),
+                    port=dev_port,
                     output=lambda message: console.print(message, style="dim", markup=False),
                 ) as dev_server:
                     managed = not existing_gateway or runtime.status().running

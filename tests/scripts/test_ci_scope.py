@@ -1,5 +1,3 @@
-"""Path policy and real git range regressions for the CI selector."""
-
 import html
 import json
 import os
@@ -27,6 +25,7 @@ def selected(result):
         ("README.md", {"docker"}),
         ("Dockerfile", {"docker"}),
         ("entrypoint.sh", {"docker"}),
+        ("render.yaml", {"python"}),
         ("tests/test_docker_config.py", {"python", "docker"}),
         ("tests/test_docker_smoke.py", {"python", "docker"}),
         ("tests/test_docker.sh", {"docker"}),
@@ -50,6 +49,7 @@ def selected(result):
         ("nanobot/webui/ws_http.py", {"python", "webui", "tui", "docker"}),
         ("nanobot/session/session_messages.py", {"python", "webui", "tui", "docker"}),
         ("packages/client-events/notifications.ts", {"webui", "tui", "docker"}),
+        ("nanobot/command/locales/core.json", {"python", "webui", "tui", "docker"}),
         ("nanobot/update_recovery.py", {"python", "docker", "native"}),
         ("nanobot/release_trust.py", {"python", "docker", "native"}),
         ("nanobot/gateway/runtime.py", {"python", "docker", "native"}),
@@ -76,7 +76,6 @@ def selected(result):
     ],
 )
 def test_existing_path_policy(path, expected):
-    # These are reachable repository inputs, not merely invented glob matches.
     assert (ROOT / path).is_file()
     result = classify_paths([path])
     assert selected(result) == expected

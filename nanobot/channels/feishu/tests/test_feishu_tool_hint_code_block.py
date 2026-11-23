@@ -1,12 +1,9 @@
-"""Tests for FeishuChannel tool hint formatting."""
-
 import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 from pytest import mark
 
-# Check optional Feishu dependencies before running tests
 try:
     from nanobot.channels import feishu
     FEISHU_AVAILABLE = getattr(feishu, "FEISHU_AVAILABLE", False)
@@ -29,7 +26,7 @@ def mock_feishu_channel():
     config.app_secret = "test_app_secret"
     config.encrypt_key = None
     config.verification_token = None
-    config.tool_hint_prefix = "\U0001f527"  # 🔧
+    config.tool_hint_prefix = "\U0001f527"
     bus = MagicMock()
     channel = FeishuChannel(config, bus)
     channel._client = MagicMock()
@@ -46,7 +43,6 @@ def _get_tool_hint_card(mock_send):
 
 @mark.asyncio
 async def test_tool_hint_sends_interactive_card(mock_feishu_channel):
-    """Tool hint without active buffer sends an interactive card with 🔧 style."""
     msg = OutboundMessage(
         channel="feishu",
         chat_id="oc_123456",
@@ -67,11 +63,10 @@ async def test_tool_hint_sends_interactive_card(mock_feishu_channel):
 
 @mark.asyncio
 async def test_tool_hint_empty_content_does_not_send(mock_feishu_channel):
-    """Empty tool hint messages should not be sent."""
     msg = OutboundMessage(
         channel="feishu",
         chat_id="oc_123456",
-        content="   ",  # whitespace only
+        content="   ",
         event=ProgressEvent(tool_hint=True),
     )
 
@@ -82,7 +77,6 @@ async def test_tool_hint_empty_content_does_not_send(mock_feishu_channel):
 
 @mark.asyncio
 async def test_tool_hint_without_metadata_sends_as_normal(mock_feishu_channel):
-    """Regular messages without _tool_hint should use normal formatting."""
     msg = OutboundMessage(
         channel="feishu",
         chat_id="oc_123456",
@@ -102,7 +96,6 @@ async def test_tool_hint_without_metadata_sends_as_normal(mock_feishu_channel):
 
 @mark.asyncio
 async def test_tool_hint_multiple_tools_in_one_message(mock_feishu_channel):
-    """Multiple tool calls should each get the 🔧 prefix."""
     msg = OutboundMessage(
         channel="feishu",
         chat_id="oc_123456",
@@ -169,7 +162,6 @@ async def test_tool_hint_preserves_arguments(mock_feishu_channel, content, first
 
 @mark.asyncio
 async def test_tool_hint_new_format_mcp(mock_feishu_channel):
-    """MCP tool format (server::tool) should parse correctly."""
     msg = OutboundMessage(
         channel="feishu",
         chat_id="oc_123456",

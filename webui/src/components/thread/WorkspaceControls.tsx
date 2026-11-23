@@ -14,6 +14,7 @@ import { SidebarSelectionHighlight, SIDEBAR_SELECTION_ITEM_CLASS } from "@/compo
 import type { WorkspaceScopePayload, ProjectDirectory, WorkspaceDirectoriesPayload, WorkspacesPayload } from "@/lib/types";
 import { createWorkspaceDirectoryCache } from "@/lib/workspace-directory-cache";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useOverlayEscapeFocus } from "@/hooks/useOverlayEscapeFocus";
 import { cn } from "@/lib/utils";
 import { isAbsoluteWorkspacePath, projectNameFromPath, sameWorkspacePath, scopeWithAccessMode, workspaceBreadcrumbs, workspacePathCompletionQuery, workspaceDirectoryPrefix, selectedProjectScope, type BrowseWorkspaceDirectories } from "@/lib/workspace";
 
@@ -210,6 +211,7 @@ export function WorkspaceProjectPicker({ disabled, scope, defaultScope, controls
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [keyboardInteraction, setKeyboardInteraction] = useState(false);
   const openedWithKeyboard = useRef(false);
+  const escapeFocus = useOverlayEscapeFocus();
   const inputRef = useRef<HTMLInputElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const optionsId = useId();
@@ -555,7 +557,7 @@ export function WorkspaceProjectPicker({ disabled, scope, defaultScope, controls
       <Dialog open={open} onOpenChange={setOpen}>
         <HoverHint content={`${t("workspace.picker.switchDirectory")}\n${displayedScope?.project_path ?? ""}`}>
           <DialogTrigger asChild>
-            <button ref={triggerRef} onClick={event => { openedWithKeyboard.current = event.detail === 0; }} onPointerDown={() => setKeyboardInteraction(false)} onKeyDown={() => setKeyboardInteraction(true)} type="button" disabled={disabled} aria-label={t("workspace.picker.switchDirectory")} className="thread-composer-workspace touch-target inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55">
+            <button ref={triggerRef} {...escapeFocus.triggerProps} onClick={event => { openedWithKeyboard.current = event.detail === 0; }} onPointerDown={() => setKeyboardInteraction(false)} onKeyDown={() => setKeyboardInteraction(true)} type="button" disabled={disabled} aria-label={t("workspace.picker.switchDirectory")} className="thread-composer-workspace touch-target inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55">
               <WorkspaceIcon className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 truncate">{projectLabel}</span>
               <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
@@ -570,8 +572,14 @@ export function WorkspaceProjectPicker({ disabled, scope, defaultScope, controls
             if (!canBrowse || pickingFolder || event.nativeEvent.isComposing) return;
             if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "g") { event.preventDefault(); editPath(); }
           }}
-          onEscapeKeyDown={event => { if (editingPath) { event.preventDefault(); cancelPathEditing(); } }}
-          onCloseAutoFocus={event => { if (!openedWithKeyboard.current) event.preventDefault(); }}>
+          onEscapeKeyDown={event => {
+            if (editingPath) { event.preventDefault(); cancelPathEditing(); }
+            else escapeFocus.contentProps.onEscapeKeyDown();
+          }}
+          onCloseAutoFocus={event => {
+            escapeFocus.contentProps.onCloseAutoFocus(event);
+            if (!openedWithKeyboard.current) event.preventDefault();
+          }}>
           <DialogTitle className="sr-only">{t("workspace.picker.title")}</DialogTitle>
           <DialogDescription className="sr-only">{t("workspace.picker.description")}</DialogDescription>
           <div className="flex shrink-0 items-center gap-1 bg-muted px-[var(--picker-toolbar-inset)] pt-[var(--picker-toolbar-inset)] pb-3">
@@ -758,6 +766,8 @@ export function WorkspaceAccessMenu({
       <DropdownMenuContent side="top" align="start" sideOffset={8} aria-label={t("thread.composer.workspace.accessAria")}
         onPointerDownCapture={() => { restoreTriggerFocus.current = false; }}
         onKeyDownCapture={() => { restoreTriggerFocus.current = true; }}
+        // Radix handles Escape at the document layer, before React's content key handler.
+        onEscapeKeyDown={() => { restoreTriggerFocus.current = true; }}
         onPointerDownOutside={() => { restoreTriggerFocus.current = false; }}
         onCloseAutoFocus={event => { if (!restoreTriggerFocus.current) event.preventDefault(); }}
         className="w-max min-w-[13rem] max-w-[calc(100vw-2rem)]">

@@ -12,7 +12,6 @@ from nanobot.session.session_handles import (
     SESSION_HANDLE_METADATA_KEY,
     SessionHandleResolver,
     _allocate_name,
-    _tier_size,
     normalize_session_handle,
 )
 from nanobot.session.types import SESSION_TYPE_KEY, SessionType
@@ -46,12 +45,6 @@ def test_handle_is_pronounceable_stable_and_stored_with_session(tmp_path: Path) 
     assert metadata is not None
     assert metadata["metadata"][SESSION_HANDLE_METADATA_KEY] == first.name
     assert not (manager.sessions_dir / "session_handles.json").exists()
-
-
-def test_pronounceable_tiers_have_millions_of_candidates() -> None:
-    assert _tier_size(2) == 2_560
-    assert _tier_size(3) == 163_840
-    assert _tier_size(4) == 10_485_760
 
 
 def test_allocator_produces_distinct_short_names() -> None:

@@ -1,10 +1,8 @@
-"""Configuration loading utilities."""
-
 import json
 import os
 import re
 from pathlib import Path
-from typing import Any, cast, overload
+from typing import Any, TypeVar, cast, overload
 
 from pydantic import BaseModel, ValidationError
 from pydantic_settings import SettingsError
@@ -15,12 +13,10 @@ from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import Config
 from nanobot.utils.file_io import write_text_atomic
 
-# Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
 
 
 def _as_config_object(value: object) -> dict[str, Any] | None:
-    """Narrow an untrusted JSON configuration value to an object."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
@@ -130,7 +126,6 @@ def load_config(config_path: Path | None = None) -> Config:
 
 
 def _apply_ssrf_whitelist(config: Config) -> None:
-    """Apply SSRF whitelist from config to the network security module."""
     from nanobot.security.network import configure_ssrf_whitelist
 
     configure_ssrf_whitelist(config.tools.ssrf_whitelist)
@@ -185,14 +180,15 @@ def merge_missing_defaults(existing: object, defaults: object) -> object:
 
 
 _ENV_REF_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_ConfigValue = TypeVar("_ConfigValue")
 
 
 def resolve_config_env_vars(
-    config: Config,
+    config: _ConfigValue,
     *,
     config_path: Path | None = None,
-) -> Config:
-    """Return *config* with ``${VAR}`` env-var references resolved.
+) -> _ConfigValue:
+    """Return a config or config subtree with ``${VAR}`` references resolved.
 
     Walks in place so fields declared with ``exclude=True`` survive;
     returns the same instance when no references are present.
@@ -318,7 +314,6 @@ def _missing_env_issues(
 
 
 def _resolve_env_vars(obj: object) -> object:
-    """Recursively resolve ``${VAR}`` patterns in plain strings/dicts/lists."""
     if isinstance(obj, str):
         return _ENV_REF_PATTERN.sub(_env_replace, obj)
     if isinstance(obj, dict):
@@ -342,8 +337,6 @@ def _env_replace(match: re.Match[str]) -> str:
 
 
 def _migrate_config(data: dict[str, Any]) -> dict[str, Any]:
-    """Migrate old config formats to current."""
-    # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace
     tools_value = data.get("tools", {})
     if not isinstance(tools_value, dict):
         return data

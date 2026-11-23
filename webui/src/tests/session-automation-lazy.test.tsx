@@ -26,8 +26,7 @@ async function loadView(fail = false) {
   await initializeI18n();
   await loadAllLocaleResources();
   const { SessionInfoPopoverView } = await import("@/components/thread/SessionInfoPopoverView");
-  render(<><textarea aria-label="Unsent draft" defaultValue="Keep this draft" /><SessionInfoPopoverView
-    title="Release work" jobs={[job]} loading={false} loadFailed={false} now={Date.now()}
+  render(<><textarea aria-label="Unsent draft" defaultValue="Keep this draft" /><SessionInfoPopoverView jobs={[job]} loading={false} loadFailed={false} now={Date.now()}
     onAction={async () => []} onEdit={async () => [job]}
   /></>);
   return loaded;

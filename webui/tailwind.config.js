@@ -30,8 +30,8 @@ export default {
         "control-label": ["0.875rem", { lineHeight: "1.25rem", fontWeight: "500" }],
         caption: ["0.75rem", { lineHeight: "1.125rem", fontWeight: "400" }],
         title: ["1.25rem", { lineHeight: "1.75rem", fontWeight: "600" }],
-        reading: ["var(--text-reading-size)", { lineHeight: "var(--cjk-line-height)", fontWeight: "400" }],
-        "reading-small": ["calc(var(--text-reading-size) * 0.875)", { lineHeight: "var(--cjk-line-height)", fontWeight: "400" }],
+        reading: ["var(--text-reading-size)", { lineHeight: "var(--reading-line-height)", fontWeight: "400" }],
+        "reading-small": ["calc(var(--text-reading-size) * 0.875)", { lineHeight: "var(--reading-line-height)", fontWeight: "400" }],
         code: ["var(--text-code-size)", { lineHeight: "1.6", fontWeight: "400" }],
         "code-dense": ["var(--text-code-dense-size)", { lineHeight: "1.6", fontWeight: "400" }],
         composer: ["max(16px, var(--text-reading-size))", { lineHeight: "1.5", fontWeight: "400" }],
@@ -158,11 +158,41 @@ export default {
   plugins: [
     animate,
     typography,
-    plugin(({ addVariant, addUtilities }) => {
+    plugin(({ addVariant, matchVariant, addUtilities }) => {
+      const textEntrySelector =
+        'textarea, [contenteditable], input:not([type="button"], [type="submit"], [type="reset"], [type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="image"])';
       addUtilities({ ".rounded-full": { cornerShape: "round" } });
       // Revealing controls on emulated hover can consume the first Safari
       // tap. Keep these sidebar hover effects on hover-capable pointers.
       addVariant("media-hover", "@media (hover: hover)");
+      // Gate non-text-entry focus rings on keyboard navigation modality so
+      // Shift+click, Escape, and shortcuts after pointer clicks stay quiet.
+      addVariant(
+        "focus-visible",
+        `&:focus-visible:where(:root:not([data-focus-modality="pointer"]) *, ${textEntrySelector})`,
+      );
+      matchVariant(
+        "group-focus-visible",
+        (_value, { modifier }) => (
+          modifier
+            ? `:where(:root:not([data-focus-modality="pointer"])) :merge(.group\\/${modifier}):focus-visible &`
+            : `:where(:root:not([data-focus-modality="pointer"])) :merge(.group):focus-visible &`
+        ),
+        { values: { DEFAULT: "" } },
+      );
+      matchVariant(
+        "peer-focus-visible",
+        (_value, { modifier }) => (
+          modifier
+            ? `:where(:root:not([data-focus-modality="pointer"])) :merge(.peer\\/${modifier}):focus-visible ~ &`
+            : `:where(:root:not([data-focus-modality="pointer"])) :merge(.peer):focus-visible ~ &`
+        ),
+        { values: { DEFAULT: "" } },
+      );
+      addVariant(
+        "has-focus-visible",
+        ':where(:root:not([data-focus-modality="pointer"])) &:has(:focus-visible)',
+      );
     }),
   ],
 };

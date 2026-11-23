@@ -1,13 +1,15 @@
 import {
   useCallback,
+  useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Quote, Wrench } from "lucide-react";
+import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Info, Quote, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DisclosureContent } from "@/components/ui/disclosure";
 
@@ -19,15 +21,19 @@ import { ImageGallery } from "@/components/ImageGallery";
 import { InlineImageProvider, useInlineImages } from "@/components/InlineImageContext";
 import { INLINE_REFERENCE_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/components/InlineTokenHighlight";
 import { MarkdownText } from "@/components/MarkdownText";
+import { PendingEdgeOverlay, usePendingEdgeState, type PendingEdgeState } from "@/components/PendingEdgeOverlay";
 import { SlashCommandText } from "@/components/SlashCommandText";
+import { DiffViewportContext } from "@/components/thread/activity/DiffViewportContext";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
 import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { HoverHint } from "@/components/ui/tooltip";
+import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { formatMessageEndTime } from "@/lib/format-time";
+import { fmtDateTime, formatMessageEndTime, formatMessageHoverTime } from "@/lib/format-time";
 import { toMediaAttachment } from "@/lib/media";
 import { matchingSlashCommand } from "@/lib/slash-command";
 import { parseQuotedUserMessage } from "@/lib/user-message-quote";
@@ -46,13 +52,11 @@ import type {
 
 interface MessageBubbleProps {
   message: UIMessage;
-  /** Give temporary-chat user turns the dashed private-mode treatment. */
   temporary?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
   onOpenFilePreview?: (path: string) => void;
-  /** Context-menu trigger positioned against this message's visual block. */
   contextMenu?: ReactNode;
 }
 
@@ -78,6 +82,7 @@ function ForkArrowIcon({ className }: { className?: string }) {
 
 function useMessageCopy(content: string) {
   const { t } = useTranslation();
+  const showToast = useToast();
   const [copied, setCopied] = useState(false);
   const copyResetRef = useRef<number | null>(null);
 
@@ -91,7 +96,10 @@ function useMessageCopy(content: string) {
 
   const onCopy = useCallback(() => {
     void copyTextToClipboard(content).then((ok) => {
-      if (!ok) return;
+      if (!ok) {
+        showToast?.({ message: t("fileActions.failed"), tone: "error", dedupeKey: "copy-failed" });
+        return;
+      }
       setCopied(true);
       if (copyResetRef.current !== null) {
         window.clearTimeout(copyResetRef.current);
@@ -101,29 +109,17 @@ function useMessageCopy(content: string) {
         copyResetRef.current = null;
       }, 1_500);
     });
-  }, [content]);
+  }, [content, showToast, t]);
 
   const label = copied ? t("message.copiedReply") : t("message.copyReply");
   return { copied, label, onCopy };
 }
 
-function messageCopyContent(message: UIMessage, t: (key: string) => string) {
-  if (message.renderAs === "text") return message.content;
-  return message.role === "assistant" && message.compactReply === "empty"
-    ? t("thread.compaction.empty")
-    : message.role === "assistant" && message.compactReply === "failed"
-      ? t("thread.compaction.failed")
-      : message.content;
-}
-
-/** The same copy behavior in the desktop menu and the mobile reply footer. */
 export function MessageCopyButton({ message, className }: { message: UIMessage; className?: string }) {
-  const { t } = useTranslation();
-  const content = messageCopyContent(message, t);
+  const content = message.content;
   const { copied, label, onCopy } = useMessageCopy(content);
   if (!content.trim()) return null;
   return <HoverHint content={label} side="top" align="center"><button type="button" data-message-block-copy-action
-    data-assistant-copy-action={message.role === "assistant" || undefined}
     onClick={onCopy} aria-label={label}
     className={cn(
       "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
@@ -151,7 +147,6 @@ interface MessageBlockMenuActionsProps {
   sheet?: boolean;
 }
 
-/** Actions and metadata shown after opening a visual message block's context panel. */
 export function MessageBlockMenuActions({
   message,
   isTurnStreaming = false,
@@ -160,7 +155,8 @@ export function MessageBlockMenuActions({
   sheet = false,
 }: MessageBlockMenuActionsProps) {
   const { t } = useTranslation();
-  const content = messageCopyContent(message, t);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const content = message.content;
   const hasText = content.trim().length > 0;
   const showFork = message.role === "assistant"
     && !message.isStreaming
@@ -180,110 +176,86 @@ export function MessageBlockMenuActions({
     ? message.source?.label?.trim() || t("message.automationSourceFallback")
     : "";
 
-  return (
+  const details = <>
+    <FallbackResponseSources
+      sources={message.role === "assistant" ? message.responseSources : undefined}
+      className="min-h-[var(--message-block-control-size)] gap-1"
+      badgeClassName="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
+    />
+    {timestampLabel || automationSourceLabel ? (
       <div
-        data-message-block-menu-actions
-        className={cn("flex max-w-full flex-col items-start gap-1", sheet ? "w-full" : "w-max")}
+        data-message-block-metadata
+        className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4 text-muted-foreground", sheet ? "px-2 text-xs" : "text-[10px]")}
       >
-        {(!sheet && hasText) || showFork || activity ? (
-          <div
-            data-message-block-toolbar
-            className={cn("flex w-full flex-wrap gap-x-1 gap-y-1", sheet ? "flex-col items-stretch" : "items-center")}
+        {timestampLabel ? (
+          <time
+            data-message-timestamp
+            data-message-created-at={message.role === "user" || undefined}
+            data-assistant-completed-at={
+              message.role === "assistant" && timestamp === message.completedAt || undefined
+            }
+            dateTime={new Date(timestamp).toISOString()}
+            className="flex min-h-[var(--message-block-control-size)] items-center tabular-nums"
           >
-            {(!sheet && hasText) || showFork ? (
-              <div className="flex min-h-[var(--message-block-control-size)] items-center gap-0.5">
-                {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
-                {showFork ? (
-                  <HoverHint content={t("message.forkFromHere")} side="top" align="center">
-                      <button
-                        type="button"
-                        data-message-block-fork-action
-                        data-assistant-fork-action
-                        onClick={onForkFromHere}
-                        aria-label={t("message.forkFromHere")}
-                        className={cn(
-                          "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
-                          "text-muted-foreground transition-colors",
-                          "hover:text-foreground",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          "motion-reduce:transform-none",
-                          sheet && "w-full justify-start gap-2 px-2 text-sm",
-                        )}
-                      >
-                        <ForkArrowIcon className="h-3.5 w-3.5" />
-                        {sheet ? <span>{t("message.forkFromHere")}</span> : null}
-                      </button>
-                  </HoverHint>
-                ) : null}
-              </div>
-            ) : null}
-            {activity ? (
-              <button
-                type="button"
-                data-message-block-activity-action
-                onClick={activity.onToggle}
-                aria-expanded={activity.expanded}
-                aria-controls={activity.controls}
-                className={cn(
-                  "group inline-flex min-h-[var(--message-block-control-size)] self-start items-center gap-1.5 whitespace-nowrap",
-                  "text-start text-[11px] leading-4",
-                  "text-muted-foreground transition-colors hover:text-foreground",
-                  "focus-visible:outline-none",
-                  sheet && "w-full gap-2 rounded-control px-2 text-sm hover:bg-muted/70",
-                )}
-              >
-                <span
-                  data-message-block-activity-icon
-                  className={cn(
-                    "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] shrink-0 items-center justify-center rounded-control",
-                    "transition-colors",
-                    "group-focus-visible:ring-2 group-focus-visible:ring-ring",
-                    "motion-reduce:transform-none",
-                    sheet && "w-3.5",
-                  )}
-                >
-                  <Activity className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
-                </span>
-                <span>{activity.label}</span>
-              </button>
-            ) : null}
-          </div>
+            {timestampLabel}
+          </time>
         ) : null}
-        <FallbackResponseSources
-          sources={message.role === "assistant" ? message.responseSources : undefined}
-          className="min-h-[var(--message-block-control-size)] gap-1"
-          badgeClassName="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
-        />
-        {timestampLabel || automationSourceLabel ? (
-          <div
-            data-message-block-metadata
-            className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4 text-muted-foreground", sheet ? "px-2 text-xs" : "text-[10px]")}
+        {automationSourceLabel ? (
+          <span
+            data-automation-trigger
+            className="flex min-h-[var(--message-block-control-size)] flex-wrap items-baseline gap-x-2 break-words"
           >
-            {timestampLabel ? (
-              <time
-                data-message-timestamp
-                data-message-created-at={message.role === "user" || undefined}
-                data-assistant-completed-at={
-                  message.role === "assistant" && timestamp === message.completedAt || undefined
-                }
-                dateTime={new Date(timestamp).toISOString()}
-                className="flex min-h-[var(--message-block-control-size)] items-center tabular-nums"
-              >
-                {timestampLabel}
-              </time>
-            ) : null}
-            {automationSourceLabel ? (
-              <span
-                data-automation-trigger
-                className="flex min-h-[var(--message-block-control-size)] flex-wrap items-baseline gap-x-2 break-words"
-              >
-                <span>{t("message.automationTriggered")}</span>{" "}
-                <span>{automationSourceLabel}</span>
-              </span>
-            ) : null}
-          </div>
+            <span>{t("message.automationTriggered")}</span>{" "}
+            <span>{automationSourceLabel}</span>
+          </span>
         ) : null}
       </div>
+    ) : null}
+  </>;
+  const fallback = message.responseSources?.find((source) => source.fallback);
+  const detailsLabel = fmtDateTime(timestamp) || automationSourceLabel
+    || (fallback ? t("message.fallbackResponse", { preset: fallback.preset }) : "");
+  const activityAction = activity && (
+    <button type="button" data-message-block-activity-action onClick={activity.onToggle}
+      aria-expanded={activity.expanded} aria-controls={activity.controls} aria-label={activity.label}
+      className={cn("inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        sheet && "w-full justify-start gap-2 px-2 text-sm hover:bg-muted/70")}>
+      <Activity className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
+      {sheet ? activity.label : null}
+    </button>
+  );
+  return (
+    <div className={sheet ? "flex w-full flex-col gap-1" : "flex flex-col items-start"}>
+      <div className={cn("flex", sheet && "flex-col items-stretch gap-1")}>
+        {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
+        {showFork ? (
+          <HoverHint content={t("message.forkFromHere")}>
+            <button type="button" onClick={onForkFromHere}
+              aria-label={t("message.forkFromHere")}
+              className={cn("inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                sheet && "w-full justify-start gap-2 px-2 text-sm")}>
+              <ForkArrowIcon className="h-3.5 w-3.5" />
+              {sheet ? t("message.forkFromHere") : null}
+            </button>
+          </HoverHint>
+        ) : null}
+        {activityAction && !sheet ? <HoverHint content={activity.label}>{activityAction}</HoverHint> : activityAction}
+      </div>
+      {sheet ? details : detailsLabel ? (
+        <Popover open={detailsOpen} onOpenChange={setDetailsOpen}>
+          <HoverHint content={detailsLabel} enabled={!detailsOpen}>
+            <PopoverTrigger asChild>
+              <button type="button" aria-label={detailsLabel}
+                className="ms-[calc((var(--message-block-action-width)-0.875rem)/2)] rounded-mark text-start text-[10px] leading-4 tabular-nums text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {timestampLabel ? <time data-message-hover-time dateTime={new Date(timestamp).toISOString()}>{formatMessageHoverTime(timestamp)}</time>
+                  : <Info className="h-3.5 w-3.5" aria-hidden />}
+              </button>
+            </PopoverTrigger>
+          </HoverHint>
+          <PopoverContent side="bottom" collisionPadding={12} className="w-max max-w-64 [--message-block-control-size:1.75rem]">{details}</PopoverContent>
+        </Popover>
+      ) : null}
+    </div>
   );
 }
 
@@ -318,9 +290,11 @@ function deliveryErrorCopy(
 function UserDeliveryStatus({
   status,
   errorKind,
+  errorDetail,
 }: {
   status: MessageDeliveryStatus | undefined;
   errorKind: MessageDeliveryErrorKind | undefined;
+  errorDetail?: string;
 }) {
   const { t } = useTranslation();
   if (status !== "sending" && status !== "failed") return null;
@@ -334,6 +308,10 @@ function UserDeliveryStatus({
         {t("message.delivery.sending")}
       </span>
     );
+  }
+
+  if (errorDetail === "temporary_chat_command_rejected") {
+    return <span role="alert" className="text-[12px] text-destructive">{t("errors.turnRejected.temporaryCommand")}</span>;
   }
 
   const label = t("message.delivery.failed");
@@ -405,7 +383,6 @@ function IncomingSessionMessage({
   );
 }
 
-/** Render user turns as compact bubbles and assistant turns as document-like prose. */
 export function MessageBubble({
   message,
   temporary = false,
@@ -423,6 +400,11 @@ export function MessageBubble({
   const mentionMcpPresets = useMemo(
     () => mergeMcpMentionPresets(mcpPresets, message.mcpPresets),
     [mcpPresets, message.mcpPresets],
+  );
+  const { edgeState, completeSeal } = usePendingEdgeState(
+    message.id,
+    message.role === "user" ? message.processingStatus : undefined,
+    temporary || message.role !== "user",
   );
 
   if (message.kind === "compaction" && message.compaction) {
@@ -453,6 +435,15 @@ export function MessageBubble({
     const hasText = userContent.trim().length > 0;
     const showDeliveryStatus =
       message.deliveryStatus === "sending" || message.deliveryStatus === "failed";
+    const processingStatus = message.processingStatus;
+    const showProcessingStatus = !temporary && processingStatus === "pending";
+    const mediaEdgeState: PendingEdgeState = !hasText ? edgeState : "solid";
+    const mediaSealEnd = !hasText ? completeSeal : undefined;
+    const userMedia = hasImages
+      ? <ImageGallery images={images} align="right" size="compact" edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
+      : hasMedia
+        ? <MessageMedia media={media} align="right" pending={message.deliveryStatus === "sending"} edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
+        : null;
     const quotedContext = parsedMessage.quotedContext;
     const slashCommand = matchingSlashCommand(userContent, slashCommands);
     const bangPrefix = /^(\s*)!/.exec(userContent);
@@ -487,10 +478,7 @@ export function MessageBubble({
         className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5"
       >
         {!hasText ? contextMenu : null}
-        {hasImages ? <ImageGallery images={images} align="right" size="compact" /> : null}
-        {!hasImages && hasMedia ? (
-          <MessageMedia media={media} align="right" pending={message.deliveryStatus === "sending"} />
-        ) : null}
+        {userMedia}
         {quotedContext ? (
           <UserQuotedContext
             text={quotedContext}
@@ -498,28 +486,29 @@ export function MessageBubble({
           />
         ) : null}
         {hasText ? (
-          <div data-user-text-bubble className="relative ml-auto w-fit max-w-full min-w-0">
-            {contextMenu}
-            <p
-              data-theme-surface
-              data-temporary-message={temporary ? "true" : undefined}
-              className={cn(
-                "ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
-                "text-left text-reading whitespace-pre-wrap [overflow-wrap:anywhere]",
-                temporary
-                  ? "border border-dashed border-muted-foreground/40 bg-transparent"
-                  : "bg-secondary/70",
-              )}
-            >
-              {messageText}
-            </p>
-          </div>
+          <UserTextBubble
+            messageId={message.id}
+            contentKey={userContent}
+            temporary={temporary}
+            showProcessingStatus={showProcessingStatus}
+            edgeState={edgeState}
+            onSealEnd={completeSeal}
+            contextMenu={contextMenu}
+          >
+            {messageText}
+          </UserTextBubble>
+        ) : null}
+        {!showDeliveryStatus && showProcessingStatus ? (
+          <span role="status" className="sr-only">
+            {t("message.delivery.waiting")}
+          </span>
         ) : null}
         {showDeliveryStatus ? (
             <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
               <UserDeliveryStatus
                 status={message.deliveryStatus}
                 errorKind={message.deliveryErrorKind}
+                errorDetail={message.deliveryErrorDetail}
               />
             </div>
         ) : null}
@@ -527,7 +516,7 @@ export function MessageBubble({
     );
   }
 
-  const assistantContent = messageCopyContent(message, t);
+  const assistantContent = message.content;
   const empty = assistantContent.trim().length === 0;
   const media = message.media ?? [];
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
@@ -571,13 +560,230 @@ export function MessageBubble({
   );
 }
 
+const USER_MESSAGE_COLLAPSE_THRESHOLD_RATIO = 0.5;
+const USER_MESSAGE_COLLAPSED_HEIGHT_RATIO = 0.38;
+const MIN_USER_MESSAGE_COLLAPSE_THRESHOLD_PX = 200;
+const MIN_USER_MESSAGE_COLLAPSED_BUBBLE_PX = 160;
+const MIN_USER_MESSAGE_COLLAPSED_TEXT_PX = 96;
+const DEFAULT_COLLAPSIBLE_PADDING_BOTTOM_PX = 40;
+const COLLAPSE_SCROLL_TOP_INSET_PX = 48;
+
+interface UserTextCollapseLayout {
+  collapsible: boolean;
+  fullTextHeight: number;
+  collapsedTextHeight: number;
+}
+
+interface UserTextBubbleProps {
+  messageId: string;
+  contentKey: string;
+  temporary: boolean;
+  showProcessingStatus: boolean;
+  edgeState: PendingEdgeState;
+  onSealEnd: () => void;
+  contextMenu?: ReactNode;
+  children: ReactNode;
+}
+
+function UserTextBubble({
+  messageId,
+  contentKey,
+  temporary,
+  showProcessingStatus,
+  edgeState,
+  onSealEnd,
+  contextMenu,
+  children,
+}: UserTextBubbleProps) {
+  const { t } = useTranslation();
+  const viewport = useContext(DiffViewportContext);
+  const bubbleRef = useRef<HTMLParagraphElement>(null);
+  const contentRef = useRef<HTMLSpanElement>(null);
+  const contentId = useId();
+  const [layout, setLayout] = useState<UserTextCollapseLayout | null>(null);
+  const [expandedForId, setExpandedForId] = useState<string | null>(null);
+  const expanded = expandedForId === messageId;
+  const isCollapsible = layout?.collapsible ?? false;
+  const isCollapsed = isCollapsible && !expanded;
+
+  useLayoutEffect(() => {
+    const bubble = bubbleRef.current;
+    if (!bubble) return;
+    const scroller = viewport?.scroller.current ?? null;
+
+    const measure = () => {
+      const currentBubble = bubbleRef.current;
+      if (!currentBubble) return;
+      const scrollerHeight = scroller?.clientHeight ?? 0;
+      const referenceHeight = scrollerHeight > 0 ? scrollerHeight : window.innerHeight;
+      if (!Number.isFinite(referenceHeight) || referenceHeight <= 0) return;
+
+      const style = getComputedStyle(currentBubble);
+      const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+      const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+      const normalPaddingY = paddingTop * 2;
+      const content = contentRef.current;
+      const fullTextHeight = content
+        ? content.scrollHeight
+        : Math.max(0, currentBubble.scrollHeight - paddingTop - paddingBottom);
+      if (fullTextHeight <= 0) return;
+
+      const naturalBubbleHeight = fullTextHeight + normalPaddingY;
+      const collapseThreshold = Math.max(
+        MIN_USER_MESSAGE_COLLAPSE_THRESHOLD_PX,
+        Math.round(referenceHeight * USER_MESSAGE_COLLAPSE_THRESHOLD_RATIO),
+      );
+      const collapsible = naturalBubbleHeight > collapseThreshold;
+      const collapsedPaddingY = content
+        ? paddingTop + paddingBottom
+        : paddingTop + DEFAULT_COLLAPSIBLE_PADDING_BOTTOM_PX;
+      const targetBubbleHeight = Math.max(
+        MIN_USER_MESSAGE_COLLAPSED_BUBBLE_PX,
+        Math.round(referenceHeight * USER_MESSAGE_COLLAPSED_HEIGHT_RATIO),
+      );
+      const collapsedTextHeight = Math.min(
+        fullTextHeight,
+        Math.max(MIN_USER_MESSAGE_COLLAPSED_TEXT_PX, targetBubbleHeight - collapsedPaddingY),
+      );
+
+      setLayout((current) => (
+        current?.collapsible === collapsible
+        && current.fullTextHeight === fullTextHeight
+        && current.collapsedTextHeight === collapsedTextHeight
+          ? current
+          : { collapsible, fullTextHeight, collapsedTextHeight }
+      ));
+    };
+
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(contentRef.current ?? bubble);
+    if (scroller) observer?.observe(scroller);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [contentKey, isCollapsible, messageId, viewport]);
+
+  const toggleCollapsed = useCallback(() => {
+    if (expanded) {
+      const bubble = bubbleRef.current;
+      if (bubble) {
+        const scroller = viewport?.scroller.current ?? null;
+        if (scroller) {
+          const scrollerRect = scroller.getBoundingClientRect();
+          const bubbleRect = bubble.getBoundingClientRect();
+          if (bubbleRect.top < scrollerRect.top + COLLAPSE_SCROLL_TOP_INSET_PX) {
+            const targetTop = Math.max(
+              0,
+              scroller.scrollTop + (bubbleRect.top - scrollerRect.top) - COLLAPSE_SCROLL_TOP_INSET_PX,
+            );
+            scroller.scrollTo({ top: targetTop, behavior: "auto" });
+          }
+        } else if (bubble.getBoundingClientRect().top < 16) {
+          bubble.scrollIntoView({ block: "nearest" });
+        }
+      }
+      setExpandedForId(null);
+      return;
+    }
+    setExpandedForId(messageId);
+  }, [expanded, messageId, viewport]);
+
+  const clipHeight = layout
+    ? (isCollapsed ? layout.collapsedTextHeight : layout.fullTextHeight)
+    : undefined;
+
+  return (
+    <div
+      data-user-text-bubble
+      data-user-message-collapsible={isCollapsible ? "true" : undefined}
+      data-user-message-collapsed={isCollapsed ? "true" : undefined}
+      className="relative ml-auto w-fit max-w-full min-w-0"
+    >
+      {contextMenu}
+      <p
+        ref={bubbleRef}
+        id={isCollapsible ? contentId : undefined}
+        data-theme-surface
+        data-temporary-message={temporary ? "true" : undefined}
+        data-pending-edge={edgeState !== "solid" ? edgeState : undefined}
+        className={cn(
+          "relative ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
+          "text-left text-reading whitespace-pre-wrap [overflow-wrap:anywhere]",
+          temporary
+            ? "border border-dashed border-muted-foreground/40 bg-transparent"
+            : "user-message-surface bg-secondary/70",
+          showProcessingStatus && "user-message-surface-dashed",
+          isCollapsible && "user-message-collapsible",
+        )}
+      >
+        <PendingEdgeOverlay state={edgeState} onSealEnd={onSealEnd} />
+        {isCollapsible ? (
+          <span
+            data-user-message-clip
+            data-state={isCollapsed ? "closed" : "open"}
+            className={cn(
+              "user-message-collapsible-body block overflow-hidden",
+              isCollapsed && "user-message-collapsible-masked",
+            )}
+            style={clipHeight !== undefined ? { height: clipHeight } : undefined}
+          >
+            <span ref={contentRef} className="block">
+              {children}
+            </span>
+          </span>
+        ) : (
+          children
+        )}
+      </p>
+      {isCollapsible ? (
+        <>
+          <div
+            data-user-message-stack
+            data-state={isCollapsed ? "visible" : "hidden"}
+            data-temporary={temporary ? "true" : undefined}
+            aria-hidden="true"
+            className="user-message-stack pointer-events-none flex flex-col"
+          >
+            <span className="user-message-stack-sheet user-message-stack-sheet-first" />
+            <span className="user-message-stack-sheet user-message-stack-sheet-second" />
+          </div>
+          <div
+            data-user-message-toggle-bar
+            className="user-message-toggle-bar pointer-events-none absolute inset-x-0 z-[2] flex items-center justify-center px-3 pb-1.5 pt-1"
+          >
+            <button
+              type="button"
+              data-thread-disclosure=""
+              data-user-message-toggle
+              aria-expanded={!isCollapsed}
+              aria-controls={contentId}
+              onClick={toggleCollapsed}
+              className={cn(
+                "pointer-events-auto touch-target inline-flex h-7 items-center rounded-full px-3.5",
+                "text-ui-label text-muted-foreground transition-colors",
+                "hover:bg-foreground/[0.06] hover:text-foreground dark:hover:bg-foreground/[0.09]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+            >
+              {isCollapsed ? t("message.expandUserMessage") : t("message.collapseUserMessage")}
+            </button>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function UserQuotedContext({ text, label }: { text: string; label: string }) {
   return (
     <blockquote
       data-theme-surface
       data-theme-ink
       className={cn(
-        "ml-auto flex w-fit max-w-full min-w-0 items-start gap-2 rounded-control",
+        "ml-auto flex w-fit max-w-full min-w-0 items-start gap-2 rounded-floating",
         "border border-border/60 bg-muted/35 px-3 py-2 text-left text-muted-foreground",
       )}
       aria-label={label}
@@ -657,10 +863,14 @@ function MessageMedia({
   media,
   align,
   pending = false,
+  edgeState = "solid",
+  onSealEnd,
 }: {
   media: UIMediaAttachment[];
   align: "left" | "right";
   pending?: boolean;
+  edgeState?: PendingEdgeState;
+  onSealEnd?: () => void;
 }) {
   const inlineImages = useInlineImages();
   if (media.length === 0) return null;
@@ -681,6 +891,9 @@ function MessageMedia({
     }
   }
   if (images.length === 0 && videos.length === 0 && files.length === 0) return null;
+  const attachSealToImages = images.length > 0;
+  const attachSealToVideos = !attachSealToImages && videos.length > 0;
+  const attachSealToFiles = !attachSealToImages && !attachSealToVideos;
 
   return (
     <div
@@ -690,15 +903,34 @@ function MessageMedia({
       )}
     >
       {images.length > 0 ? (
-        <ImageGallery images={images} align={align} size={align === "left" ? "large" : "compact"} />
+        <ImageGallery
+          images={images}
+          align={align}
+          size={align === "left" ? "large" : "compact"}
+          edgeState={edgeState}
+          onSealEnd={attachSealToImages ? onSealEnd : undefined}
+        />
       ) : null}
       {videos.map((item, i) => (
-        <AttachmentTile key={`video-${i}`} attachment={item} pending={pending} className="my-0" />
+        <AttachmentTile
+          key={`video-${i}`}
+          attachment={item}
+          pending={pending}
+          edgeState={edgeState}
+          onSealEnd={attachSealToVideos && i === 0 ? onSealEnd : undefined}
+          className="my-0"
+        />
       ))}
       {files.length > 0 ? (
         <div className={cn("flex w-full min-w-0 flex-wrap items-start gap-2", align === "right" && "justify-end")}>
           {files.map((item, i) => (
-            <AttachmentTile key={`file-${i}`} attachment={item} pending={pending} />
+            <AttachmentTile
+              key={`file-${i}`}
+              attachment={item}
+              pending={pending}
+              edgeState={edgeState}
+              onSealEnd={attachSealToFiles && i === 0 ? onSealEnd : undefined}
+            />
           ))}
         </div>
       ) : null}
@@ -706,7 +938,6 @@ function MessageMedia({
   );
 }
 
-/** Quiet pre-token state that occupies a stable line in the answer column. */
 function ThinkingState() {
   const { t } = useTranslation();
   return (
@@ -748,11 +979,6 @@ interface TraceGroupProps {
   message: UIMessage;
 }
 
-/**
- * Collapsible group of tool-call / progress breadcrumbs. Defaults to
- * collapsed because tool traces are supporting evidence, not the answer.
- * A single click expands the exact calls when the user wants details.
- */
 function TraceGroup({ message }: TraceGroupProps) {
   const { t } = useTranslation();
   const lines = message.traces ?? [message.content];

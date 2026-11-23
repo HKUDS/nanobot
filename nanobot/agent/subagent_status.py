@@ -1,5 +1,3 @@
-"""Task observations shared by execution and private child sessions."""
-
 from __future__ import annotations
 
 import time

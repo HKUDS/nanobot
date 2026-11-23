@@ -85,10 +85,10 @@ def test_anthropic_handle_error_marks_connection_kind() -> None:
 
 
 @pytest.mark.parametrize("expected, kwargs", [
-    (True, {"error_status_code": 402}),  # HTTP 402
-    (True, {"error_type": "insufficient_quota"}),  # billing token
-    (True, {"content": "429 You exceeded your current quota"}),  # text marker
-    (False, {"error_status_code": 429, "error_type": "rate_limit_exceeded"}),  # plain rate limit
+    (True, {"error_status_code": 402}),
+    (True, {"error_type": "insufficient_quota"}),
+    (True, {"content": "429 You exceeded your current quota"}),
+    (False, {"error_status_code": 429, "error_type": "rate_limit_exceeded"}),
 ])
 def test_is_arrearage_response(expected: bool, kwargs: dict) -> None:
     response = LLMResponse(finish_reason="error", **{"content": "boom", **kwargs})

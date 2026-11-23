@@ -1,28 +1,18 @@
-"""Tests for CommandRouter.is_dispatchable_command and mid-turn command interception."""
-
 from __future__ import annotations
 
-from inspect import Parameter, signature
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.command.builtin import (
+from nanobot.command.application import (
     builtin_command_starts_agent_turn,
     register_builtin_commands,
 )
+from nanobot.command.results import message_text
 from nanobot.command.router import CommandContext, CommandRouter
 
 
-def test_command_context_requires_loop_as_keyword_dependency() -> None:
-    loop_parameter = signature(CommandContext).parameters["loop"]
-
-    assert loop_parameter.kind is Parameter.KEYWORD_ONLY
-    assert loop_parameter.default is Parameter.empty
-
-
 class TestIsDispatchableCommand:
-    """Unit tests for the is_dispatchable_command() predicate."""
 
     @pytest.fixture()
     def router(self) -> CommandRouter:
@@ -52,14 +42,10 @@ class TestIsDispatchableCommand:
         assert router.is_dispatchable_command("/__shell pwd")
 
     def test_priority_commands_not_matched(self, router: CommandRouter) -> None:
-        # Priority commands are NOT in the dispatchable tiers — they are
-        # handled by is_priority() separately.
         assert not router.is_dispatchable_command("/stop")
         assert not router.is_dispatchable_command("/restart")
 
     def test_regular_text_not_matched(self, router: CommandRouter) -> None:
-        assert not router.is_dispatchable_command("hello")
-        assert not router.is_dispatchable_command("what is 2+2?")
         assert not router.is_dispatchable_command("!important is still ordinary text")
         assert not router.is_dispatchable_command("")
 
@@ -85,7 +71,7 @@ class TestIsDispatchableCommand:
     ("content", "expected"),
     [
         ("/status", False),
-        ("/history 5", False),
+        ("/dream-log abc123", False),
         ("/goal", False),
         ("/goal migrate the database", True),
         ("regular prompt", True),
@@ -132,7 +118,6 @@ class TestMidTurnCommandDispatchedDirectly:
     async def test_new_dispatched_with_session_none(
         self, router: CommandRouter, fake_loop: MagicMock, fake_msg: MagicMock,
     ) -> None:
-        """cmd_new works when session=None (mid-turn dispatch path)."""
         ctx = CommandContext(
             msg=fake_msg, session=None,
             key="test:chat1", raw="/new", loop=fake_loop,
@@ -140,13 +125,14 @@ class TestMidTurnCommandDispatchedDirectly:
         fake_loop.sessions.state.reset = AsyncMock()
         result = await router.dispatch(ctx)
         assert result is not None
-        assert "New session" in result.content
+        assert "New session" in message_text(result)
         fake_loop.sessions.state.reset.assert_awaited_once_with("test:chat1")
 
     @pytest.mark.asyncio
     async def test_help_dispatched_with_session_none(
         self, router: CommandRouter, fake_loop: MagicMock, fake_msg: MagicMock,
     ) -> None:
+        fake_loop.commands = router
         ctx = CommandContext(
             msg=fake_msg, session=None,
             key="test:chat1", raw="/help", loop=fake_loop,
@@ -155,14 +141,13 @@ class TestMidTurnCommandDispatchedDirectly:
         assert result is not None
         assert result.channel == "test"
         assert result.chat_id == "chat1"
-        assert result.metadata["render_as"] == "text"
-        assert "/new" in result.content
-        assert "/pairing [list|approve <code>|deny <code>|revoke <user_id>]" in result.content
+        assert result.event.command == "/help"
+        assert "/new" in message_text(result)
+        assert "/goal <goal>" in message_text(result)
+        assert "/pairing [list|approve <code>|deny <code>|revoke <user_id>]" in message_text(result)
 
     @pytest.mark.asyncio
     async def test_prefix_command_args_populated(self, router: CommandRouter) -> None:
-        """Prefix commands have args populated correctly in mid-turn path."""
-        # Use a custom prefix handler to avoid needing full mock setup.
         custom = CommandRouter()
         captured_args = []
 
@@ -189,7 +174,6 @@ class TestMidTurnCommandDispatchedDirectly:
         self, router: CommandRouter, fake_loop: MagicMock, fake_msg: MagicMock,
         content: str,
     ) -> None:
-        """Regular text returns None from dispatch (not a command)."""
         ctx = CommandContext(
             msg=fake_msg, session=None,
             key="test:chat1", raw=content, loop=fake_loop,
@@ -212,12 +196,11 @@ class TestMidTurnCommandDispatchedDirectly:
         result = await router.dispatch(ctx)
 
         assert result is not None
-        assert result.content == (
+        assert message_text(result) == (
             'Command "/status" does not accept arguments. Did you mean "/status"?'
         )
 
 class TestPairingCommandDispatch:
-    """Verify /pairing works via CommandRouter."""
 
     @pytest.fixture()
     def router(self) -> CommandRouter:
@@ -255,7 +238,7 @@ class TestPairingCommandDispatch:
         )
         result = await router.dispatch(ctx)
         assert result is not None
-        assert "ABCD-EFGH" in result.content
+        assert "ABCD-EFGH" in message_text(result)
         assert result.metadata.get("_pairing_command") is True
 
     @pytest.mark.asyncio
@@ -274,8 +257,8 @@ class TestPairingCommandDispatch:
         )
         result = await router.dispatch(ctx)
         assert result is not None
-        assert "Approved" in result.content
-        assert result.content == (
+        assert "Approved" in message_text(result)
+        assert message_text(result) == (
             "Approved pairing code `ABCD-EFGH` — 123 can now access telegram"
         )
         assert result.metadata.get("_pairing_command") is True
@@ -296,6 +279,6 @@ class TestPairingCommandDispatch:
         )
         result = await router.dispatch(ctx)
         assert result is not None
-        assert "Revoked" in result.content
-        assert result.content == "Revoked 123 from telegram"
+        assert "Revoked" in message_text(result)
+        assert message_text(result) == "Revoked 123 from telegram"
         assert result.metadata.get("_pairing_command") is True

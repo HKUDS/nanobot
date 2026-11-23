@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { mockBrowserFocus } from "./browser-focus";
 
 let restoreBrowserFocus: () => void;
@@ -11,6 +12,21 @@ beforeEach(() => {
 });
 
 afterEach(() => restoreBrowserFocus());
+
+it("opens Ctrl+F only in the active pane and selects a filtered message with Enter", async () => {
+  const user = userEvent.setup();
+  const jump = vi.fn();
+  const props = { messages: [{ id: "one", role: "user" as const, content: "alpha", createdAt: 1 }], onJumpToPrompt: jump };
+  const view = render(<PromptNavigator {...props} shortcutEnabled={false} />);
+  fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  view.rerender(<PromptNavigator {...props} shortcutEnabled />);
+  fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+  const input = await screen.findByRole("textbox", { name: "Search messages" });
+  await waitFor(() => expect(input).toHaveFocus());
+  await user.keyboard("alpha{Enter}");
+  expect(jump).toHaveBeenCalledWith("one");
+});
 
 it("keeps a long searchable index windowed and keyboard-reachable", async () => {
   const user = userEvent.setup();
@@ -63,4 +79,40 @@ it("keeps an unknown recovered time blank while the prompt remains navigable", a
   expect(prompt.textContent).toBe("Undated recovered input");
   await user.click(prompt);
   expect(onJumpToPrompt).toHaveBeenCalledWith("undated");
+});
+
+it("defers Ctrl+F to an open popover but not to its exit animation", async () => {
+  render(<>
+    <style>{`.test-popover[data-state="open"] { animation-name: enter; }
+      .test-popover[data-state="closed"] { animation-name: exit; }`}</style>
+    <Popover>
+      <PopoverTrigger>Model options</PopoverTrigger>
+      <PopoverContent aria-label="Model options" className="test-popover"><button>Choose model</button></PopoverContent>
+    </Popover>
+    <PromptNavigator messages={[{ id: "one", role: "user", content: "alpha", createdAt: 1 }]} onJumpToPrompt={vi.fn()} />
+  </>);
+  fireEvent.click(screen.getByRole("button", { name: "Model options" }));
+  const popover = screen.getByRole("dialog", { name: "Model options" });
+  const option = screen.getByRole("button", { name: "Choose model" });
+  fireEvent.keyDown(option, { key: "f", ctrlKey: true });
+  expect(screen.queryByRole("textbox", { name: "Search messages" })).not.toBeInTheDocument();
+
+  fireEvent.keyDown(option, { key: "Escape" });
+  expect(popover).toHaveAttribute("data-state", "closed");
+  expect(popover).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole("button", { name: "Model options" }), { key: "f", ctrlKey: true });
+  expect(screen.getByRole("textbox", { name: "Search messages" })).toBeInTheDocument();
+});
+
+it("returns shortcut-opened search to the interrupted editor", async () => {
+  const user = userEvent.setup();
+  render(<><input aria-label="Draft" /><PromptNavigator messages={[
+    { id: "one", role: "user", content: "alpha", createdAt: 1 },
+  ]} onJumpToPrompt={vi.fn()} /></>);
+  const editor = screen.getByRole("textbox", { name: "Draft" });
+  await user.click(editor);
+  await user.keyboard("{Control>}f{/Control}");
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Search messages" })).toHaveFocus());
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(editor).toHaveFocus());
 });

@@ -1,12 +1,9 @@
-"""QQ management contract."""
-
 from nanobot.channels._manifest import field, required_fields
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin
 
 SETUP_SPEC = ChannelSetupSpec(
     fields={
-        # Written by QR binding; manual entry stays available in the WebUI.
         "appId": field(),
         "secret": field("secret"),
         "allowFrom": field("list"),

@@ -1,5 +1,3 @@
-"""Durability configuration is applied to every SQLite connection."""
-
 from nanobot.session.manager import SessionManager
 
 

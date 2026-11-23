@@ -1,5 +1,3 @@
-"""Cross-platform lifecycle management for nanobot background processes."""
-
 from __future__ import annotations
 
 import ctypes
@@ -105,11 +103,6 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         # it; poll() both reaps it and reports the real lifecycle state.
         self._owned_process: Any | None = None
 
-    def start_background(self, options: _StartOptionsT) -> ProcessResult:
-        """Start the configured command as a detached process."""
-        with self._lifecycle_lock():
-            return self._start_background(options)
-
     def _start_background(self, options: _StartOptionsT) -> ProcessResult:
         current = self.status()
         if current.running:
@@ -153,11 +146,6 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         self._write_state(state)
         return ProcessResult(True, self._message("started_background"), self.status())
 
-    def stop(self, *, timeout_s: int = 20) -> ProcessResult:
-        """Stop the process recorded in this runtime's state file."""
-        with self._lifecycle_lock():
-            return self._stop(timeout_s=timeout_s)
-
     def _stop(self, *, timeout_s: int) -> ProcessResult:
         status = self.status()
         if not status.pid:
@@ -190,15 +178,6 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             return ProcessResult(True, self._message("stopped"), final_status)
         self._clear_state()
         return ProcessResult(True, self._message("stopped"), self.status(reason="stopped"))
-
-    def restart(self, options: _StartOptionsT, *, timeout_s: int = 20) -> ProcessResult:
-        """Restart the managed process."""
-        with self._lifecycle_lock():
-            stop_result = self._stop(timeout_s=timeout_s)
-            recoverable = {self._message("not_running"), self._message("state_stale")}
-            if not stop_result.ok and stop_result.message not in recoverable:
-                return stop_result
-            return self._start_background(options)
 
     def status(self, *, reason: str | None = None) -> ProcessStatus:
         """Return live status, clearing stale state when needed."""
@@ -288,7 +267,6 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             handle.close()
 
     def _log_file_replaced(self, handle: Any) -> bool:
-        """Return whether rotation replaced or truncated the followed log file."""
         try:
             opened = os.fstat(handle.fileno())
             current = self.paths.log_path.stat()
@@ -582,7 +560,6 @@ def _darwin_identity_match(
     recorded: object,
     current: object,
 ) -> Literal["match", "mismatch", "unknown"]:
-    """Compare the new numeric identity with a pre-upgrade ``ps`` identity."""
     if not isinstance(recorded, str) or not isinstance(current, str):
         return "mismatch"
     current_identity = _parse_darwin_identity(current)
@@ -632,7 +609,6 @@ def process_identity_record(
 
 
 def _legacy_darwin_started_at(value: str) -> int | None:
-    """Parse the English and numeric macOS ``ps lstart`` formats we released."""
     english = re.fullmatch(
         r"[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})\s+"
         r"(\d{2}):(\d{2}):(\d{2})\s+(\d{4})",
@@ -695,7 +671,6 @@ def _darwin_proc_pidinfo() -> Any | None:
 
 
 def _darwin_process_birth(pid: int) -> tuple[int, int, int] | None:
-    """Read PGID and microsecond process birth time from ``proc_bsdinfo``."""
     proc_pidinfo = _darwin_proc_pidinfo()
     if proc_pidinfo is None:
         return None
@@ -717,41 +692,52 @@ def _darwin_process_birth(pid: int) -> tuple[int, int, int] | None:
     return process_group, started_at_seconds, started_at_microseconds
 
 
-def _windows_process_identity(pid: int) -> str | None:
-    if os.name != "nt":
-        return None
+# Python before 3.14 retains each distinct pointer type in a global ctypes cache.
+class _FileTime(ctypes.Structure):
+    _fields_ = [("low", ctypes.c_uint32), ("high", ctypes.c_uint32)]
 
-    class FileTime(ctypes.Structure):
-        _fields_ = [("low", ctypes.c_uint32), ("high", ctypes.c_uint32)]
+    @property
+    def value(self) -> int:
+        return (int(self.high) << 32) | int(self.low)
 
-        @property
-        def value(self) -> int:
-            return (int(self.high) << 32) | int(self.low)
 
-    process_query_limited_information = 0x1000
+_FILE_TIME_PTR = ctypes.POINTER(_FileTime)
+
+
+@lru_cache(maxsize=1)
+def _windows_kernel32() -> Any:
+    """Reuse the native bindings while querying process identity on every call."""
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.GetProcessTimes.argtypes = [
         wintypes.HANDLE,
-        ctypes.POINTER(FileTime),
-        ctypes.POINTER(FileTime),
-        ctypes.POINTER(FileTime),
-        ctypes.POINTER(FileTime),
+        _FILE_TIME_PTR,
+        _FILE_TIME_PTR,
+        _FILE_TIME_PTR,
+        _FILE_TIME_PTR,
     ]
     kernel32.GetProcessTimes.restype = wintypes.BOOL
     kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
     kernel32.GetExitCodeProcess.restype = wintypes.BOOL
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel32.CloseHandle.restype = wintypes.BOOL
-    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    return kernel32
+
+
+def _windows_process_identity(pid: int) -> str | None:
+    if os.name != "nt":
+        return None
+
+    kernel32 = _windows_kernel32()
+    handle = kernel32.OpenProcess(0x1000, False, pid)
     if not handle:
         return None
     try:
-        creation_time = FileTime()
-        exit_time = FileTime()
-        kernel_time = FileTime()
-        user_time = FileTime()
+        creation_time = _FileTime()
+        exit_time = _FileTime()
+        kernel_time = _FileTime()
+        user_time = _FileTime()
         ok = kernel32.GetProcessTimes(
             handle,
             ctypes.byref(creation_time),

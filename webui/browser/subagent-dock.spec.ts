@@ -10,6 +10,27 @@ async function settledMotion(target: Locator) {
 }
 
 for (const width of [1440, 390]) {
+  test(`opens a session without detached past results at ${width}px`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/browser/fixture.html?case=subagent-dock&past&saved");
+    const messages = page.getByTestId("thread-message-region");
+    const archives = messages.locator("[data-subagent-results]");
+    await expect(page.getByTestId("subagent-task-dock-trigger")).toContainText("Running: 3");
+    await expect(archives).toHaveCount(0);
+    await page.getByRole("button", { name: "全部完成", exact: true }).click();
+    await expect(archives).toHaveCount(1);
+    await expect(archives).toContainText("Completed: 3");
+    await archives.locator("[data-subagent-results-summary]").click();
+    await expect(archives.locator("[data-subagent-id]")).toHaveCount(3);
+    await messages.evaluate(node => { node.scrollTop = 0; });
+    await settledMotion(messages);
+    await page.screenshot({ path: info.outputPath("results-with-prompt.png") });
+    await page.reload();
+    await expect(archives).toHaveCount(1);
+    await expect(archives).toContainText("Completed: 3");
+    await expect(page.getByTestId("subagent-task-dock-trigger")).toHaveCount(0);
+  });
+
   test(`keeps subtasks reachable through long replies, independent list scrolling and detail handoff at ${width}px`, async ({ page }, info) => {
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
@@ -122,7 +143,6 @@ for (const width of [1440, 390]) {
     const statusSlot = (await row.locator(":scope > span").first().boundingBox())!;
     await page.mouse.move(1, 1);
     await page.screenshot({ path: info.outputPath("one-task-ring-running.png") });
-    // Finish through the existing control without dismissing the reading view.
     await page.getByRole("button", { name: "全部完成", exact: true }).evaluate(node => (node as HTMLButtonElement).click());
     const heading = tree.getByRole("heading", { level: 2, name: "天气结果" });
     await expect(heading).toBeVisible();
@@ -350,13 +370,12 @@ test("does not retire a completed list or detail while it is being read", async 
 for (const width of [1440, 390]) {
   test(`keeps the reading position when results are archived and the live entry retires at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto("/browser/fixture.html?case=subagent-dock");
+    await page.goto("/browser/fixture.html?case=subagent-dock&long-history");
     const body = page.getByTestId("thread-message-region");
     const paragraphs = body.getByText("主对话仍然可以正常输出和滚动。任务列表与消息区分别滚动，展开详情也不会取消正在执行的任务。", { exact: true });
-    await expect(paragraphs).toHaveCount(12);
+    await expect(paragraphs).toHaveCount(20);
     await settledMotion(body);
-    const anchor = paragraphs.nth(6);
-    await anchor.scrollIntoViewIfNeeded();
+    const anchor = paragraphs.nth(13);
     await body.hover();
     await page.mouse.wheel(0, -160);
     await expect.poll(() => body.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop)).toBeGreaterThan(100);
@@ -484,6 +503,59 @@ test("follows the mouse before release and snaps without double toggling", async
 
 test.describe("touch task drawer", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  test("keeps native taps working after a fast handle drag", async ({ page }) => {
+    await page.goto("/browser/fixture.html?case=subagent-dock");
+    await page.getByRole("button", { name: "增加任务", exact: true }).click();
+    const trigger = page.getByTestId("subagent-task-dock-trigger");
+    const tree = page.getByTestId("subagent-task-tree");
+    const events = await trigger.evaluateHandle(node => {
+      const records: { type: string; prevented: boolean }[] = [];
+      for (const type of ["touchstart", "touchmove", "click"]) {
+        node.addEventListener(type, event => records.push({ type, prevented: event.defaultPrevented }));
+      }
+      return records;
+    });
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      const closed = (await trigger.boundingBox())!;
+      const x = closed.x + closed.width / 2;
+      const y = closed.y + closed.height / 2;
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + 2, y: y + 2 }] });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await expect(tree.locator("[data-subagent-id]")).toHaveCount(23);
+      expect((await events.jsonValue()).filter(event => event.type === "click")).toHaveLength(1);
+      await settledMotion(page.getByTestId("subagent-task-dock"));
+      await events.evaluate(records => { records.length = 0; });
+
+      const bounds = (await trigger.boundingBox())!;
+      const dragX = bounds.x + bounds.width / 2;
+      const dragY = bounds.y + bounds.height / 2;
+      // Define a fast release independently of CDP round-trip and screenshot timing.
+      const timestamp = (Date.now() - 35) / 1000;
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", timestamp, touchPoints: [{ x: dragX, y: dragY }] });
+      for (let step = 1; step <= 6; step++) {
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchMove", timestamp: timestamp + step * 0.005,
+          touchPoints: [{ x: dragX, y: dragY + step * 10 }],
+        });
+      }
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", timestamp: timestamp + 0.035, touchPoints: [] });
+      await expect(tree).toHaveCount(0);
+      await trigger.tap();
+      await expect(tree.locator("[data-subagent-id]")).toHaveCount(23);
+      const records = await events.jsonValue();
+      expect(records.filter(event => event.type === "click")).toHaveLength(1);
+      expect(records.filter(event => event.type === "touchstart").every(event => !event.prevented)).toBe(true);
+      const moves = records.filter(event => event.type === "touchmove");
+      expect(moves.length).toBeGreaterThan(0);
+      expect(moves.every(event => event.prevented)).toBe(true);
+    } finally {
+      await events.dispose();
+      await cdp.detach();
+    }
+  });
+
   test("follows touch movement, restores a cancelled drag, and keeps list scrolling independent", async ({ page }, info) => {
     await page.goto("/browser/fixture.html?case=subagent-dock");
     const trigger = page.getByTestId("subagent-task-dock-trigger");
@@ -630,7 +702,7 @@ for (const width of [1440, 390]) {
     await trigger.click();
     await settledMotion(page.getByTestId("subagent-task-dock"));
     const input = page.getByRole("textbox").first();
-    for (const [query, inserted] of [["/", "/history"], ["@ref", "@reference "]]) {
+    for (const [query, inserted] of [["/", "/inspect"], ["@ref", "@reference "]]) {
       await input.fill(query);
       const option = page.getByRole("option").first();
       await expect(option).toBeVisible();

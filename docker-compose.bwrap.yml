@@ -9,8 +9,5 @@ services:
   nanobot-gateway:
     <<: *bwrap-security
 
-  nanobot-api:
-    <<: *bwrap-security
-
   nanobot-cli:
     <<: *bwrap-security

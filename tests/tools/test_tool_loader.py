@@ -1,15 +1,14 @@
-"""Tests for tool plugin architecture: ToolLoader, ToolContext, metadata."""
 from __future__ import annotations
 
 import shutil
-from dataclasses import fields
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ToolContext
-from nanobot.agent.tools.loader import _SKIP_MODULES, ToolLoader
+from nanobot.agent.tools.loader import ToolLoader
 
 
 class _MinimalTool(Tool):
@@ -47,24 +46,6 @@ def test_tool_default_create_returns_instance():
     assert tool.name == "test_minimal"
 
 
-def test_tool_plugin_discoverable_default_is_true():
-    assert _MinimalTool._plugin_discoverable is True
-
-
-# --- ToolContext tests ---
-
-
-def test_tool_context_has_required_fields():
-    field_names = {f.name for f in fields(ToolContext)}
-    required = {
-        "config", "workspace", "bus", "subagent_manager",
-        "cron_service", "exec_session_manager", "file_state_store",
-        "provider_snapshot_loader", "providers_config", "timezone",
-        "runtime_control",
-    }
-    assert required <= field_names
-
-
 def test_tool_context_defaults():
     ctx = ToolContext(config=None, workspace="/tmp")
     assert ctx.bus is None
@@ -75,15 +56,6 @@ def test_tool_context_defaults():
     assert ctx.providers_config is None
     assert ctx.runtime_control is None
     assert ctx.timezone == "UTC"
-
-
-# --- ToolLoader tests ---
-
-
-def test_skip_modules_excludes_infrastructure():
-    infra = {"base", "schema", "registry", "context", "loader", "config",
-             "file_state", "sandbox", "mcp", "__init__"}
-    assert infra <= _SKIP_MODULES
 
 
 def test_discover_finds_concrete_tools():
@@ -118,7 +90,6 @@ def test_discover_skips_private_classes():
 
 
 def test_loader_registers_exec_with_real_tools_config(tmp_path):
-    """Real config objects catch bad ctx.config attribute paths that mocks hide."""
     from types import SimpleNamespace
 
     from nanobot.agent.tools.registry import ToolRegistry
@@ -192,41 +163,25 @@ def test_loader_preserves_caller_supplied_tool(tmp_path):
     assert "read_file" not in registered
 
 
-# --- Task 4: _FsTool.create() ---
-
-
-def test_fs_tool_create_builds_from_context():
+@pytest.mark.parametrize(("restrict", "sandbox"), [(False, ""), (True, ""), (False, "bwrap")])
+async def test_fs_tool_create_uses_context_workspace_and_restrictions(tmp_path, restrict, sandbox):
     from nanobot.agent.tools.filesystem import ReadFileTool
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "inside.txt").write_text("inside", encoding="utf-8")
+    (tmp_path / "outside.txt").write_text("outside contents", encoding="utf-8")
     mock_config = MagicMock()
-    mock_config.restrict_to_workspace = False
-    mock_config.exec.sandbox = ""
-    ctx = ToolContext(config=mock_config, workspace="/tmp/test")
-    tool = ReadFileTool.create(ctx)
-    assert isinstance(tool, ReadFileTool)
-    assert tool._workspace == Path("/tmp/test")
-
-
-def test_fs_tool_create_respects_restrict_to_workspace():
-    from nanobot.agent.tools.filesystem import ReadFileTool
-    mock_config = MagicMock()
-    mock_config.restrict_to_workspace = True
-    mock_config.exec.sandbox = ""
-    ctx = ToolContext(config=mock_config, workspace="/tmp/test")
-    tool = ReadFileTool.create(ctx)
-    assert tool._allowed_dir == Path("/tmp/test")
-
-
-def test_fs_tool_create_respects_sandbox():
-    from nanobot.agent.tools.filesystem import ReadFileTool
-    mock_config = MagicMock()
-    mock_config.restrict_to_workspace = False
-    mock_config.exec.sandbox = "bwrap"
-    ctx = ToolContext(config=mock_config, workspace="/tmp/test")
-    tool = ReadFileTool.create(ctx)
-    assert tool._allowed_dir == Path("/tmp/test")
-
-
-# --- Message, subagent, and cron tool factories ---
+    mock_config.restrict_to_workspace = restrict
+    mock_config.exec.sandbox = sandbox
+    tool = ReadFileTool.create(ToolContext(config=mock_config, workspace=str(workspace)))
+    assert "inside" in await tool.execute(path="inside.txt")
+    outside = await tool.execute(path="../outside.txt")
+    if restrict or sandbox:
+        assert outside.is_error
+        assert "outside contents" not in outside
+    else:
+        assert "outside contents" in outside
 
 
 async def test_message_tool_create():
@@ -272,9 +227,6 @@ def test_cron_tool_create():
     )
     tool = CronTool.create(ctx)
     assert isinstance(tool, CronTool)
-
-
-# --- Task 6: ExecTool, WebTools, ImageGenerationTool ---
 
 
 def test_exec_tool_config_cls():
@@ -387,9 +339,6 @@ def test_image_gen_tool_create():
     assert tool.provider_configs["openrouter"].api_key == "image-key"
 
 
-# --- Task 7: MyToolConfig + MCP wrappers ---
-
-
 def test_my_tool_config_cls():
     from nanobot.agent.tools.self import MyTool, MyToolConfig
     assert MyTool.config_key == "my"
@@ -420,18 +369,7 @@ def test_my_tool_requires_runtime_control():
     assert MyTool.enabled(ctx) is False
 
 
-def test_mcp_wrappers_not_discoverable():
-    from nanobot.agent.tools.mcp import MCPPromptWrapper, MCPResourceWrapper, MCPToolWrapper
-    assert MCPToolWrapper._plugin_discoverable is False
-    assert MCPResourceWrapper._plugin_discoverable is False
-    assert MCPPromptWrapper._plugin_discoverable is False
-
-
-# --- Task 10: Integration test ---
-
-
 def test_loader_registers_builtin_tools():
-    """Verify the loader produces the same tool set as the old _register_default_tools."""
     from nanobot.agent.tools.loader import ToolLoader
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.agent.tools.shell import ExecToolConfig

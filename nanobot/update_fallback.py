@@ -80,7 +80,6 @@ def _inspect_metadata(spec: WorkerSpec) -> EnvironmentSnapshot:
 
 
 def _tree(root: Path) -> dict[str, tuple[str, str, int]]:
-    """Hash files and preserve symlinks without following them outside the venv."""
     result: dict[str, tuple[str, str, int]] = {}
     for directory, folders, files in os.walk(root, followlinks=False):
         for name in [*folders, *files]:
@@ -361,7 +360,6 @@ def supervise(directory: Path, arguments: list[str]) -> None:
 
 
 def _discard_program_snapshot(directory: Path, spec: WorkerSpec) -> None:
-    """Remove only this successful job's redundant program copy, never its data backup."""
     from nanobot.update_worker import read_record
 
     _, original, _ = _paths(spec)

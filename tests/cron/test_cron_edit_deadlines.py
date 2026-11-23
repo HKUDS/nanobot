@@ -1,5 +1,3 @@
-"""Editing task instructions must not postpone or drop an existing occurrence."""
-
 import asyncio
 from dataclasses import replace
 from pathlib import Path
@@ -49,7 +47,6 @@ async def test_metadata_edit_preserves_due_occurrence(tmp_path, monkeypatch, kin
     async def execute(job):
         calls.append((job.id, job.name, job.payload.message))
 
-    # A separate service consumes the persisted edit, as the gateway does.
     reader = CronService(store_path, on_job=execute)
     loaded = reader.get_job(job.id)
     assert loaded is not None
@@ -106,29 +103,39 @@ async def test_reschedule_during_execution_preserves_new_occurrence(
         delete_after_run=delete_after_run,
     )
     pending = asyncio.create_task(service.run_job(job.id))
+    entry = asyncio.create_task(entered.wait())
     try:
-        async with asyncio.timeout(2):
-            await entered.wait()
-            replacement = (
-                CronSchedule(kind="at", at_ms=now + 120_000)
-                if replacement_kind == "at"
-                else CronSchedule(kind="every", every_ms=120_000)
-            )
-            updated = service.update_job(job.id, schedule=replacement)
+        done, _ = await asyncio.wait((pending, entry), timeout=2, return_when=asyncio.FIRST_COMPLETED)
+        if pending in done:
+            pending.result()
+        assert entry in done, "job did not enter its callback"
+        assert not pending.done(), "job completed before its callback was released"
+
+        replacement = (
+            CronSchedule(kind="at", at_ms=now + 120_000)
+            if replacement_kind == "at"
+            else CronSchedule(kind="every", every_ms=120_000)
+        )
+        updated = service.update_job(job.id, schedule=replacement)
+        assert isinstance(updated, CronJob)
+        if roundtrip:
+            now += 5_000
+            replacement = original
+            updated = service.update_job(job.id, schedule=original)
             assert isinstance(updated, CronJob)
-            if roundtrip:
-                now += 5_000
-                replacement = original
-                updated = service.update_job(job.id, schedule=original)
-                assert isinstance(updated, CronJob)
-            next_run = updated.state.next_run_at_ms
-            assert next_run is not None
-            now += 10_000
-            release.set()
-            assert await pending
+        next_run = updated.state.next_run_at_ms
+        assert next_run is not None
+        now += 10_000
+        release.set()
+        # Bound asynchronous progress, not the total duration of durable writes.
+        done, _ = await asyncio.wait((pending,), timeout=2)
+        assert pending in done, "job did not finish after its callback was released"
+        assert pending.result()
     finally:
         release.set()
-        await asyncio.gather(pending, return_exceptions=True)
+        entry.cancel()
+        pending.cancel()
+        await asyncio.gather(entry, pending, return_exceptions=True)
 
     restored = CronService(service.store_path, on_job=execute)
     saved = restored.get_job(job.id)

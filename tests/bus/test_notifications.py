@@ -91,7 +91,7 @@ async def test_scope_snapshots_route_and_queues_events_in_order():
     factory = TurnDeliveryFactory(bus)
     delivery = factory.create(InboundMessage(
         channel="slack", sender_id="u", chat_id="chat", content="", metadata=metadata,
-    ), "unified:default")
+    ), "slack:chat")
     metadata["slack"]["thread_ts"] = "moved"
     for phase in ("started", "succeeded"):
         await delivery.events.emit(ContextCompactionEvent("c1", phase))
@@ -121,7 +121,6 @@ async def test_new_internal_event_needs_explicit_audience(monkeypatch):
     monkeypatch.setitem(NOTIFICATION_AUDIENCES, RetryStatus, "interactive")
     await delivery.events.emit(event)
     assert bus.outbound.get_nowait().event is event
-    # Routing registration alone does not authorize serialization of private fields.
     assert project_notification("chat", event) is None
 
 
@@ -166,6 +165,7 @@ async def test_bus_routes_arbitrary_events_and_text_through_one_queue(channel):
     await bus.publish_outbound(text)
     await bus.publish_event(event, channel=channel, chat_id="chat", metadata={"thread": "1"})
     assert await bus.consume_outbound() is text
+    assert text.event is None
     delivered = await bus.consume_outbound()
     assert (delivered.channel, delivered.chat_id) == (channel, "chat")
     assert delivered.event is event
