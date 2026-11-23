@@ -72,6 +72,8 @@ class CommandContext:
     runtime: LLMRuntime | None = None
     is_user_turn: bool = False
     record_exchange: bool = True
+    # Start deferred work only once the command acknowledgement has been delivered.
+    after_reply: Callable[[], None] | None = None
 
 
 class CommandRouter:

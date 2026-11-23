@@ -10,6 +10,8 @@ from typing import Any, cast
 from nanobot.bus.events import INBOUND_META_TURN_ID
 from nanobot.bus.outbound_events import CommandLine
 from nanobot.command.results import line, render
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
+from nanobot.webui.metadata import WEBUI_RESTART_CONTROL_METADATA_KEY
 
 RESTART_NOTIFY_CHANNEL_ENV = "NANOBOT_RESTART_NOTIFY_CHANNEL"
 RESTART_NOTIFY_CHAT_ID_ENV = "NANOBOT_RESTART_NOTIFY_CHAT_ID"
@@ -24,6 +26,14 @@ class RestartNotice:
     started_at_raw: str
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def should_notify_chat(self) -> bool:
+        """WebSocket reconnects are silent except for explicit restarts in admitted WebUI chats."""
+        return self.channel != "websocket" or (
+            self.metadata.get("webui") is True
+            and self.metadata.get(WEBUI_RESTART_CONTROL_METADATA_KEY) is not True
+            and bool(self.metadata.get(HISTORY_GENERATION_METADATA_KEY))
+        )
 
 
 def restart_completed_line(started_at_raw: str) -> CommandLine:
@@ -47,7 +57,12 @@ def set_restart_notice_to_env(
     os.environ[RESTART_NOTIFY_CHAT_ID_ENV] = chat_id
     os.environ[RESTART_STARTED_AT_ENV] = str(time.time())
     persisted_metadata = dict(metadata or {})
-    persisted_metadata.pop(INBOUND_META_TURN_ID, None)
+    if channel == "websocket":
+        # Keep the admitted history destination, not the command's turn, owner or input context.
+        fields = ("webui", "locale", HISTORY_GENERATION_METADATA_KEY, WEBUI_RESTART_CONTROL_METADATA_KEY)
+        persisted_metadata = {key: persisted_metadata[key] for key in fields if key in persisted_metadata}
+    else:
+        persisted_metadata.pop(INBOUND_META_TURN_ID, None)
     if persisted_metadata:
         try:
             os.environ[RESTART_NOTIFY_METADATA_ENV] = json.dumps(

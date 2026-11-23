@@ -291,7 +291,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
             notification_id=f"command-result:{uuid4().hex}",
         ))
 
-    asyncio.create_task(_run_dream())
+    ctx.after_reply = lambda: loop.schedule_background(_run_dream())
     return command_reply(msg, "/dream", line("dream.started"))
 
 

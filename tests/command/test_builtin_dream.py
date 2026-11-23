@@ -146,7 +146,10 @@ def _make_dream_prompt_ctx(tmp_path, raw: str = "/dream-prompt", args: str = "")
 
 async def _run_dream_command(ctx: CommandContext) -> OutboundMessage:
     before = asyncio.all_tasks()
+    ctx.loop.schedule_background = asyncio.create_task
     immediate = await cmd_dream(ctx)
+    assert ctx.after_reply is not None
+    ctx.after_reply()
     try:
         await asyncio.gather(*(asyncio.all_tasks() - before))
     finally:

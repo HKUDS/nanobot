@@ -211,6 +211,7 @@ class TurnDelivery:
     events: EventSink = field(init=False)
     _routed_events: EventSink = field(init=False)
     completed: bool = field(init=False, default=False)
+    after_command_reply: Callable[[], None] | None = field(init=False, default=None)
     _stop_reason: str | None = field(init=False, default=None)
     _failure_error_kind: str | None = field(init=False, default=None)
     _retry_status: RetryStatusEvent | None = field(init=False, default=None)
