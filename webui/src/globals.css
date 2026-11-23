@@ -1204,14 +1204,18 @@
 
 @media (max-width: 767px), (hover: none) {
   .thread-message-row {
-    padding-inline: max(1rem, calc((100% - var(--content-column-width)) / 2));
+    padding-inline: max(1rem, var(--message-column-margin));
   }
+}
 
-  [data-message-mobile-actions],
-  [data-message-mobile-sheet] {
-    --message-block-control-size: 2.75rem;
-    --message-block-action-width: 2.75rem;
-  }
+[data-compact-message-actions] .thread-message-row {
+  padding-inline: max(1rem, var(--message-column-margin));
+}
+
+[data-message-mobile-actions],
+[data-message-mobile-sheet] {
+  --message-block-control-size: 2.75rem;
+  --message-block-action-width: 2.75rem;
 }
 
 .sidebar-selection-highlight {

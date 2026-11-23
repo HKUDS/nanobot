@@ -90,3 +90,28 @@ for (const theme of ["light", "dark"] as const) {
     });
   }
 }
+
+test("message actions follow the thread width without resizing the desktop window", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/browser/fixture.html?case=session-messages");
+  const pane = page.locator("main");
+  const row = pane.locator("[data-thread-display-unit]").last();
+  const side = row.locator("[data-message-side-actions]");
+  await row.hover();
+  await expect(side).toHaveCSS("opacity", "1");
+
+  await pane.evaluate(node => { node.style.width = "550px"; });
+  await expect(row).toHaveCSS("padding-left", "16px");
+  await row.getByRole("button", { name: "Message actions" }).click();
+  const sheet = page.getByRole("dialog", { name: "Message actions" });
+  await expect(sheet).toBeVisible();
+
+  await pane.evaluate(node => { node.style.removeProperty("width"); });
+  await expect(sheet).toBeHidden();
+  await row.hover();
+  await expect(side).toHaveCSS("opacity", "1");
+  await expect(side.getByRole("button", { name: "Copy", exact: true })).toBeVisible();
+
+  await pane.evaluate(node => { node.style.width = "550px"; });
+  await expect(row.getByRole("button", { name: "Message actions" })).toHaveAttribute("aria-expanded", "false");
+});

@@ -39,7 +39,7 @@ export function SessionMessagesFixture() {
     },
     { id: "reply", role: "assistant", content: "Thanks, I will keep those details.", createdAt: 4 },
   ];
-  return <main className="mx-auto max-w-3xl px-6 py-8" aria-label="Session messages">
+  return <main className="mx-auto max-w-5xl px-6 py-8" aria-label="Session messages">
     <ThreadMessages messages={messages} isStreaming={false} />
   </main>;
 }
