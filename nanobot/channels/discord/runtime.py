@@ -18,6 +18,7 @@ from nanobot.bus.outbound_events import ContextCompactionEvent, ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.application import build_help_text
+from nanobot.command_copy import catalog, command_text, locale_code
 from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
@@ -69,6 +70,18 @@ class DiscordConfig(Base):
 
 if DISCORD_AVAILABLE:
 
+    def _description(key: str) -> app_commands.locale_str:
+        return app_commands.locale_str(command_text(key, "en"), key=key)
+
+    class _CommandTranslator(app_commands.Translator):
+        async def translate(
+            self, string: app_commands.locale_str, locale: discord.Locale,
+            context: app_commands.TranslationContextTypes,
+        ) -> str | None:
+            # Only descriptions carry a catalog key; command and option names stay literal.
+            key = string.extras.get("key")
+            return catalog()[key].get(locale_code(locale.value)) if key else None
+
     class DiscordBotClient(discord.Client):
         """discord.py client that forwards events to the channel."""
 
@@ -84,6 +97,9 @@ if DISCORD_AVAILABLE:
             self._channel = channel
             self.tree = app_commands.CommandTree(self)
             self._register_app_commands()
+
+        async def setup_hook(self) -> None:
+            await self.tree.set_translator(_CommandTranslator())
 
         async def on_ready(self) -> None:
             self._channel._bot_user_id = str(self.user.id) if self.user else None
@@ -150,28 +166,30 @@ if DISCORD_AVAILABLE:
         async def _forward_slash_command(
             self,
             interaction: discord.Interaction,
-            command_text: str,
+            command: str,
         ) -> None:
+            locale = interaction.locale.value
             sender_id = str(interaction.user.id)
             channel_id = interaction.channel_id
 
             if channel_id is None:
-                self._channel.logger.warning("slash command missing channel_id: {}", command_text)
+                self._channel.logger.warning("slash command missing channel_id: {}", command)
                 return
 
             if not self._channel.is_allowed(sender_id):
-                await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
+                await self._reply_ephemeral(interaction, command_text("native.denied", locale))
                 return
 
             channel = await self._resolve_interaction_channel(interaction)
             if not await self._interaction_channel_allowed(interaction, channel):
-                await self._reply_ephemeral(interaction, "This channel is not allowed for this bot.")
+                await self._reply_ephemeral(interaction, command_text("native.channelDenied", locale))
                 return
 
-            await self._reply_ephemeral(interaction, f"Processing {command_text}...")
+            await self._reply_ephemeral(interaction, command_text("native.processing", locale, command=command))
 
             metadata: dict[str, Any] = {
                 "interaction_id": str(interaction.id),
+                "locale": locale,
                 "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
                 "is_slash_command": True,
             }
@@ -187,31 +205,22 @@ if DISCORD_AVAILABLE:
             await self._channel._handle_message(
                 sender_id=sender_id,
                 chat_id=str(channel_id),
-                content=command_text,
+                content=command,
                 metadata=metadata,
                 session_key=session_key,
             )
 
         def _register_app_commands(self) -> None:
-            commands = (
-                ("new", "Stop current task and start a new conversation", "/new"),
-                ("stop", "Stop the current task", "/stop"),
-                ("cancel_goal", "Cancel the current goal", "/cancel_goal"),
-                ("restart", "Restart the bot", "/restart"),
-                ("status", "Show bot status", "/status"),
-            )
+            def register_simple(name: str) -> None:
+                @self.tree.command(name=name, description=_description(f"palette.{name}.description"))
+                async def command_handler(interaction: discord.Interaction) -> None:
+                    await self._forward_slash_command(interaction, f"/{name}")
 
-            for name, description, command_text in commands:
+            for name in ("new", "stop", "cancel_goal", "restart", "status"):
+                register_simple(name)
 
-                @self.tree.command(name=name, description=description)
-                async def command_handler(
-                    interaction: discord.Interaction,
-                    _command_text: str = command_text,
-                ) -> None:
-                    await self._forward_slash_command(interaction, _command_text)
-
-            @self.tree.command(name="model", description="Show or switch runtime model preset")
-            @app_commands.describe(preset="Optional model preset name, such as default")
+            @self.tree.command(name="model", description=_description("palette.model.description"))
+            @app_commands.describe(preset=_description("native.presetDescription"))
             async def model_command(
                 interaction: discord.Interaction,
                 preset: str | None = None,
@@ -220,8 +229,8 @@ if DISCORD_AVAILABLE:
                 command_text = f"/model {preset}" if preset else "/model"
                 await self._forward_slash_command(interaction, command_text)
 
-            @self.tree.command(name="trigger", description="Create a named local trigger for this chat")
-            @app_commands.describe(name="Trigger name")
+            @self.tree.command(name="trigger", description=_description("palette.trigger.description"))
+            @app_commands.describe(name=_description("native.triggerNameDescription"))
             async def trigger_command(
                 interaction: discord.Interaction,
                 name: str,
@@ -230,17 +239,17 @@ if DISCORD_AVAILABLE:
                 command_text = f"/trigger {name}" if name else "/trigger"
                 await self._forward_slash_command(interaction, command_text)
 
-            @self.tree.command(name="help", description="Show available commands")
+            @self.tree.command(name="help", description=_description("palette.help.description"))
             async def help_command(interaction: discord.Interaction) -> None:
-                sender_id = str(interaction.user.id)
-                if not self._channel.is_allowed(sender_id):
-                    await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
+                locale = interaction.locale.value
+                if not self._channel.is_allowed(str(interaction.user.id)):
+                    await self._reply_ephemeral(interaction, command_text("native.denied", locale))
                     return
                 channel = await self._resolve_interaction_channel(interaction)
                 if not await self._interaction_channel_allowed(interaction, channel):
-                    await self._reply_ephemeral(interaction, "This channel is not allowed for this bot.")
+                    await self._reply_ephemeral(interaction, command_text("native.channelDenied", locale))
                     return
-                await self._reply_ephemeral(interaction, build_help_text())
+                await self._reply_ephemeral(interaction, build_help_text(locale=locale))
 
             @self.tree.error
             async def on_app_command_error(
