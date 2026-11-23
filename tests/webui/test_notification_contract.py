@@ -37,6 +37,7 @@ def test_tui_source_archive_preserves_shared_module_import_path():
         names = set(archive.getnames())
         assert "nanobot-tui-source/tui/src/client/validation.ts" in names
         assert "nanobot-tui-source/packages/client-events/notifications.ts" in names
+        assert "nanobot-tui-source/nanobot/command/locales/palette.json" in names
         assert "nanobot-tui-source/tui/bun.lock" in names
         assert "nanobot-tui-source/LICENSE" in names
         package = archive.extractfile("nanobot-tui-source/tui/package.json")

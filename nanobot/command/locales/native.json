@@ -1,0 +1,38 @@
+{
+  "native.startDescription": {
+    "en": "Start the bot",
+    "zh-CN": "启动机器人",
+    "zh-TW": "啟動機器人",
+    "fr": "Démarrer le bot",
+    "ja": "ボットを開始",
+    "ko": "봇 시작",
+    "es": "Iniciar el bot",
+    "pt-BR": "Iniciar o bot",
+    "vi": "Khởi động bot",
+    "id": "Mulai bot"
+  },
+  "native.presetDescription": {
+    "en": "Model preset name, such as default",
+    "zh-CN": "模型预设名称，例如 default",
+    "zh-TW": "模型預設名稱，例如 default",
+    "fr": "Nom du préréglage de modèle, par exemple default",
+    "ja": "モデルのプリセット名（例：default）",
+    "ko": "모델 프리셋 이름(예: default)",
+    "es": "Nombre del preajuste del modelo, por ejemplo, default",
+    "pt-BR": "Nome da predefinição do modelo, por exemplo, default",
+    "vi": "Tên cấu hình mô hình, ví dụ: default",
+    "id": "Nama preset model, misalnya default"
+  },
+  "native.triggerNameDescription": {
+    "en": "Trigger name",
+    "zh-CN": "触发器名称",
+    "zh-TW": "觸發器名稱",
+    "fr": "Nom du déclencheur",
+    "ja": "トリガー名",
+    "ko": "트리거 이름",
+    "es": "Nombre del activador",
+    "pt-BR": "Nome do gatilho",
+    "vi": "Tên trình kích hoạt",
+    "id": "Nama pemicu"
+  }
+}

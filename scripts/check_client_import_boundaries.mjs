@@ -110,7 +110,9 @@ export function findViolations(compiler, root, file, source, options, project) {
     const rules = [];
     const targetPath = target === null ? null : sourcePath(root, target);
     if (within(relative, "packages/client-events")) {
-      if ((targetPath !== null && !within(targetPath, "packages/client-events")) || uiPackage(specifier)) {
+      const commandCopy = relative === "packages/client-events/command-result.ts"
+        && /^nanobot\/command\/locales\/[\w-]+\.json$/.test(targetPath ?? "");
+      if ((targetPath !== null && !within(targetPath, "packages/client-events") && !commandCopy) || uiPackage(specifier)) {
         rules.push("shared-client-contracts");
       }
     }

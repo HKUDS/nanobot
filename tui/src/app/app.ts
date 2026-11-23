@@ -777,7 +777,7 @@ export class NanobotTui {
           this.activeLabel = event.kind === "tool_hint" ? "Working" : "Thinking"
           this.transcript.progress(event.text, event.tool_events)
           this.setActive(true)
-        } else if (event.render_as === "text") {
+        } else if (event.side_channel === true || event.render_as === "text") {
           this.transcript.assistant(event.text, event.render_as)
         } else {
           this.finalMessage = event.text
@@ -2325,8 +2325,14 @@ export class NanobotTui {
     if (/^\/model(?:\s|$)/iu.test(content)) this.modelCommandTurns.add(turnId)
     this.clearComposer()
     this.commandMenu.hide()
-    if (!silent && lifecycle !== "stop_active_turn") this.transcript.user(content)
     if (!silent) this.recordPrompt(content)
+    if (lifecycle === "stop_active_turn") {
+      this.restoreQueuedPrompts()
+      if (this.activeTurn) this.status.content = "Stopping…"
+      else this.status.content = this.readyStatus()
+      return
+    }
+    if (!silent) this.transcript.user(content)
 
     if (lifecycle === "finalize_active_turn") {
       this.activeTurnId = null
@@ -2336,10 +2342,6 @@ export class NanobotTui {
       this.turnHadAnswer = false
       this.setActive(false)
       this.status.content = "Resetting chat…"
-    } else if (lifecycle === "stop_active_turn") {
-      this.activeTurnId = null
-      this.setActive(false)
-      this.status.content = "Stopping…"
     } else if (!this.activeTurn) {
       this.status.content = `Running ${content.split(/\s+/u, 1)[0]}…`
     }

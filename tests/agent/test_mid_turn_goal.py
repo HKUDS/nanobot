@@ -7,7 +7,7 @@ from agent.session_helpers import stop_loop
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
 from nanobot.agent.loop import AgentLoop as CoreAgentLoop
 from nanobot.bus.events import InboundMessage
-from nanobot.bus.outbound_events import GoalStatusEvent, TurnEndEvent
+from nanobot.bus.outbound_events import CommandResultEvent, GoalStatusEvent, TurnEndEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.goal.assembly import install_goal
 from nanobot.providers.base import (
@@ -113,7 +113,9 @@ async def test_scheduled_goal_command_cannot_generate_internal_input(tmp_path):
     try:
         await loop._dispatch_command_inline(msg, msg.content, loop.commands.dispatch)
         response = loop.bus.outbound.get_nowait()
-        assert "only be started by a user" in response.content
+        assert isinstance(response.event, CommandResultEvent)
+        assert response.event.command == "/goal"
+        assert response.event.parts[0]["key"] == "goal.userOnly"
         assert loop._pending_queues == {}
         assert goal_mutation_allowed() is False
         assert (await loop.sessions.state.get(msg.session_key)).messages == []

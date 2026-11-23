@@ -20,7 +20,7 @@ Use these slash commands inside the WebUI, terminal chat, or connected chat apps
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
 | `/dream-prompt` | Show how Dream is guided for memory |
 | `/dream-prompt init` | Create an editable Dream guide at `prompts/dream.md` |
-| `/skill` | List enabled skills and their descriptions |
+| `/skill` | List enabled skills in text channels. In WebUI and TUI, use `$` instead. |
 | `/trigger <name>` | Create a named local trigger for the current chat |
 | `/pairing` | List pending pairing requests |
 | `/pairing approve <code>` | Approve a pairing code |

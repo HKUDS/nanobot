@@ -500,6 +500,7 @@ async def test_restart_notice_does_not_outwait_send_permit_deadline(tmp_path):
             active -= 1
 
     channel.send = AsyncMock(side_effect=send)
+    channel.send_command_result = AsyncMock(side_effect=send)
     manager.channels["probe"] = channel
     try:
         for i in range(manager_module._OUTBOUND_CONCURRENCY):
@@ -528,7 +529,7 @@ async def test_restart_notice_deadline_does_not_cancel_submitted_send(tmp_path):
         started.set()
         await release.wait()
 
-    channel = MagicMock(spec=BaseChannel, is_running=True, send=AsyncMock(side_effect=send))
+    channel = MagicMock(spec=BaseChannel, is_running=True, send_command_result=AsyncMock(side_effect=send))
     manager.channels["probe"] = channel
     task = asyncio.create_task(manager._send_restart_notice_when_started(
         RestartNotice(channel="probe", chat_id="notice", started_at_raw=""), timeout_s=0.05,
@@ -542,7 +543,7 @@ async def test_restart_notice_deadline_does_not_cancel_submitted_send(tmp_path):
         assert not task.done()
         release.set()
         await asyncio.wait_for(task, 1)
-        channel.send.assert_awaited_once()
+        channel.send_command_result.assert_awaited_once()
         assert manager._outbound_sends._value == manager_module._OUTBOUND_CONCURRENCY
     finally:
         task.cancel()

@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from nanobot.bus.events import INBOUND_META_TURN_ID
+from nanobot.bus.outbound_events import CommandLine
+from nanobot.command.results import line, render
 
 RESTART_NOTIFY_CHANNEL_ENV = "NANOBOT_RESTART_NOTIFY_CHANNEL"
 RESTART_NOTIFY_CHAT_ID_ENV = "NANOBOT_RESTART_NOTIFY_CHAT_ID"
@@ -23,14 +25,18 @@ class RestartNotice:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def format_restart_completed_message(started_at_raw: str) -> str:
-    """Build restart completion text and include elapsed time when available."""
-    elapsed_suffix = ""
+
+def restart_completed_line(started_at_raw: str) -> CommandLine:
+    """Report elapsed time when the requesting process recorded its start time."""
     if started_at_raw:
         with suppress(ValueError):
             elapsed_s = max(0.0, time.time() - float(started_at_raw))
-            elapsed_suffix = f" in {elapsed_s:.1f}s"
-    return f"Restart completed{elapsed_suffix}."
+            return line("restart.elapsed", seconds=f"{elapsed_s:.1f}")
+    return line("restart.complete")
+
+
+def format_restart_completed_message(started_at_raw: str, locale: object = None) -> str:
+    return render((restart_completed_line(started_at_raw),), locale)
 
 
 def set_restart_notice_to_env(

@@ -11,6 +11,7 @@ from loguru import logger
 
 from nanobot.bus.events import INBOUND_META_USER_SHELL, OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.outbound_events import (
+    CommandResultEvent,
     ContextCompactionEvent,
     GoalStateSyncEvent,
     GoalStatusEvent,
@@ -26,6 +27,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
+from nanobot.command.results import message_text
 from nanobot.context_graph import ContextGraph, ContextGraphParts, graph_from_parts
 from nanobot.context_sources import PromptSourcesEvent
 from nanobot.events import ModelRequestEvent
@@ -274,6 +276,14 @@ class WebUIOutboundDelivery:
 
     async def send(self, msg: OutboundMessage) -> None:
         event = msg.event
+        if isinstance(event, CommandResultEvent):
+            if msg.metadata.get("webui") is True:
+                if event.command == "/stop" and any(p.get("key") == "stop.done" for p in event.parts):
+                    return
+                if event.command == "/help":
+                    event = replace(event, parts=tuple(p for p in event.parts if p.get("key") != "palette.skill.description"))
+                    msg = replace(msg, event=event)
+            msg = replace(msg, content=message_text(msg))
         if isinstance(event, PromptSourcesEvent):
             await self._context_graph.observe_prompt(
                 msg.chat_id, event.sources, msg.metadata, system_sources=event.system_sources,
@@ -446,15 +456,20 @@ class WebUIOutboundDelivery:
 
     async def _message_payload(self, msg: OutboundMessage, progress: ProgressEvent | None) -> dict[str, Any]:
         text = msg.content
-        user_shell = msg.metadata.get(INBOUND_META_USER_SHELL) is True
+        # Help lists literal command syntax; other command receipts can contain Markdown.
+        literal = msg.metadata.get(INBOUND_META_USER_SHELL) is True or (
+            isinstance(msg.event, CommandResultEvent) and msg.event.command == "/help"
+        )
         payload: MessageWirePayload = {
             "event": "message", "chat_id": msg.chat_id,
-            "text": text if user_shell else await self._rewrite_markdown_images(text),
+            "text": text if literal else await self._rewrite_markdown_images(text),
         }
-        if user_shell:
+        if literal:
             payload["render_as"] = "text"
         if isinstance(msg.event, SideChannelReplyEvent):
             payload["side_channel"] = True
+        if isinstance(msg.event, CommandResultEvent):
+            payload["command_result"] = {"command": msg.event.command, "parts": list(msg.event.parts)}
         turn_id = msg.metadata.get(WEBUI_TURN_METADATA_KEY)
         if isinstance(turn_id, str) and turn_id:
             payload["turn_id"] = turn_id

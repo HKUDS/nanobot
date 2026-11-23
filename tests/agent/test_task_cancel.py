@@ -12,6 +12,7 @@ import pytest
 from agent.session_helpers import mock_session_manager, run_session
 from nanobot.agent.memory import Consolidator
 from nanobot.bus.outbound_events import StreamDeltaEvent, StreamEndEvent
+from nanobot.command.results import message_text
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -295,7 +296,7 @@ class TestHandleStop:
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)
         out = await cmd_stop(ctx)
-        assert "No active task" in out.content
+        assert message_text(out) == "Stopped."
 
     @pytest.mark.asyncio
     async def test_aclose_cancels_active_turn_before_resources(self):
@@ -378,7 +379,7 @@ class TestHandleStop:
         out = await cmd_stop(ctx)
 
         assert cancelled.is_set()
-        assert "stopped" in out.content.lower()
+        assert "stopped" in message_text(out).lower()
 
     @pytest.mark.asyncio
     async def test_stop_cancels_multiple_tasks(self):
@@ -405,7 +406,7 @@ class TestHandleStop:
         out = await cmd_stop(ctx)
 
         assert all(e.is_set() for e in events)
-        assert "2 task" in out.content
+        assert message_text(out) == "Stopped."
 
 
 class TestDispatch:

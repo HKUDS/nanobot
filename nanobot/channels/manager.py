@@ -10,12 +10,14 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 from loguru import logger
 
 from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
+    CommandResultEvent,
     ProgressEvent,
     RetryWaitEvent,
     RuntimeModelUpdatedEvent,
@@ -34,13 +36,14 @@ from nanobot.channels.contracts import (
     resolve_channel_action_target,
 )
 from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
+from nanobot.command.results import command_result
 from nanobot.config.schema import Config
 from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.security.workspace_policy import resolve_allowed_path
 from nanobot.utils.restart import (
     RestartNotice,
     consume_restart_notice_from_env,
-    format_restart_completed_message,
+    restart_completed_line,
 )
 
 if TYPE_CHECKING:
@@ -676,11 +679,9 @@ class ChannelManager:
 
         await self._send_with_retry(
             target,
-            OutboundMessage(
-                channel=notice.channel,
-                chat_id=notice.chat_id,
-                content=format_restart_completed_message(notice.started_at_raw),
-                metadata=dict(notice.metadata or {}),
+            command_result(
+                notice.channel, notice.chat_id, "/restart", restart_completed_line(notice.started_at_raw),
+                metadata=notice.metadata, notification_id=f"command-result:{uuid4().hex}",
             ),
             deadline=deadline,
         )
@@ -1077,6 +1078,8 @@ class ChannelManager:
             await ChannelManager._send_stream_event(channel, msg, event)
         elif isinstance(event, StreamEndEvent):
             await ChannelManager._send_stream_event(channel, msg, event)
+        elif isinstance(event, CommandResultEvent):
+            await channel.send_command_result(msg)
         elif not isinstance(event, StreamedResponseEvent):
             await channel.send(msg)
 

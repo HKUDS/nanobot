@@ -141,6 +141,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
     from nanobot.bus.queue import MessageBus
     from nanobot.cli import terminal as cli_terminal
     from nanobot.cli.stream import ThinkingSpinner
+    from nanobot.command.results import as_text_message
     from nanobot.cron.service import CronService
     from nanobot.providers.factory import make_provider
     from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates
@@ -326,7 +327,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             async def _consume_outbound() -> None:
                 while True:
                     try:
-                        msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+                        msg = as_text_message(await asyncio.wait_for(bus.consume_outbound(), timeout=1.0))
                         event = msg.event
 
                         if isinstance(event, StreamDeltaEvent):

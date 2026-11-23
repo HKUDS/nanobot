@@ -87,6 +87,7 @@ def iter_webui_source_files(source_dir: Path) -> list[Path]:
         if not root.is_dir():
             continue
         files.extend(path for path in root.rglob("*") if path.is_file())
+    files.extend((source_dir.parent / "nanobot" / "command" / "locales").glob("*.json"))
     shared_root = source_dir.parent / "packages" / "client-events"
     if shared_root.is_dir():
         files.extend(path for path in shared_root.rglob("*") if path.is_file())

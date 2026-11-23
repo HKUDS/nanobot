@@ -129,6 +129,7 @@ class MessageWirePayload(_ChatWirePayload):
     event: Literal["message"]
     text: str
     side_channel: NotRequired[Literal[True]]
+    command_result: NotRequired[dict[str, object]]
     render_as: NotRequired[Literal["text"]]
     media: NotRequired[list[str]]
     media_urls: NotRequired[list[dict[str, str]]]

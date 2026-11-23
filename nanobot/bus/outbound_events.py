@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.command_copy import command_text
 from nanobot.events import AgentEvent
 from nanobot.events import ContextCompactionEvent as ContextCompactionEvent
 from nanobot.events import RecoveryStateEvent as RecoveryStateEvent
@@ -61,6 +62,27 @@ class SideChannelReplyEvent(AgentEvent):
     """Command text that does not replace the active assistant answer."""
 
     notification_id: str | None = None
+
+
+class CommandLine(TypedDict):
+    key: str
+    values: dict[str, str | int | float]
+    prefix: NotRequired[str]  # Literal syntax displayed beside a translated description.
+
+
+class LiteralLine(TypedDict):
+    text: str
+
+
+CommandPart = CommandLine | LiteralLine
+
+
+@dataclass(frozen=True, kw_only=True)
+class CommandResultEvent(SideChannelReplyEvent):
+    """A slash-command outcome; the receiving channel chooses whether and how to display it."""
+
+    command: str
+    parts: tuple[CommandPart, ...]
 
 
 @dataclass(frozen=True)
@@ -133,7 +155,7 @@ def outbound_message_for_event(
     return OutboundMessage(
         channel=channel,
         chat_id=chat_id,
-        content=_event_content(event) if content is None else content,
+        content=_event_content(event, (metadata or {}).get("locale")) if content is None else content,
         event=event,
         metadata=dict(metadata or {}),
     )
@@ -149,23 +171,17 @@ def replace_outbound_event(
 
     return replace(
         msg,
-        content=_event_content(event) if content is None else content,
+        content=_event_content(event, msg.metadata.get("locale")) if content is None else content,
         event=event,
     )
 
 
-def _event_content(event: AgentEvent) -> str:
+def _event_content(event: AgentEvent, locale: object) -> str:
     if isinstance(
         event,
         ProgressEvent | RetryWaitEvent | StreamDeltaEvent | StreamEndEvent | UserInputEvent,
     ):
         return event.content
     if isinstance(event, ContextCompactionEvent):
-        if event.phase == "started":
-            return "Compressing context…"
-        if event.phase == "failed":
-            return "Unable to compact context."
-        if event.phase == "cancelled":
-            return "Context compaction cancelled."
-        return "Context compacted."
+        return command_text(f"compact.{event.phase}", locale)
     return ""

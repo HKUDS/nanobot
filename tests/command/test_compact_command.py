@@ -9,10 +9,11 @@ from agent.session_helpers import run_session
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
-from nanobot.bus.outbound_events import ContextCompactionEvent
+from nanobot.bus.outbound_events import CommandResultEvent, ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
 from nanobot.command.builtin import cmd_compact, cmd_stop
+from nanobot.command.results import message_text
 from nanobot.command.router import CommandContext
 from nanobot.providers.base import GenerationSettings, LLMResponse, ProviderConversationState
 from nanobot.runtime_context import public_history_message
@@ -143,7 +144,7 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     assert len(loop.consolidator.store.read_unprocessed_history(0)) == 1
 
     response = await loop._process_message(msg, runtime=loop.llm_runtime())
-    assert response is None
+    assert message_text(response) == "Nothing to compact."
     assert bus.outbound_size == 0
     loop.provider.chat_stream_with_retry.assert_awaited_once()
 
@@ -191,7 +192,7 @@ async def test_compacted_session_waits_for_new_input_without_continuation(
     loop.provider.chat_stream_with_retry.reset_mock()
     loop.provider.chat_stream_with_retry.return_value = LLMResponse(content="Hello!")
     response = await loop.process_direct("hi", session_key=key)
-    assert response.content == "Hello!"
+    assert message_text(response) == "Hello!"
     loop.provider.chat_stream_with_retry.assert_awaited_once()
     sent = loop.provider.chat_stream_with_retry.call_args.kwargs["messages"]
     assert [message["role"] for message in sent] == ["system", "user"]
@@ -212,7 +213,7 @@ async def test_compacted_session_waits_for_new_input_without_continuation(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("legacy_commands", [False, True])
-async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archive(
+async def test_empty_compact_explains_noop_and_does_not_schedule_idle_archive(
     loop, legacy_commands,
 ) -> None:
     key = "websocket:test"
@@ -233,7 +234,10 @@ async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archiv
         metadata={"webui_turn_id": "compact-turn"},
     ))
 
-    assert loop.bus.outbound_size == 0
+    assert loop.bus.outbound_size == 1
+    receipt = loop.bus.outbound.get_nowait()
+    assert isinstance(receipt.event, CommandResultEvent)
+    assert receipt.event.command == "/compact" and message_text(receipt) == "Nothing to compact."
     assert len(completions) == 1
     assert completions[0].context.metadata["webui_turn_id"] == "compact-turn"
     loop.sessions.invalidate(key)
@@ -290,7 +294,7 @@ async def test_stop_completes_a_compact_command_waiting_for_the_session_lock(loo
         reply = await cmd_stop(CommandContext(
             msg=msg, session=None, key=key, raw="/stop", loop=loop,
         ))
-    assert reply.content == "Stopped 1 task(s)."
+    assert message_text(reply) == "Stopped."
     assert len(completions) == 1
     assert completions[0].context.metadata["webui_turn_id"] == "queued-compact"
 
@@ -415,7 +419,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop, command) -> 
         msg=msg, session=session, key=key, raw="/stop", loop=loop,
     ))
 
-    assert reply.content == "Stopped 1 task(s)."
+    assert message_text(reply) == "Stopped."
     assert task.cancelled()
     assert len(completions) == 1
     assert completions[0].context.metadata["webui_turn_id"] == "compact-turn"
