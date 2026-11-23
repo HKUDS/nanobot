@@ -1,0 +1,92 @@
+{
+  "setup": {
+    "docsLabel": "開啟 Slack 設定指南",
+    "officialLabel": "開啟 Slack 應用程式後台",
+    "actions": {
+      "slack-manifest": "複製應用程式資訊清單"
+    },
+    "fields": {
+      "appToken": {
+        "label": "應用程式權杖",
+        "placeholder": "xapp-..."
+      },
+      "botToken": {
+        "label": "機器人權杖",
+        "placeholder": "xoxb-..."
+      },
+      "groupPolicy": {
+        "label": "群聊規則",
+        "choices": {
+          "mention": "提及回覆",
+          "open": "全部訊息",
+          "allowlist": "允許清單"
+        }
+      },
+      "mode": {
+        "label": "連接方式",
+        "choices": {
+          "socket": "Socket 模式"
+        }
+      },
+      "webhookPath": {
+        "label": "Webhook 路徑"
+      },
+      "replyInThread": {
+        "label": "話題回覆",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "reactEmoji": {
+        "label": "已讀表情"
+      },
+      "doneEmoji": {
+        "label": "完成表情"
+      },
+      "includeThreadContext": {
+        "label": "話題上下文",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "threadContextLimit": {
+        "label": "上下文上限"
+      },
+      "allowFrom": {
+        "label": "允許使用者"
+      },
+      "groupAllowFrom": {
+        "label": "允許頻道"
+      },
+      "groupRequireMention": {
+        "label": "提及回覆",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "dm_enabled": {
+        "label": "啟用私聊",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "dm_policy": {
+        "label": "私聊權限",
+        "choices": {
+          "allowlist": "白名單",
+          "open": "全部"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "私聊使用者"
+      },
+      "useProxy": {
+        "label": "使用代理"
+      }
+    }
+  }
+}

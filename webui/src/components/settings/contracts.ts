@@ -1,0 +1,53 @@
+import type { SettingsPayload } from "@/lib/types";
+
+export type SettingsExitGuard = (leave: () => void, options?: { promptRestart?: boolean }) => void;
+
+export type SettingsSectionKey =
+  | "overview"
+  | "about"
+  | "appearance"
+  | "notifications"
+  | "models"
+  | "capabilities"
+  | "image"
+  | "voice"
+  | "browser"
+  | "channels"
+  | "apps"
+  | "automations"
+  | "memory"
+  | "skills"
+  | "runtime"
+  | "advanced";
+
+export type AppsSectionKey = "apps" | "skills" | "channels";
+
+export function isAppsSection(section: SettingsSectionKey): section is AppsSectionKey {
+  return section === "apps" || section === "skills" || section === "channels";
+}
+
+export function isCapabilitySection(section: SettingsSectionKey): boolean {
+  return ["capabilities", "image", "voice", "browser", "memory"].includes(section);
+}
+
+type PendingRestartSection = "runtime" | "browser" | "image";
+export type PendingRestartSections = Record<PendingRestartSection, boolean>;
+
+export type RestartAwarePayload = {
+  requires_restart?: boolean;
+  surface?: SettingsPayload["surface"];
+  runtime_surface?: SettingsPayload["runtime_surface"];
+  runtime_capabilities?: SettingsPayload["runtime_capabilities"];
+};
+
+export type ApplySettingsPayload = (
+  payload: SettingsPayload,
+  options?: { preserveAgentForm?: boolean; preserveCapabilityForms?: boolean },
+) => void;
+
+export type MaybeRestartHostEngine = (payload: RestartAwarePayload) => Promise<void>;
+export type SettingsFocusTarget = "sandbox" | "sandbox-launcher" | `image-input:${string}`;
+
+export function imageInputPresetFromFocus(target?: SettingsFocusTarget): string | undefined {
+  return target?.startsWith("image-input:") ? target.slice("image-input:".length) : undefined;
+}

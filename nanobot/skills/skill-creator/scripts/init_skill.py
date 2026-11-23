@@ -191,7 +191,7 @@ Note: This is a text placeholder. Actual assets can be any file type.
 """
 
 
-def normalize_skill_name(skill_name):
+def normalize_skill_name(skill_name: str) -> str:
     """Normalize a skill name to lowercase hyphen-case."""
     normalized = skill_name.strip().lower()
     normalized = re.sub(r"[^a-z0-9]+", "-", normalized)
@@ -200,12 +200,12 @@ def normalize_skill_name(skill_name):
     return normalized
 
 
-def title_case_skill_name(skill_name):
+def title_case_skill_name(skill_name: str) -> str:
     """Convert hyphenated skill name to Title Case for display."""
     return " ".join(word.capitalize() for word in skill_name.split("-"))
 
 
-def parse_resources(raw_resources):
+def parse_resources(raw_resources: str) -> list[str]:
     if not raw_resources:
         return []
     resources = [item.strip() for item in raw_resources.split(",") if item.strip()]
@@ -215,8 +215,8 @@ def parse_resources(raw_resources):
         print(f"[ERROR] Unknown resource type(s): {', '.join(invalid)}")
         print(f"   Allowed: {allowed}")
         sys.exit(1)
-    deduped = []
-    seen = set()
+    deduped: list[str] = []
+    seen: set[str] = set()
     for resource in resources:
         if resource not in seen:
             deduped.append(resource)
@@ -224,7 +224,13 @@ def parse_resources(raw_resources):
     return deduped
 
 
-def create_resource_dirs(skill_dir, skill_name, skill_title, resources, include_examples):
+def create_resource_dirs(
+    skill_dir: Path,
+    skill_name: str,
+    skill_title: str,
+    resources: list[str],
+    include_examples: bool,
+) -> None:
     for resource in resources:
         resource_dir = skill_dir / resource
         resource_dir.mkdir(exist_ok=True)
@@ -252,7 +258,12 @@ def create_resource_dirs(skill_dir, skill_name, skill_title, resources, include_
                 print("[OK] Created assets/")
 
 
-def init_skill(skill_name, path, resources, include_examples):
+def init_skill(
+    skill_name: str,
+    path: str | Path,
+    resources: list[str],
+    include_examples: bool,
+) -> Path | None:
     """
     Initialize a new skill directory with template SKILL.md.
 
@@ -265,15 +276,12 @@ def init_skill(skill_name, path, resources, include_examples):
     Returns:
         Path to created skill directory, or None if error
     """
-    # Determine skill directory path
     skill_dir = Path(path).resolve() / skill_name
 
-    # Check if directory already exists
     if skill_dir.exists():
         print(f"[ERROR] Skill directory already exists: {skill_dir}")
         return None
 
-    # Create skill directory
     try:
         skill_dir.mkdir(parents=True, exist_ok=False)
         print(f"[OK] Created skill directory: {skill_dir}")
@@ -281,7 +289,6 @@ def init_skill(skill_name, path, resources, include_examples):
         print(f"[ERROR] Error creating directory: {e}")
         return None
 
-    # Create SKILL.md from template
     skill_title = title_case_skill_name(skill_name)
     skill_content = SKILL_TEMPLATE.format(skill_name=skill_name, skill_title=skill_title)
 
@@ -293,7 +300,6 @@ def init_skill(skill_name, path, resources, include_examples):
         print(f"[ERROR] Error creating SKILL.md: {e}")
         return None
 
-    # Create resource directories if requested
     if resources:
         try:
             create_resource_dirs(skill_dir, skill_name, skill_title, resources, include_examples)
@@ -301,7 +307,6 @@ def init_skill(skill_name, path, resources, include_examples):
             print(f"[ERROR] Error creating resource directories: {e}")
             return None
 
-    # Print next steps
     print(f"\n[OK] Skill '{skill_name}' initialized successfully at {skill_dir}")
     print("\nNext steps:")
     print("1. Edit SKILL.md to complete the TODO items and update the description")
@@ -317,7 +322,7 @@ def init_skill(skill_name, path, resources, include_examples):
     return skill_dir
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Create a new skill directory with a SKILL.md template.",
     )

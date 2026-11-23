@@ -1,0 +1,57 @@
+{
+  "setup": {
+    "docsLabel": "Discord 설정 가이드 열기",
+    "officialLabel": "Discord 포털 열기",
+    "fields": {
+      "token": {
+        "label": "봇 토큰",
+        "placeholder": "Discord 봇 토큰"
+      },
+      "allowChannels": {
+        "label": "허용 채널",
+        "placeholder": "채널 ID, 쉼표로 구분"
+      },
+      "groupPolicy": {
+        "label": "그룹 규칙",
+        "choices": {
+          "mention": "멘션만",
+          "open": "모든 메시지",
+          "allowlist": "허용 목록"
+        }
+      },
+      "allowFrom": {
+        "label": "허용 사용자",
+        "placeholder": "사용자 ID, 쉼표로 구분"
+      },
+      "useProxy": {
+        "label": "프록시 사용"
+      },
+      "intents": {
+        "label": "게이트웨이 인텐트"
+      },
+      "readReceiptEmoji": {
+        "label": "이모티콘 읽기"
+      },
+      "workingEmoji": {
+        "label": "처리 중 이모지"
+      },
+      "workingEmojiDelay": {
+        "label": "이모지 지연(초)"
+      },
+      "streaming": {
+        "label": "스트리밍",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "replyToMessage": {
+        "label": "메시지에 답장",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      }
+    }
+  }
+}

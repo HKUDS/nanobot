@@ -1,24 +1,26 @@
-"""Signed media helpers for the WebUI HTTP surface."""
-
 from __future__ import annotations
 
 import base64
 import binascii
 import hashlib
 import hmac
+import json
 import mimetypes
+import os
 import re
 import shutil
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.config.paths import get_media_dir
+from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.utils.helpers import safe_filename
+from nanobot.webui.file_preview import WebUIFilePreviewError, resolve_file_path
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
 )
@@ -31,7 +33,6 @@ from nanobot.webui.http_utils import (
 
 MediaDirProvider = Callable[[str | None], Path]
 SignedMediaPath = Callable[[Path], dict[str, str] | None]
-SignedMediaUrl = Callable[[Path], str | None]
 
 
 def b64url_encode(data: bytes) -> str:
@@ -74,7 +75,6 @@ _BYTE_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
 
 def _parse_single_byte_range(range_header: str, size: int) -> tuple[int, int]:
-    """Parse a single HTTP byte range for signed media responses."""
     if size <= 0 or "," in range_header:
         raise ValueError("invalid byte range")
     m = _BYTE_RANGE_RE.fullmatch(range_header.strip())
@@ -115,6 +115,13 @@ def sign_media_path(
     return f"/api/media/{b64url_encode(mac)}/{payload}"
 
 
+def sign_local_attachment(path: str, *, session_key: str, secret: bytes) -> str:
+    """Bind a borrowed path to its session; serving rechecks the current scope."""
+    payload = b64url_encode(b"\0" + json.dumps([session_key, path], ensure_ascii=False).encode("utf-8"))
+    mac = hmac.new(secret, payload.encode("ascii"), hashlib.sha256).digest()[:16]
+    return f"/api/media/{b64url_encode(mac)}/{payload}"
+
+
 def sign_or_stage_media_path(
     path: Path,
     *,
@@ -126,17 +133,33 @@ def sign_or_stage_media_path(
     signed = sign_media_path(path, secret=secret, media_dir=media_dir)
     if signed is not None:
         return {"url": signed, "name": path.name}
+    staged_tmp: Path | None = None
     try:
-        if not path.is_file():
+        resolved = path.resolve(strict=True)
+        if not resolved.is_file():
             return None
+        source_stat = resolved.stat()
         target_dir = media_dir("websocket")
         safe_name = safe_filename(path.name) or "attachment"
-        staged = target_dir / f"{uuid.uuid4().hex[:12]}-{safe_name}"
-        shutil.copyfile(path, staged)
+        source_version = "\0".join((
+            os.path.normcase(str(resolved)),
+            str(source_stat.st_size),
+            str(source_stat.st_mtime_ns),
+            str(source_stat.st_ctime_ns),
+        ))
+        source_digest = hashlib.sha256(source_version.encode("utf-8")).hexdigest()[:20]
+        staged = target_dir / f"{source_digest}-{safe_name}"
+        if not staged.is_file() or staged.stat().st_size != source_stat.st_size:
+            staged_tmp = target_dir / f".{source_digest}-{uuid.uuid4().hex}.tmp"
+            shutil.copyfile(resolved, staged_tmp)
+            staged_tmp.replace(staged)
     except OSError as exc:
         if logger is not None:
             logger.warning("failed to stage outbound media {}: {}", path, exc)
         return None
+    finally:
+        if staged_tmp is not None:
+            staged_tmp.unlink(missing_ok=True)
     signed = sign_media_path(staged, secret=secret, media_dir=media_dir)
     if signed is None:
         return None
@@ -158,47 +181,18 @@ def signed_media_attachments(
     *,
     sign_path: SignedMediaPath,
 ) -> list[dict[str, Any]]:
-    """Map persisted media paths to WebUI attachment dicts with fresh signed URLs."""
+    """Keep every attachment in order, signing only files available at projection time."""
     out: list[dict[str, Any]] = []
     for pstr in paths:
         path = Path(pstr)
-        att = sign_path(path)
-        if att is None:
-            continue
-        url = att.get("url")
-        if not url:
-            continue
-        name = att.get("name") or path.name
+        try:
+            att = sign_path(path) if path.is_file() else None
+        except OSError:
+            att = None
+        name = (att.get("name") if att else None) or path.name
+        url = (att.get("url") if att else None) or ""
         out.append({"kind": media_attachment_kind(name), "url": url, "name": name})
     return out
-
-
-def attach_signed_media_urls(
-    payload: dict[str, Any],
-    *,
-    sign_path: SignedMediaUrl,
-) -> None:
-    """Replace raw media path lists in a WebUI session payload with signed URLs."""
-    messages = payload.get("messages")
-    if not isinstance(messages, list):
-        return
-    for msg in messages:
-        if not isinstance(msg, dict):
-            continue
-        media = msg.get("media")
-        if not isinstance(media, list) or not media:
-            continue
-        urls: list[dict[str, str]] = []
-        for entry in media:
-            if not isinstance(entry, str) or not entry:
-                continue
-            signed = sign_path(Path(entry))
-            if signed is None:
-                continue
-            urls.append({"url": signed, "name": Path(entry).name})
-        if urls:
-            msg["media_urls"] = urls
-        msg.pop("media", None)
 
 
 def serve_signed_media(
@@ -208,6 +202,7 @@ def serve_signed_media(
     secret: bytes,
     request: WsRequest | None = None,
     media_dir: MediaDirProvider = _default_media_dir,
+    scope_for_session: Callable[[str], WorkspaceScope | None] | None = None,
 ) -> Response:
     """Serve a signed media URL, including browser-friendly byte ranges."""
     try:
@@ -222,21 +217,45 @@ def serve_signed_media(
         rel_str = rel_bytes.decode("utf-8")
     except (ValueError, binascii.Error, UnicodeDecodeError):
         return _http_error(400, "invalid payload")
-    try:
-        media_root = media_dir(None).resolve()
-        candidate = (media_root / rel_str).resolve()
-        candidate.relative_to(media_root)
-    except (OSError, ValueError):
-        return _http_error(404, "not found")
-    if not candidate.is_file():
-        return _http_error(404, "not found")
+    # NUL cannot start a legacy filesystem-relative path.
+    borrowed = rel_str.startswith("\0")
+    if borrowed:
+        try:
+            raw_reference: object = json.loads(rel_str[1:])
+            if not isinstance(raw_reference, list) or scope_for_session is None:
+                return _http_error(400, "invalid local attachment")
+            reference = cast(list[object], raw_reference)
+            if len(reference) != 2:
+                return _http_error(400, "invalid local attachment")
+            session_key, path = reference
+            if not isinstance(session_key, str) or not isinstance(path, str):
+                return _http_error(400, "invalid local attachment")
+            scope = scope_for_session(session_key)
+            if scope is None:
+                return _http_error(404, "attachment unavailable")
+            candidate = resolve_file_path(path, scope=scope, literal=True)
+        except (ValueError, WebUIFilePreviewError) as exc:
+            return _http_error(getattr(exc, "status", 404), "attachment unavailable")
+    else:
+        try:
+            media_root = media_dir(None).resolve()
+            candidate = (media_root / rel_str).resolve()
+            candidate.relative_to(media_root)
+        except (OSError, ValueError):
+            return _http_error(404, "not found")
+        if not candidate.is_file():
+            return _http_error(404, "not found")
 
+    return _serve_media_file(candidate, request=request, borrowed=borrowed)
+
+
+def _serve_media_file(candidate: Path, *, request: WsRequest | None, borrowed: bool) -> Response:
     mime, _ = mimetypes.guess_type(candidate.name)
     if mime not in _MEDIA_ALLOWED_MIMES:
         mime = "application/octet-stream"
     common_headers = [
         ("Accept-Ranges", "bytes"),
-        ("Cache-Control", "private, max-age=31536000, immutable"),
+        ("Cache-Control", "no-store" if borrowed else "private, max-age=31536000, immutable"),
         ("X-Content-Type-Options", "nosniff"),
     ]
     if mime == "image/svg+xml":

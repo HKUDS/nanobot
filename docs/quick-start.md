@@ -1,153 +1,213 @@
 # Install and Quick Start
 
-This page gets one local nanobot reply working. After that, you can add the WebUI, chat apps, local models, web search, MCP, deployment, or custom plugins.
+Get your first reply from nanobot in a few minutes. Skip chat apps, MCP servers, and deployment until this basic setup works.
 
-If you have never used a terminal or edited a config file before, use [`start-without-technical-background.md`](./start-without-technical-background.md) first. This page assumes you are comfortable pasting commands and editing JSON snippets.
+If terminals, Python, or API keys are new to you, start with the [beginner walkthrough](./start-without-technical-background.md) instead.
 
-## Before You Start
+> [!NOTE]
+> These docs follow the latest development branch, while the installer below installs the latest stable release. If a screen looks different, check `nanobot --version` and see the [matching release guide](https://nanobot.wiki/docs/latest/getting-started/quick-start).
 
-You need:
+## What You Need
 
 - Python 3.11 or newer.
-- One LLM provider, company endpoint, subscription endpoint, or local model server you can call. The examples below use a generic OpenAI-compatible `custom` provider so the compact path does not recommend one hosted service; any supported provider works when the key, provider name, and model ID match.
-- Git only if you install from source.
-- Node.js or Bun only if you are developing the WebUI itself.
+- Access to a supported AI provider, company endpoint, or local model server (such as Ollama).
+- The API key (or sign-in) and model ID for that service.
 
-> [!IMPORTANT]
-> Repository docs may describe features that are available first in source. Install from PyPI or `uv` for the stable day-to-day release; install from source when you want the newest repository behavior or plan to contribute.
+Packaged releases include the WebUI and native terminal UI (TUI) for macOS, Linux, and Windows—no Node.js or frontend build tools are needed.
 
-## 1. Install
+## 1. Install nanobot
 
-Pick one install method.
+The official installer sets up nanobot in its own isolated environment and automatically opens the WebUI on a local desktop.
 
-**One-command setup:**
+**macOS / Linux**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh
 ```
 
-On Windows PowerShell:
+**Windows PowerShell**
 
 ```powershell
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes and you enabled the WebSocket channel, go straight to [Open the WebUI](#5-open-the-webui).
+You can inspect [`install.sh`](../scripts/install.sh) or [`install.ps1`](../scripts/install.ps1) before running them. If `nanobot` is not on your `PATH` afterward, use the full command printed at the end of the installer output.
 
-To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
+## 2. Configure Your Model
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dry-run
-```
+When the WebUI opens in your browser, go to **Settings → Models**:
 
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dry-run
-```
+1. Click **New preset** and give it a name (if **Convert to presets** appears, click it first).
+2. Open **Provider** and select your provider—or click **Add provider** to enter its API key / sign in.
+3. Select a model from the list or enter a model ID available to your account.
+4. Click **Save**.
 
-To install the current `main` branch instead, pass `--dev`:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dev
-```
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dev
-```
-
-If `curl` or `irm` is unavailable, or GitHub raw downloads are blocked on your network, use one of the manual install methods below.
-
-If you prefer to inspect the script first, open [`../scripts/install.sh`](../scripts/install.sh) or [`../scripts/install.ps1`](../scripts/install.ps1).
-
-**Stable release with `uv`:**
+If the browser did not open automatically, run:
 
 ```bash
-uv tool install nanobot-ai
-nanobot --version
+nanobot webui
 ```
 
-**Stable release with pip:**
-
-```bash
-python -m pip install nanobot-ai
-nanobot --version
-```
-
-Use pip only inside an environment you control. If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or create a virtual environment first.
-
-**Latest source checkout:**
-
-```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
-python -m pip install -e .
-nanobot --version
-```
-
-If your shell cannot find `nanobot` after a pip install, run the module form:
-
-```bash
-python -m nanobot --version
-python -m nanobot onboard
-```
-
-On Windows, `~` in the docs means your user profile directory, for example `C:\Users\you`.
-
-The docs use `python` in commands. If your system exposes Python 3.11+ as `python3` or `py`, use that command in the same place, for example `python3 -m pip install nanobot-ai` or `py -m nanobot --version`.
-
-## 2. Initialize
-
-Skip this section if the one-command setup already started the wizard and Quick Start finished there.
-
-```bash
-nanobot onboard
-```
-
-Use the wizard if you prefer prompts instead of editing JSON by hand:
+On a headless server or over SSH, use the terminal wizard instead:
 
 ```bash
 nanobot onboard --wizard
 ```
 
-Initialization creates:
+By default, nanobot stores its files under `~/.nanobot/`:
 
-| Path | What it is |
-|------|------------|
-| `~/.nanobot/config.json` | Main settings file for providers, models, channels, tools, gateway, and API |
-| `~/.nanobot/workspace/` | Agent workspace for memory, sessions, heartbeat tasks, skills, and artifacts |
+| Path | Purpose |
+|---|---|
+| `~/.nanobot/config.json` | Providers, models, channels, tools, and runtime settings |
+| `~/.nanobot/workspace/` | Memory, skills, automations, and generated files |
+| `~/.nanobot/sessions/` | Saved conversation history |
 
-If you already have a config, `nanobot onboard` can refresh missing default fields without overwriting your existing values.
+## 3. Check the Setup
 
-## 3. Configure a Provider
+Verify your local configuration without making a model request:
 
-Skip this section if you already configured provider and model settings in the wizard.
+```bash
+nanobot status
+```
 
-Open `~/.nanobot/config.json`. Add or merge these blocks into the file created by `nanobot onboard`; do not replace the whole file unless you want to reset the config.
+Confirm that **Config** and **Workspace** show a check mark, your chosen model/preset is listed, and its provider is configured. Unused providers showing `not set` is normal.
 
-**API key:**
+## 4. Get the First Reply
+
+In the WebUI (running locally on `http://127.0.0.1:8765`, reachable only from your machine), send:
+
+```text
+Hello!
+```
+
+Any normal reply confirms that your config, provider, workspace, and WebUI are all working.
+
+### Managing the background gateway
+
+With the official installer, nanobot runs a background gateway so closing the browser or terminal does not stop it. You can manage it anytime:
+
+```bash
+nanobot gateway status
+nanobot gateway logs
+nanobot gateway restart
+nanobot gateway stop
+```
+
+If you installed nanobot another way (such as `uv` or `pip`), `nanobot webui` stops when you close the terminal unless you start it with `nanobot webui --detach` or `nanobot gateway --background`.
+
+## Terminal-Only Check
+
+To test without a browser, send a single message from the terminal:
+
+```bash
+nanobot agent -m "Hello!"
+```
+
+Or open an interactive terminal chat:
+
+```bash
+nanobot
+```
+
+In interactive mode, `Enter` sends and `Shift+Enter` (or `Ctrl+J`) inserts a newline. While nanobot is replying, `Enter` sends immediately, `Tab` queues your message for after the reply, and `Option+Up` (macOS) / `Alt+Up` (Windows/Linux) edits your queued message. Exit with `exit`, `/exit`, `:q`, or `Ctrl+D`.
+
+## Continue with nanobot
+
+Once you have your first reply, you can ask nanobot directly in chat to guide your next setup step. When the built-in `nanobot-document` skill is enabled (under **Skills → Installed**), nanobot reads the documentation bundled with your installation. For example:
+
+- *"I am already using the WebUI. Help me connect Telegram and allow only my account."*
+- *"Explain what is shared when I start a new topic or choose a different project."*
+- *"My second model preset returns an authentication error. Help me find which setting to check."*
+
+To invoke the documentation skill explicitly:
+
+```text
+$nanobot-document Explain how sessions, workspaces, and memory relate in this installation.
+```
+
+Or read the guides yourself—add one capability and test it before moving on:
+
+| Goal | Recommended path |
+|---|---|
+| Learn topics, workspaces, tools, and access modes | [WebUI guide](./webui.md) |
+| Connect a chat app | Open **Channels**, then check [Chat Apps](./chat-apps.md) for platform steps |
+| Change or add a model | Open **Settings → Models** or browse the [Provider Cookbook](./provider-cookbook.md) |
+| Add web search, voice, or image generation | Open **Settings → Capabilities** (see [Configuration](./configuration.md) for advanced options) |
+| Add a plugin, CLI App, or MCP server | Open **Apps** or follow [Configure MCP Tools](./guides/configure-mcp-tools.md) |
+| Schedule tasks or triggers | Read [Automations](./automations.md) |
+| Run continuously or remotely | Read [Deployment](./deployment.md) |
+| Integrate from Python | Use the [Python SDK](./python-sdk.md) |
+
+## Other Install Methods
+
+Pick one method below, then continue at [Configure Your Model](#2-configure-your-model).
+
+**uv**
+
+```bash
+uv tool install nanobot-ai
+nanobot webui
+```
+
+**pip (inside a virtual environment)**
+
+```bash
+python -m pip install nanobot-ai
+nanobot webui
+```
+
+If pip reports `externally-managed-environment`, use the official installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or a virtual environment instead of forcing a system-wide install.
+
+**From source (latest `main`)**
+
+Requires Git. nanobot downloads the matching Bun runtime automatically for the TUI; Node.js is not required.
+
+```bash
+git clone https://github.com/HKUDS/nanobot.git
+cd nanobot
+python3 -m venv .venv
+```
+
+On Windows, use `py -3 -m venv .venv`. Activate the environment (`source .venv/bin/activate` on macOS/Linux or `.venv\Scripts\Activate.ps1` in PowerShell), then run:
+
+```bash
+python -m pip install -e .
+nanobot webui
+```
+
+For contributor details, see [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+
+<details>
+<summary>If the <code>nanobot</code> command is not found</summary>
+
+Reuse the full command printed by the official installer, or call Python directly from its dedicated environment:
+
+- **macOS / Linux:** `~/.nanobot/venv/bin/python -I -m nanobot --version`
+- **Windows PowerShell:** `& "$HOME\.nanobot\venv\Scripts\python.exe" -I -m nanobot --version`
+
+Replace `--version` with `webui`, `status`, or any other subcommand. For `uv` or `pipx` installs, use the same package manager's environment.
+
+</details>
+
+## Manual Configuration Fallback
+
+<details>
+<summary>Manual configuration</summary>
+
+Use this only when the WebUI and terminal wizard are unavailable or you manage `config.json` directly. Run `nanobot onboard` first, then merge a provider and named model preset into `~/.nanobot/config.json`:
 
 ```json
 {
   "providers": {
     "custom": {
-      "apiKey": "your-api-key",
+      "apiKey": "${PROVIDER_API_KEY}",
       "apiBase": "https://api.example.com/v1"
     }
-  }
-}
-```
-
-**Model preset:**
-
-```json
-{
+  },
   "modelPresets": {
     "primary": {
-      "label": "Primary",
       "provider": "custom",
-      "model": "model-id-from-your-provider",
-      "maxTokens": 8192,
-      "contextWindowTokens": 65536,
-      "temperature": 0.1
+      "model": "model-id-from-your-provider"
     }
   },
   "agents": {
@@ -158,190 +218,38 @@ Open `~/.nanobot/config.json`. Add or merge these blocks into the file created b
 }
 ```
 
-The provider and model inside a preset must match. The snippet above is only an example. For another provider, replace these values together:
+Keep the provider, endpoint URL, and model ID matched to the same service. See [Provider Cookbook](./provider-cookbook.md) for provider-specific examples and [Configuration](./configuration.md) for all fields.
 
-| Replace | Where |
-|---|---|
-| Provider config key, such as `custom` | `providers.<provider>` |
-| API key or environment variable | `providers.<provider>.apiKey` |
-| Preset provider name | `modelPresets.primary.provider` |
-| Model ID | `modelPresets.primary.model` |
-| Endpoint URL, only when needed | `providers.<provider>.apiBase` |
-
-Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but named presets are the recommended path because they also power `/model` switching and fallback chains. For provider-specific examples across direct, gateway, OAuth, cloud, and local setups, see [`providers.md`](./providers.md).
-
-**What about `apiBase` / base URL?**
-
-`apiBase` is the HTTP base URL of the provider endpoint, not the model name. Most hosted providers in nanobot already know their default endpoint, so you usually only set `apiKey` and a model preset. Set `apiBase` when you are using:
-
-- `custom` for a third-party or self-hosted OpenAI-compatible API;
-- a local OpenAI-compatible server such as Ollama, vLLM, or LM Studio;
-- a provider-specific alternate endpoint, regional endpoint, proxy, or subscription endpoint.
-
-Examples:
-
-```json
-{
-  "providers": {
-    "custom": {
-      "apiKey": "${CUSTOM_API_KEY}",
-      "apiBase": "https://api.example.com/v1"
-    }
-  }
-}
-```
-
-```json
-{
-  "providers": {
-    "ollama": {
-      "apiBase": "http://localhost:11434/v1"
-    }
-  }
-}
-```
-
-If the provider's docs say the endpoint is `/v1`, include `/v1` in `apiBase`. The model ID still belongs in the active `modelPresets` entry.
-
-If you prefer not to store secrets in `config.json`, reference an environment variable and set it before starting nanobot:
-
-```json
-{
-  "providers": {
-    "custom": {
-      "apiKey": "${PROVIDER_API_KEY}",
-      "apiBase": "https://api.example.com/v1"
-    }
-  }
-}
-```
-
-## 4. Check the Setup
-
-```bash
-nanobot status
-```
-
-This should show the config path, workspace path, active model or preset, and provider summary. It does not send a message to the model, so use it as a quick config check before the first real request.
-
-Read it like this:
-
-| Status line | What you want |
-|---|---|
-| `Config` | A check mark. |
-| `Workspace` | A check mark. |
-| `Model` | The model or preset you expect. |
-| Provider list | Most providers can say `not set`; the provider used by the active preset should show a check mark, OAuth status, or local URL. |
-
-## 5. Open the WebUI
-
-If Quick Start enabled the WebSocket channel, start the gateway:
-
-```bash
-nanobot gateway
-```
-
-Leave that terminal open, then open `http://127.0.0.1:8765` in your browser. Enter the WebUI password you set in the wizard, then send your first message there.
-
-## 6. Test One CLI Message
-
-Use this path if you skipped Quick Start, declined the WebSocket channel, or want a terminal-only check.
-
-Run a one-shot CLI message:
-
-```bash
-nanobot agent -m "Hello!"
-```
-
-A successful first run proves that:
-
-- the `nanobot` command is installed;
-- `~/.nanobot/config.json` can be loaded;
-- the selected provider and model can answer;
-- the default workspace can be created and used.
-
-The reply text itself will vary. Any normal assistant answer means the install, config, provider, model, and workspace path are all usable.
-
-If that works, start an interactive CLI chat:
-
-```bash
-nanobot agent
-```
-
-After the interactive session can answer normally, nanobot can help with its own next setup step. Ask it to read the relevant docs, inspect your current `~/.nanobot/config.json`, and make one concrete change such as enabling WebUI, adding a provider preset, or configuring one chat channel. When nanobot says the config is updated, run `/restart` in the chat or restart the nanobot process manually so long-running processes reload `config.json`.
-
-Example prompt:
-
-```text
-Read docs/quick-start.md, docs/providers.md, and docs/configuration.md in this checkout.
-Then update ~/.nanobot/config.json to add a model preset named "primary" for my provider.
-Tell me exactly what changed and whether I need to run /restart.
-```
-
-Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
-
-## 7. Choose Your Next Step
-
-| Want to... | Go to |
-|---|---|
-| Understand config, workspace, gateway, channels, memory, and tools | [`concepts.md`](./concepts.md) |
-| Copy another provider or local model setup | [`provider-cookbook.md`](./provider-cookbook.md) |
-| Understand provider/model matching | [`providers.md`](./providers.md) |
-| Open the bundled browser UI | [`webui.md`](./webui.md) |
-| Connect Telegram, Discord, WeChat, Slack, Email, or another chat app | [`chat-apps.md`](./chat-apps.md) |
-| Configure web search, MCP, security, memory, gateway, or runtime settings | [`configuration.md`](./configuration.md) |
-| Run with Docker, systemd, or LaunchAgent | [`deployment.md`](./deployment.md) |
-| Debug a failure | [`troubleshooting.md`](./troubleshooting.md) |
+</details>
 
 ## Updating
 
-**pip:**
+Open **Settings → About → Update** in the WebUI. Supported installations update and restart in place; others display instructions for their package manager. See [Updating nanobot](./updating.md) for preview releases, backups, and recovery.
+
+For standard Python virtual environments, you can also update from the CLI:
 
 ```bash
-python -m pip install -U nanobot-ai
+nanobot update --check
+nanobot update
+```
+
+## If the First Reply Fails
+
+Change one thing at a time. Start with:
+
+```bash
 nanobot --version
+nanobot status
+nanobot agent -m "Hello!"
 ```
 
-If pip reports `externally-managed-environment`, upgrade with the same isolated method you used to install nanobot, such as `uv tool upgrade nanobot-ai`, `pipx upgrade nanobot-ai`, or the managed venv created by the one-command installer.
+| Symptom | First check |
+|---|---|
+| `nanobot: command not found` | Reuse the full command printed by the installer (see [Other Install Methods](#other-install-methods)) |
+| JSON parse error | Check commas and braces; remember that doc examples are snippets to merge |
+| `401` or invalid API key | Confirm the key belongs to the selected provider and has no extra spaces |
+| Model not found | Use a model ID available to your account on the selected provider |
+| CLI works, but WebUI does not open | Open port `8765`, not the gateway health port `18790` |
+| WebUI works, but a chat app does not | Check **Channels** in WebUI, then run `nanobot channels status` |
 
-**uv:**
-
-```bash
-uv tool upgrade nanobot-ai
-nanobot --version
-```
-
-**pipx:**
-
-```bash
-pipx upgrade nanobot-ai
-nanobot --version
-```
-
-**Source checkout:**
-
-```bash
-git pull
-python -m pip install -e .
-nanobot --version
-```
-
-If you use WhatsApp from a source checkout, keep the optional dependencies installed:
-
-```bash
-python -m pip install -e ".[whatsapp]"
-```
-
-## First-Run Troubleshooting
-
-| Symptom | What to check |
-|---------|---------------|
-| `nanobot: command not found` | Use `python -m nanobot ...`, or add your Python scripts directory to `PATH`. |
-| `ModuleNotFoundError: nanobot` | Confirm you installed into the same Python environment that is running the command. |
-| JSON parse errors | Check commas and braces in `~/.nanobot/config.json`; examples above are partial snippets to merge. |
-| Authentication or 401 errors | Check that the API key is valid, copied without spaces, and placed under the provider you selected. |
-| Provider/model errors | Make sure the active preset uses the provider that owns your API key and that the model exists there. |
-| The CLI works but a chat app does not reply | First keep `nanobot gateway` running, then follow [`chat-apps.md`](./chat-apps.md). |
-| WebUI does not open | Enable the WebSocket channel and open port `8765`, not the gateway health port `18790`. |
-
-For a fuller diagnosis flow, see [`troubleshooting.md`](./troubleshooting.md).
+Continue with [Troubleshooting](./troubleshooting.md) if the cause is still unclear.

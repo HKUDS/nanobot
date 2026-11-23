@@ -1,0 +1,35 @@
+{
+  "setup": {
+    "primaryAction": "连接 WhatsApp",
+    "docsLabel": "打开 WhatsApp 配置指南",
+    "officialLabel": "打开 WhatsApp 帮助",
+    "fields": {
+      "allowFrom": {
+        "label": "允许名单",
+        "placeholder": "电话号码或 WhatsApp ID"
+      },
+      "groupPolicy": {
+        "label": "群聊规则",
+        "choices": {
+          "mention": "提及回复",
+          "open": "全部消息",
+          "allowlist": "白名单"
+        }
+      },
+      "useProxy": {
+        "label": "使用代理"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "WhatsApp 关联二维码",
+    "scanTitle": "关联 WhatsApp",
+    "scanDescription": "在 WhatsApp 中打开“已关联的设备”，选择“关联设备”，然后扫描此二维码。",
+    "waiting": "正在等待 WhatsApp 扫码…",
+    "connected": "WhatsApp 已连接。",
+    "stopped": "WhatsApp 连接已停止。请重新开始以获取新二维码。",
+    "connecting": "正在连接…",
+    "scanAgain": "关联其他账户",
+    "connect": "关联 WhatsApp"
+  }
+}

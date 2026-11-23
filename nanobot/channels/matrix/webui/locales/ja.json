@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "Matrix 設定ガイドを開く",
+    "officialLabel": "Matrix クライアント一覧を開く",
+    "fields": {
+      "homeserver": {
+        "label": "ホームサーバー",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "ユーザー ID",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "パスワード",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "アクセストークン",
+        "placeholder": "アクセストークンを入力"
+      },
+      "deviceId": {
+        "label": "デバイス ID",
+        "placeholder": "アクセストークン使用時に必須"
+      },
+      "groupPolicy": {
+        "label": "グループのルール",
+        "choices": {
+          "mention": "メンションのみ",
+          "open": "全メッセージ",
+          "allowlist": "許可リスト",
+          "listen": "リッスン（メンションで返信）"
+        }
+      },
+      "groupPolicyOverrides": {
+        "label": "部屋ごとのルール例外（JSON）"
+      },
+      "allowFrom": {
+        "label": "許可ユーザー"
+      },
+      "e2eeEnabled": {
+        "label": "エンドツーエンドの暗号化",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS 検証",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "同期停止の待ち時間（秒）"
+      },
+      "maxMediaBytes": {
+        "label": "メディアの上限（バイト）"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "同時ダウンロード"
+      },
+      "groupAllowFrom": {
+        "label": "許可グループ"
+      },
+      "allowRoomMentions": {
+        "label": "ルームのメンション",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "replyToMessage": {
+        "label": "引用返信",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "streaming": {
+        "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "useProxy": {
+        "label": "プロキシを使う"
+      }
+    }
+  }
+}

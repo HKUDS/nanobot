@@ -1,0 +1,92 @@
+{
+  "setup": {
+    "docsLabel": "Ouvrir le guide Slack",
+    "officialLabel": "Ouvrir les applications Slack",
+    "actions": {
+      "slack-manifest": "Copier le manifeste de l’application"
+    },
+    "fields": {
+      "appToken": {
+        "label": "Jeton d’application",
+        "placeholder": "xapp-..."
+      },
+      "botToken": {
+        "label": "Jeton du bot",
+        "placeholder": "xoxb-..."
+      },
+      "groupPolicy": {
+        "label": "Règles des groupes",
+        "choices": {
+          "mention": "Mentions uniquement",
+          "open": "Tous les messages",
+          "allowlist": "Liste d’autorisation"
+        }
+      },
+      "mode": {
+        "label": "Mode de connexion",
+        "choices": {
+          "socket": "Mode prise"
+        }
+      },
+      "webhookPath": {
+        "label": "Chemin du webhook"
+      },
+      "replyInThread": {
+        "label": "Réponses dans le fil",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "reactEmoji": {
+        "label": "Lire les emoji"
+      },
+      "doneEmoji": {
+        "label": "Terminé emoji"
+      },
+      "includeThreadContext": {
+        "label": "Contexte du fil",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Limite du contexte"
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés"
+      },
+      "groupAllowFrom": {
+        "label": "Canaux autorisés"
+      },
+      "groupRequireMention": {
+        "label": "Exiger une mention dans le canal",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "dm_enabled": {
+        "label": "Activer les messages directs",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "dm_policy": {
+        "label": "Accès aux messages directs",
+        "choices": {
+          "allowlist": "Liste verte",
+          "open": "Ouvert"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Utilisateurs de DM autorisés"
+      },
+      "useProxy": {
+        "label": "Utiliser le proxy"
+      }
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "setup": {
+    "docsLabel": "Open Discord setup",
+    "officialLabel": "Open Discord portal",
+    "fields": {
+      "token": {
+        "label": "Bot token",
+        "placeholder": "Discord bot token"
+      },
+      "allowChannels": {
+        "label": "Allowed channels",
+        "placeholder": "Channel IDs, comma separated"
+      },
+      "groupPolicy": {
+        "label": "Group rules",
+        "choices": {
+          "mention": "Mentions only",
+          "open": "All messages",
+          "allowlist": "Allowlist"
+        }
+      },
+      "allowFrom": {
+        "label": "Allowed users",
+        "placeholder": "User IDs, comma separated"
+      },
+      "useProxy": {
+        "label": "Use proxy"
+      },
+      "intents": {
+        "label": "Gateway intents"
+      },
+      "readReceiptEmoji": {
+        "label": "Read emoji"
+      },
+      "workingEmoji": {
+        "label": "Working emoji"
+      },
+      "workingEmojiDelay": {
+        "label": "Emoji delay (seconds)"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "replyToMessage": {
+        "label": "Reply to message",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      }
+    }
+  }
+}

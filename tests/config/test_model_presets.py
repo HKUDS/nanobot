@@ -1,7 +1,14 @@
+import json
+import os
+import subprocess
+import sys
+import textwrap
 import warnings
 
 import pytest
 
+from nanobot.agent.model_presets import load_model_preset_catalog
+from nanobot.config.errors import ConfigLoadError
 from nanobot.config.schema import Config
 
 
@@ -16,48 +23,79 @@ def test_resolve_preset_returns_defaults_when_no_preset() -> None:
     assert resolved.reasoning_effort == config.agents.defaults.reasoning_effort
 
 
-def test_provider_api_type_accepts_exact_values_only() -> None:
-    config = Config.model_validate({
-        "providers": {
-            "openai": {
-                "apiKey": "sk-test",
-                "apiType": "responses",
-            }
-        }
-    })
-    assert config.providers.openai.api_type == "responses"
+def test_model_preset_catalog_missing_env_reports_explicit_config_path(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    name = "NANOBOT_TEST_CATALOG_MISSING_KEY"
+    monkeypatch.delenv(name, raising=False)
+    config_path = tmp_path / "custom.json"
+    config_path.write_text(
+        json.dumps({"providers": {"openrouter": {"apiKey": f"${{{name}}}"}}}),
+        encoding="utf-8",
+    )
 
-    with pytest.raises(ValueError):
-        Config.model_validate({
-            "providers": {
-                "openai": {
-                    "apiKey": "sk-test",
-                    "apiType": "response",
-                }
-            }
-        })
+    with pytest.raises(ConfigLoadError) as exc_info:
+        load_model_preset_catalog(config_path)
+
+    assert exc_info.value.path == config_path
 
 
-def test_provider_api_type_is_openai_only() -> None:
-    with pytest.raises(ValueError, match="only supported"):
-        Config.model_validate({
-            "providers": {
-                "custom": {
-                    "apiBase": "https://example.test/v1",
-                    "apiType": "responses",
-                }
-            }
-        })
+def test_agent_timezone_rejects_unknown_iana_name() -> None:
+    with pytest.raises(ValueError, match="unknown timezone"):
+        Config.model_validate({"agents": {"defaults": {"timezone": "Not/AZone"}}})
 
-    with pytest.raises(ValueError, match="only supported"):
-        Config.model_validate({
-            "providers": {
-                "my-company-api": {
-                    "apiBase": "https://example.test/v1",
-                    "apiType": "responses",
-                }
-            }
-        })
+
+def test_agent_timezones_use_packaged_data_without_system_database() -> None:
+    script = textwrap.dedent(
+        """\
+        from zoneinfo import TZPATH
+
+        from nanobot.config.schema import Config
+
+        assert not TZPATH
+        for name in ("UTC", "Asia/Shanghai"):
+            config = Config.model_validate({"agents": {"defaults": {"timezone": name}}})
+            serialized = config.model_dump(mode="json", by_alias=True)
+            restored = Config.model_validate(serialized)
+            assert restored.agents.defaults.timezone == name
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env=os.environ | {"PYTHONTZPATH": ""},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_old_installation_defaults_load_without_changing_provider_api(tmp_path):
+    from nanobot.config.loader import load_config, save_config
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"providers": {
+        "openai": {"apiType": "auto", "apiKey": "fixture"},
+        "custom": {"apiType": "auto", "apiBase": "https://example.test/v1"},
+    }}), encoding="utf-8")
+    config = load_config(path)
+    assert config.providers.openai.api is None
+    assert config.providers.custom.api is None
+    save_config(config, path)
+    assert load_config(path).providers.custom.api_base == "https://example.test/v1"
+
+
+@pytest.mark.parametrize("api", [None, {"supportedApis": ["chat_completions"]}])
+def test_current_provider_api_stays_authoritative_if_old_key_remains(api):
+    config = Config.model_validate({"providers": {"openai": {
+        "apiType": "responses", "api": api,
+    }}})
+    resolved = config.providers.openai.api
+    assert (resolved.to_capabilities().preferred_api if resolved else None) == (
+        "chat_completions" if api else None
+    )
 
 
 @pytest.mark.parametrize("provider_name", ["openai-codex", "github-copilot", "lm-studio"])
@@ -219,6 +257,42 @@ def test_model_presets_accepts_camel_case_root_key() -> None:
     assert config.model_presets["fast"].provider == "openai"
 
 
+@pytest.mark.parametrize(
+    "model_presets",
+    [
+        {"Default": {"model": "openai/gpt-4.1"}},
+        {
+            "Fast": {"model": "openai/gpt-4.1-mini"},
+            "fast": {"model": "openai/gpt-4.1"},
+        },
+        {" fast ": {"model": "openai/gpt-4.1"}},
+    ],
+)
+def test_model_preset_names_accepted_by_earlier_releases_remain_loadable(
+    model_presets: dict[str, dict[str, str]],
+) -> None:
+    config = Config.model_validate({"modelPresets": model_presets})
+
+    assert list(config.model_presets) == list(model_presets)
+
+
+def test_model_presets_serializes_with_camel_case_root_key() -> None:
+    config = Config.model_validate({
+        "model_presets": {
+            "fast": {
+                "model": "openai/gpt-4.1",
+                "provider": "openai",
+            }
+        },
+    })
+
+    dumped = config.model_dump(mode="json", by_alias=True)
+
+    assert "modelPresets" in dumped
+    assert "model_presets" not in dumped
+    assert dumped["modelPresets"]["fast"]["model"] == "openai/gpt-4.1"
+
+
 def test_resolve_preset_can_target_named_preset_without_activating() -> None:
     config = Config.model_validate({
         "model_presets": {
@@ -242,6 +316,24 @@ def test_validator_rejects_unknown_preset() -> None:
                     "modelPreset": "unknown",
                 }
             }
+        })
+
+
+def test_validator_accepts_dream_model_preset() -> None:
+    config = Config.model_validate({
+        "modelPresets": {
+            "dream": {"model": "anthropic/claude-haiku-4-5", "provider": "anthropic"},
+        },
+        "agents": {"defaults": {"dream": {"modelOverride": "dream"}}},
+    })
+
+    assert config.agents.defaults.dream.model_override == "dream"
+
+
+def test_validator_rejects_unknown_dream_model_preset() -> None:
+    with pytest.raises(ValueError, match="Dream model preset 'unknown' not found"):
+        Config.model_validate({
+            "agents": {"defaults": {"dream": {"modelOverride": "unknown"}}},
         })
 
 
@@ -275,15 +367,22 @@ def test_resolve_preset_rejects_unknown_named_preset() -> None:
         Config().resolve_preset("missing")
 
 
-def test_match_provider_uses_preset_model() -> None:
+@pytest.mark.parametrize(
+    "provider_name, model",
+    [
+        pytest.param("openai", "openai/gpt-4.1", id="model"),
+        pytest.param("anthropic", "anthropic/claude-opus-4-5", id="provider_when_forced"),
+    ],
+)
+def test_match_provider_uses_model_preset(provider_name, model) -> None:
     config = Config.model_validate({
         "providers": {
-            "openai": {"apiKey": "sk-test"},
+            provider_name: {"apiKey": "sk-test"},
         },
         "model_presets": {
             "fast": {
-                "model": "openai/gpt-4.1",
-                "provider": "openai",
+                "model": model,
+                "provider": provider_name,
             }
         },
         "agents": {
@@ -293,28 +392,7 @@ def test_match_provider_uses_preset_model() -> None:
         },
     })
     name = config.get_provider_name()
-    assert name == "openai"
-
-
-def test_match_provider_uses_preset_provider_when_forced() -> None:
-    config = Config.model_validate({
-        "providers": {
-            "anthropic": {"apiKey": "sk-test"},
-        },
-        "model_presets": {
-            "fast": {
-                "model": "anthropic/claude-opus-4-5",
-                "provider": "anthropic",
-            }
-        },
-        "agents": {
-            "defaults": {
-                "modelPreset": "fast",
-            }
-        },
-    })
-    name = config.get_provider_name()
-    assert name == "anthropic"
+    assert name == provider_name
 
 
 def test_match_provider_routes_forced_novita_model_api_models() -> None:
@@ -347,3 +425,20 @@ def test_transcription_only_provider_is_not_chat_fallback() -> None:
     })
 
     assert config.get_provider_name() is None
+
+
+@pytest.mark.parametrize("supports_images", [False, True])
+def test_image_capability_round_trip_for_defaults_named_and_inline_presets(supports_images):
+    config = Config.model_validate({
+        "agents": {"defaults": {"supportsImages": supports_images, "fallbackModels": [
+            "vision", {"model": "inline", "provider": "custom", "supportsImages": supports_images},
+        ]}},
+        "modelPresets": {"vision": {"model": "vision", "supportsImages": supports_images}},
+    })
+    restored = Config.model_validate(config.model_dump(mode="json", by_alias=True))
+    assert restored.resolve_default_preset().supports_images is supports_images
+    assert restored.resolve_preset("vision").supports_images is supports_images
+    inline = restored.agents.defaults.fallback_models[1]
+    assert not isinstance(inline, str)
+    assert inline.supports_images is supports_images
+    assert Config().resolve_preset().supports_images is True

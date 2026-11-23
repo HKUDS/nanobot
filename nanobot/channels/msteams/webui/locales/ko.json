@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "Teams 설정 가이드 열기",
+    "officialLabel": "Teams 개발자 포털 열기",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID"
+      },
+      "appPassword": {
+        "label": "클라이언트 시크릿",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "테넌트 ID",
+        "placeholder": "테넌트 ID(선택 사항)"
+      },
+      "path": {
+        "label": "콜백 경로",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "허용 사용자",
+        "placeholder": "Teams 사용자 ID, 쉼표로 구분"
+      },
+      "host": {
+        "label": "호스트 듣기"
+      },
+      "port": {
+        "label": "청취 포트"
+      },
+      "replyInThread": {
+        "label": "스레드 답변",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "멘션만 있는 경우의 답변"
+      },
+      "validateInboundAuth": {
+        "label": "요청 검증",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "refTtlDays": {
+        "label": "참조 유지 기간(일)"
+      },
+      "pruneWebChatRefs": {
+        "label": "Web Chat 참조 정리",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "그룹 참조 정리",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "갱신 간격(초)"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "신뢰하는 호스트"
+      }
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "setup": {
+    "docsLabel": "Mở hướng dẫn Discord",
+    "officialLabel": "Mở cổng nhà phát triển Discord",
+    "fields": {
+      "token": {
+        "label": "Token bot",
+        "placeholder": "Token bot Discord"
+      },
+      "allowChannels": {
+        "label": "Kênh được phép",
+        "placeholder": "ID kênh, phân tách bằng dấu phẩy"
+      },
+      "groupPolicy": {
+        "label": "Quy tắc nhóm",
+        "choices": {
+          "mention": "Chỉ khi được nhắc",
+          "open": "Mọi tin nhắn",
+          "allowlist": "Danh sách cho phép"
+        }
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
+      },
+      "useProxy": {
+        "label": "Dùng proxy"
+      },
+      "intents": {
+        "label": "Ý định của cổng"
+      },
+      "readReceiptEmoji": {
+        "label": "Đọc biểu tượng cảm xúc"
+      },
+      "workingEmoji": {
+        "label": "Emoji đang xử lý"
+      },
+      "workingEmojiDelay": {
+        "label": "Độ trễ emoji (giây)"
+      },
+      "streaming": {
+        "label": "Truyền phát",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "replyToMessage": {
+        "label": "Trả lời tin nhắn",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      }
+    }
+  }
+}

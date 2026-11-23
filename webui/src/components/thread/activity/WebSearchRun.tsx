@@ -1,0 +1,47 @@
+import {
+  WebSearchIcon,
+} from "@/components/icons/product-icons";
+import { AlertCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
+
+import { ActivityStep } from "@/components/thread/activity/ActivityStep";
+import { WebActivityRow } from "@/components/thread/activity/WebActivityRow";
+import {
+  presentWebSearchAction,
+  type WebSearchRunModel,
+} from "@/components/thread/activity/web-search-model";
+
+export function WebSearchRun({ run, turnActive }: { run: WebSearchRunModel; turnActive: boolean }) {
+  return (
+    <>
+      <WebSearchActionRow run={run} turnActive={turnActive} />
+      {run.sources.map((source) => (
+        <WebActivityRow
+          key={source.href}
+          title={source.title}
+          href={source.href}
+          host={source.host}
+          displayUrl={source.displayUrl}
+        />
+      ))}
+    </>
+  );
+}
+
+export function WebSearchActionRow({ run, turnActive }: { run: WebSearchRunModel; turnActive: boolean }) {
+  const { t } = useTranslation();
+  const active = run.status === "running" && turnActive;
+  const status = run.status === "running" && !turnActive ? "done" : run.status;
+  const presentation = presentWebSearchAction(run.query, status, run.target, t);
+
+  return (
+    <ActivityStep
+      icon={status === "error" ? AlertCircle : WebSearchIcon}
+      active={active}
+      tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
+      label={presentation.label}
+      detail={presentation.detail}
+      labelClassName={presentation.detail ? "max-w-[50%]" : undefined}
+    />
+  );
+}

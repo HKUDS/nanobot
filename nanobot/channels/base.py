@@ -1,21 +1,26 @@
-"""Base channel interface for chat platforms."""
-
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.config.network import NetworkConfig
 from nanobot.pairing import (
     PAIRING_CODE_META_KEY,
     format_pairing_reply,
     generate_code,
     is_approved,
+    record_delivery,
 )
+from nanobot.pairing.events import PairingChanged
+from nanobot.utils.tool_hints import format_tool_event_hints
 
 
 class BaseChannel(ABC):
@@ -28,19 +33,27 @@ class BaseChannel(ABC):
 
     name: str = "base"
     display_name: str = "Base"
+    # Opt-in construction capability, not a channel configuration field.
+    uses_shared_proxy: bool = False
     send_progress: bool = True
-    send_tool_hints: bool = False
+    send_tool_hints: bool = True
+    tool_hint_max_length: int = 40
     show_reasoning: bool = True
+    show_compaction_notices: bool = False
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
+    ):
         """
         Initialize the channel.
 
         Args:
             config: Channel-specific configuration.
             bus: The message bus for communication.
+            network: Instance-scoped shared network settings.
         """
         self.config = config
+        self.network = network if network is not None else NetworkConfig()
         self.logger = logger.bind(channel=self.name)
         self.bus = bus
         self._running = False
@@ -98,23 +111,108 @@ class BaseChannel(ABC):
 
         Implementations should raise on delivery failure so the channel manager
         can apply any retry policy in one place.
+        Raise ChannelNotReadyError only before submitting any part of a message.
+        Raise DeliveryRejectedError for a rejected destination or policy.
+        Other exceptions have an unknown delivery outcome for scheduled results.
+        A normal return confirms this adapter completed, not a recipient read receipt.
         """
         pass
 
-    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+    def can_batch_send(self, previous: OutboundMessage, following: OutboundMessage) -> bool:
+        """Opt in to sending adjacent, unscheduled envelopes together.
+
+        The synchronous predicate must preserve channel-owned event, turn and
+        generation boundaries. Returning True requires implementing ``send_batch``.
+        """
+        return False
+
+    async def send_batch(self, messages: Sequence[OutboundMessage]) -> None:
+        """Send an ordered batch approved by ``can_batch_send``.
+
+        The manager does not retry a batch: a failure may follow partial delivery.
+        Like ``send``, returning confirms completion of the adapter's work.
+        """
+        raise NotImplementedError("Channels opting into batching must implement send_batch")
+
+    def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
+        """Project tool activity once before delivery; override for native UI.
+
+        Keep the core event unchanged and reuse the returned envelope throughout
+        retries, including adapters that track already-sent multipart messages.
+        """
+        event = msg.event
+        if isinstance(event, ProgressEvent) and event.tool_hint and event.tool_events:
+            return replace(msg, content=format_tool_event_hints(
+                event.tool_events, max_length=self.tool_hint_max_length,
+            ))
+        return msg
+
+    @property
+    def has_pending_delivery(self) -> bool:
+        """Whether delivery outlives an awaited ``send``/streaming call.
+
+        The manager already accounts for awaited sends and retries. Channels
+        that enqueue their own writes must expose that work here, including
+        transport cleanup, before a gateway can be considered idle.
+        """
+        return False
+
+    def progress_transport_defaults(self) -> tuple[bool, bool] | None:
+        """Return channel-owned defaults for progress and tool-hint messages.
+
+        ``None`` keeps the global channel policy. Channels should override this
+        only when their transport requires different defaults.
+        """
+        return None
+
+    def should_retry_send_error(self, error: Exception) -> bool:
+        """Return whether the channel manager may retry a failed delivery.
+
+        Channels with protocol-level business errors can override this hook to
+        prevent retries that cannot succeed until external state changes.
+        Transport and unexpected errors remain retryable by default.
+        """
+        return True
+
+    def start_error_message(self, error: Exception) -> str | None:
+        """Return an actionable public message for a channel startup failure.
+
+        Channel-specific exception handling stays in the owning channel. Returning
+        ``None`` keeps the manager's generic fallback.
+        """
+        return None
+
+    async def send_delta(
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+        stream_end: bool = False,
+        resuming: bool = False,
+        merge_next: bool = False,
+    ) -> None:
         """Deliver a streaming text chunk.
 
         Override in subclasses to enable streaming. Implementations should
         raise on delivery failure so the channel manager can retry.
 
-        Streaming contract: ``_stream_delta`` is a chunk, ``_stream_end`` ends
-        the current segment, and stateful implementations must key buffers by
-        ``_stream_id`` rather than only by ``chat_id``.
+        Stateful implementations should key buffers by ``stream_id`` rather
+        than only by ``chat_id`` when it is provided.
+
+        ``merge_next`` marks a resumable provider boundary whose next text
+        segment belongs to the same user-visible message.
         """
         pass
 
     async def send_reasoning_delta(
-        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
     ) -> None:
         """Stream a chunk of model reasoning/thinking content.
 
@@ -123,15 +221,17 @@ class BaseChannel(ABC):
         subtext, WebUI italic bubble, ...) override to render reasoning
         as a subordinate trace that updates in place as the model thinks.
 
-        Streaming contract mirrors :meth:`send_delta`: ``_reasoning_delta``
-        is a chunk, ``_reasoning_end`` ends the current reasoning segment,
-        and stateful implementations should key buffers by ``_stream_id``
-        rather than only by ``chat_id``.
+        Streaming contract mirrors :meth:`send_delta`: stateful implementations
+        should key buffers by ``stream_id`` rather than only by ``chat_id``.
         """
         return
 
     async def send_reasoning_end(
-        self, chat_id: str, metadata: dict[str, Any] | None = None
+        self,
+        chat_id: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
     ) -> None:
         """Mark the end of a reasoning stream segment.
 
@@ -165,25 +265,38 @@ class BaseChannel(ABC):
         """
         if not msg.content:
             return
-        meta = dict(msg.metadata or {})
-        meta.setdefault("_reasoning_delta", True)
-        await self.send_reasoning_delta(msg.chat_id, msg.content, meta)
-        end_meta = dict(meta)
-        end_meta.pop("_reasoning_delta", None)
-        end_meta["_reasoning_end"] = True
-        await self.send_reasoning_end(msg.chat_id, end_meta)
+        stream_id = getattr(msg.event, "stream_id", None)
+        await self.send_reasoning_delta(
+            msg.chat_id,
+            msg.content,
+            msg.metadata,
+            stream_id=stream_id,
+        )
+        await self.send_reasoning_end(
+            msg.chat_id,
+            msg.metadata,
+            stream_id=stream_id,
+        )
 
     @property
     def supports_streaming(self) -> bool:
         """True when config enables streaming AND this subclass implements send_delta."""
         cfg = self.config
-        streaming = cfg.get("streaming", False) if isinstance(cfg, dict) else getattr(cfg, "streaming", False)
+        config_mapping = cast(dict[str, Any], cfg) if isinstance(cfg, dict) else None
+        streaming: Any = (
+            config_mapping.get("streaming", False)
+            if config_mapping is not None
+            else getattr(cast(Any, cfg), "streaming", False)
+        )
         return bool(streaming) and type(self).send_delta is not BaseChannel.send_delta
 
     def is_allowed(self, sender_id: str) -> bool:
         """Check sender permission: star > allowlist > pairing store > deny."""
         if isinstance(self.config, dict):
-            allow_list = self.config.get("allow_from") or self.config.get("allowFrom") or []
+            config_mapping = cast(dict[str, Any], self.config)
+            allow_list: Any = (
+                config_mapping.get("allow_from") or config_mapping.get("allowFrom") or []
+            )
         else:
             allow_list = getattr(self.config, "allow_from", None) or []
         if "*" in allow_list:
@@ -195,6 +308,9 @@ class BaseChannel(ABC):
             return True
         return False
 
+    def _pairing_changed(self) -> None:
+        self.bus.publish_nowait(PairingChanged())
+
     async def _handle_message(
         self,
         sender_id: str,
@@ -204,19 +320,47 @@ class BaseChannel(ABC):
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         is_dm: bool = False,
-    ) -> None:
-        """Handle an incoming message: check permissions, issue pairing codes in DMs, or forward to bus."""
-        if not self.is_allowed(sender_id):
+        authorization_id: str | None = None,
+        require_existing_session: bool = False,
+        session_generation: str | None = None,
+    ) -> bool:
+        """Handle a message after checking its authorization subject.
+
+        Return True only after the inbound bus accepts the message. Return False
+        for a denied message, including when a pairing reply was sent. Delivery
+        errors propagate; callers must not acknowledge on an exception.
+
+        ``sender_id`` is the identity recorded on the inbound message.  Channels
+        where access is scoped to another entity (for example, a group or room)
+        can pass that entity as ``authorization_id`` without changing the
+        sender's identity.  When omitted, authorization remains sender-based.
+        """
+        permission_id = authorization_id if authorization_id is not None else sender_id
+        if not self.is_allowed(permission_id):
             if is_dm:
-                code = generate_code(self.name, str(sender_id))
-                await self.send(
-                    OutboundMessage(
-                        channel=self.name,
-                        chat_id=str(chat_id),
-                        content=format_pairing_reply(code),
-                        metadata={PAIRING_CODE_META_KEY: code},
+                try:
+                    code = generate_code(self.name, str(sender_id), on_change=self._pairing_changed)
+                except OSError:
+                    # Transient pairing-store I/O failure: skip the pairing
+                    # reply for this message rather than crash the handler.
+                    self.logger.warning(
+                        "Pairing store unavailable; dropping DM from {}", sender_id
                     )
-                )
+                    return False
+                record_delivery(code, "sending", on_change=self._pairing_changed)
+                try:
+                    await self.send(
+                        OutboundMessage(
+                            channel=self.name,
+                            chat_id=str(chat_id),
+                            content=format_pairing_reply(code),
+                            metadata={PAIRING_CODE_META_KEY: code},
+                        )
+                    )
+                except Exception:
+                    record_delivery(code, "failed", on_change=self._pairing_changed)
+                    raise
+                record_delivery(code, "sent", on_change=self._pairing_changed)
                 self.logger.info(
                     "Sent pairing code {} to sender {} in chat {}",
                     code, sender_id, chat_id,
@@ -227,7 +371,7 @@ class BaseChannel(ABC):
                     "Add them to allowFrom list in config to grant access.",
                     sender_id,
                 )
-            return
+            return False
 
         meta = metadata or {}
         if self.supports_streaming:
@@ -241,14 +385,27 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=meta,
             session_key_override=session_key,
+            session_generation=session_generation,
+            require_existing_session=require_existing_session,
         )
 
         await self.bus.publish_inbound(msg)
+        return True
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         """Return default config for onboard. Override in plugins to auto-populate config.json."""
         return {"enabled": False}
+
+    @classmethod
+    def refresh_feature_metadata(
+        cls,
+        config_path: Path,
+        *,
+        instance_id: str = "default",
+    ) -> bool:
+        """Refresh persisted display metadata after an explicit settings action."""
+        return False
 
     @property
     def is_running(self) -> bool:

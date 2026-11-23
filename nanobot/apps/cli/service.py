@@ -1,7 +1,6 @@
-"""CLI-Anything catalog, install state, and safe CLI execution."""
-
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -10,14 +9,17 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from importlib import metadata as importlib_metadata
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import httpx
+from loguru import logger
 
+from nanobot.agent.skill_metadata import parse_skill_metadata, valid_skill_metadata
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.security.workspace_policy import is_path_within
@@ -25,6 +27,7 @@ from nanobot.security.workspace_policy import is_path_within
 CLI_ANYTHING_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/registry.json"
 CLI_ANYTHING_PUBLIC_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/public_registry.json"
 CLI_ANYTHING_RAW_BASE = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main"
+AGENT_PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 NANOBOT_EXTENSION_REGISTRY_URL = "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main/registry.json"
 NANOBOT_EXTENSION_RAW_BASE = "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main"
 _CATALOG_SOURCES = (
@@ -187,6 +190,8 @@ _BRAND_ALIASES: dict[str, str] = {
     "lark-cli": "feishu",
     "minimax-cli": "minimax",
     "obsidian-cli": "obsidian",
+    "obsidian-agent": "obsidian",
+    "obsidian-agent-cli": "obsidian",
     "slay-the-spire-2": "slay-the-spire-ii",
     "slay-the-spire-ii": "slay-the-spire-ii",
     "unimol-tools": "unimol-tools",
@@ -201,9 +206,29 @@ def _now() -> float:
     return time.time()
 
 
-def _safe_skill_name(name: str) -> str:
+def _as_object_dict(value: object) -> dict[str, Any] | None:
+    return cast(dict[str, Any], value) if isinstance(value, dict) else None
+
+
+def _skill_name(name: str, *, legacy: bool = False) -> str:
     clean = _SAFE_NAME_RE.sub("-", name.lower()).strip("-")
+    if not legacy:
+        clean = clean.replace("_", "-")
     return f"cli-app-{clean or 'app'}"
+
+
+def _plugin_skill_relative_path(name: str) -> str:
+    skill_name = _skill_name(name)
+    return f"plugins/{skill_name}/skills/{skill_name}/SKILL.md"
+
+
+def cli_app_skill_relative_path(workspace: Path, name: str) -> str:
+    """Return a CLI App's skill path, including the legacy location."""
+    canonical = _plugin_skill_relative_path(name)
+    legacy = f"skills/{_skill_name(name, legacy=True)}/SKILL.md"
+    if not (workspace / canonical).is_file() and (workspace / legacy).is_file():
+        return legacy
+    return canonical
 
 
 def _has_shell_meta(command: str) -> bool:
@@ -274,10 +299,11 @@ def _console_script_distribution(entry_point: str) -> str | None:
             if item.group != "console_scripts" or item.name != entry_point:
                 continue
             try:
-                name = distribution.metadata.get("Name")
+                name: object = cast(Any, distribution.metadata).get("Name")
             except Exception:
                 name = None
-            return str(name or getattr(distribution, "name", "") or "").strip() or None
+            fallback_name = cast(object, getattr(distribution, "name", ""))
+            return str(name or fallback_name or "").strip() or None
     return None
 
 
@@ -332,10 +358,10 @@ def _brand_payload(app: dict[str, Any]) -> tuple[str | None, str | None]:
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    return data if isinstance(data, dict) else None
+    return _as_object_dict(data)
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
@@ -381,7 +407,6 @@ def _truncate(text: str, limit: int = _MAX_TOOL_OUTPUT_CHARS) -> str:
 
 
 def _catalog_description(app: dict[str, Any]) -> str:
-    """Return catalog copy without implying vendor endorsement."""
     description = str(app.get("description") or "")
     return _ENDORSEMENT_WORD_RE.sub("", description).strip()
 
@@ -411,8 +436,8 @@ class CliAppManager:
         cached = _read_json(cache_path)
         if not cached:
             return None, 0.0
-        data = cached.get("data")
-        if not isinstance(data, dict):
+        data = _as_object_dict(cached.get("data"))
+        if data is None:
             return None, 0.0
         try:
             cached_at = float(cached.get("_cached_at", 0))
@@ -422,8 +447,8 @@ class CliAppManager:
 
     def _load_installed(self) -> dict[str, Any]:
         data = _read_json(self.installed_path) or {}
-        apps = data.get("apps") if isinstance(data.get("apps"), dict) else data
-        return apps if isinstance(apps, dict) else {}
+        apps = _as_object_dict(data.get("apps"))
+        return apps if apps is not None else data
 
     def _save_installed(self, installed: dict[str, Any]) -> None:
         _write_json(self.installed_path, {"schema_version": 1, "apps": installed})
@@ -431,6 +456,23 @@ class CliAppManager:
     def installed_names(self) -> list[str]:
         """Return registry names explicitly installed through CLI Apps."""
         return sorted(str(name) for name in self._load_installed())
+
+    def managed_plugin_owners(self) -> dict[Path, str]:
+        """Map the plugin directories managed by installed CLI Apps to their owners."""
+        return {
+            (self.workspace / _plugin_skill_relative_path(name)).parents[2].resolve(): name
+            for name in self.installed_names()
+        }
+
+    def installed_skill_aliases(self) -> dict[str, str]:
+        """Map pre-plugin CLI App skill names to their portable identities."""
+        aliases: dict[str, str] = {}
+        for name in self.installed_names():
+            legacy = _skill_name(name, legacy=True)
+            canonical = _skill_name(name)
+            if legacy != canonical:
+                aliases[legacy] = canonical
+        return aliases
 
     def _fetch_registry(
         self,
@@ -450,8 +492,8 @@ class CliAppManager:
         try:
             response = httpx.get(url, timeout=15.0, follow_redirects=True)
             response.raise_for_status()
-            fetched = response.json()
-            if not isinstance(fetched, dict):
+            fetched = _as_object_dict(response.json())
+            if fetched is None:
                 raise ValueError("registry response must be an object")
         except Exception:
             if data is not None:
@@ -468,7 +510,7 @@ class CliAppManager:
         *,
         force_refresh: bool = False,
     ) -> dict[str, Any]:
-        data, cached_at = self._cached_registry(cache_path)
+        data, cached_at = await asyncio.to_thread(self._cached_registry, cache_path)
         if (
             not force_refresh
             and data is not None
@@ -480,15 +522,15 @@ class CliAppManager:
             async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
                 response = await client.get(url)
             response.raise_for_status()
-            fetched = response.json()
-            if not isinstance(fetched, dict):
+            fetched = _as_object_dict(response.json())
+            if fetched is None:
                 raise ValueError("registry response must be an object")
         except Exception:
             if data is not None:
                 return data
             raise
 
-        _write_json(cache_path, {"_cached_at": _now(), "data": fetched})
+        await asyncio.to_thread(_write_json, cache_path, {"_cached_at": _now(), "data": fetched})
         return fetched
 
     async def refresh_catalog_cache(self, *, force_refresh: bool = False) -> None:
@@ -531,13 +573,14 @@ class CliAppManager:
         apps_by_name: dict[str, dict[str, Any]] = {}
         updated_values: list[str] = []
         for source, raw_base, registry in registries:
-            meta = registry.get("meta")
-            if isinstance(meta, dict) and isinstance(meta.get("updated"), str):
+            meta = _as_object_dict(registry.get("meta"))
+            if meta is not None and isinstance(meta.get("updated"), str):
                 updated_values.append(meta["updated"])
-            for row in registry.get("clis", []):
-                if not isinstance(row, dict) or not row.get("name"):
+            for row in cast(Iterable[object], registry.get("clis", [])):
+                entry = _as_object_dict(row)
+                if entry is None or not entry.get("name"):
                     continue
-                entry = dict(row)
+                entry = dict(entry)
                 entry["_source"] = source
                 entry["_raw_base"] = raw_base
                 key = str(entry["name"]).lower()
@@ -585,7 +628,7 @@ class CliAppManager:
         if not installed:
             return []
         installed_by_name = {
-            str(name).lower(): (str(name), data if isinstance(data, dict) else {})
+            str(name).lower(): (str(name), _as_object_dict(data) or {})
             for name, data in installed.items()
         }
         seen: set[str] = set()
@@ -602,7 +645,7 @@ class CliAppManager:
                     "name": installed_name,
                     "entry_point": entry_point,
                     "source": str(data.get("source") or ""),
-                    "skill": f"skills/{_safe_skill_name(installed_name)}/SKILL.md",
+                    "skill": cli_app_skill_relative_path(self.workspace, installed_name),
                     "tool": "run_cli_app",
                 }
             )
@@ -627,9 +670,6 @@ class CliAppManager:
             return False
         install_cmd = str(app.get("install_cmd") or "")
         return not _has_shell_meta(install_cmd)
-
-    def _skill_path(self, name: str) -> Path:
-        return self.workspace / "skills" / _safe_skill_name(name) / "SKILL.md"
 
     def _app_payload(
         self,
@@ -666,7 +706,7 @@ class CliAppManager:
             "status": status,
             "logo_url": logo_url,
             "brand_color": brand_color,
-            "skill_installed": self._skill_path(name).is_file(),
+            "skill_installed": (self.workspace / cli_app_skill_relative_path(self.workspace, name)).is_file(),
             "manifest": self._manifest_payload(app, logo_url=logo_url, brand_color=brand_color),
         }
 
@@ -702,7 +742,8 @@ class CliAppManager:
         name = str(app["name"])
         entry_point = str(app.get("entry_point") or "")
         strategy = self._strategy(app)
-        skill_path = f"skills/{_safe_skill_name(name)}/SKILL.md"
+        skill_path = _plugin_skill_relative_path(name)
+        plugin_path = f"plugins/{_skill_name(name)}"
         capabilities = [
             compact_dict({
                 "type": "cli",
@@ -715,13 +756,13 @@ class CliAppManager:
         install = compact_dict({
             "supported": install_supported,
             "strategy": strategy,
-            "managed_paths": [skill_path],
+            "managed_paths": [plugin_path],
             "verification": ["entry_point_available"] if entry_point else [],
         })
         remove = compact_dict({
             "supported": strategy != "unsupported",
             "strategy": strategy,
-            "managed_paths": [skill_path],
+            "managed_paths": [plugin_path],
             "verification": (
                 ["package_manager_ok", "entry_point_absent", "managed_paths_absent"]
                 if strategy not in {"bundled", "unsupported"}
@@ -760,19 +801,32 @@ class CliAppManager:
 
     def installed_payload(self) -> dict[str, Any]:
         installed = self._load_installed()
-        rows = []
+        cached_apps, _ = self.catalog(cache_only=True)
+        cached_by_name = {
+            str(app.get("name") or "").lower(): app
+            for app in cached_apps
+            if app.get("name")
+        }
+        rows: list[dict[str, Any]] = []
         for name, raw_entry in sorted(installed.items()):
-            entry = raw_entry if isinstance(raw_entry, dict) else {}
+            entry = _as_object_dict(raw_entry)
+            if entry is None:
+                entry = {}
             strategy = str(entry.get("strategy") or "bundled")
-            app = {
+            cached_app = cached_by_name.get(str(name).lower(), {})
+            app: dict[str, Any] = {
                 "name": str(name),
-                "display_name": str(entry.get("display_name") or name),
-                "category": str(entry.get("category") or "installed"),
-                "description": str(entry.get("description") or ""),
-                "requires": str(entry.get("requires") or ""),
+                "display_name": str(
+                    cached_app.get("display_name") or entry.get("display_name") or name
+                ),
+                "category": str(cached_app.get("category") or entry.get("category") or "installed"),
+                "description": str(cached_app.get("description") or entry.get("description") or ""),
+                "requires": str(cached_app.get("requires") or entry.get("requires") or ""),
                 "_source": str(entry.get("source") or "local"),
                 "entry_point": str(entry.get("entry_point") or ""),
                 "package_manager": strategy,
+                "logo_url": cached_app.get("logo_url") or entry.get("logo_url"),
+                "brand_color": cached_app.get("brand_color") or entry.get("brand_color"),
             }
             rows.append(self._app_payload(app, installed))
         return {
@@ -940,13 +994,56 @@ class CliAppManager:
             return None
         raise CliAppError("this CLI app uses an unsupported install strategy")
 
+    def _subprocess_env(self) -> dict[str, str]:
+        """Minimal env for CLI app subprocesses — no API keys or secrets.
+
+        Uses an explicit allowlist so installed apps cannot read
+        provider credentials from the parent process environment.
+        """
+        if sys.platform == "win32":
+            sr = os.environ.get("SYSTEMROOT", r"C:\Windows")
+            env = {
+                "SYSTEMROOT": sr,
+                "COMSPEC": os.environ.get("COMSPEC", f"{sr}\\system32\\cmd.exe"),
+                "USERPROFILE": os.environ.get("USERPROFILE", ""),
+                "HOMEDRIVE": os.environ.get("HOMEDRIVE", "C:"),
+                "HOMEPATH": os.environ.get("HOMEPATH", "\\"),
+                "TEMP": os.environ.get("TEMP", f"{sr}\\Temp"),
+                "TMP": os.environ.get("TMP", f"{sr}\\Temp"),
+                "PATHEXT": os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD"),
+                "PATH": os.environ.get("PATH", f"{sr}\\system32;{sr}"),
+                "PYTHONUNBUFFERED": "1",
+            }
+            return env
+        env = {
+            "HOME": os.environ.get("HOME", "/tmp"),
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "TERM": os.environ.get("TERM", "dumb"),
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "PYTHONUNBUFFERED": "1",
+        }
+        # Desktop CLIs use this directory to locate the running application.
+        if "XDG_RUNTIME_DIR" in os.environ:
+            env["XDG_RUNTIME_DIR"] = os.environ["XDG_RUNTIME_DIR"]
+        return env
+
     def _run_argv(self, argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        command = subprocess.list2cmdline(argv)
+        logger.info("CLI Apps: running {}", command)
+        result = subprocess.run(
             argv,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
+            env=self._subprocess_env(),
         )
+        logger.info("CLI Apps: command exited with code {}: {}", result.returncode, command)
+        output = (result.stderr or result.stdout or "").strip()
+        if output:
+            logger.info("CLI Apps command output:\n{}", _truncate(output, 4000))
+        return result
 
     def _installed_entry(self, app: dict[str, Any]) -> dict[str, Any]:
         entry_point = str(app.get("entry_point") or "")
@@ -958,6 +1055,17 @@ class CliAppManager:
             "strategy": strategy,
             "installed_at": int(_now()),
         }
+        for field in (
+            "display_name",
+            "category",
+            "description",
+            "requires",
+            "logo_url",
+            "brand_color",
+        ):
+            value = app.get(field)
+            if value not in (None, ""):
+                entry[field] = value
         resolved = shutil.which(entry_point) if entry_point else None
         if resolved:
             entry["entry_point_path"] = resolved
@@ -988,11 +1096,10 @@ class CliAppManager:
         name = str(app.get("name") or "unknown")
         display = str(app.get("display_name") or name)
         entry = str(app.get("entry_point") or f"cli-anything-{name}")
-        description = _catalog_description(app) or f"Use {display} from nanobot."
+        description = (_catalog_description(app) or f"Use {display} from nanobot.")[:1024]
         return f"""---
-name: {_safe_skill_name(name)}
-description: >-
-  {description}
+name: {_skill_name(name)}
+description: {json.dumps(description, ensure_ascii=False)}
 ---
 
 # {display}
@@ -1012,10 +1119,17 @@ Prefer machine-readable output when the CLI supports `--json`.
 """
 
     def _with_nanobot_skill_note(self, content: str, app: dict[str, Any]) -> str:
+        name = str(app.get("name") or "unknown")
+        skill_name = _skill_name(name)
+        metadata = parse_skill_metadata(content)
+        if metadata is None or not valid_skill_metadata(metadata | {"name": skill_name}, skill_name):
+            content = self._fallback_skill(app)
+        content, replaced = re.subn(r"(?m)^name\s*:.*$", f"name: {skill_name}", content, count=1)
+        if not replaced:
+            content = content.replace("---\n", f"---\nname: {skill_name}\n", 1)
         marker = "<!-- nanobot-cli-app-note -->"
         if marker in content:
             return content
-        name = str(app.get("name") or "unknown")
         note = f"""{marker}
 ## Nanobot execution
 
@@ -1029,24 +1143,42 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         return note + "\n" + content
 
     def install_skill(self, app: dict[str, Any]) -> Path:
-        path = self._skill_path(str(app["name"]))
+        name = str(app["name"])
+        path = self.workspace / _plugin_skill_relative_path(name)
         path.parent.mkdir(parents=True, exist_ok=True)
         content = self._fetch_skill_content(app) or self._fallback_skill(app)
         content = self._with_nanobot_skill_note(content, app)
         path.write_text(content, encoding="utf-8")
+        plugin_root = path.parents[2]
+        manifest = compact_dict({
+            "$schema": AGENT_PLUGIN_SCHEMA,
+            "name": _skill_name(str(app["name"])),
+            "version": str(app.get("version") or ""),
+            "description": _catalog_description(app),
+        })
+        _write_json(plugin_root / "plugin.json", manifest)
+        legacy_dir = self.workspace / "skills" / _skill_name(str(app["name"]), legacy=True)
+        if legacy_dir.is_dir():
+            shutil.rmtree(legacy_dir)
         return path
 
     def remove_skill(self, name: str) -> None:
-        skill_dir = self._skill_path(name).parent
-        if skill_dir.is_dir():
-            shutil.rmtree(skill_dir)
+        plugin_root = (self.workspace / _plugin_skill_relative_path(name)).parents[2]
+        if plugin_root.is_dir():
+            shutil.rmtree(plugin_root)
+        legacy_dir = self.workspace / "skills" / _skill_name(name, legacy=True)
+        if legacy_dir.is_dir():
+            shutil.rmtree(legacy_dir)
 
     def _record_installed(self, app: dict[str, Any]) -> dict[str, Any]:
+        from nanobot.agent.plugins import set_agent_plugin_enabled
+
         installed = self._load_installed()
         entry = self._installed_entry(app)
         installed[str(app["name"])] = entry
         self._save_installed(installed)
         self.install_skill(app)
+        set_agent_plugin_enabled(self.workspace, _skill_name(str(app["name"])), True)
         return entry
 
     def install(self, name: str) -> dict[str, Any]:
@@ -1131,7 +1263,9 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         if str(app["name"]) not in installed:
             raise CliAppError("CLI app is not installed")
         raw_installed_entry = installed.get(str(app["name"]))
-        installed_entry = raw_installed_entry if isinstance(raw_installed_entry, dict) else {}
+        installed_entry = _as_object_dict(raw_installed_entry)
+        if installed_entry is None:
+            installed_entry = {}
         strategy = self._strategy(app)
         entry_point = str(app.get("entry_point") or "").strip()
         managed_entry_path = str(installed_entry.get("entry_point_path") or "").strip()
@@ -1332,8 +1466,10 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
                 cwd=str(cwd),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=effective_timeout,
-                env=os.environ.copy(),
+                env=self._subprocess_env(),
             )
         except subprocess.TimeoutExpired:
             return f"CLI app '{name}' timed out after {effective_timeout}s"

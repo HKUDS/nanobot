@@ -1,0 +1,85 @@
+{
+  "setup": {
+    "docsLabel": "Abrir o guia de configuração do MoChat",
+    "officialLabel": "Abrir o MoChat",
+    "fields": {
+      "clawToken": {
+        "label": "Token Claw",
+        "placeholder": "Token Claw do MoChat"
+      },
+      "baseUrl": {
+        "label": "URL do servidor",
+        "placeholder": "https://mochat.io"
+      },
+      "agentUserId": {
+        "label": "ID de usuário do agente",
+        "placeholder": "ID de usuário opcional do agente"
+      },
+      "sessions": {
+        "label": "Sessões",
+        "placeholder": "IDs de sessão, separados por vírgulas"
+      },
+      "panels": {
+        "label": "Painéis",
+        "placeholder": "IDs de painel, separados por vírgulas"
+      },
+      "allowFrom": {
+        "label": "Usuários permitidos",
+        "placeholder": "IDs de usuário, separados por vírgulas"
+      },
+      "socketUrl": {
+        "label": "URL do soquete"
+      },
+      "socketPath": {
+        "label": "Caminho do soquete"
+      },
+      "socketDisableMsgpack": {
+        "label": "Desativar MessagePack",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "socketReconnectDelayMs": {
+        "label": "Atraso na reconexão"
+      },
+      "socketMaxReconnectDelayMs": {
+        "label": "Limite de atraso de reconexão (ms)"
+      },
+      "socketConnectTimeoutMs": {
+        "label": "Tempo limite de conexão"
+      },
+      "refreshIntervalMs": {
+        "label": "Intervalo de atualização"
+      },
+      "watchTimeoutMs": {
+        "label": "Tempo limite de exibição"
+      },
+      "watchLimit": {
+        "label": "Tamanho do lote"
+      },
+      "retryDelayMs": {
+        "label": "Atraso na nova tentativa"
+      },
+      "maxRetryAttempts": {
+        "label": "Limite de tentativas"
+      },
+      "mention_requireInGroups": {
+        "label": "Exigir menção em grupos",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "groups": {
+        "label": "Regras de grupo (JSON)"
+      },
+      "replyDelayMode": {
+        "label": "Modo de atraso"
+      },
+      "replyDelayMs": {
+        "label": "Atraso na resposta"
+      }
+    }
+  }
+}

@@ -1,11 +1,13 @@
 import asyncio
 import json
 import time
+from pathlib import Path
 
 import pytest
 
 from nanobot.cron.service import CronJobSkippedError, CronService
 from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
 
 
 async def _wait_until(predicate, *, timeout: float = 1.0, interval: float = 0.01) -> None:
@@ -23,6 +25,95 @@ def _bound_chat(chat_id: str = "chat-1") -> dict[str, str]:
         "origin_channel": "websocket",
         "origin_chat_id": chat_id,
     }
+
+
+def test_load_jobs_accepts_snake_case_schedule_and_run_history(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "every_ms": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "session_key": "websocket:chat-1",
+                        },
+                        "state": {
+                            "run_history": [
+                                {"run_at_ms": 1000, "status": "ok", "duration_ms": 12},
+                            ],
+                        },
+                        "created_at_ms": 0,
+                        "updated_at_ms": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert jobs[0].schedule.every_ms == 60_000
+    assert jobs[0].payload.session_key == "websocket:chat-1"
+    assert jobs[0].state.run_history[0].run_at_ms == 1000
+    assert jobs[0].state.run_history[0].duration_ms == 12
+
+
+def test_cron_job_from_dict_rejects_malformed_run_history() -> None:
+    with pytest.raises(TypeError):
+        CronJob.from_dict(
+            {
+                "id": "j1",
+                "name": "t",
+                "state": {"run_history": [None]},
+            }
+        )
+
+
+def test_load_jobs_coerces_string_schedule_and_state_ms(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": "60000"},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {
+                            "nextRunAtMs": "100",
+                            "lastRunAtMs": "50",
+                        },
+                        "createdAtMs": 0,
+                        "updatedAtMs": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert jobs[0].schedule.every_ms == 60_000
+    assert jobs[0].state.next_run_at_ms == 100
+    assert jobs[0].state.last_run_at_ms == 50
 
 
 def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
@@ -50,6 +141,60 @@ def test_add_job_accepts_valid_timezone(tmp_path) -> None:
 
     assert job.schedule.tz == "America/Vancouver"
     assert job.state.next_run_at_ms is not None
+
+
+@pytest.mark.parametrize("expr", [None, "", "   "])
+def test_add_job_rejects_missing_cron_expression(tmp_path, expr: str | None) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="requires a non-empty 'expr'"):
+        service.add_job(
+            name="missing expression",
+            schedule=CronSchedule(kind="cron", expr=expr),
+            message="hello",
+        )
+
+    assert service.list_jobs(include_disabled=True) == []
+
+
+@pytest.mark.parametrize("every_ms", [None, 0, -60_000])
+def test_add_job_rejects_non_positive_interval(tmp_path, every_ms: int | None) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="requires a positive 'every_ms'"):
+        service.add_job(
+            name="never runs",
+            schedule=CronSchedule(kind="every", every_ms=every_ms),
+            message="hello",
+            **_bound_chat(),
+        )
+
+    assert service.list_jobs(include_disabled=True) == []
+
+
+def test_add_job_rejects_invalid_cron_expression_before_persisting(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="invalid cron expression"):
+        service.add_job(
+            name="bad expression",
+            schedule=CronSchedule(kind="cron", expr="not a cron expression"),
+            message="hello",
+        )
+
+    assert service.list_jobs(include_disabled=True) == []
+
+
+def test_write_run_record_uses_cron_runs_dir(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    service.write_run_record("job:1", {"status": "queued"})
+
+    record_path = tmp_path / "cron" / "runs" / "job_1.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["run_id"] == "job:1"
+    assert record["status"] == "queued"
+    assert record["updated_at_ms"] > 0
 
 
 @pytest.mark.asyncio
@@ -163,7 +308,12 @@ def test_load_store_migrates_legacy_delivery_context(tmp_path) -> None:
                             "deliver": True,
                             "channel": "telegram",
                             "to": "user-1",
-                            "channelMeta": {"message_thread_id": 42},
+                            "channelMeta": {
+                                "message_thread_id": 42,
+                                RUNTIME_CONTEXT_INPUT_META: [
+                                    {"source": "webui_quote", "content": "stale quote"}
+                                ],
+                            },
                             "sessionKey": "telegram:user-1:topic:42",
                         },
                         "state": {},
@@ -280,6 +430,38 @@ def test_add_job_preserves_origin_delivery_context(tmp_path) -> None:
     assert reloaded.payload.origin_channel == "slack"
     assert reloaded.payload.origin_chat_id == "C123"
     assert reloaded.payload.origin_metadata == metadata
+
+
+@pytest.mark.asyncio
+async def test_start_heals_runtime_context_from_pending_external_add(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    external = CronService(store_path)
+    job = external.add_job(
+        name="quoted reminder",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="remember this",
+        origin_metadata={"webui": True},
+        **_bound_chat("quoted"),
+    )
+
+    action_path = tmp_path / "cron" / "action.jsonl"
+    action = json.loads(action_path.read_text(encoding="utf-8"))
+    action["params"]["payload"]["origin_metadata"][RUNTIME_CONTEXT_INPUT_META] = [
+        {"source": "webui_quote", "content": "quoted reply"}
+    ]
+    action_path.write_text(json.dumps(action), encoding="utf-8")
+
+    owner = CronService(store_path)
+    await owner.start()
+    try:
+        loaded = owner.get_job(job.id)
+        assert loaded is not None
+        assert loaded.payload.origin_metadata == {"webui": True}
+
+        raw = json.loads(store_path.read_text(encoding="utf-8"))
+        assert raw["jobs"][0]["payload"]["originMetadata"] == {"webui": True}
+    finally:
+        owner.stop()
 
 
 @pytest.mark.asyncio
@@ -500,6 +682,117 @@ async def test_run_job_preserves_running_service_state(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_manual_run_persists_completion_when_callback_lists_jobs(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+
+    async def on_job(_job) -> None:
+        service.list_jobs(include_disabled=True)
+        await asyncio.sleep(0)
+
+    service = CronService(store_path, on_job=on_job)
+    job = service.add_job(
+        name="manual",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+
+    assert await service.run_job(job.id) is True
+
+    state = json.loads(store_path.read_text())["jobs"][0]["state"]
+    assert state["lastStatus"] == "ok"
+    assert state["lastError"] is None
+    assert len(state["runHistory"]) == 1
+    assert state["runHistory"][0]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_overlapping_manual_runs_preserve_stopped_service_state(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    entered = [asyncio.Event(), asyncio.Event()]
+    release = [asyncio.Event(), asyncio.Event()]
+    call_count = 0
+
+    async def on_job(_job) -> None:
+        nonlocal call_count
+        call_index = call_count
+        call_count += 1
+        entered[call_index].set()
+        await release[call_index].wait()
+
+    service = CronService(store_path, on_job=on_job)
+    jobs = [
+        service.add_job(
+            name=f"manual-{index}",
+            schedule=CronSchedule(kind="every", every_ms=60_000),
+            message="hello",
+            **_bound_chat(str(index)),
+        )
+        for index in range(2)
+    ]
+
+    first = asyncio.create_task(service.run_job(jobs[0].id))
+    await entered[0].wait()
+    second = asyncio.create_task(service.run_job(jobs[1].id))
+    try:
+        await entered[1].wait()
+        release[0].set()
+        assert await first is True
+        assert service._running is False
+
+        release[1].set()
+        assert await second is True
+        assert service._running is False
+        assert service._timer_task is None
+
+        states = {
+            item["name"]: item["state"]
+            for item in json.loads(store_path.read_text())["jobs"]
+        }
+        assert states["manual-0"]["lastStatus"] == "ok"
+        assert states["manual-1"]["lastStatus"] == "ok"
+    finally:
+        release[0].set()
+        release[1].set()
+        await asyncio.gather(first, second, return_exceptions=True)
+        service.stop()
+
+
+@pytest.mark.asyncio
+async def test_manual_run_does_not_restart_service_stopped_during_execution(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def on_job(_job) -> None:
+        entered.set()
+        await release.wait()
+
+    service = CronService(store_path, on_job=on_job)
+    job = service.add_job(
+        name="manual-stop",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+    await service.start()
+
+    run = asyncio.create_task(service.run_job(job.id))
+    try:
+        await entered.wait()
+        service.stop()
+        release.set()
+
+        assert await run is True
+        assert service._running is False
+        assert service._timer_task is None
+    finally:
+        release.set()
+        await asyncio.gather(run, return_exceptions=True)
+        service.stop()
+
+
+@pytest.mark.asyncio
 async def test_running_service_honors_external_disable(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"
     called: list[str] = []
@@ -543,6 +836,41 @@ def test_remove_job_refuses_system_jobs(tmp_path) -> None:
 
     assert result == "protected"
     assert service.get_job("dream") is not None
+
+
+def test_remove_system_job_retires_persisted_system_job(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    service = CronService(store_path)
+    service.register_system_job(CronJob(
+        id="heartbeat",
+        name="heartbeat",
+        schedule=CronSchedule(kind="every", every_ms=1_800_000, tz="UTC"),
+        payload=CronPayload(kind="system_event"),
+    ))
+    assert service.get_job("heartbeat") is not None
+
+    removed = service.remove_system_job("heartbeat")
+
+    assert removed is True
+    assert service.get_job("heartbeat") is None
+    assert CronService(store_path).get_job("heartbeat") is None
+    assert service.remove_system_job("heartbeat") is False
+    other = CronService(store_path)
+    other.register_system_job(CronJob(
+        id="dream",
+        name="dream",
+        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
+        payload=CronPayload(kind="system_event"),
+    ))
+    assert other.remove_job("dream") == "protected"
+
+
+def test_remove_system_job_without_store_file(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    service = CronService(store_path)
+
+    assert service.remove_system_job("heartbeat") is False
+    assert not store_path.exists()
 
 
 @pytest.mark.asyncio
@@ -594,7 +922,6 @@ async def test_subsecond_job_not_delayed_to_one_second(tmp_path):
 
 @pytest.mark.asyncio
 async def test_running_service_picks_up_external_add(tmp_path):
-    """A running service should detect and execute a job added by another instance."""
     store_path = tmp_path / "cron" / "jobs.json"
     called: list[str] = []
 
@@ -687,18 +1014,110 @@ async def test_external_update_preserves_run_history_records(tmp_path):
     fresh._save_store()
 
 
-# ── timer race regression tests ──
+def test_stale_instance_remove_preserves_external_add(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    schedule = CronSchedule(kind="every", every_ms=60_000)
+    service_a = CronService(store_path)
+    service_b = CronService(store_path)
+
+    first = service_a.add_job(
+        name="first",
+        schedule=schedule,
+        message="first",
+        **_bound_chat("first"),
+    )
+
+    assert [job.name for job in service_b.list_jobs(include_disabled=True)] == ["first"]
+
+    service_a.add_job(
+        name="second",
+        schedule=schedule,
+        message="second",
+        **_bound_chat("second"),
+    )
+
+    assert service_b.remove_job(first.id) == "removed"
+
+    reloaded = CronService(store_path)
+    assert [job.name for job in reloaded.list_jobs(include_disabled=True)] == ["second"]
+
+
+@pytest.mark.asyncio
+async def test_save_store_failure_retries_without_replaying_job(tmp_path, monkeypatch):
+    store_path = tmp_path / "cron" / "jobs.json"
+    calls: list[str] = []
+    arm_calls: list[str] = []
+
+    async def on_job(job):
+        calls.append(job.id)
+
+    service = CronService(store_path, on_job=on_job)
+    service._running = True
+    service._load_store()
+
+    def arm_spy() -> None:
+        arm_calls.append("arm")
+
+    monkeypatch.setattr(service, "_arm_timer", arm_spy)
+
+    job = service.add_job(
+        name="persist-failure",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        **_bound_chat(),
+    )
+    job.state.next_run_at_ms = max(1, int(time.time() * 1000) - 1_000)
+    service._save_store()
+    arm_calls.clear()
+
+    real_atomic_write = service._atomic_write
+    save_attempts = 0
+    writes_fail = True
+
+    def flaky_atomic_write(path: Path, content: str) -> None:
+        nonlocal save_attempts, writes_fail
+        save_attempts += 1
+        if writes_fail:
+            raise OSError("disk full")
+        real_atomic_write(path, content)
+
+    monkeypatch.setattr(service, "_atomic_write", flaky_atomic_write)
+    await service._on_timer()
+
+    assert arm_calls == ["arm"], "scheduler must re-arm after a failed tick"
+    assert service._active_executions == 0
+    assert calls == [job.id]
+    assert service._store_dirty is True
+    loaded = service.get_job(job.id)
+    assert loaded is not None
+    assert loaded.state.last_run_at_ms is not None
+
+    with pytest.raises(OSError, match="disk full"):
+        await service.run_job(job.id, force=True)
+    assert calls == [job.id]
+
+    writes_fail = False
+    await service._on_timer()
+
+    assert calls == [job.id]
+    assert arm_calls == ["arm", "arm", "arm"]
+    assert save_attempts == 3
+    assert service._store_dirty is False
+
+    persisted = CronService(store_path).get_job(job.id)
+    assert persisted is not None
+    assert persisted.state.last_run_at_ms is not None
+    assert persisted.state.next_run_at_ms is not None
+    assert persisted.state.next_run_at_ms > persisted.state.last_run_at_ms
 
 
 @pytest.mark.asyncio
 async def test_timer_execution_is_not_rolled_back_by_list_jobs_reload(tmp_path):
-    """list_jobs() during _on_timer should not replace the active store and re-run the same due job."""
     store_path = tmp_path / "cron" / "jobs.json"
     calls: list[str] = []
 
     async def on_job(job):
         calls.append(job.id)
-        # Simulate frontend polling list_jobs while the timer callback is mid-execution.
         service.list_jobs(include_disabled=True)
         await asyncio.sleep(0)
 
@@ -725,9 +1144,6 @@ async def test_timer_execution_is_not_rolled_back_by_list_jobs_reload(tmp_path):
     assert loaded.state.last_run_at_ms is not None
     assert loaded.state.next_run_at_ms is not None
     assert loaded.state.next_run_at_ms > loaded.state.last_run_at_ms
-
-
-# ── update_job tests ──
 
 
 def test_update_job_changes_name(tmp_path) -> None:
@@ -810,7 +1226,14 @@ def test_update_job_rejects_system_job(tmp_path) -> None:
     assert service.get_job("dream").name == "dream"
 
 
-def test_update_job_validates_schedule(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "schedule,error",
+    [
+        (CronSchedule(kind="cron", expr="0 9 * * *", tz="Bad/Zone"), "unknown timezone"),
+        (CronSchedule(kind="every", every_ms=0), "positive 'every_ms'"),
+    ],
+)
+def test_update_job_validates_schedule(tmp_path, schedule, error) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
     job = service.add_job(
         name="validate",
@@ -818,11 +1241,12 @@ def test_update_job_validates_schedule(tmp_path) -> None:
         message="hello",
         **_bound_chat(),
     )
-    with pytest.raises(ValueError, match="unknown timezone"):
-        service.update_job(
-            job.id,
-            schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="Bad/Zone"),
-        )
+    action_path = service.store_path.with_name("action.jsonl")
+    before = action_path.read_bytes()
+    with pytest.raises(ValueError, match=error):
+        service.update_job(job.id, schedule=schedule)
+    assert action_path.read_bytes() == before
+    assert service.get_job(job.id).schedule.every_ms == 60_000
 
 
 @pytest.mark.asyncio
@@ -891,13 +1315,11 @@ async def test_list_jobs_during_on_job_does_not_cause_stale_reload(tmp_path) -> 
     async def on_job_that_lists(job):
         nonlocal execution_count
         execution_count += 1
-        # Simulate the bot calling cron(action=list) mid-execution
         service.list_jobs()
 
     service = CronService(store_path, on_job=on_job_that_lists, max_sleep_ms=100)
     await service.start()
 
-    # Add two jobs scheduled in the past so they're immediately due
     now_ms = int(time.time() * 1000)
     for name in ("job-a", "job-b"):
         service.add_job(
@@ -906,22 +1328,161 @@ async def test_list_jobs_during_on_job_does_not_cause_stale_reload(tmp_path) -> 
             message="test",
             **_bound_chat(name),
         )
-    # Force next_run to the past so _on_timer picks them up
     for job in service._store.jobs:
         job.state.next_run_at_ms = now_ms - 1000
     service._save_store()
     service._arm_timer()
 
-    # Let the timer fire once
     await asyncio.sleep(0.3)
     service.stop()
 
-    # Each job should have run exactly once, not looped
     assert execution_count == 2
 
-    # Verify next_run_at_ms was persisted correctly (in the future)
     raw = json.loads(store_path.read_text())
     for j in raw["jobs"]:
         next_run = j["state"]["nextRunAtMs"]
         assert next_run is not None
         assert next_run > now_ms, f"Job '{j['name']}' next_run should be in the future"
+
+
+def test_load_jobs_accepts_null_run_history_ms(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {
+                            "runHistory": [
+                                {"runAtMs": None, "status": "ok", "durationMs": None},
+                            ],
+                        },
+                        "createdAtMs": None,
+                        "updatedAtMs": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert jobs[0].state.run_history[0].run_at_ms == 0
+    assert jobs[0].state.run_history[0].duration_ms == 0
+    assert jobs[0].state.run_history[0].status == "ok"
+    assert jobs[0].created_at_ms == 0
+    assert jobs[0].updated_at_ms == 0
+
+
+def test_load_jobs_skips_null_run_history_elements(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {
+                            "runHistory": [
+                                None,
+                                {"runAtMs": 1, "status": "ok", "durationMs": 2},
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert len(jobs[0].state.run_history) == 1
+    assert jobs[0].state.run_history[0].run_at_ms == 1
+    assert jobs[0].state.run_history[0].status == "ok"
+
+
+def _dream_job(every_ms: int) -> CronJob:
+    return CronJob(
+        id="dream",
+        name="dream",
+        schedule=CronSchedule(kind="every", every_ms=every_ms),
+        payload=CronPayload(kind="system_event"),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("restart_hours,expected_hours", [(23, 24), (25, 49)])
+async def test_restart_keeps_pending_every_job_run(tmp_path, monkeypatch, restart_hours, expected_hours) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    t0 = 1_800_000_000_000
+    hour = 3_600_000
+    monkeypatch.setattr("nanobot.cron.service._now_ms", lambda: t0)
+    service = CronService(store_path)
+    await service.start()
+    job = service.add_job(
+        name="daily",
+        schedule=CronSchedule(kind="every", every_ms=24 * hour),
+        message="hello",
+        **_bound_chat(),
+    )
+    service.stop()
+    assert job.state.next_run_at_ms == t0 + 24 * hour
+
+    for elapsed in (restart_hours * hour, restart_hours * hour + hour // 4):
+        monkeypatch.setattr("nanobot.cron.service._now_ms", lambda: t0 + elapsed)
+        restarted = CronService(store_path)
+        await restarted.start()
+        try:
+            reloaded = restarted.get_job(job.id)
+            assert reloaded is not None
+            assert reloaded.state.next_run_at_ms == t0 + expected_hours * hour
+        finally:
+            restarted.stop()
+
+
+@pytest.mark.asyncio
+async def test_reregistering_system_job_keeps_pending_every_run(tmp_path, monkeypatch) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    t0 = 1_800_000_000_000
+    minute = 60_000
+
+    async def boot(now: int, every_ms: int) -> int | None:
+        monkeypatch.setattr("nanobot.cron.service._now_ms", lambda: now)
+        service = CronService(store_path)
+        service.register_system_job(_dream_job(every_ms))
+        await service.start()
+        try:
+            job = service.get_job("dream")
+            assert job is not None
+            return job.state.next_run_at_ms
+        finally:
+            service.stop()
+
+    assert await boot(t0, 120 * minute) == t0 + 120 * minute
+    assert await boot(t0 + 90 * minute, 120 * minute) == t0 + 120 * minute
+    assert await boot(t0 + 100 * minute, 60 * minute) == t0 + 160 * minute
+    assert await boot(t0 + 110 * minute, 60 * minute) == t0 + 160 * minute
+    assert await boot(t0 + 170 * minute, 60 * minute) == t0 + 230 * minute

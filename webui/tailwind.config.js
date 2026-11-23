@@ -1,10 +1,17 @@
 import animate from "tailwindcss-animate";
 import typography from "@tailwindcss/typography";
+import plugin from "tailwindcss/plugin";
 
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ["class"],
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  content: [
+    "./index.html",
+    "./src/**/*.{ts,tsx}",
+    ...(process.env.NODE_ENV === "production" ? ["!./src/dev/**"] : []),
+    "../nanobot/channels/*/webui/**/*.{ts,tsx}",
+    "./node_modules/streamdown/dist/*.js",
+  ],
   theme: {
     container: {
       center: true,
@@ -14,6 +21,21 @@ export default {
       },
     },
     extend: {
+      // Text roles own their metrics; reading preferences never change the rem grid.
+      fontSize: {
+        ui: ["0.8125rem", { lineHeight: "1.25rem", fontWeight: "400" }],
+        "ui-label": ["0.75rem", { lineHeight: "1.125rem", fontWeight: "500" }],
+        "ui-heading": ["0.8125rem", { lineHeight: "1.25rem", fontWeight: "600" }],
+        "ui-body": ["0.875rem", { lineHeight: "1.25rem", fontWeight: "400" }],
+        "control-label": ["0.875rem", { lineHeight: "1.25rem", fontWeight: "500" }],
+        caption: ["0.75rem", { lineHeight: "1.125rem", fontWeight: "400" }],
+        title: ["1.25rem", { lineHeight: "1.75rem", fontWeight: "600" }],
+        reading: ["var(--text-reading-size)", { lineHeight: "var(--reading-line-height)", fontWeight: "400" }],
+        "reading-small": ["calc(var(--text-reading-size) * 0.875)", { lineHeight: "var(--reading-line-height)", fontWeight: "400" }],
+        code: ["var(--text-code-size)", { lineHeight: "1.6", fontWeight: "400" }],
+        "code-dense": ["var(--text-code-dense-size)", { lineHeight: "1.6", fontWeight: "400" }],
+        composer: ["max(16px, var(--text-reading-size))", { lineHeight: "1.5", fontWeight: "400" }],
+      },
       fontFamily: {
         sans: [
           "system-ui",
@@ -34,6 +56,8 @@ export default {
         ],
         mono: [
           '"JetBrains Mono"',
+          '"SFMono-Regular"',
+          '"SF Mono"',
           '"Fira Code"',
           '"Cascadia Code"',
           '"Source Code Pro"',
@@ -46,8 +70,19 @@ export default {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        mark: "var(--radius-mark)",
+        compact: "var(--radius-compact)",
+        control: "var(--radius-control)",
+        floating: "var(--radius-floating)",
+        panel: "var(--radius-panel)",
+        modal: "var(--radius-modal)",
+        prominent: "var(--radius-prominent)",
       },
       colors: {
+        "content-link": {
+          DEFAULT: "var(--content-link)",
+          hover: "var(--content-link-hover)",
+        },
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         card: {
@@ -78,15 +113,30 @@ export default {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
+        "diff-added": {
+          DEFAULT: "var(--diff-added)",
+          foreground: "var(--diff-added-foreground)",
+        },
+        "diff-deleted": {
+          DEFAULT: "var(--diff-deleted)",
+          foreground: "var(--diff-deleted-foreground)",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
         sidebar: {
           DEFAULT: "hsl(var(--sidebar))",
           foreground: "hsl(var(--sidebar-foreground))",
+          content: "hsl(var(--sidebar-content))",
+          "muted-foreground": "hsl(var(--sidebar-muted-foreground))",
+          selected: "hsl(var(--sidebar-selected))",
           accent: "hsl(var(--sidebar-accent))",
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
+        },
+        settings: {
+          canvas: "hsl(var(--settings-canvas))",
+          surface: "hsl(var(--settings-surface))",
         },
       },
       keyframes: {
@@ -105,5 +155,44 @@ export default {
       },
     },
   },
-  plugins: [animate, typography],
+  plugins: [
+    animate,
+    typography,
+    plugin(({ addVariant, matchVariant, addUtilities }) => {
+      const textEntrySelector =
+        'textarea, [contenteditable], input:not([type="button"], [type="submit"], [type="reset"], [type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="image"])';
+      addUtilities({ ".rounded-full": { cornerShape: "round" } });
+      // Revealing controls on emulated hover can consume the first Safari
+      // tap. Keep these sidebar hover effects on hover-capable pointers.
+      addVariant("media-hover", "@media (hover: hover)");
+      // Gate non-text-entry focus rings on keyboard navigation modality so
+      // Shift+click, Escape, and shortcuts after pointer clicks stay quiet.
+      addVariant(
+        "focus-visible",
+        `&:focus-visible:where(:root:not([data-focus-modality="pointer"]) *, ${textEntrySelector})`,
+      );
+      matchVariant(
+        "group-focus-visible",
+        (_value, { modifier }) => (
+          modifier
+            ? `:where(:root:not([data-focus-modality="pointer"])) :merge(.group\\/${modifier}):focus-visible &`
+            : `:where(:root:not([data-focus-modality="pointer"])) :merge(.group):focus-visible &`
+        ),
+        { values: { DEFAULT: "" } },
+      );
+      matchVariant(
+        "peer-focus-visible",
+        (_value, { modifier }) => (
+          modifier
+            ? `:where(:root:not([data-focus-modality="pointer"])) :merge(.peer\\/${modifier}):focus-visible ~ &`
+            : `:where(:root:not([data-focus-modality="pointer"])) :merge(.peer):focus-visible ~ &`
+        ),
+        { values: { DEFAULT: "" } },
+      );
+      addVariant(
+        "has-focus-visible",
+        ':where(:root:not([data-focus-modality="pointer"])) &:has(:focus-visible)',
+      );
+    }),
+  ],
 };

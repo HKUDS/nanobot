@@ -4,13 +4,12 @@ export interface RuntimeHost {
   surface: RuntimeSurface;
   capabilities: RuntimeCapabilities;
   socketFactory?: (url: string) => WebSocket;
-  pickFolder?: () => Promise<string | null>;
   restartEngine?: () => Promise<void>;
   openLogs?: () => Promise<void>;
   exportDiagnostics?: () => Promise<string>;
 }
 
-export interface HostRuntimeInfo {
+interface HostRuntimeInfo {
   surface: "native";
   app_version: string;
   engine_status: "starting" | "ready" | "restarting" | "stopped" | "crashed";
@@ -23,12 +22,11 @@ export interface HostRuntimeInfo {
   engine_transport?: "unix_socket";
 }
 
-export interface NanobotHostApi {
-  getRuntimeInfo(): Promise<HostRuntimeInfo>;
-  restartEngine(): Promise<void>;
-  pickFolder(): Promise<string | null>;
-  openLogs(): Promise<void>;
-  exportDiagnostics(): Promise<string>;
+interface NanobotHostApi {
+  getRuntimeInfo?(): Promise<HostRuntimeInfo>;
+  restartEngine?(): Promise<void>;
+  openLogs?(): Promise<void>;
+  exportDiagnostics?(): Promise<string>;
   openSocket?(url: string): Promise<string>;
   sendSocket?(id: string, data: string): Promise<void>;
   closeSocket?(id: string): Promise<void>;
@@ -40,7 +38,7 @@ export interface NanobotHostApi {
   ): () => void;
 }
 
-export type HostSocketEvent =
+type HostSocketEvent =
   | { id: string; type: "open" }
   | { data: string; id: string; type: "message" }
   | { id: string; message: string; type: "error" }
@@ -62,7 +60,7 @@ declare global {
   }
 }
 
-export function getHostApi(): NanobotHostApi | null {
+function getHostApi(): NanobotHostApi | null {
   if (typeof window === "undefined") return null;
   return window.nanobotHost ?? null;
 }
@@ -79,7 +77,6 @@ export function createRuntimeHost(
   const mergedCapabilities = {
     can_export_diagnostics: false,
     can_open_logs: false,
-    can_pick_folder: false,
     can_restart_engine: false,
     ...(capabilities ?? {}),
   };
@@ -88,11 +85,23 @@ export function createRuntimeHost(
     surface,
     capabilities: mergedCapabilities,
     socketFactory: bridge ? createHostWebSocket : undefined,
-    pickFolder: api?.pickFolder,
-    restartEngine: api?.restartEngine,
-    openLogs: api?.openLogs,
-    exportDiagnostics: api?.exportDiagnostics,
+    restartEngine: api?.restartEngine?.bind(api),
+    openLogs: api?.openLogs?.bind(api),
+    exportDiagnostics: api?.exportDiagnostics?.bind(api),
   };
+}
+
+export function getRuntimeHost(
+  surface?: string | null,
+  capabilities?: Partial<RuntimeCapabilities> | null,
+): RuntimeHost {
+  const runtimeSurface =
+    surface == null ? (isNativeRuntime() ? "native" : "browser") : toRuntimeSurface(surface);
+  return createRuntimeHost(runtimeSurface, capabilities);
+}
+
+export function isNativeRuntime(surface?: string | null): boolean {
+  return getHostApi() !== null || toRuntimeSurface(surface) === "native";
 }
 
 export function createHostWebSocket(url: string): WebSocket {
@@ -105,19 +114,20 @@ export function createHostWebSocket(url: string): WebSocket {
 
 function getHostSocketBridge(): HostSocketBridge | null {
   const api = getHostApi();
+  const { closeSocket, onSocketEvent, openSocket, sendSocket } = api ?? {};
   if (
-    !api?.openSocket
-    || !api.sendSocket
-    || !api.closeSocket
-    || !api.onSocketEvent
+    !openSocket
+    || !sendSocket
+    || !closeSocket
+    || !onSocketEvent
   ) {
     return null;
   }
   return {
-    closeSocket: api.closeSocket,
-    onSocketEvent: api.onSocketEvent,
-    openSocket: api.openSocket,
-    sendSocket: api.sendSocket,
+    closeSocket: (id) => closeSocket.call(api, id),
+    onSocketEvent: (listener) => onSocketEvent.call(api, listener),
+    openSocket: (url) => openSocket.call(api, url),
+    sendSocket: (id, data) => sendSocket.call(api, id, data),
   };
 }
 

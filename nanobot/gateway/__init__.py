@@ -1,6 +1,7 @@
-"""Lightweight background runtime for the nanobot gateway."""
-
 from nanobot.gateway.runtime import (
+    GatewayAlreadyRunningError,
+    GatewayClientLease,
+    GatewayInstance,
     GatewayRuntime,
     GatewayRuntimePaths,
     GatewayStartOptions,
@@ -10,6 +11,9 @@ from nanobot.gateway.runtime import (
 )
 
 __all__ = [
+    "GatewayAlreadyRunningError",
+    "GatewayClientLease",
+    "GatewayInstance",
     "GatewayRuntime",
     "GatewayRuntimePaths",
     "GatewayStartOptions",

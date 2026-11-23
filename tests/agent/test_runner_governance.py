@@ -1,73 +1,110 @@
-"""Tests for AgentRunner context governance: backfill, orphan cleanup, microcompact, snip_history."""
-
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import tiktoken
 
+from agent.runner_helpers import make_run_spec
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.context_governance import (
     BACKFILL_CONTENT,
-    MICROCOMPACT_KEEP_RECENT,
+    ContextCompactionState,
     ContextGovernanceConfig,
     ContextGovernor,
+    ContextWindowExceededError,
+    ModelRequestState,
+    _request_extends_measured,
 )
-from nanobot.agent.runner import AgentRunSpec
-from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.events import ContextCompactionEvent, EventSink
+from nanobot.providers.base import (
+    GenerationSettings,
+    LLMProvider,
+    LLMResponse,
+    LLMUsage,
+    ProviderConversationState,
+    ToolCallRequest,
+)
+from nanobot.providers.conversation_state import ProviderConversationStateController
+from nanobot.providers.fallback_provider import FallbackProvider
+from nanobot.runtime_context import public_history_message
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
+
+
+def _build_transcript(transcript: TranscriptInput) -> list[dict]:
+    system = (
+        transcript.session_summary["text"]
+        if transcript.session_summary is not None
+        else "system"
+    )
+    messages = [{"role": "system", "content": system}, *transcript.history]
+    if transcript.current_message is not None:
+        messages.append({"role": transcript.current_role, "content": transcript.current_message})
+    return messages
 
 
 def _governance_config(
     provider,
     tools,
     spec: AgentRunSpec,
-    *,
-    inflight_start_index: int = 0,
 ) -> ContextGovernanceConfig:
     return ContextGovernanceConfig(
         provider=provider,
-        model=spec.model,
+        model=spec.runtime.model,
         tools=tools,
         workspace=spec.workspace,
         session_key=spec.session_key,
         max_tool_result_chars=spec.max_tool_result_chars,
-        context_window_tokens=spec.context_window_tokens,
-        context_block_limit=spec.context_block_limit,
-        max_tokens=spec.max_tokens,
-        inflight_start_index=inflight_start_index,
+        context_window_tokens=spec.runtime.context_window_tokens,
+        max_tokens=spec.runtime.generation.max_tokens,
     )
 
 
-def _make_loop(tmp_path):
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.queue import MessageBus
-
-    bus = MessageBus()
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
-        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
-    return loop
+def _compaction_state(spec: AgentRunSpec) -> ContextCompactionState:
+    assert spec.initial_messages is not None
+    return ContextCompactionState.from_messages(
+        spec.initial_messages,
+        spec.consolidate_history,
+        spec.consolidate_provider_compaction,
+    )
 
 
-async def test_runner_uses_raw_messages_when_context_governance_fails():
+async def test_provider_can_emit_without_an_event_specific_runner_callback():
+    from nanobot.events import AgentEvent
+
+    event = AgentEvent()
+    received = []
+
+    async def observe(value):
+        received.append(value)
+
+    async def request(*, provider_context, **kwargs):
+        await provider_context.events.emit(event)
+        return LLMResponse(content="done")
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = request
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    await AgentRunner().run(make_run_spec(
+        provider, model="test-model", tools=tools, max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        events=EventSink(observe),
+    ))
+    assert received.count(event) == 1
+
+
+async def test_runner_propagates_context_governance_failure():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
-    captured_messages: list[dict] = []
-
-    async def chat_with_retry(*, messages, **kwargs):
-        captured_messages[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
-
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = AsyncMock()
     tools = MagicMock()
     tools.get_definitions.return_value = []
     initial_messages = [
@@ -75,123 +112,1342 @@ async def test_runner_uses_raw_messages_when_context_governance_fails():
         {"role": "user", "content": "hello"},
     ]
 
-    runner = AgentRunner(provider)
+    runner = AgentRunner()
     runner.context_governor.prepare_for_model = MagicMock(  # type: ignore[method-assign]
         side_effect=RuntimeError("boom")
     )
-    result = await runner.run(AgentRunSpec(
-        initial_messages=initial_messages,
+    with pytest.raises(RuntimeError, match="boom"):
+        await runner.run(make_run_spec(provider,
+            initial_messages=initial_messages,
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        ))
+
+    provider.chat_stream_with_retry.assert_not_awaited()
+
+
+async def test_runner_summarizes_history_and_preserves_current_input(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = True
+    prior_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": [{"type": "message", "role": "assistant"}]},
+    )
+    candidate_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": [{"type": "message", "role": "assistant", "fresh": True}]},
+    )
+    requests: list[tuple[list[dict], object]] = []
+
+    async def request(*, messages, provider_context, **_kwargs):
+        requests.append((messages, provider_context))
+        return LLMResponse(content="done", provider_state=candidate_state)
+
+    provider.chat_stream_with_retry = request
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    old_answer = "old answer " * 2_000
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda _provider, _model, messages, _tools: (
+            (600, "test-counter")
+            if any(message.get("content") == old_answer for message in messages)
+            else (100, "test-counter")
+        ),
+    )
+    consolidate = AsyncMock(return_value="fresh checkpoint")
+    previous = {"text": "existing checkpoint", "last_active": "2026-08-30T00:00:00"}
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=None,
+        transcript_input=TranscriptInput(
+            history=[
+                {"role": "user", "content": "old question"},
+                {"role": "assistant", "content": old_answer},
+            ],
+            current_message="continue the current task",
+            session_summary=previous,
+        ),
+        transcript_builder=_build_transcript,
+        consolidate_history=consolidate,
+        provider_state=prior_state,
         tools=tools,
         model="test-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert result.final_content == "done"
-    assert captured_messages == initial_messages
+    consolidate.assert_awaited_once_with(
+        [
+            {"role": "system", "content": "existing checkpoint"},
+            {"role": "user", "content": "old question"},
+            {"role": "assistant", "content": old_answer},
+        ],
+        "existing checkpoint",
+    )
+    assert requests[0][0] == [
+        {"role": "system", "content": "fresh checkpoint"},
+        {"role": "user", "content": "continue the current task"},
+    ]
+    assert requests[0][1].conversation_state is None
+    assert result.provider_state == candidate_state
+    assert result.summary_checkpoint is not None
+    assert result.summary_checkpoint.summary == "fresh checkpoint"
+    assert result.summary_checkpoint.transcript_boundary == 3
+    assert any(message.get("content") == old_answer for message in result.messages)
 
 
-def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch):
-    provider = MagicMock()
+async def test_runner_rejects_oversized_delta_without_summarizable_history(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock()
     tools = MagicMock()
     tools.get_definitions.return_value = []
-    messages = [
-        {"role": "system", "content": "system"},
-        {"role": "user", "content": "old user"},
-        {
-            "role": "assistant",
-            "content": "tool call",
-            "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "ls", "arguments": "{}"}}],
-        },
-        {"role": "tool", "tool_call_id": "call_1", "content": "tool output"},
-        {"role": "assistant", "content": "after tool"},
-    ]
-    spec = AgentRunSpec(
-        initial_messages=messages,
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (600, "test-counter"),
+    )
+    consolidate = AsyncMock(return_value=None)
+
+    with pytest.raises(ContextWindowExceededError):
+        await AgentRunner().run(make_run_spec(
+            provider,
+            initial_messages=None,
+            transcript_input=TranscriptInput(
+                history=[],
+                current_message="current input is the entire oversized delta",
+            ),
+            transcript_builder=_build_transcript,
+            consolidate_history=consolidate,
+            tools=tools,
+            model="test-model",
+            context_window_tokens=1_624,
+            max_tokens=100,
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        ))
+
+    consolidate.assert_awaited_once_with(
+        [{"role": "system", "content": "system"}],
+        None,
+    )
+    provider.chat_stream_with_retry.assert_not_awaited()
+
+
+async def test_runner_governs_history_before_summarizing_it(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = False
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda _provider, _model, messages, _tools: (
+            (100, "test-counter")
+            if messages[0].get("content") == "fresh checkpoint"
+            else (600, "test-counter")
+        ),
+    )
+    consolidate = AsyncMock(return_value="fresh checkpoint")
+
+    await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=None,
+        transcript_input=TranscriptInput(
+            history=[
+                {"role": "user", "content": "inspect"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call-missing",
+                        "type": "function",
+                        "function": {"name": "inspect", "arguments": "{}"},
+                    }],
+                },
+            ],
+            current_message="continue",
+        ),
+        transcript_builder=_build_transcript,
+        consolidate_history=consolidate,
         tools=tools,
         model="test-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        context_window_tokens=2000,
-        context_block_limit=100,
+    ))
+
+    summarized = consolidate.await_args.args[0]
+    assert [message["role"] for message in summarized] == [
+        "system", "user", "assistant", "tool",
+    ]
+    assert summarized[-1]["tool_call_id"] == "call-missing"
+    assert summarized[-1]["content"] == BACKFILL_CONTENT
+
+
+@pytest.mark.parametrize(
+    ("scope", "expected_contents", "expected_boundary"),
+    [
+        ("prior_context", ["system", "accepted question", "accepted answer"], 3),
+        (
+            "current_request",
+            ["system", "accepted question", "accepted answer", "inspect the project"],
+            4,
+        ),
+    ],
+)
+async def test_native_compaction_uses_provider_request_boundary(
+    monkeypatch,
+    scope,
+    expected_contents,
+    expected_boundary,
+):
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = False
+    compacted_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": [{"type": "compaction", "encrypted_content": "opaque"}]},
     )
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content=None,
+            tool_calls=[ToolCallRequest(id="call-1", name="inspect", arguments={})],
+            provider_compaction_applied=True,
+            provider_compaction_state=compacted_state,
+            provider_compaction_scope=scope,
+            provider_compaction_event_id="native-already-reported" if scope == "prior_context" else None,
+        ),
+        LLMResponse(content="done"),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="complete tool result")
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args: (100, "test-counter"),
+    )
+    consolidate = AsyncMock(return_value="portable checkpoint")
+    consolidate_native = AsyncMock(
+        return_value="portable checkpoint"
+    )
+    compaction_events: list[ContextCompactionEvent] = []
+
+    async def observe_compaction(event: ContextCompactionEvent) -> None:
+        if isinstance(event, ContextCompactionEvent):
+            compaction_events.append(event)
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=None,
+        transcript_input=TranscriptInput(
+            history=[
+                {"role": "user", "content": "accepted question"},
+                {"role": "assistant", "content": "accepted answer"},
+            ],
+            current_message="inspect the project",
+        ),
+        transcript_builder=_build_transcript,
+        consolidate_history=consolidate,
+        consolidate_provider_compaction=consolidate_native,
+        tools=tools,
+        model="test-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        events=EventSink(observe_compaction),
+    ))
+
+    consolidate.assert_not_awaited()
+    consolidate_native.assert_awaited_once()
+    assert consolidate_native.await_args.args[0] == compacted_state
+    assert [
+        message["content"] for message in consolidate_native.await_args.args[1]
+    ] == expected_contents
+    assert consolidate_native.await_args.args[2] is None
+    assert result.summary_checkpoint is not None
+    assert result.summary_checkpoint.transcript_boundary == expected_boundary
+    assert result.provider_compaction_applied is True
+    assert any(message.get("content") == "inspect the project" for message in result.messages)
+    assert any(message.get("content") == "complete tool result" for message in result.messages)
+    assert [event.phase for event in compaction_events] == ([] if scope == "prior_context" else ["succeeded"])
+    assert all(event.reason == "provider_native" for event in compaction_events)
+
+
+@pytest.mark.parametrize("error", [RuntimeError("checkpoint failed"), asyncio.CancelledError()])
+async def test_native_checkpoint_failure_does_not_relabel_completed_compaction(monkeypatch, error):
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = False
+    compacted = ProviderConversationState(
+        kind="openai_responses", provider="openai:test", model="test-model", version=1,
+        payload={"items": [{"type": "compaction", "encrypted_content": "opaque"}]},
+    )
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="done", provider_compaction_applied=True,
+        provider_compaction_state=compacted, provider_compaction_scope="current_request",
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    monkeypatch.setattr("nanobot.agent.context_governance.estimate_prompt_tokens_chain", lambda *_args: (100, "test-counter"))
+    notices: list[ContextCompactionEvent] = []
+
+    async def observe(event) -> None:
+        if isinstance(event, ContextCompactionEvent):
+            notices.append(event)
+
+    async def consolidate(*_args):
+        assert [notice.phase for notice in notices] == ["succeeded"]
+        raise error
+
+    with pytest.raises(type(error)):
+        await AgentRunner().run(make_run_spec(
+            provider, initial_messages=None,
+            transcript_input=TranscriptInput(history=[], current_message="question"),
+            transcript_builder=_build_transcript, consolidate_provider_compaction=consolidate,
+            tools=tools, model="test-model", context_window_tokens=1_624,
+            max_tokens=100, max_iterations=1, max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            events=EventSink(observe),
+        ))
+    assert [notice.phase for notice in notices] == ["succeeded"]
+    assert all(notice.reason == "provider_native" for notice in notices)
+
+
+async def test_runner_keeps_current_tool_exchange_outside_summary(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = False
+    responses = [
+        LLMResponse(
+            content=None,
+            tool_calls=[ToolCallRequest(id="call-1", name="inspect", arguments={})],
+        ),
+        LLMResponse(content="done"),
+    ]
+    requests: list[list[dict]] = []
+
+    async def request(*, messages, **_kwargs):
+        requests.append(messages)
+        return responses.pop(0)
+
+    provider.chat_stream_with_retry = request
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    full_result = "tool-result:" + ("x" * 4_000)
+    tools.execute = AsyncMock(return_value=full_result)
+
+    def estimate(_provider, _model, messages, _tools):
+        has_tool_result = any(message.get("role") == "tool" for message in messages)
+        has_old_system = any(
+            message.get("role") == "system" and message.get("content") == "system"
+            for message in messages
+        )
+        return (600 if has_tool_result and has_old_system else 100, "test-counter")
 
     monkeypatch.setattr(
         "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
-        lambda *_args, **_kwargs: (500, None),
+        estimate,
     )
-    token_sizes = {
-        "old user": 120,
-        "tool call": 120,
-        "tool output": 40,
-        "after tool": 40,
-        "system": 0,
-    }
-    monkeypatch.setattr(
-        "nanobot.agent.context_governance.estimate_message_tokens",
-        lambda msg: token_sizes.get(str(msg.get("content")), 40),
-    )
+    consolidate = AsyncMock(return_value="fresh checkpoint")
 
-    trimmed = ContextGovernor().snip_history(_governance_config(provider, tools, spec), messages)
-
-    # After the fix, the user message is recovered so the sequence is valid
-    # for providers that require system → user (e.g. GLM error 1214).
-    assert trimmed[0]["role"] == "system"
-    non_system = [m for m in trimmed if m["role"] != "system"]
-    assert non_system[0]["role"] == "user", f"Expected user after system, got {non_system[0]['role']}"
-
-
-def test_snip_history_reserves_budget_for_tool_definitions(monkeypatch):
-    provider = MagicMock()
-    tools = MagicMock()
-    tools.get_definitions.return_value = [{"type": "function", "function": {"name": "large_tool"}}]
-    messages = [
-        {"role": "system", "content": "system"},
-        {"role": "user", "content": "old user"},
-        {"role": "assistant", "content": "old assistant"},
-        {"role": "user", "content": "recent one"},
-        {"role": "assistant", "content": "recent answer"},
-        {"role": "user", "content": "recent two"},
-    ]
-    spec = AgentRunSpec(
-        initial_messages=messages,
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=None,
+        transcript_input=TranscriptInput(history=[], current_message="inspect the project"),
+        transcript_builder=_build_transcript,
+        consolidate_history=consolidate,
         tools=tools,
         model="test-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    consolidate.assert_awaited_once_with(
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "inspect the project"},
+        ],
+        None,
+    )
+    assert [message["role"] for message in requests[1]] == [
+        "system", "user", "assistant", "tool",
+    ]
+    assert requests[1][1]["content"] == SUMMARY_CONTINUATION_TEXT
+    assert requests[1][-1]["content"] == full_result
+    assert result.summary_checkpoint is not None
+    assert result.summary_checkpoint.transcript_boundary == 2
+    assert any(message.get("content") == full_result for message in result.messages)
+
+
+async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = False
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content=None,
+            tool_calls=[ToolCallRequest(id="call-1", name="inspect", arguments={})],
+        ),
+        LLMResponse(
+            content=None,
+            tool_calls=[ToolCallRequest(id="call-2", name="inspect", arguments={})],
+        ),
+        LLMResponse(content="done"),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(side_effect=["result-1", "result-2"])
+
+    def estimate(_provider, _model, messages, _tools):
+        system = messages[0].get("content")
+        contents = {message.get("content") for message in messages}
+        if "result-2" in contents:
+            return (100 if system == "checkpoint-2" else 600, "test-counter")
+        if "result-1" in contents:
+            return (100 if system == "checkpoint-1" else 600, "test-counter")
+        return 100, "test-counter"
+
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        estimate,
+    )
+    consolidate = AsyncMock(side_effect=[
+        "checkpoint-1",
+        "checkpoint-2",
+    ])
+    compaction_events: list[ContextCompactionEvent] = []
+
+    async def observe_compaction(event: ContextCompactionEvent) -> None:
+        if isinstance(event, ContextCompactionEvent):
+            compaction_events.append(event)
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=None,
+        transcript_input=TranscriptInput(history=[], current_message="inspect"),
+        transcript_builder=_build_transcript,
+        consolidate_history=consolidate,
+        tools=tools,
+        model="test-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        events=EventSink(observe_compaction),
+    ))
+
+    assert consolidate.await_count == 2
+    assert consolidate.await_args_list[0].args[1] is None
+    assert consolidate.await_args_list[1].args[1] == "checkpoint-1"
+    second_prefix = consolidate.await_args_list[1].args[0]
+    assert second_prefix[0]["content"] == "checkpoint-1"
+    assert any(message.get("content") == "result-1" for message in second_prefix)
+    assert result.final_content == "done"
+    assert result.summary_checkpoint is not None
+    assert result.summary_checkpoint.summary == "checkpoint-2"
+    assert result.summary_checkpoint.transcript_boundary == 4
+    assert [event.phase for event in compaction_events] == [
+        "started", "succeeded", "started", "succeeded",
+    ]
+    assert all(event.reason == "context_pressure" for event in compaction_events)
+    first_id, second_id = compaction_events[0].compaction_id, compaction_events[2].compaction_id
+    assert first_id == compaction_events[1].compaction_id
+    assert second_id == compaction_events[3].compaction_id
+    assert first_id != second_id
+
+
+async def test_runner_refuses_checkpoint_that_cannot_fit_with_delta(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unexpected"))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    old_answer = "old answer"
+    current_input = "current input must remain intact"
+
+    def estimate(_provider, _model, messages, _tools):
+        contents = {message.get("content") for message in messages}
+        if old_answer in contents or current_input in contents:
+            return 600, "test-counter"
+        return 100, "test-counter"
+
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        estimate,
+    )
+    consolidate = AsyncMock(return_value="small checkpoint")
+
+    with pytest.raises(ContextWindowExceededError):
+        await AgentRunner().run(make_run_spec(
+            provider,
+            initial_messages=None,
+            transcript_input=TranscriptInput(
+                history=[{"role": "assistant", "content": old_answer}],
+                current_message=current_input,
+            ),
+            transcript_builder=_build_transcript,
+            consolidate_history=consolidate,
+            tools=tools,
+            model="test-model",
+            context_window_tokens=1_624,
+            max_tokens=100,
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        ))
+
+    summarized = consolidate.await_args.args[0]
+    assert all(message.get("content") != current_input for message in summarized)
+    provider.chat_stream_with_retry.assert_not_awaited()
+
+
+@pytest.mark.parametrize("context_window, omitted_count, fallback", [
+    (200_000, 1, True), (100_000, 2, True), (40_000, 2, False),
+])
+async def test_runner_recovers_oversized_file_read_delta(
+    tmp_path, monkeypatch, context_window, omitted_count, fallback,
+):
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    # A cold/offline tokenizer must exercise the same conservative count as #5879.
+    if fallback:
+        monkeypatch.setattr(
+            "nanobot.utils.helpers._get_token_encoding",
+            MagicMock(side_effect=RuntimeError("tokenizer unavailable")),
+        )
+    else:
+        encoding = tiktoken.get_encoding("cl100k_base")
+        monkeypatch.setattr("nanobot.utils.helpers._get_token_encoding", lambda: encoding)
+    paths = [tmp_path / f"result-{index}.json" for index in range(3)]
+    for path in paths:
+        path.write_text("record, " * 10_000, encoding="utf-8")
+    tools = ToolRegistry()
+    tools.register(ReadFileTool(workspace=tmp_path, allowed_dir=tmp_path))
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = True
+    provider_state = ProviderConversationState(
+        kind="openai_responses", provider="openai:test", model="test-model",
+        version=1, payload={"items": []},
+    )
+    calls = [
+        ToolCallRequest(id=f"read-{index}", name="read_file", arguments={
+            "path": str(path), "limit": 20,
+        })
+        for index, path in enumerate(paths)
+    ]
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=calls, provider_state=provider_state),
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="reread", name="read_file", arguments=calls[0].arguments,
+        )], provider_state=provider_state),
+        LLMResponse(content="done"),
+    ])
+    consolidate = AsyncMock(return_value="small checkpoint")
+    phases = []
+
+    async def observe(event):
+        if isinstance(event, ContextCompactionEvent):
+            phases.append(event.phase)
+
+    result = await AgentRunner().run(make_run_spec(
+        provider, tools=tools, model="test-model", workspace=tmp_path,
+        initial_messages=None,
+        transcript_input=TranscriptInput(history=[], current_message="inspect the files"),
+        transcript_builder=_build_transcript,
+        consolidate_history=consolidate,
+        context_window_tokens=context_window, max_tokens=8192, max_iterations=3,
+        max_tool_result_chars=16_000, concurrent_tools=True,
+        events=EventSink(observe),
+    ))
+
+    assert result.final_content == "done"
+    requests = provider.chat_stream_with_retry.await_args_list
+    delivered = [m for m in requests[1].kwargs["messages"] if m["role"] == "tool"]
+    assert all("read_file result was not sent" in m["content"] for m in delivered[:omitted_count])
+    assert "offset" in delivered[0]["content"] and "JSON" in delivered[0]["content"]
+    assert all("record, " * 10_000 in m["content"] for m in delivered[omitted_count:])
+    assert all(r.kwargs["provider_context"].conversation_state is None for r in requests[1:])
+    assert "record, " * 10_000 in requests[2].kwargs["messages"][-1]["content"]
+    saved_results = [m for m in result.messages if m["role"] == "tool"]
+    assert [m["content"] for m in saved_results[:3]] == [m["content"] for m in delivered]
+    assert "record, " * 10_000 in saved_results[3]["content"]
+    assert phases == ["started", "succeeded", "started", "succeeded"]
+    assert consolidate.await_count == 2
+    assert not any(m["role"] == "tool" for m in consolidate.await_args_list[0].args[0])
+    assert all(path.read_text(encoding="utf-8") == "record, " * 10_000 for path in paths)
+    assert not (tmp_path / ".nanobot" / "tool-results").exists()
+
+
+@pytest.mark.parametrize("fallback, same_round, context_window", [
+    (False, True, 200_000),
+    (False, False, 40_000),
+    (True, False, 200_000),
+])
+async def test_file_reads_that_fit_each_round_are_not_omitted(
+    tmp_path, monkeypatch, fallback, same_round, context_window,
+):
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    encoding = None if fallback else tiktoken.get_encoding("cl100k_base")
+    monkeypatch.setattr("nanobot.utils.helpers._get_token_encoding", lambda: encoding)
+    paths = [tmp_path / f"result-{index}.json" for index in range(3)]
+    for path in paths:
+        path.write_text("record, " * 10_000, encoding="utf-8")
+    tools = ToolRegistry()
+    tools.register(ReadFileTool(workspace=tmp_path, allowed_dir=tmp_path))
+    calls = [
+        ToolCallRequest(id=f"read-{index}", name="read_file", arguments={"path": str(path)})
+        for index, path in enumerate(paths)
+    ]
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        *(LLMResponse(content=None, tool_calls=batch)
+          for batch in ([calls] if same_round else [[call] for call in calls])),
+        LLMResponse(content="done"),
+    ])
+    result = await AgentRunner().run(make_run_spec(
+        provider, tools=tools, model="test-model", workspace=tmp_path,
+        initial_messages=None,
+        transcript_input=TranscriptInput(history=[], current_message="inspect the files"),
+        transcript_builder=_build_transcript,
+        consolidate_history=AsyncMock(return_value="small checkpoint"),
+        context_window_tokens=context_window, max_tokens=8192, max_iterations=4,
+        max_tool_result_chars=16_000,
+    ))
+    assert result.final_content == "done"
+    delivered = [
+        message
+        for request in provider.chat_stream_with_retry.await_args_list
+        for message in request.kwargs["messages"]
+        if message["role"] == "tool"
+    ]
+    assert {message["tool_call_id"] for message in delivered} == {call.id for call in calls}
+    assert all("record, " * 10_000 in message["content"] for message in delivered)
+    assert all("record, " * 10_000 in m["content"] for m in result.messages if m["role"] == "tool")
+    assert all(request.kwargs["tools"] == tools.get_definitions()
+               for request in provider.chat_stream_with_retry.await_args_list)
+
+
+@pytest.mark.parametrize("structured_transcript", [True, False])
+async def test_recovered_file_read_results_survive_session_replay(
+    tmp_path, monkeypatch, structured_transcript,
+):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.session.manager import SessionManager
+
+    monkeypatch.setattr(
+        "nanobot.utils.helpers._get_token_encoding",
+        MagicMock(side_effect=RuntimeError("tokenizer unavailable")),
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    paths = [workspace / f"result-{index}.json" for index in range(3)]
+    for path in paths:
+        path.write_text("record, " * 10_000, encoding="utf-8")
+    tools = ToolRegistry()
+    tools.register(ReadFileTool(workspace=workspace, allowed_dir=workspace))
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[
+            ToolCallRequest(id=f"read-{index}", name="read_file", arguments={
+                "path": str(path), "limit": 20,
+            })
+            for index, path in enumerate(paths)
+        ]),
+        LLMResponse(content="Please select one file to inspect first."),
+    ])
+    consolidate = AsyncMock(return_value="small checkpoint")
+    transcript = TranscriptInput(history=[], current_message="inspect the files")
+    result = await AgentRunner().run(make_run_spec(
+        provider, tools=tools, model="test-model", workspace=workspace,
+        initial_messages=None if structured_transcript else _build_transcript(transcript),
+        transcript_input=transcript if structured_transcript else None,
+        transcript_builder=_build_transcript if structured_transcript else None,
+        consolidate_history=consolidate,
+        context_window_tokens=200_000, max_tokens=8192, max_iterations=2,
+        max_tool_result_chars=16_000, concurrent_tools=True,
+    ))
+    assert result.final_content == "Please select one file to inspect first."
+    assert consolidate.await_count == 1
+    delivered = [
+        message for message in provider.chat_stream_with_retry.await_args.kwargs["messages"]
+        if message["role"] == "tool"
+    ]
+    assert "read_file result was not sent" in delivered[0]["content"]
+
+    manager = SessionManager(workspace, sessions_root=tmp_path / "sessions")
+    session = manager.get_or_create("test:file-replay")
+    AgentLoop.__new__(AgentLoop)._save_turn(
+        session, result.messages, skip=1, summary_checkpoint=result.summary_checkpoint,
+    )
+    manager.save(session)
+    reopened = SessionManager(workspace, sessions_root=tmp_path / "sessions").get_existing(session.key)
+    assert reopened is not None
+    replayed = [message for message in reopened.get_history() if message["role"] == "tool"]
+    assert replayed == delivered
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ready"))
+    consolidate.reset_mock()
+    followup = await AgentRunner().run(make_run_spec(
+        provider, tools=tools, model="test-model", workspace=workspace,
+        initial_messages=None,
+        transcript_input=TranscriptInput(
+            history=reopened.get_history(), current_message="which files are still pending?",
+            session_summary=reopened.metadata["_last_summary"],
+        ),
+        transcript_builder=_build_transcript,
+        consolidate_history=consolidate,
+        context_window_tokens=200_000, max_tokens=8192, max_iterations=1,
+        max_tool_result_chars=16_000,
+    ))
+    assert followup.final_content == "ready"
+    consolidate.assert_not_awaited()
+    request = provider.chat_stream_with_retry.await_args.kwargs
+    assert [m for m in request["messages"] if m["role"] == "tool"] == delivered
+    assert request["tools"] == tools.get_definitions()
+    assert all(path.read_text(encoding="utf-8") == "record, " * 10_000 for path in paths)
+
+
+@pytest.mark.asyncio
+async def test_runner_governs_messages_added_by_before_iteration_hook(monkeypatch):
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unexpected"))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    oversized = "hook-added-oversized-message"
+
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda _provider, _model, messages, _tools: (
+            (2_000, "test-counter")
+            if any(oversized in str(message.get("content")) for message in messages)
+            else (100, "test-counter")
+        ),
+    )
+
+    class MutatingHook(AgentHook):
+        async def before_iteration(self, context: AgentHookContext) -> None:
+            context.messages.append({"role": "user", "content": oversized})
+
+    with pytest.raises(ContextWindowExceededError):
+        await AgentRunner().run(make_run_spec(
+            provider,
+            initial_messages=[{"role": "user", "content": "hello"}],
+            tools=tools,
+            model="local-model",
+            context_window_tokens=1_624,
+            max_tokens=100,
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            hook=MutatingHook(),
+        ))
+
+    provider.chat_stream_with_retry.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("input_tokens", "expected_pressure"),
+    [(500, True), (100, False)],
+)
+async def test_matching_reported_provider_usage_avoids_local_estimate(
+    monkeypatch,
+    input_tokens,
+    expected_pressure,
+):
+    provider = MagicMock(spec=LLMProvider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    spec = make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="local-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        context_window_tokens=2000,
-        context_block_limit=500,
     )
-
-    def _estimate(_provider, _model, estimate_messages, estimate_tools):
-        if estimate_messages == messages:
-            return 1000, None
-        assert estimate_messages == [{"role": "system", "content": "system"}]
-        assert estimate_tools == tools.get_definitions.return_value
-        return 350, None
-
-    monkeypatch.setattr("nanobot.agent.context_governance.estimate_prompt_tokens_chain", _estimate)
-    token_sizes = {
-        "system": 50,
-        "old user": 200,
-        "old assistant": 200,
-        "recent one": 200,
-        "recent answer": 200,
-        "recent two": 200,
-    }
     monkeypatch.setattr(
-        "nanobot.agent.context_governance.estimate_message_tokens",
-        lambda msg: token_sizes.get(str(msg.get("content")), 40),
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("matching provider usage must be authoritative")
+        ),
     )
 
-    trimmed = ContextGovernor().snip_history(_governance_config(provider, tools, spec), messages)
+    governor = ContextGovernor()
+    state = ModelRequestState(
+        config=_governance_config(provider, tools, spec),
+        conversation=ProviderConversationStateController(
+            provider=provider, model=spec.runtime.model, messages=spec.initial_messages,
+        ),
+        compaction=_compaction_state(spec),
+        usage=LLMUsage.reported(input_tokens=input_tokens, output_tokens=10),
+        messages=spec.initial_messages,
+        tool_definitions=[],
+    )
+    if expected_pressure:
+        with pytest.raises(ContextWindowExceededError):
+            await governor.prepare_request(
+                state,
+                spec.initial_messages,
+                tool_definitions=tools.get_definitions(),
+            )
+    else:
+        messages, _context = await governor.prepare_request(
+            state,
+            spec.initial_messages,
+            tool_definitions=tools.get_definitions(),
+        )
+        assert messages == spec.initial_messages
 
-    contents = [message.get("content") for message in trimmed]
-    assert contents == ["system", "recent two"]
+
+async def test_changed_messages_use_local_estimate_after_reported_usage(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    spec = make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "new tool output"}],
+        tools=tools,
+        model="local-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    estimate = MagicMock(return_value=(600, "test-counter"))
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        estimate,
+    )
+
+    governor = ContextGovernor()
+    state = ModelRequestState(
+        config=_governance_config(provider, tools, spec),
+        conversation=ProviderConversationStateController(
+            provider=provider, model=spec.runtime.model, messages=spec.initial_messages,
+        ),
+        compaction=_compaction_state(spec),
+        usage=LLMUsage.reported(input_tokens=900, output_tokens=10),
+        messages=[{"role": "user", "content": "previous request"}],
+        tool_definitions=[],
+    )
+    with pytest.raises(ContextWindowExceededError):
+        await governor.prepare_request(
+            state,
+            spec.initial_messages,
+            tool_definitions=tools.get_definitions(),
+        )
+    estimate.assert_called_once()
+
+
+async def test_reported_usage_floor_triggers_pressure_despite_low_estimate(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    spec = make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "previous request"}],
+        tools=tools,
+        model="local-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    estimate = MagicMock(return_value=(100, "test-counter"))
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        estimate,
+    )
+
+    governor = ContextGovernor()
+    state = ModelRequestState(
+        config=_governance_config(provider, tools, spec),
+        conversation=ProviderConversationStateController(
+            provider=provider, model=spec.runtime.model, messages=spec.initial_messages,
+        ),
+        compaction=_compaction_state(spec),
+        usage=LLMUsage.reported(input_tokens=900, output_tokens=10),
+        messages=spec.initial_messages,
+        tool_definitions=[],
+    )
+    with pytest.raises(ContextWindowExceededError) as exc_info:
+        await governor.prepare_request(
+            state,
+            [
+                *spec.initial_messages,
+                {"role": "assistant", "content": "appended response"},
+            ],
+            tool_definitions=tools.get_definitions(),
+        )
+    estimate.assert_called_once()
+    assert exc_info.value.estimated_tokens == 900
+    assert exc_info.value.source == "prior provider usage plus pending messages"
+
+
+async def test_runner_does_not_compact_primary_request_from_fallback_usage(monkeypatch):
+    primary = MagicMock(spec=LLMProvider)
+    primary._image_input_error.return_value = None
+    primary.provider_name = "primary"
+    primary.supports_images = True
+    primary.generation = GenerationSettings(max_tokens=100)
+    primary.supports_native_compaction.return_value = False
+    primary.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="unavailable", finish_reason="error", error_status_code=503),
+        LLMResponse(content="done", usage=LLMUsage.reported(input_tokens=100, output_tokens=10)),
+    ])
+    fallback = MagicMock(spec=LLMProvider)
+    fallback.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content=None,
+        tool_calls=[ToolCallRequest(id="call-1", name="inspect", arguments={})],
+        finish_reason="tool_calls",
+        usage=LLMUsage.reported(input_tokens=600, output_tokens=10),
+    ))
+    provider = FallbackProvider(
+        primary=primary,
+        fallback_presets=[ModelPresetConfig(model="backup", max_tokens=100)],
+        provider_factory=lambda _preset: fallback,
+    )
+    tools = MagicMock()
+    tools.get_definitions.return_value = [{
+        "type": "function",
+        "function": {
+            "name": "inspect",
+            "description": "Inspect the project.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }]
+    tools.execute = AsyncMock(return_value="inspection complete")
+    consolidate = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (100, "test-counter"),
+    )
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "inspect the project"}],
+        tools=tools,
+        model="primary",
+        context_window_tokens=1_624,
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        consolidate_history=consolidate,
+    ))
+
+    assert result.final_content == "done"
+    assert result.tools_used == ["inspect"]
+    consolidate.assert_not_awaited()
+    assert [usage.input_tokens for usage in result.round_usages] == [600, 100]
+    assert result.usage is not None
+    assert result.usage.input_tokens == 700
+
+
+async def test_reported_usage_floor_stays_idle_below_budget(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    spec = make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "previous request"}],
+        tools=tools,
+        model="local-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    estimate = MagicMock(return_value=(100, "test-counter"))
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        estimate,
+    )
+
+    governor = ContextGovernor()
+    state = ModelRequestState(
+        config=_governance_config(provider, tools, spec),
+        conversation=ProviderConversationStateController(
+            provider=provider, model=spec.runtime.model, messages=spec.initial_messages,
+        ),
+        compaction=_compaction_state(spec),
+        usage=LLMUsage.reported(input_tokens=200, output_tokens=10),
+        messages=spec.initial_messages,
+        tool_definitions=[],
+    )
+    messages, _context = await governor.prepare_request(
+        state,
+        [
+            *spec.initial_messages,
+            {"role": "assistant", "content": "appended response"},
+        ],
+        tool_definitions=tools.get_definitions(),
+    )
+    estimate.assert_called_once()
+    assert messages == [
+        {"role": "user", "content": "previous request"},
+        {"role": "assistant", "content": "appended response"},
+    ]
+
+
+async def test_estimated_usage_does_not_apply_reported_floor(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    spec = make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "previous request"}],
+        tools=tools,
+        model="local-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    estimate = MagicMock(return_value=(100, "test-counter"))
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        estimate,
+    )
+    consolidate = AsyncMock(return_value="checkpoint")
+
+    governor = ContextGovernor()
+    state = ModelRequestState(
+        config=_governance_config(provider, tools, spec),
+        conversation=ProviderConversationStateController(
+            provider=provider, model=spec.runtime.model, messages=spec.initial_messages,
+        ),
+        compaction=ContextCompactionState.from_messages(
+            spec.initial_messages, consolidate, None,
+        ),
+        usage=LLMUsage.estimated(input_tokens=900, output_tokens=10),
+        messages=spec.initial_messages,
+        tool_definitions=[],
+    )
+    messages, _context = await governor.prepare_request(
+        state,
+        [
+            *spec.initial_messages,
+            {"role": "assistant", "content": "appended response"},
+        ],
+        tool_definitions=tools.get_definitions(),
+    )
+    estimate.assert_called_once()
+    consolidate.assert_not_awaited()
+    assert messages == [
+        {"role": "user", "content": "previous request"},
+        {"role": "assistant", "content": "appended response"},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("measured", "current", "expected"),
+    [
+        (
+            [{"role": "user", "content": "question"}],
+            [{"role": "user", "content": "question"}],
+            True,
+        ),
+        (
+            [
+                {"role": "user", "content": "question"},
+                {"role": "assistant", "content": "answer"},
+            ],
+            [{"role": "user", "content": "question"}],
+            False,
+        ),
+        (
+            [{"role": "user", "content": "question"}],
+            [
+                {"role": "user", "content": "question"},
+                {"role": "assistant", "content": "answer"},
+            ],
+            True,
+        ),
+        (
+            [
+                {"role": "user", "content": "question"},
+                {"role": "assistant", "content": "answer"},
+            ],
+            [
+                {"role": "user", "content": "question"},
+                {"role": "assistant", "content": "rewritten answer"},
+            ],
+            False,
+        ),
+    ],
+)
+def test_request_extends_measured_prefix_cases(measured, current, expected):
+    assert _request_extends_measured(measured, current) is expected
+
+
+@pytest.mark.parametrize(
+    ("estimated_tokens", "expected_pressure"),
+    [(100, None), (900, (900, "test-counter"))],
+)
+def test_missing_usage_falls_back_to_pure_estimate(monkeypatch, estimated_tokens, expected_pressure):
+    provider = MagicMock(spec=LLMProvider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    spec = make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="local-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    estimate = MagicMock(return_value=(estimated_tokens, "test-counter"))
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        estimate,
+    )
+
+    pressure = ContextGovernor().request_pressure(
+        _governance_config(provider, tools, spec),
+        spec.initial_messages,
+        None,
+        usage_matches_messages=False,
+        usage_prefixes_messages=True,
+        tool_definitions=tools.get_definitions(),
+    )
+
+    assert pressure == expected_pressure
+    estimate.assert_called_once()
+
+
+async def test_rewritten_request_does_not_inherit_reported_usage_floor(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    spec = make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "rewritten request"}],
+        tools=tools,
+        model="local-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    estimate = MagicMock(return_value=(100, "test-counter"))
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        estimate,
+    )
+
+    governor = ContextGovernor()
+    state = ModelRequestState(
+        config=_governance_config(provider, tools, spec),
+        conversation=ProviderConversationStateController(
+            provider=provider, model=spec.runtime.model, messages=spec.initial_messages,
+        ),
+        compaction=_compaction_state(spec),
+        usage=LLMUsage.reported(input_tokens=900, output_tokens=10),
+        messages=[{"role": "user", "content": "previous request"}],
+        tool_definitions=[],
+    )
+    messages, _context = await governor.prepare_request(
+        state,
+        spec.initial_messages,
+        tool_definitions=tools.get_definitions(),
+    )
+    estimate.assert_called_once()
+    assert messages == [{"role": "user", "content": "rewritten request"}]
+
+
+async def test_provider_compaction_invalidates_cached_usage():
+    provider = MagicMock(spec=LLMProvider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    for applied, expected_usage in ((True, None), (False, 900)):
+        spec = make_run_spec(
+            provider,
+            initial_messages=[{"role": "user", "content": "previous request"}],
+            tools=tools,
+            model="local-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+        state = ModelRequestState(
+            config=_governance_config(provider, tools, spec),
+            conversation=ProviderConversationStateController(
+                provider=provider, model=spec.runtime.model, messages=spec.initial_messages,
+            ),
+            compaction=_compaction_state(spec),
+            messages=spec.initial_messages,
+            tool_definitions=[],
+        )
+        usage = await AgentRunner()._record_request_usage(
+            spec,
+            state,
+            LLMResponse(
+                content="done",
+                usage=LLMUsage.reported(input_tokens=900, output_tokens=10),
+                provider_compaction_applied=applied,
+            ),
+        )
+        assert usage.input_tokens == 900
+        if expected_usage is None:
+            assert state.usage is None
+        else:
+            assert state.usage is not None
+            assert state.usage.input_tokens == expected_usage
+
+
+def test_resumed_provider_context_avoids_full_transcript_estimate(monkeypatch):
+    provider = MagicMock(spec=LLMProvider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    spec = make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "pending delta"}],
+        tools=tools,
+        model="local-model",
+        context_window_tokens=1_624,
+        max_tokens=100,
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("resumed provider context must be authoritative")
+        ),
+    )
+
+    pressure = ContextGovernor().request_pressure(
+        _governance_config(provider, tools, spec),
+        spec.initial_messages,
+        LLMUsage.reported(input_tokens=900, output_tokens=10),
+        usage_matches_messages=False,
+        usage_prefixes_messages=False,
+        tool_definitions=tools.get_definitions(),
+        request_context_tokens=100,
+    )
+
+    assert pressure is None
+
+
+@pytest.mark.asyncio
+async def test_runner_refuses_oversized_resumed_state_without_compactor(monkeypatch):
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = True
+    captured_contexts = []
+
+    async def chat_stream_with_retry(*, provider_context=None, **_kwargs):
+        captured_contexts.append(provider_context)
+        return LLMResponse(
+            content="done",
+            usage=LLMUsage.reported(input_tokens=100, output_tokens=10),
+        )
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    current_message = {"role": "user", "content": "new delta"}
+    saved_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="local-model",
+        version=1,
+        payload={
+            "items": [{"type": "reasoning", "encrypted_content": "opaque"}],
+            "context_tokens": 450,
+        },
+        pending_messages=[current_message],
+    )
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (100, "test-counter"),
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.conversation_state.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (100, "test-counter"),
+    )
+
+    with pytest.raises(ContextWindowExceededError) as exc_info:
+        await AgentRunner().run(make_run_spec(
+            provider,
+            initial_messages=[current_message],
+            tools=tools,
+            model="local-model",
+            context_window_tokens=1_624,
+            max_tokens=100,
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            provider_state=saved_state,
+        ))
+
+    assert exc_info.value.estimated_tokens == 550
+    assert exc_info.value.source == "resumed provider state plus pending messages"
+    assert captured_contexts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("context_window_tokens", "expected_budget"),
+    [(1_624, 500), (1_000, 0)],
+)
+async def test_runner_refuses_oversized_request_without_compactor(
+    monkeypatch,
+    context_window_tokens,
+    expected_budget,
+):
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unexpected"))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (2_000, "test-counter"),
+    )
+
+    with pytest.raises(ContextWindowExceededError) as exc_info:
+        await AgentRunner().run(make_run_spec(
+            provider,
+            initial_messages=[
+                {"role": "system", "content": "oversized system"},
+                {"role": "user", "content": "oversized user"},
+            ],
+            tools=tools,
+            model="local-model",
+            context_window_tokens=context_window_tokens,
+            max_tokens=100,
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        ))
+
+    assert exc_info.value.estimated_tokens == 2_000
+    assert exc_info.value.input_budget == expected_budget
+    provider.chat_stream_with_retry.assert_not_awaited()
 
 
 async def test_backfill_missing_tool_results_inserts_error():
-    """Orphaned tool_use (no matching tool_result) should get a synthetic error."""
 
     messages = [
         {"role": "user", "content": "hi"},
@@ -249,7 +1505,6 @@ def test_drop_orphan_tool_results_removes_unmatched_tool_messages():
 
 @pytest.mark.asyncio
 async def test_backfill_noop_when_complete():
-    """Complete message chains should not be modified."""
     messages = [
         {"role": "user", "content": "hi"},
         {
@@ -263,7 +1518,7 @@ async def test_backfill_noop_when_complete():
         {"role": "assistant", "content": "all good"},
     ]
     result = ContextGovernor.backfill_missing_tool_results(messages)
-    assert result is messages  # same object — no copy
+    assert result is messages
 
 
 @pytest.mark.asyncio
@@ -273,16 +1528,16 @@ async def test_runner_drops_orphan_tool_results_before_model_request():
     provider = MagicMock()
     captured_messages: list[dict] = []
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         captured_messages[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "old user"},
@@ -307,15 +1562,13 @@ async def test_runner_drops_orphan_tool_results_before_model_request():
 
 @pytest.mark.asyncio
 async def test_backfill_repairs_model_context_without_shifting_save_turn_boundary(tmp_path):
-    """Historical backfill should not duplicate old tail messages on persist."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
 
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    response = LLMResponse(content="new answer", tool_calls=[], usage={})
-    provider.chat_with_retry = AsyncMock(return_value=response)
+    response = LLMResponse(content="new answer", tool_calls=[], usage=None)
     provider.chat_stream_with_retry = AsyncMock(return_value=response)
 
     loop = AgentLoop(
@@ -325,7 +1578,6 @@ async def test_backfill_repairs_model_context_without_shifting_save_turn_boundar
         model="test-model",
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
     session.messages = [
@@ -353,7 +1605,7 @@ async def test_backfill_repairs_model_context_without_shifting_save_turn_boundar
     assert result is not None
     assert result.content == "new answer"
 
-    request_messages = provider.chat_with_retry.await_args.kwargs["messages"]
+    request_messages = provider.chat_stream_with_retry.await_args.kwargs["messages"]
     synthetic = [
         message
         for message in request_messages
@@ -369,7 +1621,7 @@ async def test_backfill_repairs_model_context_without_shifting_save_turn_boundar
             for key, value in message.items()
             if key in {"role", "content", "tool_call_id", "name", "tool_calls"}
         }
-        for message in session_after.messages
+        for message in map(public_history_message, session_after.messages)
     ] == [
         {"role": "user", "content": "old user"},
         {
@@ -391,17 +1643,16 @@ async def test_backfill_repairs_model_context_without_shifting_save_turn_boundar
 
 @pytest.mark.asyncio
 async def test_runner_backfill_only_mutates_model_context_not_returned_messages():
-    """Runner should repair orphaned tool calls for the model without rewriting result.messages."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
     captured_messages: list[dict] = []
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         captured_messages[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -423,8 +1674,8 @@ async def test_runner_backfill_only_mutates_model_context_not_returned_messages(
         {"role": "user", "content": "new prompt"},
     ]
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=initial_messages,
         tools=tools,
         model="test-model",
@@ -467,448 +1718,42 @@ async def test_runner_backfill_only_mutates_model_context_not_returned_messages(
     ]
 
 
-# ---------------------------------------------------------------------------
-# Microcompact (stale tool result compaction)
-# ---------------------------------------------------------------------------
-
-
-def _microcompact_messages(*, total: int, tool_name: str, content: str) -> list[dict]:
-    messages: list[dict] = [{"role": "system", "content": "sys"}]
-    for i in range(total):
-        messages.append({
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [{
-                "id": f"c{i}",
-                "type": "function",
-                "function": {"name": tool_name, "arguments": "{}"},
-            }],
-        })
-        messages.append({
-            "role": "tool",
-            "tool_call_id": f"c{i}",
-            "name": tool_name,
-            "content": content,
-        })
-    return messages
-
-
-def test_microcompact_skips_when_prompt_under_hard_budget(monkeypatch):
-    """Cache-friendly path: in-flight tool results stay stable while prompt fits."""
-    provider = MagicMock()
-    provider.generation = SimpleNamespace(max_tokens=0)
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    total = MICROCOMPACT_KEEP_RECENT + 5
-    long_content = "x" * 600
-    messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
-    spec = AgentRunSpec(
-        initial_messages=messages,
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        max_tokens=0,
-        context_window_tokens=20_000,
-    )
-
-    monkeypatch.setattr(
-        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
-        lambda *_args, **_kwargs: (1000, "test"),
-    )
-
-    result = ContextGovernor().compact_inflight_overflow(
-        _governance_config(provider, tools, spec),
-        messages,
-        set(),
-    )
-
-    assert result is messages
-
-
-def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
-    """Overflow path: compact in-flight stale results with headroom for later calls."""
-    provider = MagicMock()
-    provider.generation = SimpleNamespace(max_tokens=0)
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    total = MICROCOMPACT_KEEP_RECENT + 8
-    long_content = "x" * 600
-    messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
-    spec = AgentRunSpec(
-        initial_messages=messages,
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        max_tokens=0,
-        context_window_tokens=2224,  # input budget 1200, low target 1020
-    )
-
-    def estimate(_provider, _model, msgs, _tools):
-        return sum(
-            100 if (content := msg.get("content")) == long_content
-            else 1 if isinstance(content, str) and "omitted from context" in content
-            else 0
-            for msg in msgs
-            if msg.get("role") == "tool"
-        ), "test"
-
-    monkeypatch.setattr("nanobot.agent.context_governance.estimate_prompt_tokens_chain", estimate)
-
-    result = ContextGovernor().compact_inflight_overflow(
-        _governance_config(provider, tools, spec),
-        messages,
-        set(),
-    )
-    tool_msgs = [m for m in result if m.get("role") == "tool"]
-    compacted = [m for m in tool_msgs if "omitted from context" in str(m.get("content", ""))]
-    preserved = [m for m in tool_msgs if m.get("content") == long_content]
-
-    assert len(compacted) == 8
-    assert len(preserved) == total - 8
-    assert [m["tool_call_id"] for m in compacted] == [f"c{i}" for i in range(8)]
-
-
-def test_microcompact_compacts_newest_when_it_alone_overflows(monkeypatch):
-    """The newest result is preserved only while the request can still fit."""
-    provider = MagicMock()
-    provider.generation = SimpleNamespace(max_tokens=0)
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    long_content = "x" * 600
-    messages = _microcompact_messages(total=1, tool_name="read_file", content=long_content)
-    spec = AgentRunSpec(
-        initial_messages=messages,
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        max_tokens=0,
-        context_window_tokens=2000,
-        context_block_limit=500,
-    )
-
-    def estimate(_provider, _model, msgs, _tools):
-        return sum(
-            1000 if msg.get("content") == long_content else 1
-            for msg in msgs
-            if msg.get("role") == "tool"
-        ), "test"
-
-    monkeypatch.setattr("nanobot.agent.context_governance.estimate_prompt_tokens_chain", estimate)
-
-    compacted_tool_call_ids: set[str] = set()
-    result = ContextGovernor().compact_inflight_overflow(
-        _governance_config(provider, tools, spec),
-        messages,
-        compacted_tool_call_ids,
-    )
-
-    tool_msg = next(m for m in result if m.get("role") == "tool")
-    assert "omitted from context" in tool_msg["content"]
-    assert compacted_tool_call_ids == {"c0"}
-
-
-def test_context_governor_keeps_compaction_boundary_stable(monkeypatch):
-    provider = MagicMock()
-    provider.generation = SimpleNamespace(max_tokens=0)
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    total = MICROCOMPACT_KEEP_RECENT + 8
-    long_content = "x" * 600
-    messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
-    spec = AgentRunSpec(
-        initial_messages=messages,
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        max_tokens=0,
-        context_window_tokens=2224,
-    )
-
-    def estimate(_provider, _model, msgs, _tools):
-        return sum(
-            100 if msg.get("content") == long_content else 1
-            for msg in msgs
-            if msg.get("role") == "tool"
-        ), "test"
-
-    monkeypatch.setattr("nanobot.agent.context_governance.estimate_prompt_tokens_chain", estimate)
-
-    governor = ContextGovernor()
-    compacted_tool_call_ids: set[str] = set()
-    config = _governance_config(provider, tools, spec, inflight_start_index=0)
-    first = governor.compact_inflight_overflow(config, messages, compacted_tool_call_ids)
-    first_ids = set(compacted_tool_call_ids)
-
-    second = governor.compact_inflight_overflow(config, messages, compacted_tool_call_ids)
-
-    assert compacted_tool_call_ids == first_ids
-    assert [m.get("content") for m in second] == [m.get("content") for m in first]
-
-
-def test_microcompact_preserves_short_results(monkeypatch):
-    """Short tool results below the compaction threshold should not be replaced."""
-    provider = MagicMock()
-    provider.generation = SimpleNamespace(max_tokens=0)
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    total = MICROCOMPACT_KEEP_RECENT + 5
-    messages = _microcompact_messages(total=total, tool_name="exec", content="short")
-    spec = AgentRunSpec(
-        initial_messages=messages,
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        max_tokens=0,
-        context_window_tokens=2024,
-    )
-
-    monkeypatch.setattr(
-        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
-        lambda *_args, **_kwargs: (2000, "test"),
-    )
-
-    result = ContextGovernor().compact_inflight_overflow(
-        _governance_config(provider, tools, spec),
-        messages,
-        set(),
-    )
-    assert result is messages  # no copy needed — all stale results are short
-
-
-def test_microcompact_skips_non_compactable_tools(monkeypatch):
-    """Non-compactable tools (e.g. 'message') should never be replaced."""
-    provider = MagicMock()
-    provider.generation = SimpleNamespace(max_tokens=0)
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    total = MICROCOMPACT_KEEP_RECENT + 5
-    long_content = "y" * 1000
-    messages = _microcompact_messages(total=total, tool_name="message", content=long_content)
-    spec = AgentRunSpec(
-        initial_messages=messages,
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        max_tokens=0,
-        context_window_tokens=2024,
-    )
-
-    monkeypatch.setattr(
-        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
-        lambda *_args, **_kwargs: (2000, "test"),
-    )
-
-    result = ContextGovernor().compact_inflight_overflow(
-        _governance_config(provider, tools, spec),
-        messages,
-        set(),
-    )
-    assert result is messages  # no compactable tools found
-
-
-def test_governance_repairs_orphans_after_snip():
-    """After snipping clips an assistant+tool_calls, orphan repair cleans up the tail."""
-    # Simulate snipping that keeps only the tail: drop the assistant with
-    # tool_calls but keep its tool result (orphan).
-    snipped = [
-        {"role": "system", "content": "system"},
-        {"role": "tool", "tool_call_id": "tc_old", "name": "search",
-         "content": "old result"},
-        {"role": "assistant", "content": "old answer"},
-        {"role": "user", "content": "new msg"},
-    ]
-
-    cleaned = ContextGovernor.drop_orphan_tool_results(snipped)
-    # The orphan tool result should be removed.
-    assert not any(
-        m.get("role") == "tool" and m.get("tool_call_id") == "tc_old"
-        for m in cleaned
-    )
-
-
-def test_governance_fallback_still_repairs_orphans():
-    """When full governance fails, the fallback must still repair orphans."""
-    # Messages with an orphan tool result (no matching assistant tool_call).
-    messages = [
-        {"role": "user", "content": "hello"},
-        {"role": "tool", "tool_call_id": "orphan_tc", "name": "read",
-         "content": "stale"},
-        {"role": "assistant", "content": "hi"},
-    ]
-
-    repaired = ContextGovernor.drop_orphan_tool_results(messages)
-    repaired = ContextGovernor.backfill_missing_tool_results(repaired)
-    # Orphan tool result should be gone.
-    assert not any(m.get("tool_call_id") == "orphan_tc" for m in repaired)
-
-
-def test_snip_history_preserves_user_message_after_truncation(monkeypatch):
-    """When _snip_history truncates messages and the only user message ends up
-    outside the kept window, the method must recover the nearest user message
-    so the resulting sequence is valid for providers like GLM (which reject
-    system→assistant with error 1214).
-
-    This reproduces the exact scenario from the bug report:
-    - Normal interaction: user asks, assistant calls tool, tool returns,
-      assistant replies.
-    - Injection adds a phantom user message, triggering more tool calls.
-    - _snip_history activates, keeping only recent assistant/tool pairs.
-    - The injected user message is in the truncated prefix and gets lost.
-    """
-    provider = MagicMock()
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    messages = [
-        {"role": "system", "content": "system"},
-        {"role": "assistant", "content": "previous reply"},
-        {"role": "user", "content": ".nanobot的同目录"},
-        {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [{"id": "tc_1", "type": "function", "function": {"name": "exec", "arguments": "{}"}}],
-        },
-        {"role": "tool", "tool_call_id": "tc_1", "content": "tool output 1"},
-        {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [{"id": "tc_2", "type": "function", "function": {"name": "exec", "arguments": "{}"}}],
-        },
-        {"role": "tool", "tool_call_id": "tc_2", "content": "tool output 2"},
-    ]
-
-    spec = AgentRunSpec(
-        initial_messages=messages,
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        context_window_tokens=2000,
-        context_block_limit=100,
-    )
-
-    # Make estimate_prompt_tokens_chain report above budget so _snip_history activates.
-    monkeypatch.setattr(
-        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
-        lambda *_a, **_kw: (500, None),
-    )
-    # Make kept window small: only the last 2 messages fit the budget.
-    token_sizes = {
-        "system": 0,
-        "previous reply": 200,
-        ".nanobot的同目录": 80,
-        "tool output 1": 80,
-        "tool output 2": 80,
-    }
-    monkeypatch.setattr(
-        "nanobot.agent.context_governance.estimate_message_tokens",
-        lambda msg: token_sizes.get(str(msg.get("content")), 100),
-    )
-
-    trimmed = ContextGovernor().snip_history(_governance_config(provider, tools, spec), messages)
-
-    # The first non-system message MUST be user (not assistant).
-    non_system = [m for m in trimmed if m.get("role") != "system"]
-    assert non_system, "trimmed should contain at least one non-system message"
-    assert non_system[0]["role"] == "user", (
-        f"First non-system message must be 'user', got '{non_system[0]['role']}'. "
-        f"Roles: {[m['role'] for m in trimmed]}"
-    )
-
-
-def test_snip_history_no_user_at_all_falls_back_gracefully(monkeypatch):
-    """Edge case: if non_system has zero user messages, _snip_history should
-    still return a valid sequence (not crash or produce system→assistant)."""
-    provider = MagicMock()
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    messages = [
-        {"role": "system", "content": "system"},
-        {"role": "assistant", "content": "reply"},
-        {"role": "tool", "tool_call_id": "tc_1", "content": "result"},
-        {"role": "assistant", "content": "reply 2"},
-        {"role": "tool", "tool_call_id": "tc_2", "content": "result 2"},
-    ]
-
-    spec = AgentRunSpec(
-        initial_messages=messages,
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        context_window_tokens=2000,
-        context_block_limit=100,
-    )
-
-    monkeypatch.setattr(
-        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
-        lambda *_a, **_kw: (500, None),
-    )
-    monkeypatch.setattr(
-        "nanobot.agent.context_governance.estimate_message_tokens",
-        lambda msg: 100,
-    )
-
-    trimmed = ContextGovernor().snip_history(_governance_config(provider, tools, spec), messages)
-
-    # Should not crash.  The result should still be a valid list.
-    assert isinstance(trimmed, list)
-    # Must have at least system.
-    assert any(m.get("role") == "system" for m in trimmed)
-    # The _enforce_role_alternation safety net must be able to fix whatever
-    # _snip_history returns here — verify it produces a valid sequence.
-    from nanobot.providers.base import LLMProvider
-    fixed = LLMProvider._enforce_role_alternation(trimmed)
-    non_system = [m for m in fixed if m["role"] != "system"]
-    if non_system:
-        assert non_system[0]["role"] in ("user", "tool"), (
-            f"Safety net should ensure first non-system is user/tool, got {non_system[0]['role']}"
-        )
-
-
-# ---------------------------------------------------------------------------
 # Malformed tool_call name guard (missing/non-string name wedges the session
 # upstream: messages.content.N.tool_use.name: Input should be a valid string)
-# ---------------------------------------------------------------------------
 
 
 def test_drop_malformed_tool_calls_trims_response():
-    """LLM response tool_calls with a missing/empty name are dropped in place."""
     from nanobot.agent.runner import AgentRunner
 
+    candidate_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="gpt-5.6",
+        version=1,
+        payload={"items": [{"type": "function_call", "name": None}]},
+    )
     response = LLMResponse(
         content=None,
         tool_calls=[
             ToolCallRequest(id="1", name=None, arguments={}),
             ToolCallRequest(id="2", name="", arguments={}),
-            ToolCallRequest(id="3", name="read_file", arguments={}),
+            ToolCallRequest(id="3", name={"unexpected": "object"}, arguments={}),
+            ToolCallRequest(id="4", name="read_file", arguments={}),
         ],
         finish_reason="tool_calls",
+        provider_state=candidate_state,
     )
     dropped, all_dropped, orig = AgentRunner._drop_malformed_tool_calls(response)
     assert [tc.name for tc in response.tool_calls] == ["read_file"]
+    assert response.provider_state is None
     assert response.finish_reason == "tool_calls"
     assert response.should_execute_tools is True
-    assert dropped == 2
+    assert dropped == 3
     assert all_dropped is False
     assert orig == "tool_calls"
 
 
 def test_drop_malformed_tool_calls_all_bad_disables_execution():
-    """If every tool call is malformed, execution is disabled (no empty exec)."""
     from nanobot.agent.runner import AgentRunner
 
     response = LLMResponse(
@@ -926,7 +1771,6 @@ def test_drop_malformed_tool_calls_all_bad_disables_execution():
 
 
 def test_drop_malformed_returns_tuple_no_calls():
-    """No tool calls returns (0, False, current_finish_reason)."""
     from nanobot.agent.runner import AgentRunner
 
     response = LLMResponse(content="hi", finish_reason="stop")
@@ -937,7 +1781,6 @@ def test_drop_malformed_returns_tuple_no_calls():
 
 
 def test_strip_malformed_tool_calls_keeps_valid_calls_in_history():
-    """A mixed assistant turn keeps only its valid tool_calls."""
     messages = [
         {"role": "user", "content": "hi"},
         {
@@ -951,8 +1794,8 @@ def test_strip_malformed_tool_calls_keeps_valid_calls_in_history():
         {"role": "tool", "tool_call_id": "ok", "name": "exec", "content": "done"},
     ]
     result = ContextGovernor.strip_malformed_tool_calls(messages)
-    assert result is not messages  # copied, original untouched
-    assert len(messages[1]["tool_calls"]) == 2  # original preserved
+    assert result is not messages
+    assert len(messages[1]["tool_calls"]) == 2
     kept = result[1]["tool_calls"]
     assert [tc["function"]["name"] for tc in kept] == ["exec"]
 
@@ -979,7 +1822,6 @@ def test_strip_malformed_tool_calls_drops_empty_assistant_turn():
 
 
 def test_strip_malformed_tool_calls_noop_when_clean():
-    """Clean history is returned unchanged (same object)."""
     messages = [
         {"role": "user", "content": "hi"},
         {
@@ -995,7 +1837,6 @@ def test_strip_malformed_tool_calls_noop_when_clean():
 
 
 def test_strip_placeholder_assistant_messages_removes_omitted():
-    """Placeholder assistant messages are removed; real messages kept."""
     messages = [
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "real response"},
@@ -1013,7 +1854,6 @@ def test_strip_placeholder_assistant_messages_removes_omitted():
 
 
 def test_strip_placeholder_noop_when_clean():
-    """Clean history is returned unchanged (same object)."""
     messages = [
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "hello back"},
@@ -1022,7 +1862,6 @@ def test_strip_placeholder_noop_when_clean():
 
 
 def test_strip_placeholder_keeps_assistant_with_tool_calls():
-    """A placeholder assistant that also carries tool_calls is kept."""
     messages = [
         {"role": "user", "content": "hi"},
         {

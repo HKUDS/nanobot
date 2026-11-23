@@ -1,0 +1,881 @@
+"""QQ channel implementation using botpy SDK.
+
+Inbound:
+- Parse QQ botpy messages (C2C / Group)
+- Download attachments to media dir using chunked streaming write (memory-safe)
+- Publish to Nanobot bus via BaseChannel._handle_message()
+- Content includes a clear, actionable "Received files:" list with local paths
+
+Outbound:
+- Send attachments (msg.media) first via QQ rich media API (base64 upload + msg_type=7)
+- Then send text (plain or markdown)
+- msg.media supports local paths, file:// paths, and http(s) URLs
+
+Notes:
+- QQ restricts many audio/video formats. We conservatively classify as image vs file.
+- Attachment structures differ across botpy versions; we try multiple field candidates.
+"""
+
+# pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import mimetypes
+import os
+import re
+import time
+from collections import deque
+from collections.abc import Callable, Mapping
+from contextlib import suppress
+from pathlib import Path
+from typing import Any, BinaryIO, Literal, cast
+from urllib.parse import unquote, urlparse
+
+import aiohttp
+from loguru import logger
+from pydantic import Field
+
+from nanobot.bus.delivery import ChannelNotReadyError
+from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ContextCompactionEvent
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.base import BaseChannel
+from nanobot.config_base import Base
+from nanobot.security.network import validate_url_target
+from nanobot.utils.logging_bridge import redirect_lib_logging
+
+try:
+    from nanobot.config.paths import get_media_dir
+except Exception:  # pragma: no cover
+    get_media_dir = None  # type: ignore
+
+try:
+    import botpy
+    from botpy.gateway import BotWebSocket
+    from botpy.http import Route
+
+    QQ_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    QQ_AVAILABLE = False
+    botpy = None
+    BotWebSocket = None
+    Route = None
+
+# QQ rich media file_type: 1=image, 4=file
+# (2=voice, 3=video are restricted; we only use image vs file)
+QQ_FILE_TYPE_IMAGE = 1
+QQ_FILE_TYPE_FILE = 4
+
+_IMAGE_EXTS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".webp",
+    ".tif",
+    ".tiff",
+    ".ico",
+    ".svg",
+}
+
+_SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
+
+
+def _sanitize_filename(name: str) -> str:
+    name = (name or "").strip()
+    name = Path(name).name
+    name = _SAFE_NAME_RE.sub("_", name).strip("._ ")
+    return name
+
+
+def _is_image_name(name: str) -> bool:
+    return Path(name).suffix.lower() in _IMAGE_EXTS
+
+
+def _guess_send_file_type(filename: str) -> int:
+    ext = Path(filename).suffix.lower()
+    mime, _ = mimetypes.guess_type(filename)
+    if ext in _IMAGE_EXTS or (mime and mime.startswith("image/")):
+        return QQ_FILE_TYPE_IMAGE
+    return QQ_FILE_TYPE_FILE
+
+
+_RECONNECT_BACKOFF_START = 5
+_RECONNECT_BACKOFF_MAX = 300
+
+
+def _is_network_error(exc: BaseException) -> bool:
+    return isinstance(
+        exc,
+        (aiohttp.ClientConnectorError, OSError),
+    )
+
+
+def _make_bot_class(channel: QQChannel) -> type[Any]:
+    botpy_sdk = cast(Any, botpy)
+    intents = botpy_sdk.Intents(public_messages=True, direct_message=True)
+
+    class _Bot(botpy_sdk.Client):
+        def __init__(self):
+            # Disable botpy's file log — nanobot uses loguru; default "botpy.log" fails on read-only fs
+            super().__init__(  # pyright: ignore[reportUnknownMemberType]
+                intents=intents,
+                ext_handlers=False,
+            )
+            self._ws_backoff: dict[int, int] = {}
+            self._ws_retry_at: dict[int, float] = {}
+
+        async def on_ready(self):
+            logger.info("QQ bot ready: {}", self.robot.name)
+
+        async def on_c2c_message_create(self, message: object) -> None:
+            await channel._on_message(message, is_group=False)
+
+        async def on_group_at_message_create(self, message: object) -> None:
+            await channel._on_message(message, is_group=True)
+
+        async def on_direct_message_create(self, message: object) -> None:
+            await channel._on_message(message, is_group=False)
+
+        async def bot_connect(self, session: object) -> None:
+            session_id = id(session)
+            retry_at = self._ws_retry_at.pop(session_id, None)
+            if retry_at is not None:
+                remaining = retry_at - time.monotonic()
+                if remaining > 0:
+                    await asyncio.sleep(remaining)
+
+            websocket_class = cast(Any, BotWebSocket)
+            client = websocket_class(session, self._connection)
+            backoff = self._ws_backoff.get(session_id, _RECONNECT_BACKOFF_START)
+            try:
+                await client.ws_connect()
+                self._ws_backoff.pop(session_id, None)
+            except (Exception, KeyboardInterrupt, SystemExit) as e:
+                if _is_network_error(e):
+                    channel.logger.warning(
+                        "QQ bot network error (retry in {}s): {}",
+                        backoff,
+                        e,
+                    )
+                    # Count botpy's post-connect pacing toward the retry delay.
+                    self._ws_retry_at[session_id] = time.monotonic() + backoff
+                    self._ws_backoff[session_id] = min(backoff * 2, _RECONNECT_BACKOFF_MAX)
+                else:
+                    channel.logger.exception("QQ bot WebSocket error: {}", e)
+
+                self._connection.add(session)
+
+    return _Bot
+
+
+# QQ's C2C/group events do not carry ``message_reference``; botpy models that
+# field because the object is shared with guild messages, but QQ never sends it
+# here.  The quoted original arrives in ``msg_elements``, linked from
+# ``message_scene.ext`` by ``ref_msg_idx``.  botpy parses neither field, and
+# ``BaseMessage.__slots__`` drops the raw payload, so
+# ``_install_qq_payload_capture`` keeps the payload from the constructor before
+# it is discarded.  If a future botpy exposes those fields on the message
+# object, ``_quoted_content_for`` prefers that copy and the hook becomes dead
+# weight rather than a correctness dependency.
+
+QQ_QUOTED_CONTEXT_MAX_CHARS = 4_000
+QQ_RAW_PAYLOAD_CACHE = 200
+
+_qq_raw_payloads: dict[str, dict[str, Any]] = {}
+
+
+def _flatten_scene_ext(scene: Any) -> dict[str, str]:
+    if not isinstance(scene, Mapping):
+        return {}
+    ext = cast("Mapping[str, Any]", scene).get("ext")
+    if not isinstance(ext, list):
+        return {}
+    flattened: dict[str, str] = {}
+    for item in cast("list[Any]", ext):
+        if isinstance(item, str) and "=" in item:
+            key, _, value = item.partition("=")
+            flattened[key] = value
+    return flattened
+
+
+def extract_quoted_content(raw: Mapping[str, Any] | None) -> str | None:
+    """Return the text of the message the sender quoted, if any.
+
+    QQ points at the quoted message from ``message_scene.ext``: ``ref_msg_idx=X``
+    matches the ``msg_elements`` entry whose ``msg_idx`` is ``X``, and that
+    entry's ``content`` is the original text.  Matching on the index instead of
+    taking the first element keeps this correct if QQ ever sends more than one.
+    """
+    if not isinstance(raw, Mapping):
+        return None
+
+    ref_idx = _flatten_scene_ext(raw.get("message_scene")).get("ref_msg_idx")
+    if not ref_idx:
+        return None
+
+    elements = raw.get("msg_elements")
+    if not isinstance(elements, list):
+        return None
+
+    for element in cast("list[Any]", elements):
+        if not isinstance(element, Mapping):
+            continue
+        entry = cast("Mapping[str, Any]", element)
+        if entry.get("msg_idx") != ref_idx:
+            continue
+        text = entry.get("content")
+        if not isinstance(text, str) or not text.strip():
+            return None
+        text = text.strip()
+        if len(text) > QQ_QUOTED_CONTEXT_MAX_CHARS:
+            text = text[:QQ_QUOTED_CONTEXT_MAX_CHARS] + "..."
+        return text
+    return None
+
+
+def _install_qq_payload_capture() -> None:
+    """Keep raw QQ payloads that botpy would otherwise discard (idempotent)."""
+    if not QQ_AVAILABLE:
+        return
+    try:
+        from botpy import message as botpy_message
+
+        for message_cls in (botpy_message.C2CMessage, botpy_message.GroupMessage):
+            original_init = cast("Callable[..., Any]", message_cls.__init__)
+            if getattr(original_init, "_nanobot_qq_capture", False):
+                continue
+
+            def _capture(
+                self: Any,
+                api: Any,
+                event_id: Any,
+                data: Any,
+                _original: Callable[..., Any] = original_init,
+            ) -> Any:
+                if isinstance(data, Mapping):
+                    payload = cast("Mapping[str, Any]", data)
+                    message_id = payload.get("id")
+                    if isinstance(message_id, str):
+                        _qq_raw_payloads[message_id] = dict(payload)
+                        while len(_qq_raw_payloads) > QQ_RAW_PAYLOAD_CACHE:
+                            _qq_raw_payloads.pop(next(iter(_qq_raw_payloads)))
+                return _original(self, api, event_id, data)
+
+            setattr(_capture, "_nanobot_qq_capture", True)
+            setattr(message_cls, "__init__", _capture)
+    except Exception:  # pragma: no cover - optional dependency shape may vary
+        logger.debug("QQ quoted-message payload capture unavailable")
+
+
+def _quoted_content_for(message: Any) -> str | None:
+    scene = getattr(message, "message_scene", None)
+    elements = getattr(message, "msg_elements", None)
+    if scene is not None or elements is not None:
+        return extract_quoted_content({"message_scene": scene, "msg_elements": elements})
+    return extract_quoted_content(_qq_raw_payloads.get(str(getattr(message, "id", ""))))
+
+
+class QQConfig(Base):
+    """QQ channel configuration using botpy SDK."""
+
+    enabled: bool = False
+    app_id: str = ""
+    secret: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+    msg_format: Literal["plain", "markdown"] = "plain"
+    ack_message: str = "⏳ Processing..."
+
+    # Optional: directory to save inbound attachments. If empty, use nanobot get_media_dir("qq").
+    media_dir: str = ""
+
+    download_chunk_size: int = 1024 * 256
+    download_max_bytes: int = 1024 * 1024 * 200
+
+    # QQ's C2C/group message API has no edit or recall endpoint, so automatic
+    # notices would land as separate permanent messages (#5784). Unset inherits
+    # the global policy (off by default); explicit legacy true/false still override it.
+    show_compaction_notices: bool | None = None
+
+
+class QQChannel(BaseChannel):
+    """QQ channel using botpy SDK with WebSocket connection."""
+
+    name = "qq"
+    display_name = "QQ"
+
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return QQConfig().model_dump(by_alias=True, exclude_none=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = QQConfig.model_validate(config)
+        super().__init__(config, bus)
+        self.config: QQConfig = config
+        # Preserve explicitly configured notices for standalone channel callers.
+        # ChannelManager resolves global inheritance from the original section.
+        self.show_compaction_notices = bool(config.show_compaction_notices)
+
+        self._client: Any | None = None
+        self._http: aiohttp.ClientSession | None = None
+
+        self._processed_ids: deque[str] = deque(maxlen=1000)
+        self._msg_seq: int = 1  # used to avoid QQ API dedup
+        self._chat_type_cache: dict[str, str] = {}
+
+        _install_qq_payload_capture()
+
+        self._media_root: Path = self._init_media_root()
+
+
+    def _init_media_root(self) -> Path:
+        if self.config.media_dir:
+            root = Path(self.config.media_dir).expanduser()
+        elif get_media_dir:
+            try:
+                root = Path(get_media_dir("qq"))
+            except Exception:
+                root = Path.home() / ".nanobot" / "media" / "qq"
+        else:
+            root = Path.home() / ".nanobot" / "media" / "qq"
+
+        root.mkdir(parents=True, exist_ok=True)
+        self.logger.info("media directory: {}", str(root))
+        return root
+
+    async def login(self, force: bool = False) -> bool:
+        """Scan a QQ Bot QR code and save the AppID/secret it returns."""
+        from nanobot.channels.qq.connect import QQConnectStore
+
+        if not force and self.config.app_id and self.config.secret:
+            return True
+        credentials = await QQConnectStore().login()
+        if credentials is None:
+            return False
+        self.config.app_id, self.config.secret = credentials
+        return True
+
+    async def start(self) -> None:
+        """Start the QQ bot with auto-reconnect loop."""
+        redirect_lib_logging("botpy", level="WARNING")
+        if not QQ_AVAILABLE:
+            self.logger.error("SDK not installed. Run: nanobot plugins enable qq")
+            return
+
+        if not self.config.app_id or not self.config.secret:
+            self.logger.error("app_id and secret not configured")
+            return
+
+        self._running = True
+        self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
+
+        self._client = _make_bot_class(self)()
+        self.logger.info("bot started (C2C & Group supported)")
+        await self._run_bot()
+
+    async def _run_bot(self) -> None:
+        backoff = 5
+        max_backoff = 300
+        while self._running:
+            try:
+                client = cast(Any, self._client)
+                await client.start(appid=self.config.app_id, secret=self.config.secret)
+                backoff = 5
+            except Exception as e:
+                if _is_network_error(e):
+                    self.logger.warning(
+                        "QQ bot network error (retry in {}s): {}", backoff, e
+                    )
+                else:
+                    self.logger.warning("bot error: {}", e)
+            if self._running:
+                self.logger.info("Reconnecting bot in {} seconds...", backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
+
+    async def stop(self) -> None:
+        """Stop bot and cleanup resources."""
+        self._running = False
+        if self._client:
+            with suppress(Exception):
+                await self._client.close()
+        self._client = None
+
+        if self._http:
+            with suppress(Exception):
+                await self._http.close()
+        self._http = None
+
+        self.logger.info("bot stopped")
+
+
+    async def send(self, msg: OutboundMessage) -> None:
+        """Send attachments first, then text."""
+        if (
+            isinstance(msg.event, ContextCompactionEvent)
+            and not (msg.event.notify or self.show_compaction_notices)
+        ):
+            return
+
+        try:
+            if not self._client:
+                raise ChannelNotReadyError("QQ client not initialized")
+
+            msg_id = msg.metadata.get("message_id")
+            chat_type = self._chat_type_cache.get(msg.chat_id, "c2c")
+            is_group = chat_type == "group"
+
+            for media_ref in msg.media or []:
+                ok = await self._send_media(
+                    chat_id=msg.chat_id,
+                    media_ref=media_ref,
+                    msg_id=msg_id,
+                    is_group=is_group,
+                )
+                if not ok:
+                    filename = (
+                        os.path.basename(urlparse(media_ref).path)
+                        or os.path.basename(media_ref)
+                        or "file"
+                    )
+                    await self._send_text_only(
+                        chat_id=msg.chat_id,
+                        is_group=is_group,
+                        msg_id=msg_id,
+                        content=f"[Attachment send failed: {filename}]",
+                    )
+
+            if msg.content and msg.content.strip():
+                await self._send_text_only(
+                    chat_id=msg.chat_id,
+                    is_group=is_group,
+                    msg_id=msg_id,
+                    content=msg.content.strip(),
+                )
+        except (aiohttp.ClientError, OSError):
+            # Network / transport errors — propagate so ChannelManager can retry
+            raise
+        except Exception:
+            self.logger.exception("Error sending message to chat_id={}", msg.chat_id)
+            raise
+
+    async def _send_text_only(
+        self,
+        chat_id: str,
+        is_group: bool,
+        msg_id: str | None,
+        content: str,
+    ) -> None:
+        if not self._client:
+            return
+
+        self._msg_seq += 1
+        use_markdown = self.config.msg_format == "markdown"
+        payload: dict[str, Any] = {
+            "msg_type": 2 if use_markdown else 0,
+            "msg_id": msg_id,
+            "msg_seq": self._msg_seq,
+        }
+        if use_markdown:
+            payload["markdown"] = {"content": content}
+        else:
+            payload["content"] = content
+
+        if is_group:
+            await self._client.api.post_group_message(group_openid=chat_id, **payload)
+        else:
+            await self._client.api.post_c2c_message(openid=chat_id, **payload)
+
+    async def _send_media(
+        self,
+        chat_id: str,
+        media_ref: str,
+        msg_id: str | None,
+        is_group: bool,
+    ) -> bool:
+        if not self._client:
+            return False
+
+        data, filename = await self._read_media_bytes(media_ref)
+        if not data or not filename:
+            return False
+
+        try:
+            file_type = _guess_send_file_type(filename)
+            file_data_b64 = base64.b64encode(data).decode()
+
+            media_obj = await self._post_base64file(
+                chat_id=chat_id,
+                is_group=is_group,
+                file_type=file_type,
+                file_data=file_data_b64,
+                file_name=filename,
+            )
+            if not media_obj:
+                self.logger.error("media upload failed: empty response")
+                return False
+
+            self._msg_seq += 1
+            if is_group:
+                await self._client.api.post_group_message(
+                    group_openid=chat_id,
+                    msg_type=7,
+                    msg_id=msg_id,
+                    msg_seq=self._msg_seq,
+                    media=media_obj,
+                )
+            else:
+                await self._client.api.post_c2c_message(
+                    openid=chat_id,
+                    msg_type=7,
+                    msg_id=msg_id,
+                    msg_seq=self._msg_seq,
+                    media=media_obj,
+                )
+
+            self.logger.info("media sent: {}", filename)
+            return True
+        except (aiohttp.ClientError, OSError) as e:
+            # Network / transport errors — propagate for retry by caller
+            self.logger.warning("send media network error filename={} err={}", filename, e)
+            raise
+        except Exception:
+            # API-level or other non-network errors — return False so send() can fallback
+            self.logger.exception("send media failed filename={}", filename)
+            return False
+
+    async def _read_media_bytes(self, media_ref: str) -> tuple[bytes | None, str | None]:
+        media_ref = (media_ref or "").strip()
+        if not media_ref:
+            return None, None
+
+        if not media_ref.startswith("http://") and not media_ref.startswith("https://"):
+            try:
+                if media_ref.startswith("file://"):
+                    parsed = urlparse(media_ref)
+                    # Windows: path in netloc; Unix: path in path
+                    raw = parsed.path or parsed.netloc
+                    local_path = Path(unquote(raw))
+                else:
+                    local_path = Path(os.path.expanduser(media_ref))
+
+                if not local_path.is_file():
+                    self.logger.warning("outbound media file not found: {}", str(local_path))
+                    return None, None
+
+                data = await asyncio.to_thread(local_path.read_bytes)
+                return data, local_path.name
+            except Exception as e:
+                self.logger.warning("outbound media read error ref={} err={}", media_ref, e)
+                return None, None
+
+        ok, err = validate_url_target(media_ref)
+        if not ok:
+            self.logger.warning("outbound media URL validation failed url={} err={}", media_ref, err)
+            return None, None
+
+        if not self._http:
+            self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
+        try:
+            async with self._http.get(media_ref, allow_redirects=True) as resp:
+                if resp.status >= 400:
+                    self.logger.warning(
+                        "outbound media download failed status={} url={}",
+                        resp.status,
+                        media_ref,
+                    )
+                    return None, None
+                data = await resp.read()
+                if not data:
+                    return None, None
+                filename = os.path.basename(urlparse(media_ref).path) or "file.bin"
+                return data, filename
+        except Exception as e:
+            self.logger.warning("outbound media download error url={} err={}", media_ref, e)
+            return None, None
+
+    # https://github.com/tencent-connect/botpy/issues/198
+    # https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/rich-media.html
+    async def _post_base64file(
+        self,
+        chat_id: str,
+        is_group: bool,
+        file_type: int,
+        file_data: str,
+        file_name: str | None = None,
+    ) -> dict[str, Any]:
+        if not self._client:
+            raise RuntimeError("QQ client not initialized")
+
+        if is_group:
+            endpoint = "/v2/groups/{group_openid}/files"
+            id_key = "group_openid"
+        else:
+            endpoint = "/v2/users/{openid}/files"
+            id_key = "openid"
+
+        payload: dict[str, Any] = {
+            id_key: chat_id,
+            "file_type": file_type,
+            "file_data": file_data,
+            "srv_send_msg": False,
+        }
+        # Only pass file_name for non-image types (file_type=4).
+        # Passing file_name for images causes QQ client to render them as
+        # file attachments instead of inline images.
+        if file_type != QQ_FILE_TYPE_IMAGE and file_name:
+            payload["file_name"] = file_name
+
+        route_class = cast(Any, Route)
+        route = route_class("POST", endpoint, **{id_key: chat_id})
+        client = self._client
+        result: object = await client.api._http.request(route, json=payload)
+
+        # Extract only the file_info field to avoid extra fields (file_uuid, ttl, etc.)
+        # that may confuse QQ client when sending the media object.
+        if isinstance(result, dict) and "file_info" in result:
+            result_data = cast(dict[str, Any], result)
+            return {"file_info": result_data["file_info"]}
+        return cast(dict[str, Any], result)
+
+
+    async def _on_message(self, data: object, is_group: bool = False) -> None:
+        try:
+            message = cast(Any, data)
+            if is_group:
+                chat_id = cast(str, message.group_openid)
+                user_id = cast(str, message.author.member_openid)
+                chat_type = "group"
+            else:
+                chat_id = str(
+                    getattr(message.author, "id", None)
+                    or getattr(message.author, "user_openid", "unknown")
+                )
+                user_id = chat_id
+                chat_type = "c2c"
+
+            content = str(message.content or "").strip()
+
+            message_id = cast(str, message.id)
+            if message_id in self._processed_ids:
+                return
+            self._processed_ids.append(message_id)
+            self._chat_type_cache[chat_id] = chat_type
+
+            # Early permission check — avoid attachment downloads and ack side effects
+            # for unauthorized users. C2C messages can receive pairing codes;
+            # group messages remain silently ignored.
+            if not self.is_allowed(user_id):
+                if not is_group:
+                    await self._handle_message(
+                        sender_id=user_id,
+                        chat_id=chat_id,
+                        content="",
+                        is_dm=True,
+                    )
+                return
+
+            # Resolve the quote before attachment downloads let newer messages
+            # evict this message's captured payload.
+            quoted = _quoted_content_for(message)
+            if quoted:
+                quote_tag = f"[Reply to: {quoted}]"
+                content = f"{quote_tag}\n{content}" if content else quote_tag
+
+            attachments = cast(
+                list[object],
+                getattr(message, "attachments", None) or [],
+            )
+            media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
+
+            if recv_lines:
+                tag = (
+                    "[Image]"
+                    if any(_is_image_name(Path(p).name) for p in media_paths)
+                    else "[File]"
+                )
+                file_block = "Received files:\n" + "\n".join(recv_lines)
+                content = (
+                    f"{content}\n\n{file_block}".strip() if content else f"{tag}\n{file_block}"
+                )
+
+            if not content and not media_paths:
+                return
+
+            if self.config.ack_message:
+                try:
+                    await self._send_text_only(
+                        chat_id=chat_id,
+                        is_group=is_group,
+                        msg_id=message_id,
+                        content=self.config.ack_message,
+                    )
+                except Exception:
+                    self.logger.debug("ack message failed for chat_id={}", chat_id)
+
+            await self._handle_message(
+                sender_id=user_id,
+                chat_id=chat_id,
+                content=content,
+                media=media_paths if media_paths else None,
+                metadata={
+                    "message_id": message_id,
+                    "attachments": att_meta,
+                },
+                is_dm=not is_group,
+            )
+        except Exception:
+            self.logger.exception(
+                "Error handling inbound message id={}",
+                getattr(data, "id", "?"),
+            )
+
+    async def _handle_attachments(
+        self,
+        attachments: list[object],
+    ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+        media_paths: list[str] = []
+        recv_lines: list[str] = []
+        att_meta: list[dict[str, Any]] = []
+
+        if not attachments:
+            return media_paths, recv_lines, att_meta
+
+        for att in attachments:
+            url = getattr(att, "url", None) or ""
+            filename = getattr(att, "filename", None) or ""
+            ctype = getattr(att, "content_type", None) or ""
+
+            self.logger.info("Downloading file: {}", filename or url)
+            local_path = await self._download_to_media_dir_chunked(url, filename_hint=filename)
+
+            att_meta.append(
+                {
+                    "url": url,
+                    "filename": filename,
+                    "content_type": ctype,
+                    "saved_path": local_path,
+                }
+            )
+
+            if local_path:
+                media_paths.append(local_path)
+                shown_name = filename or os.path.basename(local_path)
+                recv_lines.append(f"- {shown_name}\n  saved: {local_path}")
+            else:
+                shown_name = filename or url
+                recv_lines.append(f"- {shown_name}\n  saved: [download failed]")
+
+        return media_paths, recv_lines, att_meta
+
+    async def _download_to_media_dir_chunked(
+        self,
+        url: str,
+        filename_hint: str = "",
+    ) -> str | None:
+        if url.startswith("//"):
+            url = f"https:{url}"
+
+        # Inbound attachment URLs are attacker-influenceable (a compromised or
+        # redirecting CDN can point at an internal address), so validate them
+        # like outbound media and refuse redirects — matching napcat/dingtalk.
+        # The guard resolves DNS synchronously; do not block the gateway loop.
+        ok, err = await asyncio.to_thread(validate_url_target, url)
+        if not ok:
+            self.logger.warning("inbound media URL blocked url={} err={}", url, err)
+            return None
+
+        if not self._http:
+            self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
+
+        safe = _sanitize_filename(filename_hint)
+        ts = int(time.time() * 1000)
+        tmp_path: Path | None = None
+
+        try:
+            async with self._http.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=120),
+                allow_redirects=False,
+            ) as resp:
+                if resp.status != 200:
+                    self.logger.warning("download failed: status={} url={}", resp.status, url)
+                    return None
+
+                ctype = (resp.headers.get("Content-Type") or "").lower()
+
+                ext = Path(urlparse(url).path).suffix
+                if not ext:
+                    ext = Path(filename_hint).suffix
+                if not ext:
+                    if "png" in ctype:
+                        ext = ".png"
+                    elif "jpeg" in ctype or "jpg" in ctype:
+                        ext = ".jpg"
+                    elif "gif" in ctype:
+                        ext = ".gif"
+                    elif "webp" in ctype:
+                        ext = ".webp"
+                    elif "pdf" in ctype:
+                        ext = ".pdf"
+                    else:
+                        ext = ".bin"
+
+                if safe:
+                    if not Path(safe).suffix:
+                        safe = safe + ext
+                    filename = safe
+                else:
+                    filename = f"qq_file_{ts}{ext}"
+
+                target = self._media_root / filename
+                if target.exists():
+                    target = self._media_root / f"{target.stem}_{ts}{target.suffix}"
+
+                tmp_path = target.with_suffix(target.suffix + ".part")
+
+                downloaded = 0
+                chunk_size = max(1024, int(self.config.download_chunk_size or 262144))
+                max_bytes = max(
+                    1024 * 1024, int(self.config.download_max_bytes or (200 * 1024 * 1024))
+                )
+
+                active_tmp_path = tmp_path
+
+                def _open_tmp() -> BinaryIO:
+                    active_tmp_path.parent.mkdir(parents=True, exist_ok=True)
+                    return active_tmp_path.open("wb")
+
+                f = await asyncio.to_thread(_open_tmp)
+                try:
+                    async for chunk in resp.content.iter_chunked(chunk_size):
+                        if not chunk:
+                            continue
+                        downloaded += len(chunk)
+                        if downloaded > max_bytes:
+                            self.logger.warning(
+                                "download exceeded max_bytes={} url={} -> abort",
+                                max_bytes,
+                                url,
+                            )
+                            return None
+                        await asyncio.to_thread(f.write, chunk)
+                finally:
+                    await asyncio.to_thread(f.close)
+
+                await asyncio.to_thread(os.replace, active_tmp_path, target)
+                tmp_path = None
+                self.logger.info("file saved: {}", str(target))
+                return str(target)
+
+        except Exception:
+            self.logger.exception("download error")
+            return None
+        finally:
+            if tmp_path is not None:
+                with suppress(Exception):
+                    tmp_path.unlink(missing_ok=True)

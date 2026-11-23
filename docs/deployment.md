@@ -1,124 +1,144 @@
 # Deployment
 
-Use this page after `nanobot agent -m "Hello!"` works locally. Deployment keeps long-running surfaces online: WebUI, chat apps, heartbeat, Dream, cron jobs, and channel connections.
+Use this page to keep nanobot running reliably in the background—on a hosted platform, in Docker, or as a Linux/macOS system service.
 
 ## Before You Deploy
 
-Check these once before Docker, systemd, or LaunchAgent:
+Confirm these basics first (for a new container host, check them inside the container after setup):
 
-| Check | Why it matters |
-|---|---|
-| `nanobot status` shows the expected config and workspace | Confirms the process will read the instance you meant to run |
-| `nanobot agent -m "Hello!"` works | Proves install, config, provider, model, and workspace writes before adding a service layer |
-| Secrets are in environment variables or protected config files | API keys, bot tokens, OAuth state, and chat credentials should not be world-readable |
-| `~/.nanobot/` or your custom config/workspace path is persistent | Sessions, memory, channel login state, generated artifacts, and cron jobs live there |
-| Channel access control is intentional | Use `allowFrom`, pairing, WebSocket `token`/`tokenIssueSecret`, or private test channels before exposing the bot |
-| Ports are planned | Gateway health defaults to `18790`; WebUI/WebSocket defaults to `8765`; `nanobot serve` defaults to `8900` |
-| Logs are easy to reach | Use `docker compose logs`, `journalctl`, LaunchAgent log files, or `nanobot gateway --verbose` while diagnosing startup |
+- **Local setup works:** `nanobot status` shows the right config and workspace, and `nanobot agent -m "Hello!"` returns a reply.
+- **Secrets are protected:** Keep API keys, bot tokens, and WebUI passwords in environment variables or private config files.
+- **Data persists:** Keep your config directory (including `sessions/`) and workspace on persistent storage.
+- **Access is locked down:** Configure pairing, `allowFrom`, or a WebUI password (`tokenIssueSecret`) before exposing nanobot beyond localhost.
+- **Restart after edits:** Long-running services read `config.json` at startup—restart the service after config changes.
 
-Restart the deployed process after editing `config.json`. Long-running processes read config at startup.
+## Choose a Deployment Option
 
-## Choose a Runtime
+| Option | Best for | Where data lives |
+|---|---|---|
+| [Render](#render) | One-click hosted gateway + WebUI without managing a server | Render persistent disk (`/home/nanobot/.nanobot`) |
+| [Docker Compose](#docker-compose) | Linux servers and repeatable container deployments | Bind mount `~/.nanobot` → `/home/nanobot/.nanobot` |
+| [Linux Service](#linux-service) | Always-on gateway on a Linux machine (systemd) | Host `~/.nanobot` |
+| [macOS LaunchAgent](#macos-launchagent) | Always-on gateway after login on a Mac | Host `~/.nanobot` |
 
-| Runtime | Use it for | State location | Useful first command |
-|---|---|---|---|
-| Docker Compose | Repeatable container runs on Linux servers or workstations | Bind-mount `~/.nanobot` to `/home/nanobot/.nanobot` | `docker compose run --rm nanobot-cli agent -m "Hello!"` |
-| Docker CLI | Manual container testing or small one-off hosts | Bind-mount `~/.nanobot` to `/home/nanobot/.nanobot` | `docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot status` |
-| systemd user service | Linux user-level gateway that restarts automatically | Host user's `~/.nanobot` unless you pass explicit paths | `systemctl --user status nanobot-gateway` |
-| macOS LaunchAgent | macOS gateway that starts after login | Host user's `~/.nanobot` unless the plist passes explicit paths | `launchctl list | grep ai.nanobot.gateway` |
+## Render
 
-## Docker
-
-> [!TIP]
-> The `-v ~/.nanobot:/home/nanobot/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
-> The container runs as the non-root user `nanobot` (UID 1000) and reads config from `/home/nanobot/.nanobot`. Always mount your host config directory to `/home/nanobot/.nanobot`, not `/root/.nanobot`.
-> If you get **Permission denied**, fix ownership on the host first: `sudo chown -R 1000:1000 ~/.nanobot`, or pass `--user $(id -u):$(id -g)` to match your host UID. Podman users can use `--userns=keep-id` instead.
->
-> [!IMPORTANT]
-> Official Docker usage currently means building from this repository with the included `Dockerfile`. Docker Hub images under third-party namespaces are not maintained or verified by HKUDS/nanobot; do not mount API keys or bot tokens into them unless you trust the publisher.
+Deploy the gateway and bundled WebUI together on Render with a persistent disk so your config, sessions, memory, and automations survive restarts.
 
 > [!IMPORTANT]
-> The gateway and WebSocket channel default to `host: "127.0.0.1"` in `config.json` (set in `nanobot/config/schema.py`). Docker `-p` port forwarding cannot reach a container's loopback interface, so for the host or LAN to reach the exposed ports you must set both binds to `0.0.0.0` in `~/.nanobot/config.json` before starting the container. To serve the bundled WebUI from Docker, enable the WebSocket channel and protect bootstrap with a secret:
->
-> ```json
-> {
->   "gateway": { "host": "0.0.0.0" },
->   "channels": {
->     "websocket": {
->       "enabled": true,
->       "host": "0.0.0.0",
->       "port": 8765,
->       "tokenIssueSecret": "your-secret-here"
->     }
->   }
-> }
-> ```
->
-> When the WebSocket `host` is `0.0.0.0`, the channel refuses to start unless `token` or `tokenIssueSecret` is also configured. See [`webui.md#lan-access`](./webui.md#lan-access) for details.
+> Requires a paid Render Starter plan because persistent disks are not available on the free tier. Have your `ANTHROPIC_API_KEY` ready, and generate a strong private password for `NANOBOT_WEB_TOKEN` (for example with `openssl rand -hex 32`).
 
-### Docker Compose
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HKUDS/nanobot) · [Review blueprint](../render.yaml)
+
+1. Click **Deploy to Render**, sign in, and review the blueprint (one Starter web service + 1 GB persistent disk).
+2. Enter your `ANTHROPIC_API_KEY` and set `NANOBOT_WEB_TOKEN` to a strong random password (save it in your password manager).
+3. Create the blueprint and wait for the status to reach **Live** (the first build takes a few minutes).
+4. Open your `onrender.com` URL and sign in with `NANOBOT_WEB_TOKEN`.
+
+Automatic deploys are disabled by default so upstream changes do not unexpectedly restart your bot. To update later, open the Render Dashboard and click **Manual Deploy → Deploy latest commit**.
+
+## Docker Compose
+
+On a Linux host with Git and Docker Compose installed (no host Python required):
 
 ```bash
-docker compose run --rm nanobot-cli onboard   # first-time setup
-vim ~/.nanobot/config.json                     # add API keys
-docker compose up -d nanobot-gateway           # start gateway
+git clone https://github.com/HKUDS/nanobot.git
+cd nanobot
+docker compose up -d
+docker compose logs
 ```
 
+On first boot, Compose creates `~/.nanobot/config.json` with container network settings and a random WebUI password printed in the logs. Open `http://<your-host>:8765`, enter that password, and configure your provider and model in **Settings → Models**.
+
+- **Set your own password:** Export `NANOBOT_WEB_TOKEN="your-secret"` before running `docker compose up -d` for the first time.
+- **Common commands:**
+
 ```bash
-docker compose run --rm nanobot-cli agent -m "Hello!"   # run CLI
-docker compose logs -f nanobot-gateway                   # view logs
+docker compose run --rm nanobot-cli agent -m "Hello!"   # test CLI
+docker compose logs -f nanobot-gateway                   # follow logs
+curl --fail http://127.0.0.1:18790/health                # health check
 docker compose down                                      # stop
 ```
 
-### Docker
+- **Preinstall chat channels into the image** (recommended when the container has slow or no PyPI access):
 
 ```bash
-# Build the image
-docker build -t nanobot .
-
-# Initialize config (first time only)
-docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
-
-# Edit config on host to add API keys
-vim ~/.nanobot/config.json
-
-# Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat).
-# Mirrors the security caps and port mappings declared in docker-compose.yml:
-#   - `--cap-drop ALL --cap-add SYS_ADMIN` + unconfined apparmor/seccomp are required
-#     when `tools.exec.sandbox: "bwrap"` is enabled (bwrap needs CAP_SYS_ADMIN for
-#     user namespaces). Without them, `bwrap` exits with `clone3: Operation not permitted`.
-#   - `-p 8765:8765` exposes the WebSocket channel / WebUI alongside the gateway health
-#     endpoint on 18790.
-docker run \
-  --cap-drop ALL --cap-add SYS_ADMIN \
-  --security-opt apparmor=unconfined \
-  --security-opt seccomp=unconfined \
-  -v ~/.nanobot:/home/nanobot/.nanobot \
-  -p 18790:18790 -p 8765:8765 \
-  nanobot gateway
-
-# Or run a single command
-docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot agent -m "Hello!"
-docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot status
+NANOBOT_CHANNELS=telegram,slack docker compose build
 ```
+
+- **Remote access tip:** For a remote server, either restrict port `8765` with a firewall or connect over an SSH tunnel (`ssh -L 8765:127.0.0.1:8765 user@HOST`) and open `http://127.0.0.1:8765` locally.
+
+<details>
+<summary>Reusing an existing config, permissions, manual Docker CLI, and bwrap sandbox</summary>
+
+- **Reusing an existing `config.json`:** Docker port forwarding cannot reach `127.0.0.1` inside a container. Set both `gateway.host` and `channels.websocket.host` to `"0.0.0.0"` and configure `channels.websocket.tokenIssueSecret` (see [LAN Access](./webui.md#lan-access)). Keep port `18790` (health check) bound to `127.0.0.1` on the host.
+- **File permissions:** The container runs as UID `1000` (`nanobot`) and mounts `~/.nanobot` to `/home/nanobot/.nanobot`. If you see **Permission denied**, run `sudo chown -R 1000:1000 ~/.nanobot` on the host (or pass `--user $(id -u):$(id -g)` / Podman `--userns=keep-id`).
+- **Official image note:** Build from this repository's `Dockerfile`; third-party images on Docker Hub are not maintained by HKUDS/nanobot.
+- **Linux `bwrap` shell sandbox:** If you enable `"tools.exec.sandbox": "bwrap"`, start Compose with the bwrap override file so bubblewrap can create nested namespaces (requires host unprivileged user namespaces):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.bwrap.yml up -d nanobot-gateway
+```
+
+- **Manual Docker CLI:**
+
+```bash
+docker build -t nanobot .
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot agent -m "Hello!"
+docker run \
+  --cap-drop ALL --cap-add CHOWN --cap-add SETGID --cap-add SETUID \
+  --security-opt no-new-privileges:true \
+  -v ~/.nanobot:/home/nanobot/.nanobot \
+  -p 127.0.0.1:18790:18790 -p 8765:8765 \
+  nanobot gateway
+```
+
+</details>
+
+<details>
+<summary>Cloudflare Tunnel + Cloudflare Access</summary>
+
+If you place a local `cloudflared` tunnel with Cloudflare Access in front of nanobot, you can let Cloudflare Access handle browser authentication instead of a WebUI password:
+
+```json
+{
+  "gateway": { "host": "127.0.0.1" },
+  "channels": {
+    "websocket": {
+      "host": "127.0.0.1",
+      "port": 8765,
+      "publicWsUrl": "wss://nanobot.example.com/",
+      "trustedProxyAuth": {
+        "trustedPeerCidrs": ["127.0.0.1/32", "::1/128"],
+        "assertionHeader": "Cf-Access-Jwt-Assertion"
+      }
+    }
+  }
+}
+```
+
+nanobot requires both a direct loopback connection and a non-empty `Cf-Access-Jwt-Assertion` header (standard proxy headers like `X-Forwarded-*` are rejected). Because nanobot trusts the tunnel rather than cryptographically validating the JWT, never expose port `8765` directly to untrusted networks.
+
+</details>
+
+## Switch an Existing Gateway to a Service
+
+Before installing a Linux or macOS service, stop any manually running gateway so the ports do not conflict:
+
+- Close WebUI/TUI windows that might restart the gateway.
+- Run `nanobot gateway stop` (or press `Ctrl+C` in a foreground terminal). Pass the same `--config` and `--workspace` if you use a custom instance.
 
 ## Linux Service
 
-Run the gateway as a systemd user service so it starts automatically and restarts on failure.
-
-Preview the generated unit first:
+Run the gateway as a `systemd` user service so it starts automatically and restarts on failure:
 
 ```bash
-nanobot gateway install-service --manager systemd --dry-run
+nanobot gateway install-service --manager systemd --dry-run   # preview
+nanobot gateway install-service --manager systemd             # install & start
 ```
 
-Install, enable, and start it:
-
-```bash
-nanobot gateway install-service --manager systemd
-```
-
-For a custom instance, pass the same config/workspace selector you use to run the gateway:
+For a custom instance, pass `--name`, `--config`, and `--workspace`:
 
 ```bash
 nanobot gateway install-service \
@@ -128,53 +148,28 @@ nanobot gateway install-service \
   --workspace ~/.nanobot-telegram/workspace
 ```
 
-Common operations:
+Common commands:
 
 ```bash
-systemctl --user status nanobot-gateway        # check status
-systemctl --user restart nanobot-gateway       # restart after config changes
-journalctl --user -u nanobot-gateway -f        # follow logs
+systemctl --user status nanobot-gateway
+systemctl --user restart nanobot-gateway
+journalctl --user -u nanobot-gateway -f
 nanobot gateway uninstall-service --manager systemd
 ```
 
-The installer writes `~/.config/systemd/user/nanobot-gateway.service`, runs
-`systemctl --user daemon-reload`, enables the unit, and restarts it. It uses the
-current Python executable with `python -m nanobot gateway --foreground`, so the
-service runs in the same environment you used to install nanobot.
-
-> **Note:** User services only run while you are logged in. To keep the gateway running after logout, enable lingering:
->
-> ```bash
-> loginctl enable-linger $USER
-> ```
+> [!TIP]
+> To keep a user service running after you log out of Linux, enable lingering: `loginctl enable-linger $USER`.
 
 ## macOS LaunchAgent
 
-Use a LaunchAgent when you want `nanobot gateway` to stay online after you log in, without keeping a terminal open.
-
-Preview the generated plist first:
+Run the gateway automatically after you log in on macOS without keeping a terminal open:
 
 ```bash
-nanobot gateway install-service --manager launchd --dry-run
+nanobot gateway install-service --manager launchd --dry-run   # preview
+nanobot gateway install-service --manager launchd             # install & start
 ```
 
-Install, load, enable, and start it:
-
-```bash
-nanobot gateway install-service --manager launchd
-```
-
-For a custom instance:
-
-```bash
-nanobot gateway install-service \
-  --manager launchd \
-  --name nanobot-telegram \
-  --config ~/.nanobot-telegram/config.json \
-  --workspace ~/.nanobot-telegram/workspace
-```
-
-Common operations:
+Common commands:
 
 ```bash
 launchctl list | grep ai.nanobot.gateway
@@ -182,8 +177,4 @@ launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway
 nanobot gateway uninstall-service --manager launchd
 ```
 
-The installer writes `~/Library/LaunchAgents/ai.nanobot.gateway.plist`, uses the
-current Python executable with `python -m nanobot gateway --foreground`, and
-writes LaunchAgent logs under `~/.nanobot/logs/`.
-
-> **Note:** if startup fails with "address already in use", stop the manually started `nanobot gateway` process first.
+Logs are written under `~/.nanobot/logs/`. If startup fails with "address already in use", stop any manually started gateway first.

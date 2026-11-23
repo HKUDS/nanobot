@@ -1,0 +1,92 @@
+{
+  "setup": {
+    "docsLabel": "Abrir guía de Slack",
+    "officialLabel": "Abrir aplicaciones de Slack",
+    "actions": {
+      "slack-manifest": "Copiar manifiesto de la aplicación"
+    },
+    "fields": {
+      "appToken": {
+        "label": "Token de la app",
+        "placeholder": "xapp-..."
+      },
+      "botToken": {
+        "label": "Token del bot",
+        "placeholder": "xoxb-..."
+      },
+      "groupPolicy": {
+        "label": "Reglas de grupo",
+        "choices": {
+          "mention": "Solo menciones",
+          "open": "Todos los mensajes",
+          "allowlist": "Lista de permitidos"
+        }
+      },
+      "mode": {
+        "label": "Modo de conexión",
+        "choices": {
+          "socket": "Modo de enchufe"
+        }
+      },
+      "webhookPath": {
+        "label": "Ruta del webhook"
+      },
+      "replyInThread": {
+        "label": "Respuestas en hilo",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "reactEmoji": {
+        "label": "Leer emojis"
+      },
+      "doneEmoji": {
+        "label": "emoji hecho"
+      },
+      "includeThreadContext": {
+        "label": "Contexto del hilo",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Límite de contexto"
+      },
+      "allowFrom": {
+        "label": "Usuarios permitidos"
+      },
+      "groupAllowFrom": {
+        "label": "Canales permitidos"
+      },
+      "groupRequireMention": {
+        "label": "Exigir mención en canales",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "dm_enabled": {
+        "label": "Habilitar mensajes directos",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "dm_policy": {
+        "label": "Acceso a mensajes directos",
+        "choices": {
+          "allowlist": "Lista de permitidos",
+          "open": "Abierto"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Usuarios de DM permitidos"
+      },
+      "useProxy": {
+        "label": "Usar proxy"
+      }
+    }
+  }
+}

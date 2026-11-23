@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "Abrir guia do QQ",
+    "officialLabel": "Abrir console do bot QQ",
+    "sections": {
+      "credentials": "Credenciais manuais",
+      "advanced": "Avançado"
+    },
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "App ID do bot QQ"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Usuários permitidos",
+        "placeholder": "Open IDs separados por vírgulas"
+      },
+      "msgFormat": {
+        "label": "Formato das mensagens",
+        "choices": {
+          "plain": "Texto simples",
+          "markdown": "Markdown"
+        }
+      },
+      "ackMessage": {
+        "label": "Mensagem de recebimento"
+      },
+      "mediaDir": {
+        "label": "Diretório de mídia"
+      },
+      "downloadChunkSize": {
+        "label": "Tamanho do bloco (bytes)"
+      },
+      "downloadMaxBytes": {
+        "label": "Limite de download (bytes)"
+      },
+      "showCompactionNotices": {
+        "label": "Avisos de compactação",
+        "choices": {
+          "true": "Ativado",
+          "false": "Desativado"
+        }
+      }
+    }
+  },
+  "custom": {
+    "scanTitle": "Escaneie com o QQ no celular",
+    "waiting": "Aguardando leitura…",
+    "connected": "Vinculação concluída",
+    "stopped": "Cancelado",
+    "connecting": "Preparando QR code…",
+    "qrAlt": "QR code de vinculação do QQ",
+    "scanAgainWarning": "Vincular este bot do QQ novamente pode interromper outros aplicativos que o utilizam. Se o App Secret for redefinido, o segredo antigo será invalidado e esses aplicativos precisarão do novo.",
+    "configured": "Configurado",
+    "bind": "Vincular bot QQ",
+    "rebind": "Vincular bot novamente",
+    "refresh": "Atualizar QR code",
+    "retry": "Tentar novamente",
+    "expired": "QR code expirado",
+    "failed": "Falha na vinculação",
+    "cancelFailed": "Não foi possível cancelar",
+    "retrying": "Tentando novamente…",
+    "manualSetup": "Inserir credenciais manualmente"
+  }
+}

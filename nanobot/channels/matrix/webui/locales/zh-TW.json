@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "開啟 Matrix 設定指南",
+    "officialLabel": "開啟 Matrix 用戶端列表",
+    "fields": {
+      "homeserver": {
+        "label": "賬戶主機",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "使用者 ID",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "密碼",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "存取權杖",
+        "placeholder": "輸入存取權杖"
+      },
+      "deviceId": {
+        "label": "裝置 ID",
+        "placeholder": "使用存取權杖時必填"
+      },
+      "groupPolicy": {
+        "label": "群聊規則",
+        "choices": {
+          "mention": "提及回覆",
+          "open": "全部訊息",
+          "allowlist": "允許清單",
+          "listen": "旁聽（被提及時回覆）"
+        }
+      },
+      "groupPolicyOverrides": {
+        "label": "按房間的規則例外（JSON）"
+      },
+      "allowFrom": {
+        "label": "允許使用者"
+      },
+      "e2eeEnabled": {
+        "label": "端對端加密",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS 驗證",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "停止等待（秒）"
+      },
+      "maxMediaBytes": {
+        "label": "媒體上限（位元組）"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "下載併發"
+      },
+      "groupAllowFrom": {
+        "label": "允許群組"
+      },
+      "allowRoomMentions": {
+        "label": "房間提及",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "replyToMessage": {
+        "label": "引用回覆",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "streaming": {
+        "label": "串流輸出",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "useProxy": {
+        "label": "使用代理"
+      }
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "setup": {
+    "docsLabel": "Mở hướng dẫn NapCat",
+    "officialLabel": "Mở tài liệu NapCat",
+    "fields": {
+      "wsUrl": {
+        "label": "URL WebSocket",
+        "placeholder": "ws://127.0.0.1:3001"
+      },
+      "accessToken": {
+        "label": "Token truy cập",
+        "placeholder": "Token tùy chọn"
+      },
+      "groupPolicy": {
+        "label": "Quy tắc nhóm",
+        "choices": {
+          "mention": "Chỉ khi được nhắc",
+          "open": "Mọi tin nhắn",
+          "allowlist": "Danh sách cho phép"
+        }
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID QQ, phân tách bằng dấu phẩy"
+      },
+      "groupPolicyOverrides": {
+        "label": "Ngoại lệ nhóm (JSON)"
+      },
+      "welcomeNewMembers": {
+        "label": "Chào thành viên mới",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "maxImageBytes": {
+        "label": "Giới hạn ảnh (byte)"
+      }
+    }
+  }
+}

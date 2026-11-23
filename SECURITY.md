@@ -21,6 +21,11 @@ We aim to respond to security reports within 48 hours.
 **CRITICAL**: Never commit API keys to version control.
 
 ```bash
+# ✅ Best: Use environment variable references in config (never writes the key to disk)
+# In ~/.nanobot/config.json:
+#   "apiKey": "${ANTHROPIC_API_KEY}"
+# Then supply the key at runtime via env var or Docker secret.
+
 # ✅ Good: Store in config file with restricted permissions
 chmod 600 ~/.nanobot/config.json
 
@@ -28,9 +33,9 @@ chmod 600 ~/.nanobot/config.json
 ```
 
 **Recommendations:**
-- Store API keys in `~/.nanobot/config.json` with file permissions set to `0600`
-- Consider using environment variables for sensitive keys
-- Use OS keyring/credential manager for production deployments
+- **Prefer environment variable references** (`${VAR}`) in config — the config file stores the `${VAR}` placeholder, and the plaintext value only exists in memory at runtime. See [Configuration: Environment Variables for Secrets](https://nanobot.wiki/docs/latest/use-nanobot/configuration/#environment-variables-for-secrets) for details.
+- When plaintext keys are stored in `~/.nanobot/config.json`, set file permissions to `0600` (`chmod 600`)
+- Consider using an OS keyring/credential manager for production deployments
 - Rotate API keys regularly
 - Use separate API keys for development and production
 
@@ -55,16 +60,16 @@ chmod 600 ~/.nanobot/config.json
 ```
 
 **Security Notes:**
-- In `v0.1.4.post3` and earlier, an empty `allowFrom` allowed all users. Since `v0.1.4.post4`, empty `allowFrom` denies all access by default — set `["*"]` to explicitly allow everyone.
-- Get your Telegram user ID from `@userinfobot`
-- Use WhatsApp sender IDs as full phone numbers with country code and no leading `+`
-- Review access logs regularly for unauthorized access attempts
+- An empty `allowFrom` denies all access by default (or uses DM pairing where supported). Set `["*"]` only if you intentionally want public access.
+- Get your Telegram user ID from `@userinfobot`.
+- Use WhatsApp sender IDs as full phone numbers with country code and no leading `+`.
+- Review access logs regularly for unauthorized access attempts.
 
 ### 3. Shell Command Execution
 
 The `exec` tool can execute shell commands. While dangerous command patterns are blocked, you should:
 
-- ✅ **Enable the bwrap sandbox** (`"tools.exec.sandbox": "bwrap"`) for kernel-level isolation (Linux only)
+- ✅ **Enable the exec sandbox** (`"tools.exec.sandbox": "bwrap"` on Linux, `"seatbelt"` on macOS) for kernel-level isolation
 - ✅ Review all tool usage in agent logs
 - ✅ Understand what commands the agent is running
 - ✅ Use a dedicated user account with limited privileges
@@ -72,18 +77,25 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 - ❌ Don't disable security checks
 - ❌ Don't run on systems with sensitive data without careful review
 
-**Exec sandbox (bwrap):**
+**Exec sandbox (bwrap on Linux, seatbelt on macOS):**
 
-On Linux, set `"tools.exec.sandbox": "bwrap"` to wrap every shell command in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox. This uses Linux kernel namespaces to restrict what the process can see:
+Set `"tools.exec.sandbox"` to wrap every shell command in an OS sandbox. Both backends restrict filesystem access:
 
 - Workspace directory → **read-write** (agent works normally)
 - Media directory → **read-only** (can read uploaded attachments)
 - System directories (`/usr`, `/bin`, `/lib`) → **read-only** (commands still work)
-- Config files and API keys (`~/.nanobot/config.json`) → **hidden** (masked by tmpfs)
+- The workspace's parent, which holds `~/.nanobot/config.json` in the default layout → **denied**, except for explicitly exposed roots
+- Unlisted paths, including `~/.ssh` in the default layout → **denied**
 
-Requires `bwrap` installed (`apt install bubblewrap`). Pre-installed in the official Docker image. **Not available on macOS or Windows** — bubblewrap depends on Linux kernel namespaces.
+| Backend | Value | Platform | Requires |
+|---------|-------|----------|----------|
+| [bubblewrap](https://github.com/containers/bubblewrap) | `"bwrap"` | Linux | `bwrap` (`apt install bubblewrap`). Pre-installed in the official Docker image. |
+| Seatbelt | `"seatbelt"` | macOS | `sandbox-exec(1)`, shipped with macOS. |
 
-Enabling the sandbox also automatically activates `restrictToWorkspace` for file tools.
+**Windows has no OS shell sandbox:** nanobot logs a warning and runs commands unsandboxed (disable shell execution if workspace guards are not enough).
+
+> [!NOTE]
+> The OS sandbox isolates the filesystem (not network access) and automatically enables `restrictToWorkspace` for file tools. Keep `~/.nanobot/config.json` and secrets outside your workspace, and use narrow `sandboxRoBinds` / `sandboxRwBinds` only when a tool needs extra paths. On macOS Seatbelt, `HOME` and `TMPDIR` point inside the workspace.
 
 **Blocked patterns:**
 - `rm -rf /` - Root filesystem deletion
@@ -107,12 +119,12 @@ File operations have path traversal protection, but:
 **API Calls:**
 - All external API calls use HTTPS by default
 - Timeouts are configured to prevent hanging requests
-- The OpenAI-compatible API server must set `api.api_key` when binding to `0.0.0.0` or `::`; otherwise startup fails to prevent unauthenticated network access
 - Consider using a firewall to restrict outbound connections if needed
 
 **WhatsApp:**
 - Keep the neonize session database under `~/.nanobot/whatsapp-auth` secure (mode 0700).
 - Use `nanobot channels login whatsapp --force` to remove and recreate the local session database when rotating linked devices.
+- The separate `whatsapp_agent` channel authenticates with a per-agent API token. Treat it as a secret, prefer `${WA_AGENT_TOKEN}` over a literal value in `config.json`, and regenerate it in WhatsApp when it may have leaked. Its poll cursor holds no token material.
 
 ### 6. Dependency Security
 
@@ -128,9 +140,9 @@ pip install --upgrade nanobot-ai
 ```
 
 **Important Notes:**
-- Keep `litellm` updated to the latest version for security fixes
-- Run `pip-audit` regularly, including optional channel dependencies such as `nanobot-ai[whatsapp]`
-- Subscribe to security advisories for nanobot and its dependencies
+- Keep `nanobot-ai` and its dependencies up to date for security fixes.
+- Run `pip-audit` regularly after enabling chat channels in production.
+- Subscribe to security advisories for nanobot and its dependencies.
 
 ### 7. Production Deployment
 
@@ -237,7 +249,7 @@ If you suspect a security breach:
 ⚠️ **Current Security Limitations:**
 
 1. **No Rate Limiting** - Users can send unlimited messages (add your own if needed)
-2. **Plain Text Config** - API keys stored in plain text (use keyring for production)
+2. **Plain Text Config** - API keys stored in plain text in `config.json` (prefer `${VAR}` env references when possible, or use keyring for production)
 3. **No Session Management** - No automatic session expiry
 4. **Limited Command Filtering** - Only blocks obvious dangerous patterns (enable the bwrap sandbox for kernel-level isolation on Linux)
 5. **No Audit Trail** - Limited security event logging (enhance as needed)
@@ -260,7 +272,7 @@ Before deploying nanobot:
 
 ## Updates
 
-**Last Updated**: 2026-04-05
+**Last Updated**: 2026-07-21
 
 For the latest security updates and announcements, check:
 - GitHub Security Advisories: https://github.com/HKUDS/nanobot/security/advisories

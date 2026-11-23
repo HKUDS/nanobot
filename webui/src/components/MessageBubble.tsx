@@ -1,54 +1,63 @@
 import {
   useCallback,
+  useContext,
   useEffect,
+  useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import {
-  Check,
-  ChevronRight,
-  Clock3,
-  Copy,
-  ImageIcon,
-  Sparkles,
-  Wrench,
-} from "lucide-react";
+import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Info, Quote, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { DisclosureContent } from "@/components/ui/disclosure";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
-import { CliAppMentionText } from "@/components/CliAppMentionText";
-import { ImageLightbox } from "@/components/ImageLightbox";
-import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { CodeBlock } from "@/components/CodeBlock";
+import { SessionHandleLabel } from "@/components/SessionHandleLabel";
+import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
+import { ImageGallery } from "@/components/ImageGallery";
+import { InlineImageProvider, useInlineImages } from "@/components/InlineImageContext";
+import { INLINE_REFERENCE_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/components/InlineTokenHighlight";
+import { MarkdownText } from "@/components/MarkdownText";
+import { PendingEdgeOverlay, usePendingEdgeState, type PendingEdgeState } from "@/components/PendingEdgeOverlay";
+import { SlashCommandText } from "@/components/SlashCommandText";
+import { DiffViewportContext } from "@/components/thread/activity/DiffViewportContext";
+import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
+import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
+import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
+import { UserMessageText } from "@/components/UserMessageText";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { HoverHint } from "@/components/ui/tooltip";
+import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { formatTurnLatency } from "@/lib/format";
+import { fmtDateTime, formatMessageEndTime, formatMessageHoverTime } from "@/lib/format-time";
 import { toMediaAttachment } from "@/lib/media";
+import { matchingSlashCommand } from "@/lib/slash-command";
+import { parseQuotedUserMessage } from "@/lib/user-message-quote";
 import type {
   CliAppInfo,
   McpPresetInfo,
+  SlashCommand,
   UICliAppAttachment,
   UIMcpPresetAttachment,
   UIImage,
   UIMediaAttachment,
   UIMessage,
+  MessageDeliveryErrorKind,
+  MessageDeliveryStatus,
 } from "@/lib/types";
 
 interface MessageBubbleProps {
   message: UIMessage;
-  /** When false, hide the assistant reply copy button (mid-turn text before more agent activity). Default true. */
-  showAssistantCopyAction?: boolean;
+  temporary?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  slashCommands?: SlashCommand[];
   onOpenFilePreview?: (path: string) => void;
-  onForkFromHere?: () => void;
+  contextMenu?: ReactNode;
 }
 
 function ForkArrowIcon({ className }: { className?: string }) {
@@ -71,35 +80,11 @@ function ForkArrowIcon({ className }: { className?: string }) {
   );
 }
 
-/**
- * Render a single message. Following agent-chat-ui: user turns are a rounded
- * "pill" right-aligned with a muted fill; assistant turns render as bare
- * markdown so prose/code read like a document rather than a chat bubble.
- * Each turn fades+slides in for a touch of motion polish.
- *
- * Trace rows (tool-call hints, progress breadcrumbs) render as a subdued
- * collapsible group so intermediate steps never masquerade as replies.
- */
-export function MessageBubble({
-  message,
-  showAssistantCopyAction = true,
-  cliApps = [],
-  mcpPresets = [],
-  onOpenFilePreview,
-  onForkFromHere,
-}: MessageBubbleProps) {
+function useMessageCopy(content: string) {
   const { t } = useTranslation();
+  const showToast = useToast();
   const [copied, setCopied] = useState(false);
   const copyResetRef = useRef<number | null>(null);
-  const baseAnim = "animate-in fade-in-0 slide-in-from-bottom-1 duration-300";
-  const mentionCliApps = useMemo(
-    () => mergeCliMentionApps(cliApps, message.cliApps),
-    [cliApps, message.cliApps],
-  );
-  const mentionMcpPresets = useMemo(
-    () => mergeMcpMentionPresets(mcpPresets, message.mcpPresets),
-    [mcpPresets, message.mcpPresets],
-  );
 
   useEffect(() => {
     return () => {
@@ -109,9 +94,12 @@ export function MessageBubble({
     };
   }, []);
 
-  const onCopyAssistantReply = useCallback(() => {
-    void copyTextToClipboard(message.content).then((ok) => {
-      if (!ok) return;
+  const onCopy = useCallback(() => {
+    void copyTextToClipboard(content).then((ok) => {
+      if (!ok) {
+        showToast?.({ message: t("fileActions.failed"), tone: "error", dedupeKey: "copy-failed" });
+        return;
+      }
       setCopied(true);
       if (copyResetRef.current !== null) {
         window.clearTimeout(copyResetRef.current);
@@ -121,10 +109,324 @@ export function MessageBubble({
         copyResetRef.current = null;
       }, 1_500);
     });
-  }, [message.content]);
+  }, [content, showToast, t]);
+
+  const label = copied ? t("message.copiedReply") : t("message.copyReply");
+  return { copied, label, onCopy };
+}
+
+function messageCopyContent(message: UIMessage, t: (key: string) => string) {
+  if (message.renderAs === "text") return message.content;
+  return message.role === "assistant" && message.compactReply === "empty"
+    ? t("thread.compaction.empty")
+    : message.role === "assistant" && message.compactReply === "failed"
+      ? t("thread.compaction.failed")
+      : message.content;
+}
+
+export function MessageCopyButton({ message, className }: { message: UIMessage; className?: string }) {
+  const { t } = useTranslation();
+  const content = messageCopyContent(message, t);
+  const { copied, label, onCopy } = useMessageCopy(content);
+  if (!content.trim()) return null;
+  return <HoverHint content={label} side="top" align="center"><button type="button" data-message-block-copy-action
+    onClick={onCopy} aria-label={label}
+    className={cn(
+      "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
+      "text-muted-foreground transition-[color] hover:text-foreground",
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none",
+      className,
+    )}>
+    {copied ? <Check className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+      : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />}
+  </button></HoverHint>;
+}
+
+interface MessageBlockMenuActivity {
+  label: string;
+  expanded: boolean;
+  controls: string;
+  onToggle: () => void;
+}
+
+interface MessageBlockMenuActionsProps {
+  message: UIMessage;
+  isTurnStreaming?: boolean;
+  onForkFromHere?: () => void;
+  activity?: MessageBlockMenuActivity;
+  sheet?: boolean;
+}
+
+export function MessageBlockMenuActions({
+  message,
+  isTurnStreaming = false,
+  onForkFromHere,
+  activity,
+  sheet = false,
+}: MessageBlockMenuActionsProps) {
+  const { t } = useTranslation();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const content = messageCopyContent(message, t);
+  const hasText = content.trim().length > 0;
+  const showFork = message.role === "assistant"
+    && !message.isStreaming
+    && !isTurnStreaming
+    && hasText
+    && onForkFromHere !== undefined;
+  const timestamp = message.role === "assistant"
+    && typeof message.completedAt === "number"
+    && Number.isFinite(message.completedAt)
+    ? message.completedAt
+    : message.createdAt;
+  const timestampLabel = typeof timestamp === "number" && Number.isFinite(timestamp)
+    ? formatMessageEndTime(timestamp)
+    : "";
+  const automationSourceLabel = message.role === "assistant"
+    && ["cron", "local_trigger", "trigger"].includes(message.source?.kind ?? "")
+    ? message.source?.label?.trim() || t("message.automationSourceFallback")
+    : "";
+
+  const details = <>
+    <FallbackResponseSources
+      sources={message.role === "assistant" ? message.responseSources : undefined}
+      className="min-h-[var(--message-block-control-size)] gap-1"
+      badgeClassName="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
+    />
+    {timestampLabel || automationSourceLabel ? (
+      <div
+        data-message-block-metadata
+        className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4 text-muted-foreground", sheet ? "px-2 text-xs" : "text-[10px]")}
+      >
+        {timestampLabel ? (
+          <time
+            data-message-timestamp
+            data-message-created-at={message.role === "user" || undefined}
+            data-assistant-completed-at={
+              message.role === "assistant" && timestamp === message.completedAt || undefined
+            }
+            dateTime={new Date(timestamp).toISOString()}
+            className="flex min-h-[var(--message-block-control-size)] items-center tabular-nums"
+          >
+            {timestampLabel}
+          </time>
+        ) : null}
+        {automationSourceLabel ? (
+          <span
+            data-automation-trigger
+            className="flex min-h-[var(--message-block-control-size)] flex-wrap items-baseline gap-x-2 break-words"
+          >
+            <span>{t("message.automationTriggered")}</span>{" "}
+            <span>{automationSourceLabel}</span>
+          </span>
+        ) : null}
+      </div>
+    ) : null}
+  </>;
+  const fallback = message.responseSources?.find((source) => source.fallback);
+  const detailsLabel = fmtDateTime(timestamp) || automationSourceLabel
+    || (fallback ? t("message.fallbackResponse", { preset: fallback.preset }) : "");
+  const activityAction = activity && (
+    <button type="button" data-message-block-activity-action onClick={activity.onToggle}
+      aria-expanded={activity.expanded} aria-controls={activity.controls} aria-label={activity.label}
+      className={cn("inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        sheet && "w-full justify-start gap-2 px-2 text-sm hover:bg-muted/70")}>
+      <Activity className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
+      {sheet ? activity.label : null}
+    </button>
+  );
+  return (
+    <div className={sheet ? "flex w-full flex-col gap-1" : "flex flex-col items-start"}>
+      <div className={cn("flex", sheet && "flex-col items-stretch gap-1")}>
+        {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
+        {showFork ? (
+          <HoverHint content={t("message.forkFromHere")}>
+            <button type="button" onClick={onForkFromHere}
+              aria-label={t("message.forkFromHere")}
+              className={cn("inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                sheet && "w-full justify-start gap-2 px-2 text-sm")}>
+              <ForkArrowIcon className="h-3.5 w-3.5" />
+              {sheet ? t("message.forkFromHere") : null}
+            </button>
+          </HoverHint>
+        ) : null}
+        {activityAction && !sheet ? <HoverHint content={activity.label}>{activityAction}</HoverHint> : activityAction}
+      </div>
+      {sheet ? details : detailsLabel ? (
+        <Popover open={detailsOpen} onOpenChange={setDetailsOpen}>
+          <HoverHint content={detailsLabel} enabled={!detailsOpen}>
+            <PopoverTrigger asChild>
+              <button type="button" aria-label={detailsLabel}
+                className="ms-[calc((var(--message-block-action-width)-0.875rem)/2)] rounded-mark text-start text-[10px] leading-4 tabular-nums text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {timestampLabel ? <time data-message-hover-time dateTime={new Date(timestamp).toISOString()}>{formatMessageHoverTime(timestamp)}</time>
+                  : <Info className="h-3.5 w-3.5" aria-hidden />}
+              </button>
+            </PopoverTrigger>
+          </HoverHint>
+          <PopoverContent side="bottom" collisionPadding={12} className="w-max max-w-64 [--message-block-control-size:1.75rem]">{details}</PopoverContent>
+        </Popover>
+      ) : null}
+    </div>
+  );
+}
+
+function deliveryErrorCopy(
+  kind: MessageDeliveryErrorKind | undefined,
+  t: (key: string) => string,
+): { title: string; body: string } {
+  switch (kind) {
+    case "message_too_big":
+      return {
+        title: t("errors.messageTooBig.title"),
+        body: t("errors.messageTooBig.body"),
+      };
+    case "workspace_scope_rejected":
+      return {
+        title: t("errors.workspaceScopeRejected.title"),
+        body: t("errors.workspaceScopeRejected.body"),
+      };
+    case "turn_rejected":
+    case undefined:
+      return {
+        title: t("errors.turnRejected.title"),
+        body: t("errors.turnRejected.body"),
+      };
+    default: {
+      const _exhaustive: never = kind;
+      return { title: String(_exhaustive), body: "" };
+    }
+  }
+}
+
+function UserDeliveryStatus({
+  status,
+  errorKind,
+}: {
+  status: MessageDeliveryStatus | undefined;
+  errorKind: MessageDeliveryErrorKind | undefined;
+}) {
+  const { t } = useTranslation();
+  if (status !== "sending" && status !== "failed") return null;
+  if (status === "sending") {
+    return (
+      <span
+        role="status"
+        className="inline-flex items-center gap-1 text-[12px] leading-none text-muted-foreground"
+      >
+        <Clock3 className="h-3.5 w-3.5" aria-hidden />
+        {t("message.delivery.sending")}
+      </span>
+    );
+  }
+
+  const label = t("message.delivery.failed");
+  const { title, body } = deliveryErrorCopy(errorKind, t);
+  return (
+    <>
+      <HoverHint
+        side="top"
+        align="end"
+        contentClassName="max-w-72 px-3 py-2.5 text-left"
+        content={<>
+          <p className="font-medium text-popover-foreground">{title}</p>
+          <p className="mt-1 leading-relaxed text-muted-foreground">{body}</p>
+        </>}
+      >
+          <button
+            type="button"
+            aria-label={`${label}: ${title}`}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-sm text-[12px] leading-none",
+              "text-destructive/80 transition-colors hover:text-destructive",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "dark:text-red-400/80 dark:hover:text-red-400",
+            )}
+          >
+            <CircleAlert className="h-3.5 w-3.5" aria-hidden />
+            {label}
+          </button>
+      </HoverHint>
+      <span role="alert" aria-live="assertive" className="sr-only">
+        {title}. {body}
+      </span>
+    </>
+  );
+}
+
+function IncomingSessionMessage({
+  message,
+  contextMenu,
+  onOpenFilePreview,
+}: {
+  message: UIMessage;
+  contextMenu?: ReactNode;
+  onOpenFilePreview?: (path: string) => void;
+}) {
+  const handle = message.sessionMessage!.session;
+  const handleName = `@${handle.name}`;
+
+  return (
+    <div
+      data-session-message
+      className="group relative mr-auto w-fit min-w-0 max-w-[min(85%,36rem)] text-reading"
+    >
+      <div className="mb-1.5 flex items-center px-4 text-[12px] text-muted-foreground">
+        <SessionHandleLabel id={handle.id}>{handleName}</SessionHandleLabel>
+      </div>
+      <div data-theme-surface className="relative min-w-0 rounded-floating bg-secondary/70 px-4 py-2">
+        {contextMenu}
+        <div data-assistant-selectable="true" className="min-w-0">
+          <MarkdownText
+            preserveStreamingLayout
+            onOpenFilePreview={onOpenFilePreview}
+          >
+            {message.content}
+          </MarkdownText>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function MessageBubble({
+  message,
+  temporary = false,
+  cliApps = [],
+  mcpPresets = [],
+  slashCommands = [],
+  onOpenFilePreview,
+  contextMenu,
+}: MessageBubbleProps) {
+  const { t } = useTranslation();
+  const mentionCliApps = useMemo(
+    () => mergeCliMentionApps(cliApps, message.cliApps),
+    [cliApps, message.cliApps],
+  );
+  const mentionMcpPresets = useMemo(
+    () => mergeMcpMentionPresets(mcpPresets, message.mcpPresets),
+    [mcpPresets, message.mcpPresets],
+  );
+  const { edgeState, completeSeal } = usePendingEdgeState(
+    message.id,
+    message.role === "user" ? message.processingStatus : undefined,
+    temporary || message.role !== "user",
+  );
+
+  if (message.kind === "compaction" && message.compaction) {
+    return <ContextCompactionNotice compaction={message.compaction} />;
+  }
 
   if (message.kind === "trace") {
-    return <TraceGroup message={message} animClass={baseAnim} />;
+    return <TraceGroup message={message} />;
+  }
+
+  if (message.role === "user" && message.sessionMessage) {
+    return (
+      <IncomingSessionMessage
+        message={message}
+        contextMenu={contextMenu}
+        onOpenFilePreview={onOpenFilePreview}
+      />
+    );
   }
 
   if (message.role === "user") {
@@ -132,163 +434,368 @@ export function MessageBubble({
     const media = message.media ?? [];
     const hasImages = images.length > 0;
     const hasMedia = media.length > 0;
-    const hasText = message.content.trim().length > 0;
+    const parsedMessage = parseQuotedUserMessage(message.content);
+    const userContent = parsedMessage.content;
+    const hasText = userContent.trim().length > 0;
+    const showDeliveryStatus =
+      message.deliveryStatus === "sending" || message.deliveryStatus === "failed";
+    const processingStatus = message.processingStatus;
+    const showProcessingStatus = !temporary && processingStatus === "pending";
+    const mediaEdgeState: PendingEdgeState = !hasText ? edgeState : "solid";
+    const mediaSealEnd = !hasText ? completeSeal : undefined;
+    const userMedia = hasImages
+      ? <ImageGallery images={images} align="right" size="compact" edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
+      : hasMedia
+        ? <MessageMedia media={media} align="right" pending={message.deliveryStatus === "sending"} edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
+        : null;
+    const quotedContext = parsedMessage.quotedContext;
+    const slashCommand = matchingSlashCommand(userContent, slashCommands);
+    const bangPrefix = /^(\s*)!/.exec(userContent);
+    const messageText = bangPrefix ? (
+      <>
+        {bangPrefix[1]}
+        <InlineTokenHighlight testId="message-shell-prefix" className="font-normal" color={INLINE_REFERENCE_HIGHLIGHT_COLOR}>
+          <span className="opacity-90">!</span>
+        </InlineTokenHighlight>
+        {userContent.slice(bangPrefix[0].length)}
+      </>
+    ) : slashCommand ? (
+      <>
+        <SlashCommandText command={slashCommand.command} />
+        <UserMessageText
+          text={userContent.slice(slashCommand.command.length)}
+          cliApps={mentionCliApps}
+          mcpPresets={mentionMcpPresets}
+          sessionMentions={message.sessionMentions}
+        />
+      </>
+    ) : (
+      <UserMessageText
+        text={userContent}
+        cliApps={mentionCliApps}
+        mcpPresets={mentionMcpPresets}
+        sessionMentions={message.sessionMentions}
+      />
+    );
     return (
       <div
-        className={cn(
-          "group ml-auto flex max-w-[min(85%,36rem)] flex-col items-end gap-1.5",
-          baseAnim,
-        )}
+        className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5"
       >
-        {hasImages ? <UserImages images={images} align="right" /> : null}
-        {!hasImages && hasMedia ? (
-          <MessageMedia media={media} align="right" />
+        {!hasText ? contextMenu : null}
+        {userMedia}
+        {quotedContext ? (
+          <UserQuotedContext
+            text={quotedContext}
+            label={t("thread.composer.quotedContext")}
+          />
         ) : null}
         {hasText ? (
-          <p
-            className={cn(
-              "ml-auto w-fit rounded-[18px] bg-secondary/70 px-4 py-2",
-              "text-left text-[16px]/[1.75] whitespace-pre-wrap break-words",
-            )}
+          <UserTextBubble
+            messageId={message.id}
+            contentKey={userContent}
+            temporary={temporary}
+            showProcessingStatus={showProcessingStatus}
+            edgeState={edgeState}
+            onSealEnd={completeSeal}
+            contextMenu={contextMenu}
           >
-            <CliAppMentionText
-              text={message.content}
-              cliApps={mentionCliApps}
-              mcpPresets={mentionMcpPresets}
-            />
-          </p>
+            {messageText}
+          </UserTextBubble>
+        ) : null}
+        {!showDeliveryStatus && showProcessingStatus ? (
+          <span role="status" className="sr-only">
+            {t("message.delivery.waiting")}
+          </span>
+        ) : null}
+        {showDeliveryStatus ? (
+            <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
+              <UserDeliveryStatus
+                status={message.deliveryStatus}
+                errorKind={message.deliveryErrorKind}
+              />
+            </div>
         ) : null}
       </div>
     );
   }
 
-  const empty = message.content.trim().length === 0;
+  const assistantContent = messageCopyContent(message, t);
+  const empty = assistantContent.trim().length === 0;
   const media = message.media ?? [];
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
   const reasoningStreaming = !!(message.role === "assistant" && message.reasoningStreaming);
   const hasReasoning = reasoning.length > 0 || reasoningStreaming;
-  const automationSourceLabel = message.source?.kind === "cron"
-    ? (message.source.label?.trim() || t("message.automationSourceFallback"))
-    : "";
-  const automationTriggeredLabel = t("message.automationTriggered");
-
-  const showAssistantActions = message.role === "assistant" && !message.isStreaming && !empty;
-  const showCopyButton = showAssistantCopyAction && showAssistantActions;
-  const showForkButton = showAssistantActions && !!onForkFromHere;
-  const copyReplyLabel = copied ? t("message.copiedReply") : t("message.copyReply");
-  const forkLabel = t("message.forkFromHere");
-  const latencyMs = message.latencyMs;
-  const showLatencyFooter =
-    message.role === "assistant"
-    && latencyMs != null
-    && !message.isStreaming
-    && (!empty || hasReasoning || media.length > 0);
-  const showAssistantFooterRow = showCopyButton || showForkButton || showLatencyFooter;
   return (
-    <div className={cn("w-full text-[15px]", baseAnim)} style={{ lineHeight: "var(--cjk-line-height)" }}>
+    <div
+      data-assistant-message
+      className="group/assistant relative w-full text-reading"
+    >
+      {contextMenu}
       {hasReasoning ? (
         <ReasoningBubble
           text={reasoning}
           streaming={reasoningStreaming}
           hasBodyBelow={!empty}
-          onOpenFilePreview={onOpenFilePreview}
         />
       ) : null}
       {empty && message.isStreaming && !hasReasoning ? (
-        <TypingDots />
+        <ThinkingState />
       ) : empty && message.isStreaming ? null : (
-        <>
-          {automationSourceLabel ? (
-            <AutomationSourceBadge
-              label={automationSourceLabel}
-              triggerLabel={automationTriggeredLabel}
-            />
-          ) : null}
-          <MarkdownText
-            streaming={!!message.isStreaming}
-            onOpenFilePreview={onOpenFilePreview}
-          >
-            {message.content}
-          </MarkdownText>
+        <InlineImageProvider>
+          <div data-assistant-selectable={message.isStreaming ? undefined : "true"}>
+            {message.renderAs === "text" ? (
+              <CodeBlock language="text" code={assistantContent} highlight={false} ansi={false} />
+            ) : (
+              /* A mode switch rebuilds Streamdown's subtree and moves the scroll anchor. */
+              <MarkdownText
+                streaming={!!message.isStreaming}
+                preserveStreamingLayout
+                onOpenFilePreview={onOpenFilePreview}
+              >
+                {assistantContent}
+              </MarkdownText>
+            )}
+          </div>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
-          {showAssistantFooterRow ? (
-            <TooltipProvider delayDuration={220} skipDelayDuration={80}>
-              <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-                {showCopyButton ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={onCopyAssistantReply}
-                        aria-label={copyReplyLabel}
-                        className={cn(
-                          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                          "transition-colors hover:bg-muted/55 hover:text-foreground",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        )}
-                      >
-                        {copied ? (
-                          <Check className="h-4 w-4" aria-hidden />
-                        ) : (
-                          <Copy className="h-4 w-4" aria-hidden />
-                        )}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" align="center">{copyReplyLabel}</TooltipContent>
-                  </Tooltip>
-                ) : null}
-                {showForkButton ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={onForkFromHere}
-                        aria-label={forkLabel}
-                        className={cn(
-                          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                          "transition-colors hover:bg-muted/55 hover:text-foreground",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        )}
-                      >
-                        <ForkArrowIcon className="h-4 w-4" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>
-                  </Tooltip>
-                ) : null}
-                {showLatencyFooter ? (
-                  <span
-                    className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
-                    title={t("message.turnLatencyTitle")}
-                  >
-                    {formatTurnLatency(latencyMs)}
-                  </span>
-                ) : null}
-              </div>
-            </TooltipProvider>
-          ) : null}
-        </>
+        </InlineImageProvider>
       )}
     </div>
   );
 }
 
-function AutomationSourceBadge({ label, triggerLabel }: { label: string; triggerLabel: string }) {
+const USER_MESSAGE_COLLAPSE_THRESHOLD_RATIO = 0.5;
+const USER_MESSAGE_COLLAPSED_HEIGHT_RATIO = 0.38;
+const MIN_USER_MESSAGE_COLLAPSE_THRESHOLD_PX = 200;
+const MIN_USER_MESSAGE_COLLAPSED_BUBBLE_PX = 160;
+const MIN_USER_MESSAGE_COLLAPSED_TEXT_PX = 96;
+const DEFAULT_COLLAPSIBLE_PADDING_BOTTOM_PX = 40;
+const COLLAPSE_SCROLL_TOP_INSET_PX = 48;
+
+interface UserTextCollapseLayout {
+  collapsible: boolean;
+  fullTextHeight: number;
+  collapsedTextHeight: number;
+}
+
+interface UserTextBubbleProps {
+  messageId: string;
+  contentKey: string;
+  temporary: boolean;
+  showProcessingStatus: boolean;
+  edgeState: PendingEdgeState;
+  onSealEnd: () => void;
+  contextMenu?: ReactNode;
+  children: ReactNode;
+}
+
+function UserTextBubble({
+  messageId,
+  contentKey,
+  temporary,
+  showProcessingStatus,
+  edgeState,
+  onSealEnd,
+  contextMenu,
+  children,
+}: UserTextBubbleProps) {
+  const { t } = useTranslation();
+  const viewport = useContext(DiffViewportContext);
+  const bubbleRef = useRef<HTMLParagraphElement>(null);
+  const contentRef = useRef<HTMLSpanElement>(null);
+  const contentId = useId();
+  const [layout, setLayout] = useState<UserTextCollapseLayout | null>(null);
+  const [expandedForId, setExpandedForId] = useState<string | null>(null);
+  const expanded = expandedForId === messageId;
+  const isCollapsible = layout?.collapsible ?? false;
+  const isCollapsed = isCollapsible && !expanded;
+
+  useLayoutEffect(() => {
+    const bubble = bubbleRef.current;
+    if (!bubble) return;
+    const scroller = viewport?.scroller.current ?? null;
+
+    const measure = () => {
+      const currentBubble = bubbleRef.current;
+      if (!currentBubble) return;
+      const scrollerHeight = scroller?.clientHeight ?? 0;
+      const referenceHeight = scrollerHeight > 0 ? scrollerHeight : window.innerHeight;
+      if (!Number.isFinite(referenceHeight) || referenceHeight <= 0) return;
+
+      const style = getComputedStyle(currentBubble);
+      const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+      const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+      const normalPaddingY = paddingTop * 2;
+      const content = contentRef.current;
+      const fullTextHeight = content
+        ? content.scrollHeight
+        : Math.max(0, currentBubble.scrollHeight - paddingTop - paddingBottom);
+      if (fullTextHeight <= 0) return;
+
+      const naturalBubbleHeight = fullTextHeight + normalPaddingY;
+      const collapseThreshold = Math.max(
+        MIN_USER_MESSAGE_COLLAPSE_THRESHOLD_PX,
+        Math.round(referenceHeight * USER_MESSAGE_COLLAPSE_THRESHOLD_RATIO),
+      );
+      const collapsible = naturalBubbleHeight > collapseThreshold;
+      const collapsedPaddingY = content
+        ? paddingTop + paddingBottom
+        : paddingTop + DEFAULT_COLLAPSIBLE_PADDING_BOTTOM_PX;
+      const targetBubbleHeight = Math.max(
+        MIN_USER_MESSAGE_COLLAPSED_BUBBLE_PX,
+        Math.round(referenceHeight * USER_MESSAGE_COLLAPSED_HEIGHT_RATIO),
+      );
+      const collapsedTextHeight = Math.min(
+        fullTextHeight,
+        Math.max(MIN_USER_MESSAGE_COLLAPSED_TEXT_PX, targetBubbleHeight - collapsedPaddingY),
+      );
+
+      setLayout((current) => (
+        current?.collapsible === collapsible
+        && current.fullTextHeight === fullTextHeight
+        && current.collapsedTextHeight === collapsedTextHeight
+          ? current
+          : { collapsible, fullTextHeight, collapsedTextHeight }
+      ));
+    };
+
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(contentRef.current ?? bubble);
+    if (scroller) observer?.observe(scroller);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [contentKey, isCollapsible, messageId, viewport]);
+
+  const toggleCollapsed = useCallback(() => {
+    if (expanded) {
+      const bubble = bubbleRef.current;
+      if (bubble) {
+        const scroller = viewport?.scroller.current ?? null;
+        if (scroller) {
+          const scrollerRect = scroller.getBoundingClientRect();
+          const bubbleRect = bubble.getBoundingClientRect();
+          if (bubbleRect.top < scrollerRect.top + COLLAPSE_SCROLL_TOP_INSET_PX) {
+            const targetTop = Math.max(
+              0,
+              scroller.scrollTop + (bubbleRect.top - scrollerRect.top) - COLLAPSE_SCROLL_TOP_INSET_PX,
+            );
+            scroller.scrollTo({ top: targetTop, behavior: "auto" });
+          }
+        } else if (bubble.getBoundingClientRect().top < 16) {
+          bubble.scrollIntoView({ block: "nearest" });
+        }
+      }
+      setExpandedForId(null);
+      return;
+    }
+    setExpandedForId(messageId);
+  }, [expanded, messageId, viewport]);
+
+  const clipHeight = layout
+    ? (isCollapsed ? layout.collapsedTextHeight : layout.fullTextHeight)
+    : undefined;
+
   return (
     <div
-      className={cn(
-        "mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-1",
-        "border border-sky-500/15 bg-sky-500/[0.06]",
-        "text-[11px] font-medium leading-none text-sky-700",
-        "dark:border-sky-300/15 dark:bg-sky-300/[0.08] dark:text-sky-200/80",
-      )}
-      title={triggerLabel}
+      data-user-text-bubble
+      data-user-message-collapsible={isCollapsible ? "true" : undefined}
+      data-user-message-collapsed={isCollapsed ? "true" : undefined}
+      className="relative ml-auto w-fit max-w-full min-w-0"
     >
-      <Clock3 className="h-3 w-3 shrink-0" aria-hidden />
-      <span className="min-w-0 truncate">{label}</span>
-      <span className="text-current/45" aria-hidden>·</span>
-      <span className="shrink-0">{triggerLabel}</span>
+      {contextMenu}
+      <p
+        ref={bubbleRef}
+        id={isCollapsible ? contentId : undefined}
+        data-theme-surface
+        data-temporary-message={temporary ? "true" : undefined}
+        data-pending-edge={edgeState !== "solid" ? edgeState : undefined}
+        className={cn(
+          "relative ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
+          "text-left text-reading whitespace-pre-wrap [overflow-wrap:anywhere]",
+          temporary
+            ? "border border-dashed border-muted-foreground/40 bg-transparent"
+            : "user-message-surface bg-secondary/70",
+          showProcessingStatus && "user-message-surface-dashed",
+          isCollapsible && "user-message-collapsible",
+        )}
+      >
+        <PendingEdgeOverlay state={edgeState} onSealEnd={onSealEnd} />
+        {isCollapsible ? (
+          <span
+            data-user-message-clip
+            data-state={isCollapsed ? "closed" : "open"}
+            className={cn(
+              "user-message-collapsible-body block overflow-hidden",
+              isCollapsed && "user-message-collapsible-masked",
+            )}
+            style={clipHeight !== undefined ? { height: clipHeight } : undefined}
+          >
+            <span ref={contentRef} className="block">
+              {children}
+            </span>
+          </span>
+        ) : (
+          children
+        )}
+      </p>
+      {isCollapsible ? (
+        <>
+          <div
+            data-user-message-stack
+            data-state={isCollapsed ? "visible" : "hidden"}
+            data-temporary={temporary ? "true" : undefined}
+            aria-hidden="true"
+            className="user-message-stack pointer-events-none flex flex-col"
+          >
+            <span className="user-message-stack-sheet user-message-stack-sheet-first" />
+            <span className="user-message-stack-sheet user-message-stack-sheet-second" />
+          </div>
+          <div
+            data-user-message-toggle-bar
+            className="user-message-toggle-bar pointer-events-none absolute inset-x-0 z-[2] flex items-center justify-center px-3 pb-1.5 pt-1"
+          >
+            <button
+              type="button"
+              data-thread-disclosure=""
+              data-user-message-toggle
+              aria-expanded={!isCollapsed}
+              aria-controls={contentId}
+              onClick={toggleCollapsed}
+              className={cn(
+                "pointer-events-auto touch-target inline-flex h-7 items-center rounded-full px-3.5",
+                "text-ui-label text-muted-foreground transition-colors",
+                "hover:bg-foreground/[0.06] hover:text-foreground dark:hover:bg-foreground/[0.09]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+            >
+              {isCollapsed ? t("message.expandUserMessage") : t("message.collapseUserMessage")}
+            </button>
+          </div>
+        </>
+      ) : null}
     </div>
+  );
+}
+
+function UserQuotedContext({ text, label }: { text: string; label: string }) {
+  return (
+    <blockquote
+      data-theme-surface
+      data-theme-ink
+      className={cn(
+        "ml-auto flex w-fit max-w-full min-w-0 items-start gap-2 rounded-floating",
+        "border border-border/60 bg-muted/35 px-3 py-2 text-left text-muted-foreground",
+      )}
+      aria-label={label}
+    >
+      <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+      <p className="min-w-0 line-clamp-3 whitespace-pre-wrap text-reading-small [overflow-wrap:anywhere]">
+        {text}
+      </p>
+    </blockquote>
   );
 }
 
@@ -358,231 +865,92 @@ function mergeCliMentionApps(
 function MessageMedia({
   media,
   align,
+  pending = false,
+  edgeState = "solid",
+  onSealEnd,
 }: {
   media: UIMediaAttachment[];
   align: "left" | "right";
+  pending?: boolean;
+  edgeState?: PendingEdgeState;
+  onSealEnd?: () => void;
 }) {
+  const inlineImages = useInlineImages();
   if (media.length === 0) return null;
   const images: UIImage[] = [];
-  const nonImages: UIMediaAttachment[] = [];
+  const seen = new Set<string>();
+  const videos: UIMediaAttachment[] = [];
+  const files: UIMediaAttachment[] = [];
   for (const item of media) {
     const normalized = toMediaAttachment(item);
     if (normalized.kind === "image") {
+      if (normalized.url && (inlineImages.has(normalized.url) || seen.has(normalized.url))) continue;
+      if (normalized.url) seen.add(normalized.url);
       images.push({ url: normalized.url, name: normalized.name });
+    } else if (normalized.kind === "video") {
+      videos.push(normalized);
     } else {
-      nonImages.push(normalized);
+      files.push(normalized);
     }
   }
+  if (images.length === 0 && videos.length === 0 && files.length === 0) return null;
+  const attachSealToImages = images.length > 0;
+  const attachSealToVideos = !attachSealToImages && videos.length > 0;
+  const attachSealToFiles = !attachSealToImages && !attachSealToVideos;
 
   return (
     <div
       className={cn(
-        "mt-2 flex flex-wrap gap-2",
-        align === "right" ? "justify-end" : "justify-start",
+        "mt-2 flex min-w-0 max-w-full flex-col gap-2",
+        align === "right" ? "items-end" : "items-start",
       )}
     >
       {images.length > 0 ? (
-        <UserImages images={images} align={align} size={align === "left" ? "large" : "compact"} />
-      ) : null}
-      {nonImages.map((item, i) => (
-        <AttachmentTile key={`${item.url ?? item.name ?? item.kind}-${i}`} attachment={item} />
-      ))}
-    </div>
-  );
-}
-
-/**
- * Right-aligned preview row for images attached to a user turn.
- *
- * Visual follows agent-chat-ui: a single wrapping row of fixed-size square
- * thumbnails that stay modest next to the text pill regardless of how many
- * images are attached.
- *
- * The URL is expected to be a self-contained ``data:`` URL (the Composer
- * hands the normalized base64 payload to the optimistic bubble so that the
- * preview survives React StrictMode double-mount — blob URLs would be
- * revoked by the Composer's cleanup before remount). Historical replays
- * have no URL (the backend strips data URLs before persisting), so we
- * render a labelled placeholder tile instead of a broken ``<img>``.
- */
-function UserImages({
-  images,
-  align = "right",
-  size = "compact",
-}: {
-  images: UIImage[];
-  align?: "left" | "right";
-  size?: "compact" | "large";
-}) {
-  const { t } = useTranslation();
-  // Only real-URL images can open in the lightbox; historical-replay
-  // placeholders (no URL) have nothing to zoom into.
-  const viewableImages: UIImage[] = [];
-  const originalToViewable = new Map<number, number>();
-  for (let i = 0; i < images.length; i += 1) {
-    const img = images[i];
-    if (typeof img.url !== "string" || img.url.length === 0) continue;
-    originalToViewable.set(i, viewableImages.length);
-    viewableImages.push(img);
-  }
-
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-
-  return (
-    <>
-      <div
-        className={cn(
-          "flex flex-wrap items-end gap-2",
-          size === "large" && "gap-3",
-          align === "right" ? "ml-auto justify-end" : "mr-auto justify-start",
-        )}
-      >
-        {images.map((img, i) => (
-          <UserImageCell
-            key={`${img.url ?? "placeholder"}-${i}`}
-            image={img}
-            size={size}
-            placeholderLabel={t("message.imageAttachment")}
-            openLabel={t("lightbox.open")}
-            onOpen={
-              originalToViewable.has(i)
-                ? () => setLightboxIndex(originalToViewable.get(i)!)
-                : undefined
-            }
-          />
-        ))}
-      </div>
-      <ImageLightbox
-        images={viewableImages}
-        index={lightboxIndex}
-        onIndexChange={setLightboxIndex}
-        onOpenChange={(open) => {
-          if (!open) setLightboxIndex(null);
-        }}
-      />
-    </>
-  );
-}
-
-function UserImageCell({
-  image,
-  size,
-  placeholderLabel,
-  openLabel,
-  onOpen,
-}: {
-  image: UIImage;
-  size: "compact" | "large";
-  placeholderLabel: string;
-  openLabel: string;
-  onOpen?: () => void;
-}) {
-  const hasUrl = typeof image.url === "string" && image.url.length > 0;
-  const tileClasses = cn(
-    "relative overflow-hidden border border-border/60 bg-muted/40",
-    size === "large"
-      ? "w-[min(100%,34rem)] rounded-[20px] bg-transparent"
-      : "h-24 w-24 rounded-[14px]",
-    "shadow-[0_6px_18px_-14px_rgba(0,0,0,0.45)]",
-  );
-
-  if (hasUrl && onOpen) {
-    return (
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={image.name ? `${openLabel}: ${image.name}` : openLabel}
-        className={cn(
-          tileClasses,
-          "block cursor-zoom-in p-0 transition-transform duration-150 motion-reduce:transition-none",
-          "hover:scale-[1.01] hover:ring-2 hover:ring-primary/25",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-        )}
-      >
-        <img
-          src={image.url}
-          alt={image.name ?? ""}
-          loading="lazy"
-          decoding="async"
-          draggable={false}
-          className={cn(
-            "block",
-            size === "large"
-              ? "h-auto max-h-[36rem] w-full rounded-[inherit] object-contain"
-              : "h-full w-full object-cover",
-          )}
+        <ImageGallery
+          images={images}
+          align={align}
+          size={align === "left" ? "large" : "compact"}
+          edgeState={edgeState}
+          onSealEnd={attachSealToImages ? onSealEnd : undefined}
         />
-      </button>
-    );
-  }
-
-  return (
-    <div className={tileClasses} title={image.name ?? undefined}>
-      <div
-        className="flex h-full w-full flex-col items-center justify-center gap-1 px-2 text-[11px] text-muted-foreground"
-        aria-label={placeholderLabel}
-      >
-        <ImageIcon className="h-4 w-4 flex-none" aria-hidden />
-        <span className="line-clamp-2 text-center leading-tight">
-          {image.name ?? placeholderLabel}
-        </span>
-      </div>
+      ) : null}
+      {videos.map((item, i) => (
+        <AttachmentTile
+          key={`video-${i}`}
+          attachment={item}
+          pending={pending}
+          edgeState={edgeState}
+          onSealEnd={attachSealToVideos && i === 0 ? onSealEnd : undefined}
+          className="my-0"
+        />
+      ))}
+      {files.length > 0 ? (
+        <div className={cn("flex w-full min-w-0 flex-wrap items-start gap-2", align === "right" && "justify-end")}>
+          {files.map((item, i) => (
+            <AttachmentTile
+              key={`file-${i}`}
+              attachment={item}
+              pending={pending}
+              edgeState={edgeState}
+              onSealEnd={attachSealToFiles && i === 0 ? onSealEnd : undefined}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-/** Pre-token-arrival placeholder: three bouncing dots. */
-function TypingDots() {
+function ThinkingState() {
   const { t } = useTranslation();
   return (
     <span
       aria-label={t("message.assistantTyping")}
-      className="inline-flex items-center gap-1 py-1"
+      className="inline-flex min-h-7 items-center py-1 text-[13px]"
     >
-      <Dot delay="0ms" />
-      <Dot delay="150ms" />
-      <Dot delay="300ms" />
-    </span>
-  );
-}
-
-function Dot({ delay }: { delay: string }) {
-  return (
-    <span
-      style={{ animationDelay: delay }}
-      className={cn(
-        "inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60",
-        "animate-bounce",
-      )}
-    />
-  );
-}
-
-/** L→R sheen on the glyphs themselves; inactive labels stay solid muted text. */
-export function StreamingLabelSheen({
-  children,
-  active,
-  className,
-}: {
-  children: ReactNode;
-  active: boolean;
-  className?: string;
-}) {
-  const sheenText =
-    typeof children === "string" || typeof children === "number"
-      ? String(children)
-      : undefined;
-  return (
-    <span className={cn("block min-w-0 overflow-hidden py-px", className)}>
-      <span
-        data-sheen-text={active ? sheenText : undefined}
-        className={cn(
-          "block w-fit max-w-full truncate font-medium leading-normal",
-          active ? "streaming-text-sheen" : "text-muted-foreground",
-        )}
-      >
-        {children}
-      </span>
+      <StreamingLabelSheen active>
+        {t("message.reasoningStreaming", { defaultValue: "Thinking…" })}
+      </StreamingLabelSheen>
     </span>
   );
 }
@@ -591,133 +959,51 @@ interface ReasoningBubbleProps {
   text: string;
   streaming: boolean;
   hasBodyBelow: boolean;
-  /** When true, skip the slide-in wrapper (used inside ``AgentActivityCluster``). */
-  embeddedInCluster?: boolean;
-  onOpenFilePreview?: (path: string) => void;
 }
 
-/**
- * Subordinate "thinking" trace shown above an assistant turn.
- *
- * Lifecycle:
- *   - While ``streaming`` is true (``reasoning_delta`` frames still arriving),
- *     the bubble defaults to open and the header shows a sheen + pulse so
- *     the user sees the model "thinking out loud" in real time.
- *   - Expanded reasoning uses the same Markdown pipeline as assistant replies
- *     (deferred while streaming to reduce parser thrash), so headings and
- *     emphasis render instead of leaking raw ``###`` / ``**``.
- *   - On ``reasoning_end`` the bubble auto-collapses for prose density —
- *     the user can re-expand to inspect the chain of thought. The local
- *     toggle persists once the user interacts.
- */
-export function ReasoningBubble({
+function ReasoningBubble({
   text,
   streaming,
   hasBodyBelow,
-  embeddedInCluster = false,
-  onOpenFilePreview,
 }: ReasoningBubbleProps) {
-  const { t } = useTranslation();
-  const [userToggled, setUserToggled] = useState(false);
-  const [openLocal, setOpenLocal] = useState(true);
-  const open = userToggled ? openLocal : streaming;
-  const onToggle = () => {
-    setUserToggled(true);
-    setOpenLocal((v) => (userToggled ? !v : !open));
-  };
-  useEffect(() => {
-    if (open && text.length > 0) {
-      preloadMarkdownText();
-    }
-  }, [open, text.length]);
   return (
-    <div
+    <ReasoningRow
+      text={text}
+      streaming={streaming}
       className={cn(
-        "w-full",
-        !embeddedInCluster && "animate-in fade-in-0 slide-in-from-top-1 duration-200",
+        "animate-in fade-in-0 slide-in-from-top-1 duration-200",
         hasBodyBelow && "mb-2",
       )}
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        className={cn(
-          "group flex w-full items-center gap-2 rounded-md px-2 py-1.5",
-          "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
-        )}
-        aria-expanded={open}
-        aria-live={streaming ? "polite" : undefined}
-      >
-        <Sparkles
-          className={cn("h-3.5 w-3.5", streaming && "animate-pulse")}
-          aria-hidden
-        />
-        <StreamingLabelSheen active={streaming} className="min-w-0 flex-1 text-left">
-          {streaming
-            ? t("message.reasoningStreaming", { defaultValue: "Thinking…" })
-            : t("message.reasoning", { defaultValue: "Thinking" })}
-        </StreamingLabelSheen>
-        <ChevronRight
-          aria-hidden
-          className={cn(
-            "ml-auto h-3.5 w-3.5 transition-transform duration-200",
-            open && "rotate-90",
-          )}
-        />
-      </button>
-      {open && text.length > 0 && (
-        <div
-          className={cn(
-            "mt-1 min-w-0 border-l border-muted-foreground/20 pl-3",
-            !embeddedInCluster && "animate-in fade-in-0 slide-in-from-top-1 duration-200",
-          )}
-        >
-          <MarkdownText
-            streaming={streaming}
-            onOpenFilePreview={onOpenFilePreview}
-            className={cn(
-              "text-[12.5px] italic text-muted-foreground/88",
-              "prose-p:my-1.5 prose-li:my-0.5",
-              "prose-headings:mt-2 prose-headings:mb-1 prose-headings:font-medium",
-              "prose-headings:text-muted-foreground/92 prose-strong:text-muted-foreground",
-              "prose-h1:text-[15px] prose-h2:text-[13.5px] prose-h3:text-[12.5px] prose-h4:text-[12px]",
-              "prose-a:text-blue-500 prose-a:underline hover:prose-a:text-blue-600 dark:prose-a:text-blue-300 dark:hover:prose-a:text-blue-200",
-              "prose-code:text-[0.92em]",
-            )}
-          >
-            {text}
-          </MarkdownText>
-        </div>
-      )}
-    </div>
+    />
   );
 }
 
 interface TraceGroupProps {
   message: UIMessage;
-  animClass: string;
 }
 
-/**
- * Collapsible group of tool-call / progress breadcrumbs. Defaults to
- * collapsed because tool traces are supporting evidence, not the answer.
- * A single click expands the exact calls when the user wants details.
- */
-export function TraceGroup({ message, animClass }: TraceGroupProps) {
+function TraceGroup({ message }: TraceGroupProps) {
   const { t } = useTranslation();
   const lines = message.traces ?? [message.content];
   const count = lines.length;
   const [open, setOpen] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
+  const releaseContent = useCallback(() => setHasOpened(false), []);
+  const contentId = useId();
   return (
-    <div className={cn("w-full", animClass)}>
+    <div className="w-full">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) setHasOpened(true);
+          setOpen((value) => !value);
+        }}
         className={cn(
           "group flex w-full items-center gap-2 rounded-md px-2 py-1.5",
           "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
         )}
         aria-expanded={open}
+        aria-controls={contentId}
       >
         <Wrench className="h-3.5 w-3.5" aria-hidden />
         <span className="font-medium">
@@ -728,17 +1014,14 @@ export function TraceGroup({ message, animClass }: TraceGroupProps) {
         <ChevronRight
           aria-hidden
           className={cn(
-            "ml-auto h-3.5 w-3.5 transition-transform duration-200",
+            "ml-auto h-3.5 w-3.5 transition-transform duration-200 motion-reduce:transition-none",
             open && "rotate-90",
           )}
         />
       </button>
-      {open && (
-        <ul
-          className={cn(
-            "mt-1 space-y-0.5 border-l border-muted-foreground/20 pl-3",
-            "animate-in fade-in-0 slide-in-from-top-1 duration-200",
-          )}
+      <DisclosureContent id={contentId} open={open} onExitComplete={releaseContent}>
+        {hasOpened && <ul
+          className="mt-1 space-y-0.5 border-l border-muted-foreground/20 pl-3"
         >
           {lines.map((line, i) => (
             <li
@@ -748,8 +1031,8 @@ export function TraceGroup({ message, animClass }: TraceGroupProps) {
               {line}
             </li>
           ))}
-        </ul>
-      )}
+        </ul>}
+      </DisclosureContent>
     </div>
   );
 }

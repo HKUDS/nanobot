@@ -1,7 +1,27 @@
 import "@testing-library/jest-dom/vitest";
-import { beforeEach } from "vitest";
+import { beforeAll, beforeEach } from "vitest";
 
-import i18n from "@/i18n";
+import i18n, { initializeI18n, loadAllLocaleResources } from "@/i18n";
+
+// The DOM test environment does not implement pointer capture used by Radix Select.
+if (!HTMLElement.prototype.hasPointerCapture) {
+  HTMLElement.prototype.hasPointerCapture = () => false;
+  HTMLElement.prototype.setPointerCapture = () => {};
+  HTMLElement.prototype.releasePointerCapture = () => {};
+}
+if (!HTMLElement.prototype.scrollIntoView) {
+  HTMLElement.prototype.scrollIntoView = () => {};
+}
+// happy-dom has no animation timeline; rendered motion is covered in browser tests.
+if (!Element.prototype.getAnimations) {
+  Element.prototype.getAnimations = () => [];
+}
+
+// happy-dom does not load fonts; text measurements can run immediately.
+Object.defineProperty(document, "fonts", {
+  value: { ready: Promise.resolve() },
+  configurable: true,
+});
 
 function createTestStorage(): Storage {
   const store = new Map<string, string>();
@@ -52,6 +72,11 @@ if (!("randomUUID" in globalThis.crypto)) {
     configurable: true,
   });
 }
+
+beforeAll(async () => {
+  await initializeI18n();
+  await loadAllLocaleResources();
+});
 
 beforeEach(async () => {
   await i18n.changeLanguage("en");

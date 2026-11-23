@@ -1,95 +1,143 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
-import { StreamingLabelSheen } from "@/components/MessageBubble";
+import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
+import { formControlFocusClassName } from "@/components/ui/form-control";
+import { HoverHint, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export type ActivityStepTone = "neutral" | "active" | "success" | "error";
 
 export interface ActivityStepProps {
-  as?: "div" | "li";
   icon?: LucideIcon;
   marker?: ReactNode;
+  markerLabel?: string;
+  showMarker?: boolean;
   label: ReactNode;
-  detail?: ReactNode;
-  aside?: ReactNode;
-  children?: ReactNode;
+  detail?: string;
+  detailClassName?: string;
+  tooltipContent?: ReactNode;
+  ariaLabel?: string;
   active?: boolean;
+  animateLabel?: boolean;
   tone?: ActivityStepTone;
-  title?: string;
   className?: string;
   contentClassName?: string;
+  labelClassName?: string;
   markerClassName?: string;
   style?: CSSProperties;
 }
 
 export function ActivityStep({
-  as: Component = "div",
   icon: Icon,
   marker,
+  markerLabel,
+  showMarker = true,
   label,
   detail,
-  aside,
-  children,
+  detailClassName,
+  tooltipContent,
+  ariaLabel,
   active = false,
+  animateLabel = true,
   tone = active ? "active" : "neutral",
-  title,
   className,
   contentClassName,
+  labelClassName,
   markerClassName,
   style,
 }: ActivityStepProps) {
-  return (
-    <Component
+  const lineRef = useRef<HTMLDivElement>(null);
+  const [hintOpen, setHintOpen] = useState(false);
+  const textLabel = typeof label === "string" ? [label, detail].filter(Boolean).join("\n") : undefined;
+  const activityMarker = (
+    <span
+      data-activity-marker=""
       className={cn(
-        "group/activity-step relative grid min-w-0 grid-cols-[1.125rem_minmax(0,1fr)] gap-2 py-0.5 text-[13px] leading-5",
+        "flex h-5 w-[1.125rem] shrink-0 items-start justify-center pt-[3px]",
+        markerLabel && ["rounded-sm", formControlFocusClassName],
+      )}
+      aria-hidden={markerLabel ? undefined : true}
+      role={markerLabel ? "img" : undefined}
+      aria-label={markerLabel}
+      tabIndex={markerLabel ? 0 : undefined}
+    >
+      {marker ?? (
+        <span
+          className={cn(
+            "grid h-3.5 w-3.5 place-items-center transition-colors",
+            tone === "error" ? "text-destructive/[0.78]" : "text-muted-foreground",
+            markerClassName,
+          )}
+        >
+          {Icon ? <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden /> : null}
+        </span>
+      )}
+    </span>
+  );
+  const line = (
+    <div
+      ref={lineRef}
+      data-testid="activity-line"
+      tabIndex={typeof label === "string" ? 0 : undefined}
+      aria-label={detail && typeof label === "string" ? `${label}, ${detail}` : undefined}
+      className={cn(
+        "flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap",
+        formControlFocusClassName,
+      )}
+    >
+      <span className={cn("flex min-w-0 flex-1 items-baseline", detail && "gap-2")}>
+        <StreamingLabelSheen
+          active={active && animateLabel}
+          className={cn(
+            "min-w-0 truncate font-medium",
+            detail ? "max-w-[70%] shrink-0" : "flex-1",
+            tone === "error" ? "text-destructive/[0.78]" : "text-muted-foreground",
+            labelClassName,
+          )}
+        >
+          {label}
+        </StreamingLabelSheen>
+        {detail ? (
+          <>
+            {" "}
+            <span className={cn("min-w-0 flex-1 truncate font-normal text-muted-foreground", detailClassName)}>{detail}</span>
+          </>
+        ) : null}
+      </span>
+    </div>
+  );
+
+  return (
+    <div
+      data-testid="activity-step"
+      aria-label={ariaLabel}
+      className={cn(
+        "relative grid min-w-0 py-0.5 text-[13px] leading-5",
+        showMarker ? "grid-cols-[1.125rem_minmax(0,1fr)] gap-2" : "grid-cols-1",
         className,
       )}
-      title={title}
       style={style}
     >
-      <span
-        className={cn(
-          "relative flex h-5 w-[1.125rem] shrink-0 items-start justify-center pt-[3px]",
-          "after:absolute after:left-1/2 after:top-[1.25rem] after:h-[calc(100%+0.375rem)] after:w-px after:-translate-x-1/2 after:bg-muted-foreground/14 group-last/activity-step:after:hidden",
-        )}
-        aria-hidden
-      >
-        {marker ?? (
-          <span
-            className={cn(
-              "grid h-3.5 w-3.5 place-items-center rounded-full border bg-background transition-colors",
-              tone === "active" && "border-muted-foreground/28 text-muted-foreground/72",
-              tone === "success" && "border-emerald-500/28 text-emerald-500/78",
-              tone === "error" && "border-destructive/30 text-destructive/78",
-              tone === "neutral" && "border-muted-foreground/18 text-muted-foreground/50",
-              markerClassName,
-            )}
-          >
-            {Icon ? <Icon className="h-2.5 w-2.5" strokeWidth={2.15} /> : null}
-          </span>
-        )}
-      </span>
+      {showMarker ? markerLabel ? (
+        <HoverHint content={markerLabel}>{activityMarker}</HoverHint>
+      ) : activityMarker : null}
       <div className={cn("min-w-0", contentClassName)}>
-        <div className="flex min-w-0 items-baseline gap-1.5">
-          <StreamingLabelSheen
-            active={active}
-            className={cn(
-              "min-w-0 shrink-0 font-medium",
-              tone === "error" ? "text-destructive/78" : "text-muted-foreground/85",
-            )}
-          >
-            {label}
-          </StreamingLabelSheen>
-          {detail ? (
-            <span className="min-w-0 break-words text-foreground/82">
-              {detail}
-            </span>
-          ) : null}
-          {aside ? <span className="ml-auto shrink-0">{aside}</span> : null}
-        </div>
-        {children ? <div className="mt-1 min-w-0">{children}</div> : null}
+        {typeof label === "string" ? (
+          <TooltipProvider>
+            <Tooltip open={hintOpen} onOpenChange={(open) => {
+              const truncated = Array.from(lineRef.current?.querySelectorAll<HTMLElement>(".truncate") ?? [])
+                .some((element) => element.scrollWidth > element.clientWidth);
+              setHintOpen(open && (truncated || tooltipContent !== undefined && tooltipContent !== textLabel));
+            }}>
+              <TooltipTrigger asChild>{line}</TooltipTrigger>
+              <TooltipContent side="top" className="max-w-[min(32rem,calc(100vw-2rem))] whitespace-pre-wrap break-words">
+                {tooltipContent ?? textLabel}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : line}
       </div>
-    </Component>
+    </div>
   );
 }

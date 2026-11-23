@@ -9,17 +9,21 @@ that plagued earlier approaches.
 
 from __future__ import annotations
 
+import asyncio
 import sys
+import time
 from contextlib import contextmanager, nullcontext
+from typing import Literal
 
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.text import Text
 
+_STREAM_REFRESH_INTERVAL = 0.05
+
 
 def _clear_current_line(console: Console) -> None:
-    """Erase a transient status line before printing persistent output."""
     file = console.file
     isatty = getattr(file, "isatty", lambda: False)
     if not isatty():
@@ -51,12 +55,12 @@ class ThinkingSpinner:
         self._spinner = c.status(f"[dim]{bot_name} is thinking...[/dim]", spinner="dots")
         self._active = False
 
-    def __enter__(self):
+    def __enter__(self) -> ThinkingSpinner:
         self._spinner.start()
         self._active = True
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, *exc: object) -> Literal[False]:
         self._active = False
         self._spinner.stop()
         _clear_current_line(self._console)
@@ -106,18 +110,18 @@ class StreamRenderer:
         self.streamed = False
         self._console = _make_console()
         self._live: Live | None = None
+        self._refresh_handle: asyncio.TimerHandle | None = None
+        self._next_refresh_at = 0.0
         self._spinner: ThinkingSpinner | None = None
         self._header_printed = False
         self._start_spinner()
 
-    def _renderable(self):
-        """Create a renderable from the current buffer."""
+    def _renderable(self) -> Markdown | Text:
         if self._md and self._buf:
             return Markdown(self._buf)
         return Text(self._buf or "")
 
     def _render_str(self) -> str:
-        """Render current buffer to a plain string via Rich."""
         with self._console.capture() as cap:
             self._console.print(self._renderable())
         return cap.get()
@@ -159,6 +163,7 @@ class StreamRenderer:
         """Context manager: temporarily stop transient output for clean trace lines."""
         @contextmanager
         def _pause():
+            self._cancel_refresh()
             live_was_active = self._live is not None
             if self._live:
                 # Trace/reasoning can arrive after answer streaming has started.
@@ -190,11 +195,33 @@ class StreamRenderer:
                 transient=True,
             )
             self._live.start()
-        else:
-            self._live.update(self._renderable())
+            self._live.refresh()
+            self._next_refresh_at = time.monotonic() + _STREAM_REFRESH_INTERVAL
+        elif self._refresh_handle is None:
+            delay = max(0.0, self._next_refresh_at - time.monotonic())
+            if delay == 0:
+                self._refresh_stream()
+            else:
+                self._refresh_handle = asyncio.get_running_loop().call_later(
+                    delay, self._refresh_stream,
+                )
+
+    def _refresh_stream(self) -> None:
+        self._refresh_handle = None
+        if self._live is None:
+            return
+        self._live.update(self._renderable())
         self._live.refresh()
+        # Leave a quiet interval even when rendering itself exceeds the frame budget.
+        self._next_refresh_at = time.monotonic() + _STREAM_REFRESH_INTERVAL
+
+    def _cancel_refresh(self) -> None:
+        if self._refresh_handle is not None:
+            self._refresh_handle.cancel()
+            self._refresh_handle = None
 
     async def on_end(self, *, resuming: bool = False) -> None:
+        self._cancel_refresh()
         if self._live:
             # Double-refresh to sync _shape before stop() calls refresh().
             self._live.refresh()
@@ -204,7 +231,6 @@ class StreamRenderer:
             self._live = None
         self._stop_spinner()
         if self._buf.strip():
-            # Print final rendered content (persists after Live is gone).
             out = sys.stdout
             out.write(self._render_str())
             out.flush()
@@ -224,6 +250,7 @@ class StreamRenderer:
 
     async def close(self) -> None:
         """Stop spinner/live without rendering a final streamed round."""
+        self._cancel_refresh()
         if self._live:
             self._live.stop()
             self._live = None

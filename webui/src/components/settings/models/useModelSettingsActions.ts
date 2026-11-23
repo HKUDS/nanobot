@@ -1,0 +1,672 @@
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
+import type { TFunction } from "i18next";
+
+import type {
+  ApplySettingsPayload,
+  MaybeRestartHostEngine,
+  PendingRestartSections,
+} from "@/components/settings/contracts";
+import { agentDraftFromPayload } from "@/components/settings/models/ModelsSettings";
+import { modelAPISelection } from "@/components/settings/models/modelAPI";
+import type { RequestParameterDraft } from "@/components/settings/models/ProviderParameterFields";
+import {
+  CUSTOM_PROVIDER_CREATION_KEY,
+  providerFormFromRow,
+  providerJsonValue,
+  type CustomProviderDraft,
+} from "@/components/settings/models/providerForm";
+import type { ModelSettingsState } from "@/components/settings/models/useModelSettingsState";
+import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
+import { useToast } from "@/components/ui/toast";
+import {
+  ApiError,
+  cancelProviderOAuth,
+  completeProviderOAuth,
+  createModelConfiguration,
+  createProviderSettings,
+  deleteModelConfiguration,
+  loginProviderOAuth,
+  logoutProviderOAuth,
+  migrateModelConfigurations,
+  updateModelCallOrder,
+  updateModelConfiguration,
+  updateProviderSettings,
+} from "@/lib/api";
+import type { NanobotClient } from "@/lib/nanobot-client";
+import type {
+  ProviderOAuthAuthorizationRequired,
+  ProviderOAuthCompletionResult,
+  ProviderOAuthLoginResult,
+  ProviderOAuthPending,
+  ProviderSettingsUpdate,
+  SettingsPayload,
+} from "@/lib/types";
+
+function isProviderOAuthAuthorizationRequired(
+  payload: ProviderOAuthLoginResult,
+): payload is ProviderOAuthAuthorizationRequired {
+  return (payload as ProviderOAuthAuthorizationRequired).status === "authorization_required";
+}
+
+function isProviderOAuthPending(
+  payload: ProviderOAuthCompletionResult,
+): payload is ProviderOAuthPending {
+  return (payload as ProviderOAuthPending).status === "pending";
+}
+
+interface ModelSettingsActionsOptions {
+  state: ModelSettingsState;
+  settings: SettingsPayload | null;
+  client: NanobotClient;
+  t: TFunction;
+  applyPayload: ApplySettingsPayload;
+  maybeRestartHostEngine: MaybeRestartHostEngine;
+  setPendingRestartSections: Dispatch<SetStateAction<PendingRestartSections>>;
+  setError: Dispatch<SetStateAction<string | null>>;
+  onModelNameChange: (modelName: string | null) => void;
+  remoteBrowserAccess: boolean;
+  optimizedPresetSave: boolean;
+  closeProviderOAuthFlow: (cancelPending?: boolean) => void;
+  installCapabilities: (names: string[]) => Promise<boolean>;
+  configuredModelProviderOptions: Array<{ name: string; label: string }>;
+}
+
+export function useModelSettingsActions({
+  state,
+  settings,
+  client,
+  t,
+  applyPayload,
+  maybeRestartHostEngine,
+  setPendingRestartSections,
+  setError,
+  onModelNameChange,
+  remoteBrowserAccess,
+  optimizedPresetSave,
+  closeProviderOAuthFlow,
+  installCapabilities,
+  configuredModelProviderOptions,
+}: ModelSettingsActionsOptions) {
+  const showToast = useToast();
+  const oauthMounted = useRef(true);
+  useEffect(() => {
+    oauthMounted.current = true;
+    return () => { oauthMounted.current = false; };
+  }, []);
+  const {
+    form,
+    modelCallOrder,
+    modelCallOrderSaving,
+    modelConfigurationSaving,
+    modelMigrationSaving,
+    modelPresetBeforeCreateRef,
+    modelPresetCreating,
+    modelPresetEditingName,
+    modelPresetPendingDelete,
+    providerForms,
+    providerOAuthCompleting,
+    providerOAuthFlowRef,
+    providerOAuthResponse,
+    providerSaving,
+    saving,
+    setEditingProviderKeys,
+    setForm,
+    setModelCallOrder,
+    setModelCallOrderSaving,
+    setModelConfigurationSaving,
+    setModelMigrationSaving,
+    setModelPresetCreating,
+    setModelPresetEditingName,
+    setModelPresetNameError,
+    setModelPresetPendingDelete,
+    setModelPresetDeleteError,
+    setProviderForms,
+    setProviderOAuthCompleting,
+    setProviderOAuthDialogError,
+    setProviderOAuthFlow,
+    setProviderOAuthResponse,
+    setProviderOperation,
+    setSaving,
+    setVisibleProviderKeys,
+    visibleProviderKeys,
+  } = state;
+
+  const latestSettings = useRef(settings);
+  latestSettings.current = settings;
+  // Renaming changes the server key, not the owner of already queued edits.
+  const editTargetSequence = useRef(0);
+  const editTargetRef = useRef({ name: modelPresetEditingName, identity: 0 });
+  if (editTargetRef.current.name !== modelPresetEditingName) {
+    editTargetSequence.current += 1;
+    editTargetRef.current = { name: modelPresetEditingName, identity: editTargetSequence.current };
+  }
+  const editTarget = editTargetRef.current;
+
+  const presetNameConflict = (name: string, currentName?: string) => {
+    const normalized = name.toLowerCase();
+    return latestSettings.current?.model_presets.some(
+      (preset) =>
+        !preset.is_default &&
+        preset.name !== currentName &&
+        preset.name.toLowerCase() === normalized,
+    ) ?? false;
+  };
+
+  const showPresetNameConflict = () => {
+    setModelPresetNameError(
+      t("settings.models.presetNameDuplicate", {
+        defaultValue: "A preset with this name already exists.",
+      }),
+    );
+    setError(null);
+  };
+
+  const handlePresetSaveError = (reason: unknown) => {
+    if (reason instanceof ApiError && reason.status === 409) {
+      showPresetNameConflict();
+      return;
+    }
+    setError((reason as Error).message);
+  };
+
+  const saveModelSettings = async () => {
+    if (
+      !settings ||
+      modelCallOrderSaving ||
+      modelConfigurationSaving ||
+      !Number.isSafeInteger(form.maxTokens) ||
+      form.maxTokens <= 0 ||
+      !Number.isSafeInteger(form.contextWindowTokens) ||
+      form.contextWindowTokens <= 0 ||
+      !Number.isFinite(form.temperature) || form.temperature < 0 || form.temperature > 2
+    ) {
+      return false;
+    }
+
+    if (modelPresetCreating) {
+      const name = form.modelPreset.trim();
+      const provider = form.provider.trim();
+      const model = form.model.trim();
+      if (
+        !name ||
+        !provider ||
+        !model ||
+        form.maxTokens <= 0 ||
+        form.temperature < 0 ||
+        form.temperature > 2
+      ) {
+        return false;
+      }
+      if (presetNameConflict(name)) {
+        showPresetNameConflict();
+        return false;
+      }
+      setModelPresetNameError(null);
+      setModelConfigurationSaving(true);
+      try {
+        const result = await createModelConfiguration(client, {
+          name,
+          provider,
+          model,
+          maxTokens: form.maxTokens,
+          contextWindowTokens: form.contextWindowTokens,
+          temperature: form.temperature,
+          reasoningEffort: form.reasoningEffort || null,
+          codexFastMode: form.codexFastMode ?? undefined,
+          supportsImages: form.supportsImages,
+          api: form.api ?? undefined,
+          ...(settings.model_request_overrides_supported ? {
+            extraHeaders: form.extraHeaders,
+            extraQuery: form.extraQuery,
+            extraBody: form.extraBody,
+          } : {}),
+        }, optimizedPresetSave);
+        let payload: SettingsPayload = { ...result, usage: result.usage ?? latestSettings.current?.usage ?? settings.usage };
+        const createdPreset = payload.created_model_preset;
+        if (!optimizedPresetSave && createdPreset) {
+          applyPayload(payload, { preserveCapabilityForms: true });
+          setForm(agentDraftFromPayload(payload, createdPreset));
+          setModelPresetEditingName(createdPreset);
+          payload = await updateModelCallOrder(client, [...modelCallOrder, createdPreset]);
+        }
+        applyPayload(payload, { preserveCapabilityForms: true });
+        if (createdPreset) {
+          setForm(agentDraftFromPayload(payload, createdPreset));
+          setModelPresetEditingName(createdPreset);
+        }
+        modelPresetBeforeCreateRef.current = null;
+        onModelNameChange(payload.agent.model || null);
+        setModelPresetNameError(null);
+        setError(null);
+      } catch (err) {
+        handlePresetSaveError(err);
+      } finally {
+        setModelConfigurationSaving(false);
+      }
+      return false;
+    }
+
+    const targetName = editTarget.name;
+    const selectedPreset = latestSettings.current?.model_presets.find(
+      (preset) => !preset.is_default && preset.name === targetName,
+    );
+    if (!selectedPreset) return false;
+    const nextName = form.modelPreset.trim();
+    const nameChanged = form.modelPreset !== selectedPreset.name;
+    if (nameChanged && presetNameConflict(nextName, selectedPreset.name)) {
+      showPresetNameConflict();
+      return false;
+    }
+    setModelPresetNameError(null);
+    const reasoningEffort = form.reasoningEffort || null;
+    setSaving(true);
+    try {
+      const result = await updateModelConfiguration(client, {
+        name: selectedPreset.name,
+        newName: nameChanged ? nextName : undefined,
+        model: form.model !== selectedPreset.model ? form.model : undefined,
+        provider: form.provider !== selectedPreset.provider ? form.provider : undefined,
+        maxTokens:
+          form.maxTokens !== selectedPreset.max_tokens ? form.maxTokens : undefined,
+        contextWindowTokens:
+          form.contextWindowTokens !==
+          normalizeContextWindowTokens(selectedPreset.context_window_tokens)
+            ? form.contextWindowTokens
+            : undefined,
+        temperature:
+          form.temperature !== selectedPreset.temperature ? form.temperature : undefined,
+        reasoningEffort:
+          reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
+        codexFastMode: form.codexFastMode !== (selectedPreset.codex_fast_mode ?? null)
+          ? form.codexFastMode : undefined,
+        supportsImages: form.supportsImages !== (selectedPreset.supports_images ?? true)
+          ? form.supportsImages : undefined,
+        api: modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
+          ? form.api : undefined,
+        ...(settings.model_request_overrides_supported ? {
+          extraHeaders: form.extraHeaders !== providerJsonValue(selectedPreset.extra_headers) ? form.extraHeaders : undefined,
+          extraQuery: form.extraQuery !== providerJsonValue(selectedPreset.extra_query) ? form.extraQuery : undefined,
+          extraBody: form.extraBody !== providerJsonValue(selectedPreset.extra_body) ? form.extraBody : undefined,
+        } : {}),
+      }, optimizedPresetSave);
+      const payload = { ...result, usage: result.usage ?? latestSettings.current?.usage ?? settings.usage };
+      latestSettings.current = payload;
+      editTarget.name = nextName;
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      setForm((current) => current === form ? agentDraftFromPayload(payload, nextName) : current);
+      if (editTargetRef.current === editTarget) {
+        setModelPresetEditingName(nextName);
+      }
+      onModelNameChange(payload.agent.model || null);
+      setModelPresetNameError(null);
+      setError(null);
+      return true;
+    } catch (err) {
+      handlePresetSaveError(err);
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveModelRequestSettings = async (values: Partial<RequestParameterDraft>) => {
+    if (!settings) return;
+    setSaving(true);
+    try {
+      const result = await updateModelConfiguration(client, {
+        name: modelPresetEditingName,
+        ...values,
+      }, optimizedPresetSave);
+      const payload = { ...result, usage: result.usage ?? latestSettings.current?.usage ?? settings.usage };
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      setForm((current) => current === form ? agentDraftFromPayload(payload, modelPresetEditingName) : current);
+      setError(null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const beginModelPresetCreation = () => {
+    if (!settings || saving || modelCallOrderSaving || modelConfigurationSaving) return;
+    const primaryPreset = settings.model_presets.find(
+      (preset) => !preset.is_default && preset.name === settings.model_call_order?.[0],
+    );
+    const currentProvider = primaryPreset?.provider === "auto"
+      ? primaryPreset.resolved_provider ?? settings.agent.resolved_provider
+      : primaryPreset?.provider ?? settings.agent.provider;
+    const provider =
+      configuredModelProviderOptions.find((option) => option.name === currentProvider)?.name ??
+      configuredModelProviderOptions[0]?.name ??
+      "";
+    modelPresetBeforeCreateRef.current = modelPresetEditingName;
+    setModelPresetNameError(null);
+    setForm((prev) => ({
+      ...prev,
+      modelPreset: "",
+      provider,
+      model: "",
+      supportsImages: true,
+      api: null,
+      extraHeaders: "",
+      extraQuery: "",
+      extraBody: "",
+      maxTokens: primaryPreset?.max_tokens ?? settings.agent.max_tokens,
+      contextWindowTokens: normalizeContextWindowTokens(
+        primaryPreset?.context_window_tokens ?? settings.agent.context_window_tokens,
+      ),
+      temperature: primaryPreset?.temperature ?? settings.agent.temperature,
+      reasoningEffort: primaryPreset?.reasoning_effort ?? settings.agent.reasoning_effort ?? "",
+      codexFastMode: null,
+    }));
+    setModelPresetCreating(true);
+  };
+
+  const cancelModelPresetCreation = () => {
+    if (!settings || modelConfigurationSaving) return;
+    const previousPreset = modelPresetBeforeCreateRef.current;
+    setModelPresetCreating(false);
+    setModelPresetNameError(null);
+    setForm(agentDraftFromPayload(settings, previousPreset ?? undefined));
+    setModelPresetEditingName(previousPreset ?? agentDraftFromPayload(settings).modelPreset);
+    modelPresetBeforeCreateRef.current = null;
+  };
+
+  const changeModelCallOrder = async (nextOrder: string[]) => {
+    const unchanged =
+      nextOrder.length === modelCallOrder.length &&
+      nextOrder.every((name, index) => name === modelCallOrder[index]);
+    if (
+      !settings ||
+      saving ||
+      modelCallOrderSaving ||
+      modelConfigurationSaving ||
+      nextOrder.length === 0 ||
+      unchanged
+    ) {
+      return;
+    }
+    const previousOrder = [...modelCallOrder];
+    setModelCallOrder(nextOrder);
+    setModelCallOrderSaving(true);
+    try {
+      const payload = await updateModelCallOrder(client, nextOrder);
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      onModelNameChange(payload.agent.model || null);
+      setError(null);
+    } catch (err) {
+      setModelCallOrder(previousOrder);
+      if (showToast && err instanceof ApiError && (err.status === 503 || err.status === 504)) {
+        showToast({
+          tone: "error",
+          message: t("message.agentActivity.updateAgentSettingsFailed"),
+          dedupeKey: "settings:models:call-order",
+        });
+      } else {
+        setError((err as Error).message);
+      }
+    } finally {
+      setModelCallOrderSaving(false);
+    }
+  };
+
+  const handleMigrateModelConfigurations = async () => {
+    if (modelMigrationSaving) return;
+    setModelMigrationSaving(true);
+    try {
+      const payload = await migrateModelConfigurations(client);
+      applyPayload(payload, { preserveCapabilityForms: true });
+      onModelNameChange(payload.agent.model || null);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setModelMigrationSaving(false);
+    }
+  };
+
+  const handleDeleteModelConfiguration = async () => {
+    if (
+      !modelPresetPendingDelete ||
+      saving ||
+      modelCallOrderSaving ||
+      modelConfigurationSaving
+    ) {
+      return false;
+    }
+    setSaving(true);
+    setModelPresetDeleteError(null);
+    try {
+      const payload = await deleteModelConfiguration(client, modelPresetPendingDelete.name);
+      applyPayload(payload, { preserveCapabilityForms: true });
+      setModelPresetPendingDelete(null);
+      return true;
+    } catch (err) {
+      setModelPresetDeleteError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveProvider = async (providerName: string): Promise<boolean> => {
+    if (providerSaving) return false;
+    const provider = settings?.providers.find((item) => item.name === providerName);
+    if (!provider) return false;
+    const isOauthProvider = provider.auth_type === "oauth";
+    const providerForm = providerForms[providerName] ?? providerFormFromRow(provider);
+    const apiKey = providerForm.apiKey.trim();
+    if (!isOauthProvider && !provider.configured && (provider.api_key_required ?? true) && !apiKey) {
+      setError(t("settings.byok.apiKeyRequired"));
+      return false;
+    }
+    setProviderOperation({ provider: providerName, action: "save" });
+    try {
+      const supportName = providerName === "bedrock"
+        ? "bedrock"
+        : providerName === "azure_openai"
+          ? "azure"
+          : null;
+      if (supportName && !(await installCapabilities([supportName]))) return false;
+      const update: ProviderSettingsUpdate = { provider: providerName };
+      if (!isOauthProvider) {
+        update.apiKey = apiKey || undefined;
+        update.apiBase = providerForm.apiBase.trim();
+        if (provider.is_custom) update.displayName = providerForm.displayName.trim();
+        if (provider.provider_api_configurable) update.api = providerForm.api;
+      }
+      for (const field of provider.advanced_fields ?? []) {
+        if (field === "use_proxy") update.use_proxy = providerForm.useProxy;
+        if (field === "extra_headers") {
+          update.extraHeaders = providerForm.extraHeaders.trim();
+        }
+        if (field === "extra_body") update.extraBody = providerForm.extraBody.trim();
+        if (field === "extra_query") update.extraQuery = providerForm.extraQuery.trim();
+        if (field === "thinking_style") {
+          update.thinkingStyle = providerForm.thinkingStyle.trim();
+        }
+        if (field === "region") update.region = providerForm.region.trim();
+        if (field === "profile") update.profile = providerForm.profile.trim();
+      }
+      const payload = await updateProviderSettings(client, update);
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      if (payload.requires_restart) {
+        setPendingRestartSections((prev) => ({ ...prev, image: true }));
+      }
+      await maybeRestartHostEngine(payload);
+      setProviderForms((prev) => {
+        const next = { ...prev };
+        delete next[providerName];
+        return next;
+      });
+      setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
+      setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
+      setError(null);
+      return true;
+    } catch (err) {
+      setError((err as Error).message);
+      return false;
+    } finally {
+      setProviderOperation(null);
+    }
+  };
+
+  const createCustomProvider = async (draft: CustomProviderDraft): Promise<SettingsPayload | null> => {
+    if (providerSaving) return null;
+    setProviderOperation({ provider: CUSTOM_PROVIDER_CREATION_KEY, action: "create" });
+    try {
+      const payload = await createProviderSettings(client, {
+        name: draft.name.trim(),
+        apiKey: draft.apiKey.trim() || undefined,
+        apiBase: draft.apiBase.trim(),
+        ...(settings?.provider_api_configuration_supported ? { api: draft.api } : {}),
+        use_proxy: draft.useProxy,
+        extraHeaders: draft.extraHeaders.trim(),
+        extraBody: draft.extraBody.trim(),
+        extraQuery: draft.extraQuery.trim(),
+        thinkingStyle: draft.thinkingStyle.trim(),
+      });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      setError(null);
+      return payload;
+    } catch (err) {
+      setError((err as Error).message);
+      return null;
+    } finally {
+      setProviderOperation(null);
+    }
+  };
+
+  const runProviderOAuth = async (providerName: string, action: "login" | "logout") => {
+    if (providerSaving) return;
+    let popup: Window | null = null;
+    if (
+      action === "login"
+      && providerName === "xai_grok"
+      && !remoteBrowserAccess
+    ) {
+      try {
+        popup = window.open("about:blank", "_blank");
+        if (popup) popup.opener = null;
+      } catch {
+        popup = null;
+      }
+    }
+    setProviderOperation({ provider: providerName, action });
+    try {
+      const payload =
+        action === "login"
+          ? await loginProviderOAuth(
+              client,
+              providerName,
+              providerName === "openai_codex" && remoteBrowserAccess,
+            )
+          : await logoutProviderOAuth(client, providerName);
+      if (isProviderOAuthAuthorizationRequired(payload)) {
+        if (payload.completion_input === "device_code" && !oauthMounted.current) {
+          await cancelProviderOAuth(client, payload.provider, payload.flow_id).catch(() => {});
+          return;
+        }
+        try {
+          if (popup && !popup.closed) popup.location.href = payload.authorization_url;
+        } catch {
+          // The dialog keeps the authorization link available when the popup was closed.
+        }
+        providerOAuthFlowRef.current = payload;
+        setProviderOAuthFlow(payload);
+        setProviderOAuthResponse("");
+        setProviderOAuthDialogError(null);
+        setError(null);
+        return;
+      }
+      popup?.close();
+      closeProviderOAuthFlow(false);
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      setError(null);
+    } catch (err) {
+      popup?.close();
+      setError((err as Error).message);
+    } finally {
+      setProviderOperation(null);
+    }
+  };
+
+  const completeProviderOAuthResponse = async () => {
+    const flow = providerOAuthFlowRef.current;
+    const authorizationResponse = providerOAuthResponse.trim();
+    if (!flow || !authorizationResponse || providerOAuthCompleting) return;
+    setProviderOAuthCompleting(true);
+    setProviderOAuthDialogError(null);
+    try {
+      const payload = await completeProviderOAuth(
+        client,
+        flow.provider,
+        flow.flow_id,
+        authorizationResponse,
+      );
+      if (providerOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
+      if (isProviderOAuthPending(payload)) return;
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      setError(null);
+      closeProviderOAuthFlow(false);
+    } catch (err) {
+      if (providerOAuthFlowRef.current?.flow_id === flow.flow_id) {
+        setProviderOAuthDialogError((err as Error).message);
+      }
+    } finally {
+      setProviderOAuthCompleting(false);
+    }
+  };
+
+  const resetProviderDraft = useCallback((providerName: string) => {
+    const provider = settings?.providers.find((item) => item.name === providerName);
+    if (!provider) return;
+    setProviderForms((prev) => ({
+      ...prev,
+      [providerName]: providerFormFromRow(provider),
+    }));
+    setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
+    setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
+  }, [settings]);
+
+  const toggleProviderKeyVisibility = (providerName: string) => {
+    const isVisible = visibleProviderKeys[providerName];
+    setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: !isVisible }));
+  };
+
+  const toggleProviderKeyEditing = (providerName: string) => {
+    const provider = settings?.providers.find((row) => row.name === providerName);
+    if (!provider) return;
+    setEditingProviderKeys((prev) => {
+      const nextEditing = !prev[providerName];
+      if (!nextEditing) {
+        setProviderForms((forms) => ({
+          ...forms,
+          [providerName]: {
+            ...(forms[providerName] ?? providerFormFromRow(provider)),
+            apiKey: "",
+          },
+        }));
+        setVisibleProviderKeys((visible) => ({ ...visible, [providerName]: false }));
+      }
+      return { ...prev, [providerName]: nextEditing };
+    });
+  };
+
+  return {
+    modelEditIdentity: String(editTarget.identity),
+    beginModelPresetCreation,
+    cancelModelPresetCreation,
+    changeModelCallOrder,
+    completeProviderOAuthResponse,
+    createCustomProvider,
+    handleDeleteModelConfiguration,
+    handleMigrateModelConfigurations,
+    resetProviderDraft,
+    runProviderOAuth,
+    saveModelSettings,
+    saveModelRequestSettings,
+    saveProvider,
+    toggleProviderKeyEditing,
+    toggleProviderKeyVisibility,
+  };
+}

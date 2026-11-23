@@ -1,5 +1,3 @@
-"""Tests for tool hint formatting (nanobot.utils.tool_hints)."""
-
 from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.tool_hints import format_tool_hints
 
@@ -14,7 +12,17 @@ def _hint(calls, max_length=40):
 
 
 class TestToolHintKnownTools:
-    """Test registered tool types produce correct formatted output."""
+
+    def test_rg_shows_argument_boundaries(self):
+        assert _hint([_tc("rg", {"args": ["-n", "hello world", "src"]})]) == 'rg -n "hello world" src'
+
+    def test_rg_shows_regex_and_empty_argument(self):
+        assert _hint([_tc("rg", {"args": [r"resolve\(", ""]})]) == 'rg resolve\\( ""'
+
+    def test_rg_truncates_long_arguments(self):
+        result = _hint([_tc("rg", {"args": ["x" * 100]})])
+        assert result.endswith("…")
+        assert len(result) == 43
 
     def test_read_file_short_path(self):
         result = _hint([_tc("read_file", {"path": "foo.txt"})])
@@ -46,30 +54,26 @@ class TestToolHintKnownTools:
         cmd = "cd /very/long/path && cat file && echo done && sleep 1 && ls -la"
         result = _hint([_tc("exec", {"command": cmd})])
         assert result.startswith("$ ")
-        assert len(result) <= 50  # reasonable limit
+        assert len(result) <= 50
 
     def test_exec_abbreviates_paths_in_command(self):
-        """Windows paths in exec commands should be folded, not blindly truncated."""
         cmd = "cd D:\\Documents\\GitHub\\nanobot\\.worktree\\tomain\\nanobot && git diff origin/main...pr-2706 --name-only 2>&1"
         result = _hint([_tc("exec", {"command": cmd})])
-        assert "\u2026/" in result  # path should be folded with …/
-        assert "worktree" not in result  # middle segments should be collapsed
+        assert "\u2026/" in result
+        assert "worktree" not in result
 
     def test_exec_abbreviates_linux_paths(self):
-        """Unix absolute paths in exec commands should be folded."""
         cmd = "cd /home/user/projects/nanobot/.worktree/tomain && make build"
         result = _hint([_tc("exec", {"command": cmd})])
         assert "\u2026/" in result
         assert "projects" not in result
 
     def test_exec_abbreviates_home_paths(self):
-        """~/ paths in exec commands should be folded."""
         cmd = "cd ~/projects/nanobot/workspace && pytest tests/"
         result = _hint([_tc("exec", {"command": cmd})])
         assert "\u2026/" in result
 
     def test_exec_abbreviates_quoted_linux_paths_with_spaces(self):
-        """Quoted Unix paths with spaces should still be folded."""
         cmd = 'cd "/home/user/My Documents/project" && pytest tests/'
         result = _hint([_tc("exec", {"command": cmd})])
         assert "\u2026/" in result
@@ -77,23 +81,17 @@ class TestToolHintKnownTools:
         assert '"' in result
 
     def test_exec_abbreviates_quoted_windows_paths_with_spaces(self):
-        """Quoted Windows paths with spaces should still be folded."""
         cmd = 'cd "C:/Program Files/Git/project" && git status'
         result = _hint([_tc("exec", {"command": cmd})])
         assert "\u2026/" in result
         assert '"C:/Program Files/Git/project"' not in result
         assert '"' in result
 
-    def test_exec_short_command_unchanged(self):
-        result = _hint([_tc("exec", {"command": "npm install typescript"})])
-        assert result == "$ npm install typescript"
-
     def test_exec_chained_commands_truncated_not_mid_path(self):
-        """Long chained commands should truncate preserving abbreviated paths."""
         cmd = "cd D:\\Documents\\GitHub\\project && npm run build && npm test"
         result = _hint([_tc("exec", {"command": cmd})])
-        assert "\u2026/" in result  # path folded
-        assert "npm" in result  # chained command still visible
+        assert "\u2026/" in result
+        assert "npm" in result
 
     def test_web_search(self):
         result = _hint([_tc("web_search", {"query": "Claude 4 vs GPT-4"})])
@@ -105,7 +103,6 @@ class TestToolHintKnownTools:
 
 
 class TestToolHintMCP:
-    """Test MCP tools are abbreviated to server::tool format."""
 
     def test_mcp_standard_format(self):
         result = _hint([_tc("mcp_4_5v_mcp__analyze_image", {"imageSource": "https://img.jpg", "prompt": "describe"})])
@@ -119,7 +116,6 @@ class TestToolHintMCP:
 
 
 class TestToolHintFallback:
-    """Test unknown tools fall back to original behavior."""
 
     def test_unknown_tool_with_string_arg(self):
         result = _hint([_tc("custom_tool", {"data": "hello world"})])
@@ -141,7 +137,6 @@ class TestToolHintFallback:
 
 
 class TestToolHintFolding:
-    """Test consecutive same-tool calls are folded."""
 
     def test_single_call_no_fold(self):
         calls = [_tc("grep", {"pattern": "*.py"})]
@@ -192,7 +187,6 @@ class TestToolHintFolding:
 
 
 class TestToolHintMultipleCalls:
-    """Test multiple different tool calls are comma-separated."""
 
     def test_two_different_tools(self):
         calls = [
@@ -206,39 +200,31 @@ class TestToolHintMultipleCalls:
 
 
 class TestToolHintEdgeCases:
-    """Test edge cases and defensive handling (G1, G2)."""
 
     def test_known_tool_empty_list_args(self):
-        """C1/G1: Empty list arguments should not crash."""
         result = _hint([_tc("read_file", [])])
         assert result == "read_file"
 
     def test_known_tool_none_args(self):
-        """G2: None arguments should not crash."""
         result = _hint([_tc("read_file", None)])
         assert result == "read_file"
 
     def test_fallback_empty_list_args(self):
-        """C1: Empty list args in fallback should not crash."""
         result = _hint([_tc("custom_tool", [])])
         assert result == "custom_tool"
 
     def test_fallback_none_args(self):
-        """G2: None args in fallback should not crash."""
         result = _hint([_tc("custom_tool", None)])
         assert result == "custom_tool"
 
     def test_list_dir_registered(self):
-        """S2: list_dir should use 'ls' format."""
         result = _hint([_tc("list_dir", {"path": "/tmp"})])
         assert result == "ls /tmp"
 
 
 class TestToolHintMixedFolding:
-    """G4: Mixed folding groups with interleaved same-tool segments."""
 
     def test_read_read_grep_grep_read(self):
-        """All different args — each hint listed separately."""
         calls = [
             _tc("read_file", {"path": "a.py"}),
             _tc("read_file", {"path": "b.py"}),
@@ -253,12 +239,11 @@ class TestToolHintMixedFolding:
 
 
 class TestToolHintMaxLength:
-    """Test max_length parameter controls truncation of tool hints."""
 
-    def test_exec_default_truncates_at_40(self):
+    def test_exec_explicit_max_length_limits_hint(self):
         cmd = "cd /very/long/path/to/some/project && npm run build && npm test"
         result = _hint([_tc("exec", {"command": cmd})], max_length=40)
-        assert len(result) <= 50  # "$ " prefix + 40 + ellipsis
+        assert len(result) <= 50
         assert "\u2026" in result
 
     def test_exec_larger_max_length_shows_more(self):
@@ -287,41 +272,67 @@ class TestToolHintMaxLength:
         assert len(result) >= len(result_40)
 
     def test_path_type_respects_max_length(self):
-        """Path-type tools (read_file, write_file, etc.) should honor max_length."""
         long_path = "/home/user/.local/share/uv/tools/nanobot/agent/loop.py"
         short = _hint([_tc("read_file", {"path": long_path})], max_length=40)
         long = _hint([_tc("read_file", {"path": long_path})], max_length=120)
         assert len(long) > len(short)
 
     def test_edit_path_respects_max_length(self):
-        """edit (is_path=True) should honor max_length, not stay hardcoded at 40."""
         long_path = "/home/user/projects/nanobot/src/agent/loop.py"
         short = _hint([_tc("edit", {"file_path": long_path})], max_length=40)
         long = _hint([_tc("edit", {"file_path": long_path})], max_length=120)
         assert len(long) > len(short)
 
     def test_list_dir_path_respects_max_length(self):
-        """list_dir (is_path=True) should honor max_length."""
         long_path = "/home/user/.local/share/uv/tools/nanobot/"
         short = _hint([_tc("list_dir", {"path": long_path})], max_length=40)
         long = _hint([_tc("list_dir", {"path": long_path})], max_length=120)
         assert len(long) > len(short)
 
+    def test_plain_value_tools_respect_max_length(self):
+        """Plain-value tools must truncate like the is_path/is_command branches.
+
+        grep, web_search, x_search and find_files carry no path or command
+        structure to fold, so their raw value used to reach the progress hint
+        untruncated: a 400-char search query produced a 400-char hint.
+        """
+        for name, key in (
+            ("grep", "pattern"),
+            ("web_search", "query"),
+            ("x_search", "query"),
+            ("find_files", "query"),
+        ):
+            short = _hint([_tc(name, {key: "x" * 400})], max_length=40)
+            long = _hint([_tc(name, {key: "x" * 400})], max_length=120)
+            assert len(long) > len(short), name
+            assert len(short) <= 40 + 12, name
+            assert "\u2026" in short, name
+
+    def test_plain_value_short_value_untouched(self):
+        result = _hint([_tc("grep", {"pattern": "TODO|FIXME"})], max_length=40)
+        assert result == 'grep "TODO|FIXME"'
+
+    def test_plain_value_exactly_at_max_length_untouched(self):
+        query = "a" * 40
+        result = _hint([_tc("web_search", {"query": query})], max_length=40)
+        assert result == f'search "{query}"'
+        assert "\u2026" not in result
+
+    def test_plain_value_one_over_max_length_truncates(self):
+        result = _hint([_tc("grep", {"pattern": "a" * 41})], max_length=40)
+        assert result == 'grep "' + "a" * 39 + "\u2026" + '"'
+
 
 class TestToolHintMalformedCalls:
-    """Malformed tool calls must not crash hint formatting (see HKUDS/nanobot)."""
 
     def test_none_name_is_skipped(self):
-        """A tool call with name=None should be skipped, not raise AttributeError."""
         result = _hint([_tc(None, None)])
         assert result == ""
 
     def test_empty_name_is_skipped(self):
-        """A tool call with an empty name should be skipped."""
         result = _hint([_tc("", {"path": "foo.txt"})])
         assert result == ""
 
     def test_none_name_mixed_with_valid_call(self):
-        """A degenerate call must not suppress hints for the valid calls beside it."""
         result = _hint([_tc(None, None), _tc("read_file", {"path": "foo.txt"})])
         assert result == "read foo.txt"

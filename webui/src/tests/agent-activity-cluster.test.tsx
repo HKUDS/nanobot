@@ -1,8 +1,22 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
+import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
+import { preloadMarkdownText } from "@/components/MarkdownText";
+import { setAppLanguage } from "@/i18n";
+import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+
+function openLiveActivity() {
+  fireEvent.click(screen.getByRole("button", { name: /^Working for / }));
+}
+
+// These DOM tests exercise disclosure/source contracts; the real shadow renderer runs in browser tests.
+vi.mock("@/components/thread/activity/DiffSyntaxHighlight", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/thread/activity/DiffSyntaxHighlight")>();
+  return { ...actual, DiffSyntaxHighlight: actual.PlainDiffLines };
+});
 
 const BLENDER_CLI_APP: CliAppInfo = {
   name: "blender",
@@ -41,6 +55,15 @@ const BROWSERBASE_MCP: McpPresetInfo = {
   connection_summary: "https://mcp.browserbase.com/mcp",
 };
 
+function unifiedFileDiff(lines: string[], truncated = false) {
+  return {
+    format: "unified" as const,
+    context: 3,
+    truncated,
+    text: lines.join("\n"),
+  };
+}
+
 function activityMessages(extraReasoning = "", extraTool?: UIMessage): UIMessage[] {
   const rows: UIMessage[] = [
     {
@@ -65,49 +88,6 @@ function activityMessages(extraReasoning = "", extraTool?: UIMessage): UIMessage
   return rows;
 }
 
-function installAnimationFrameQueue() {
-  const originalRequest = window.requestAnimationFrame;
-  const originalCancel = window.cancelAnimationFrame;
-  const callbacks = new Map<number, FrameRequestCallback>();
-  let nextId = 1;
-
-  window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
-    const id = nextId;
-    nextId += 1;
-    callbacks.set(id, callback);
-    return id;
-  }) as typeof window.requestAnimationFrame;
-  window.cancelAnimationFrame = ((id: number) => {
-    callbacks.delete(id);
-  }) as typeof window.cancelAnimationFrame;
-
-  return {
-    flush() {
-      const pending = Array.from(callbacks.entries());
-      callbacks.clear();
-      for (const [, callback] of pending) callback(0);
-    },
-    restore() {
-      window.requestAnimationFrame = originalRequest;
-      window.cancelAnimationFrame = originalCancel;
-    },
-  };
-}
-
-function setScrollGeometry(
-  element: HTMLElement,
-  geometry: { scrollHeight: number; clientHeight: number; scrollTop?: number },
-) {
-  Object.defineProperties(element, {
-    scrollHeight: { configurable: true, value: geometry.scrollHeight },
-    clientHeight: { configurable: true, value: geometry.clientHeight },
-    scrollTop: {
-      configurable: true,
-      value: geometry.scrollTop ?? element.scrollTop,
-      writable: true,
-    },
-  });
-}
 
 function installReducedMotion() {
   const original = window.matchMedia;
@@ -129,129 +109,361 @@ function installReducedMotion() {
 }
 
 describe("AgentActivityCluster", () => {
-  it("jumps to the latest activity when opened", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
+  afterEach(() => { localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY); });
 
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-
-      act(() => {
-        raf.flush();
-      });
-
-      expect(scrollport.scrollTop).toBe(880);
-    } finally {
-      raf.restore();
-    }
+  it("keeps repeated session observations in call order and shows their original command", () => {
+    const id = "012345abcdef";
+    const sessionLine = `exec_session(${JSON.stringify({ session_id: id })})`;
+    const readLine = 'read_file({"path":"README.md"})';
+    const messages: UIMessage[] = [{
+      id: "session-activity", role: "tool", kind: "trace", content: sessionLine,
+      traces: [sessionLine, readLine], createdAt: 1,
+      toolEvents: [
+        { name: "exec_session", call_id: "poll-1", arguments: { session_id: id }, phase: "end", result: `Process running. session_id: ${id}\nRuntime remaining: 100.0s\nElapsed: 1.0s` },
+        { name: "read_file", call_id: "read-1", arguments: { path: "README.md" }, phase: "end" },
+        { name: "exec_session", call_id: "poll-2", arguments: { session_id: id }, phase: "end", result: "Exit code: 7\nElapsed: 2.0s" },
+      ],
+    }];
+    const commands = new Map([[id, "npm test --token secret-value"]]);
+    const { container } = render(
+      <ExecSessionCommandsContext.Provider value={commands}>
+        <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />
+      </ExecSessionCommandsContext.Provider>,
+    );
+    openLiveActivity();
+    const rows = screen.getAllByTestId("activity-step").map((row) => row.textContent);
+    expect(rows).toEqual([
+      "Command still running npm test --token ••••",
+      "Read file README.md",
+      "Command failed (exit 7) npm test --token ••••",
+    ]);
+    expect(container.innerHTML).not.toContain(id);
+    expect(container.innerHTML).not.toContain("secret-value");
   });
 
-  it("follows new reasoning and tool activity while the user is at the bottom", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      const { rerender } = render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
+  it("preserves the order of a structured session check followed by text-only activity", () => {
+    const id = "012345abcdef";
+    const line = `exec_session(${JSON.stringify({ session_id: id })})`;
+    const legacy = 'read_file({"path":"later.txt"})';
+    const message: UIMessage = { id: "mixed-activity", role: "tool", kind: "trace", content: legacy,
+      traces: [line, legacy], createdAt: 1, toolEvents: [{ name: "exec_session", call_id: "check",
+        arguments: { session_id: id }, phase: "end", result: "Exit code: 0\nElapsed: 2.0s" }] };
+    render(<AgentActivityCluster messages={[message]} isTurnStreaming hasBodyBelow={false} />);
+    openLiveActivity();
+    expect(screen.getAllByTestId("activity-step").map((row) => row.textContent)).toEqual([
+      "Command completed", "Reading file later.txt",
+    ]);
+  });
 
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-      act(() => {
-        raf.flush();
-      });
+  it("keeps text-only activity after every repeated structured check preceding it", () => {
+    const id = "012345abcdef";
+    const line = `exec_session(${JSON.stringify({ session_id: id })})`;
+    const legacy = 'read_file({"path":"later.txt"})';
+    const message: UIMessage = { id: "mixed-repeats", role: "tool", kind: "trace", content: legacy,
+      traces: [line, line, legacy], createdAt: 1, toolEvents: [
+        { name: "exec_session", call_id: "check-1", arguments: { session_id: id }, phase: "end",
+          result: `Process running. session_id: ${id}\nRuntime remaining: 100.0s\nElapsed: 1.0s` },
+        { name: "exec_session", call_id: "check-2", arguments: { session_id: id }, phase: "end", result: "Exit code: 0\nElapsed: 2.0s" },
+      ] };
+    render(<AgentActivityCluster messages={[message]} isTurnStreaming hasBodyBelow={false} />);
+    openLiveActivity();
+    expect(screen.getAllByTestId("activity-step").map((row) => row.textContent)).toEqual([
+      "Command still running", "Command completed", "Reading file later.txt",
+    ]);
+  });
 
-      rerender(
-        <AgentActivityCluster
-          messages={activityMessages(" with more detail", {
-            id: "t2",
+  it("does not claim text-only session input succeeded without an observation", () => {
+    const line = 'exec_session({"session_id":"012345abcdef","input":"private-stdin"})';
+    const message: UIMessage = { id: "legacy-session", role: "tool", kind: "trace", content: line, traces: [line], createdAt: 1 };
+    const { container } = render(<AgentActivityCluster messages={[message]} isTurnStreaming={false} hasBodyBelow={false} expanded />);
+    expect(container).toHaveTextContent("Command status unknown");
+    expect(container).not.toHaveTextContent("Sent input");
+    expect(container).not.toHaveTextContent("private-stdin");
+  });
+
+  it("folds only long consecutive passive checks and lets users inspect every observation", () => {
+    const a = "012345abcdef";
+    const b = "fedcba543210";
+    const running = (id: string) => `Process running. session_id: ${id}\nRuntime remaining: 100.0s\nElapsed: 1.0s`;
+    const view = (checks: number) => {
+      const events: NonNullable<UIMessage["toolEvents"]> = [
+        ...Array.from({ length: checks }, (_, index) => ({ name: "exec_session", call_id: `a-${index}`,
+          arguments: { session_id: a }, phase: "end" as const, result: running(a) })),
+        { name: "exec_session", call_id: "input", arguments: { session_id: a, input: "private" }, phase: "end", result: running(a) },
+        ...Array.from({ length: 7 }, (_, index) => ({ name: "exec_session", call_id: `b-${index}`,
+          arguments: { session_id: b }, phase: "end" as const, result: running(b) })),
+        { name: "exec_session", call_id: "failed", arguments: { session_id: b }, phase: "error", error: "query failed" },
+        { name: "exec_session", call_id: "finished", arguments: { session_id: a }, phase: "end", result: "Exit code: 0\nElapsed: 1.0s" },
+      ];
+      const message: UIMessage = { id: "many-checks", role: "tool", kind: "trace", content: "exec_session()",
+        traces: events.map((event) => `exec_session(${JSON.stringify(event.arguments)})`), toolEvents: events, createdAt: 1 };
+      return <ExecSessionCommandsContext.Provider value={new Map([[a, "test-a"], [b, "test-b"]])}>
+        <AgentActivityCluster messages={[message]} isTurnStreaming hasBodyBelow={false} />
+      </ExecSessionCommandsContext.Provider>;
+    };
+    const { rerender, container } = render(view(10));
+    openLiveActivity();
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(5);
+    expect(container).toHaveTextContent("Sent input test-a");
+    expect(container).toHaveTextContent("Could not check command test-b");
+    expect(container).toHaveTextContent("Command completed test-a");
+    expect(container).not.toHaveTextContent("private");
+    fireEvent.click(screen.getByRole("button", { name: "Show 9 earlier checks" }));
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(14);
+    expect(screen.getByRole("button", { name: "Hide 9 earlier checks" })).toHaveAttribute("aria-expanded", "true");
+    rerender(view(11));
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(15);
+    fireEvent.click(screen.getByRole("button", { name: "Hide 10 earlier checks" }));
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(5);
+    expect(screen.getByRole("button", { name: "Show 6 earlier checks" })).toBeInTheDocument();
+  });
+
+  it("shows a generic session label until its source command becomes available", () => {
+    const id = "012345abcdef";
+    const line = `exec_session(${JSON.stringify({ session_id: id })})`;
+    const messages: UIMessage[] = [{
+      id: "session-activity", role: "tool", kind: "trace", content: line, traces: [line], createdAt: 1,
+      toolEvents: [{ name: "exec_session", call_id: "poll", arguments: { session_id: id }, phase: "end", result: "Exit code: 0\nElapsed: 2.0s" }],
+    }];
+    const view = (commands: ReadonlyMap<string, string>) => (
+      <ExecSessionCommandsContext.Provider value={commands}>
+        <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />
+      </ExecSessionCommandsContext.Provider>
+    );
+    const { rerender, container } = render(view(new Map()));
+    expect(screen.getByText("Command completed")).toBeInTheDocument();
+    expect(container.innerHTML).not.toContain(id);
+    rerender(view(new Map([[id, "bun test"]])));
+    expect(screen.getByText("Command completed bun test")).toBeInTheDocument();
+    expect(container.innerHTML).not.toContain(id);
+  });
+
+  it.each([false, true])("honors the activity preference and manual overrides (streaming: %s)", (isTurnStreaming) => {
+    render(<AgentActivityCluster messages={activityMessages()} isTurnStreaming={isTurnStreaming} hasBodyBelow={false} />);
+    const disclosure = screen.getByRole("button", { name: /^(Working|Worked)/ });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    act(() => { writeLocalPreferences(DEFAULT_LOCAL_PREFS); });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+  });
+  it("updates existing activity when the language changes without altering raw values", async () => {
+    const query = "release notes";
+    const path = "src/app.tsx";
+    const cliLine = 'run_cli_app({"name":"blender","args":["--background","scene.blend"],"json":true})';
+    render(
+      <AgentActivityCluster
+        messages={[
+          {
+            id: "localized-activity",
             role: "tool",
             kind: "trace",
-            content: "open_browser()",
-            traces: ["open_browser()"],
-            createdAt: 3,
-          })}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1500,
-        clientHeight: 120,
-        scrollTop: scrollport.scrollTop,
-      });
+            content: cliLine,
+            traces: [
+              `grep(${JSON.stringify({ pattern: query })})`,
+              `read_file(${JSON.stringify({ path })})`,
+              cliLine,
+              'mcp_browserbase_browser_navigate({"url":"https://example.com"})',
+              "edit_file()",
+            ],
+            toolEvents: [{
+              phase: "start",
+              call_id: "localized-browserbase",
+              name: "mcp_browserbase_browser_navigate",
+              arguments: { url: "https://example.com" },
+            }],
+            fileEdits: [{
+              call_id: "localized-file-edit",
+              tool: "edit_file",
+              path,
+              phase: "end",
+              added: 1,
+              deleted: 0,
+              approximate: false,
+              status: "done",
+            }],
+            createdAt: 1,
+          },
+        ]}
+        isTurnStreaming
+        hasBodyBelow={false}
+        cliApps={[BLENDER_CLI_APP]}
+        mcpPresets={[BROWSERBASE_MCP]}
+      />,
+    );
 
-      act(() => {
-        raf.flush();
-      });
+    openLiveActivity();
+    expect(screen.getByText(`Searched files “${query}”`)).toBeInTheDocument();
+    expect(screen.getByText(`Reading file ${path}`)).toBeInTheDocument();
+    expect(screen.getByLabelText("Using Blender, --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByLabelText("Opening example.com, Browserbase")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
+    expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
 
-      expect(scrollport.scrollTop).toBe(1380);
-    } finally {
-      raf.restore();
-    }
+    await act(async () => setAppLanguage("zh-CN"));
+
+    expect(screen.getByText(`已搜索文件 “${query}”`)).toBeInTheDocument();
+    expect(screen.getByText(`正在读取文件 ${path}`)).toBeInTheDocument();
+    expect(screen.getByLabelText("正在使用 Blender, --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByLabelText("正在打开 example.com, Browserbase")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "已编辑" })).toBeInTheDocument();
+    expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
+
+    await act(async () => setAppLanguage("ja"));
+
+    expect(screen.getByText(`“${query}” ファイル検索完了`)).toBeInTheDocument();
+    expect(screen.getByText(`${path} ファイルを読み取り中`)).toBeInTheDocument();
+    expect(screen.getByLabelText("Blender を使用中, --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByLabelText("example.com 開いています, Browserbase")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "編集" })).toBeInTheDocument();
+    expect(screen.getByTestId("activity-file-reference").closest('[data-testid="activity-step"]'))
+      .toHaveAttribute("aria-label", `${path} 編集`);
   });
 
-  it("does not pull the user down after they scroll up inside the activity pane", () => {
-    const raf = installAnimationFrameQueue();
+  it.each(["exec(…)", ""])("loads deferred trace details only after completed activity is expanded (summary=%s)", async (summary) => {
+    const onLoadTraceDetails = vi.fn();
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-deferred",
+          role: "tool",
+          kind: "trace",
+          content: summary,
+          traces: summary ? [summary] : [],
+          traceDetail: {
+            ref: "9.tr-deadbeefdeadbeef",
+            bytes: 40_000,
+            traceCount: 1,
+          },
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+        onLoadTraceDetails={onLoadTraceDetails}
+      />,
+    );
+
+    expect(onLoadTraceDetails).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Worked/ }));
+    await waitFor(() => {
+      expect(onLoadTraceDetails).toHaveBeenCalledWith(["9.tr-deadbeefdeadbeef"]);
+    });
+  });
+
+  it.each([
+    {
+      locale: "en" as const,
+      waiting: "Connection failed. Retrying in 5s",
+      retrying: "Connection failed. Retrying",
+      exhausted: "Connection failed. Ending turn",
+    },
+    {
+      locale: "zh-CN" as const,
+      waiting: "连接失败，5 秒后重试",
+      retrying: "连接失败，正在重试",
+      exhausted: "连接失败，正在结束本轮",
+    },
+  ])("shows localized model retry progress in the activity header ($locale)", async ({
+    locale, waiting, retrying, exhausted,
+  }) => {
+    await act(async () => setAppLanguage(locale));
+    vi.useFakeTimers();
     try {
-      const { rerender } = render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
+      const retryStatus = {
+        state: "waiting" as const,
+        attempt: 1,
+        max_attempts: 4,
+        error_kind: "connection" as const,
+        next_retry_at: Date.now() / 1000 + 5,
+      };
+      const { rerender, unmount } = render(
+        <AgentActivityCluster messages={[]} isTurnStreaming hasBodyBelow={false} retryStatus={retryStatus} />,
       );
 
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-      act(() => {
-        raf.flush();
-      });
-
-      scrollport.scrollTop = 100;
-      fireEvent.scroll(scrollport);
+      expect(screen.getByRole("status", { name: waiting })).toBeVisible();
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(screen.getByRole("status", { name: retrying })).toBeVisible();
 
       rerender(
         <AgentActivityCluster
-          messages={activityMessages(" still streaming")}
+          messages={[]}
           isTurnStreaming
           hasBodyBelow={false}
+          retryStatus={{ ...retryStatus, state: "exhausted", attempt: 4 }}
         />,
       );
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1500,
-        clientHeight: 120,
-        scrollTop: scrollport.scrollTop,
-      });
-
-      act(() => {
-        raf.flush();
-      });
-
-      expect(scrollport.scrollTop).toBe(100);
+      expect(screen.getByRole("status", { name: exhausted })).toBeVisible();
+      unmount();
     } finally {
-      raf.restore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps intermediate assistant output as normal Markdown inside live activity", async () => {
+    await act(async () => {
+      await preloadMarkdownText();
+    });
+
+    render(
+      <AgentActivityCluster
+        messages={[
+          {
+            id: "model-activity",
+            role: "assistant",
+            content: "**partial answer**",
+            activityKind: "model",
+            isStreaming: true,
+            createdAt: 1,
+          },
+        ]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    openLiveActivity();
+    const block = screen.getByTestId("activity-model-message");
+    await waitFor(() => expect(block.querySelector("strong")).not.toBeNull());
+    expect(block.querySelector("strong")).toHaveTextContent("partial answer");
+    expect(screen.queryByTestId("activity-step")).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("uses one activity layout without nested scrolling (streaming: %s)", (isTurnStreaming) => {
+    const onExpandedChange = vi.fn();
+    const props = {
+      messages: activityMessages(),
+      isTurnStreaming,
+      hasBodyBelow: false,
+      ...(isTurnStreaming ? {} : { expanded: true, hideHeader: true }),
+      onExpandedChange,
+    };
+    const view = render(<AgentActivityCluster {...props} />);
+    const header = screen.getByRole("button", { name: /^(Working|Worked)/ });
+    if (isTurnStreaming) fireEvent.click(header);
+    const content = screen.getByTestId("agent-activity-content");
+
+    expect(header).toHaveClass("h-7", "gap-1.5", "px-1.5");
+    expect(header.querySelector("svg")).toHaveClass("lucide-activity");
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    expect(view.container.querySelector("[data-contextual-activity-guide]")).toBeInTheDocument();
+    expect(content).toHaveClass("ps-6");
+    expect(content).not.toHaveClass("max-h-[180px]");
+    expect(content).not.toHaveClass("overflow-y-auto");
+
+    view.rerender(<AgentActivityCluster {...props} messages={activityMessages(" updated", {
+      id: "next-tool", role: "tool", kind: "trace", content: "open_browser()", createdAt: 3,
+    })} />);
+    expect(screen.getByTestId("agent-activity-content")).toBe(content);
+    expect(content).toHaveTextContent("thinking updated");
+    fireEvent.click(header);
+    if (isTurnStreaming) {
+      expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
+    } else {
+      expect(onExpandedChange).toHaveBeenCalledWith(false);
     }
   });
 
@@ -273,6 +485,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
+    openLiveActivity();
     expect(screen.getByTestId("activity-reasoning-marker")).toHaveAttribute("data-state", "thinking");
 
     rerender(
@@ -293,8 +506,7 @@ describe("AgentActivityCluster", () => {
     await waitFor(() => expect(marker).toHaveClass("animate-in"));
   });
 
-  it("briefly shows completed activity, then auto-collapses before the answer", () => {
-    vi.useFakeTimers();
+  it("keeps untouched live details folded when work completes", () => {
     const liveReasoning: UIMessage = {
       id: "r-collapse",
       role: "assistant",
@@ -304,41 +516,27 @@ describe("AgentActivityCluster", () => {
       isStreaming: true,
       createdAt: 1,
     };
-    try {
-      const { rerender } = render(
-        <AgentActivityCluster
-          messages={[liveReasoning]}
-          isTurnStreaming
-          hasBodyBelow
-        />,
-      );
-      expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+    const { rerender } = render(
+      <AgentActivityCluster messages={[liveReasoning]} isTurnStreaming hasBodyBelow />,
+    );
+    expect(screen.getByRole("button", { name: /^Working for / })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByTestId("latest-activity-wheel")).toHaveTextContent("checking files");
 
-      rerender(
-        <AgentActivityCluster
-          messages={[{
-            ...liveReasoning,
-            reasoningStreaming: false,
-            isStreaming: false,
-          }]}
-          isTurnStreaming={false}
-          hasBodyBelow
-        />,
-      );
-
-      expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
-      act(() => {
-        vi.advanceTimersByTime(901);
-      });
-      expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /1 steps/i })).toHaveAttribute(
-        "aria-expanded",
-        "false",
-      );
-    } finally {
-      vi.useRealTimers();
-    }
+    rerender(
+      <AgentActivityCluster
+        messages={[{ ...liveReasoning, reasoningStreaming: false, isStreaming: false }]}
+        isTurnStreaming={false}
+        hasBodyBelow
+      />,
+    );
+    expect(screen.queryByTestId("latest-activity-wheel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
+    const disclosure = screen.getByRole("button", { name: "Worked" });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(disclosure);
+    expect(screen.getByTestId("agent-activity-content")).toHaveTextContent("checking files");
   });
+
 
   it("uses persisted turn latency for completed history instead of replay timestamps", () => {
     render(
@@ -356,7 +554,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Thought for 12s")).toBeInTheDocument();
+    expect(screen.getByText("Worked for 12s")).toBeInTheDocument();
   });
 
   it("labels mixed tool activity as work instead of thought", () => {
@@ -388,11 +586,11 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Thought")).toBeInTheDocument();
-    expect(screen.queryByText("Thought for 0s")).not.toBeInTheDocument();
+    expect(screen.getByText("Worked")).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
   });
 
-  it("renders file edit totals and a compact expanded file list", async () => {
+  it("renders file edits as one-line activity rows", async () => {
     const restoreMotion = installReducedMotion();
     try {
       render(
@@ -420,30 +618,524 @@ describe("AgentActivityCluster", () => {
           hasBodyBelow={false}
         />,
       );
-
-      expect(screen.getByRole("button", { name: /edited app\.tsx/i })).toBeInTheDocument();
-      expect(screen.getByTestId("activity-header-file-reference")).toHaveTextContent("app.tsx");
-      expect(screen.getByTestId("activity-header-file-reference")).toHaveAttribute(
-        "aria-label",
-        "/Users/renxubin/project/src/app.tsx",
-      );
-      fireEvent.click(screen.getByRole("button", { name: /edited app\.tsx/i }));
+      fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
       expect(screen.queryByText("Edited files")).not.toBeInTheDocument();
       const fileRef = screen.getByTestId("activity-file-reference");
       expect(fileRef).toHaveTextContent("src/app.tsx");
       expect(fileRef).toHaveAttribute("aria-label", "/Users/renxubin/project/src/app.tsx");
+      expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       for (const diffPair of screen.getAllByTestId("activity-diff-pair")) {
         expect(diffPair).toHaveClass("items-baseline");
         expect(diffPair).toHaveClass("leading-[inherit]");
         expect(diffPair.className).not.toContain("translate-y");
       }
-      await waitFor(() => {
-        expect(screen.getAllByText("+12").length).toBeGreaterThan(0);
-        expect(screen.getAllByText("-3").length).toBeGreaterThan(0);
-      });
+      expect(screen.getByText("+12")).toBeInTheDocument();
+      expect(screen.getByText("-3")).toBeInTheDocument();
     } finally {
       restoreMotion();
+    }
+  });
+
+  it("keeps a completed file edit at its original position in the turn", () => {
+    const before: UIMessage = {
+      id: "model-before-edit",
+      role: "assistant",
+      content: "Before the edit",
+      activityKind: "model",
+      createdAt: 1,
+    };
+    const after: UIMessage = {
+      id: "model-after-edit",
+      role: "assistant",
+      content: "After the edit",
+      activityKind: "model",
+      createdAt: 3,
+    };
+    const fileEdit = (status: "editing" | "done"): UIMessage => ({
+      id: "file-edit-in-place",
+      role: "tool",
+      kind: "trace",
+      content: "edit_file()",
+      traces: ["edit_file()"],
+      fileEdits: [{
+        call_id: "call-edit-in-place",
+        tool: "edit_file",
+        path: "src/app.tsx",
+        phase: status === "editing" ? "start" : "end",
+        added: status === "editing" ? 0 : 2,
+        deleted: 0,
+        approximate: false,
+        status,
+      }],
+      createdAt: 2,
+    });
+    const assertBetween = (middle: HTMLElement) => {
+      const beforeElement = screen.getByText("Before the edit");
+      const afterElement = screen.getByText("After the edit");
+      expect(beforeElement.compareDocumentPosition(middle) & Node.DOCUMENT_POSITION_FOLLOWING)
+        .toBeTruthy();
+      expect(middle.compareDocumentPosition(afterElement) & Node.DOCUMENT_POSITION_FOLLOWING)
+        .toBeTruthy();
+    };
+
+    const { rerender } = render(
+      <AgentActivityCluster
+        messages={[before, fileEdit("editing"), after]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    openLiveActivity();
+    assertBetween(screen.getByRole("img", { name: "Editing" }));
+
+    rerender(
+      <AgentActivityCluster
+        messages={[before, fileEdit("done"), after]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    assertBetween(screen.getByRole("img", { name: "Edited" }));
+  });
+
+  it.each(["diff", "collapsed_diff"] as const)(
+    "keeps %s edits outside reasoning folds in live and replayed activity",
+    (fileEditDisplayMode) => {
+      localStorage.setItem(
+        "nanobot-webui.settings-preferences",
+        JSON.stringify({ fileEditDisplayMode }),
+      );
+      const messages: UIMessage[] = [
+        { id: "before", role: "assistant", content: "", reasoning: "Before edit", createdAt: 1 },
+        {
+          id: "edit", role: "tool", kind: "trace", content: "edit_file()", createdAt: 2,
+          traces: ["edit_file()"],
+          fileEdits: [{
+            call_id: "edit-call", tool: "edit_file", path: "src/app.tsx", phase: "end",
+            added: 1, deleted: 1, approximate: false, status: "done",
+            diff: unifiedFileDiff([
+              "--- a/src/app.tsx", "+++ b/src/app.tsx", "@@ -1 +1 @@", "-old", "+new",
+            ]),
+          }],
+        },
+        {
+          id: "after", role: "assistant", content: "After edit",
+          activityKind: "model", createdAt: 3,
+        },
+      ];
+      const { rerender, unmount } = render(
+        <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />,
+      );
+      try {
+        if (fileEditDisplayMode === "collapsed_diff") {
+          fireEvent.click(screen.getByTestId("file-edit-diff-toggle"));
+        }
+        const assertIndependentDiff = () => {
+          const diff = screen.getByTestId("file-edit-diff");
+          expect(diff).toBeVisible();
+          expect(diff.closest('[aria-hidden="true"], [inert], [data-testid="agent-activity-content"]'))
+            .toBeNull();
+          expect(screen.getAllByTestId("activity-file-reference")).toHaveLength(1);
+        };
+        const assertExpandedOrder = () => {
+          for (const toggle of document.querySelectorAll<HTMLButtonElement>(
+            '[data-thread-disclosure][aria-expanded="false"]',
+          )) {
+            fireEvent.click(toggle);
+          }
+          const diff = screen.getByTestId("file-edit-diff");
+          expect(screen.getByText("Before edit")).toBeVisible();
+          expect(screen.getByText("After edit")).toBeVisible();
+          expect(screen.getByText("Before edit").compareDocumentPosition(diff)
+            & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+          expect(diff.compareDocumentPosition(screen.getByText("After edit"))
+            & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+          assertIndependentDiff();
+        };
+        assertIndependentDiff();
+        assertExpandedOrder();
+        for (const toggle of document.querySelectorAll<HTMLButtonElement>("[data-thread-disclosure]")) {
+          fireEvent.click(toggle);
+          assertIndependentDiff();
+        }
+        rerender(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
+        assertIndependentDiff();
+        rerender(
+          <AgentActivityCluster
+            messages={messages.slice(0, 2)}
+            isTurnStreaming
+            hasBodyBelow={false}
+            retryStatus={{ state: "waiting", attempt: 1, max_attempts: 4, error_kind: "connection" }}
+          />,
+        );
+        expect(screen.getByRole("status", { name: "Connection failed. Retrying" }))
+          .toBeVisible();
+        unmount();
+        render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
+        if (fileEditDisplayMode === "collapsed_diff") {
+          fireEvent.click(screen.getByTestId("file-edit-diff-toggle"));
+        }
+        assertIndependentDiff();
+        assertExpandedOrder();
+      } finally {
+        localStorage.removeItem("nanobot-webui.settings-preferences");
+      }
+    },
+  );
+
+  it("renders file edit diffs and responds to preference changes", () => {
+    localStorage.setItem(
+      "nanobot-webui.settings-preferences",
+      JSON.stringify({ fileEditDisplayMode: "diff" }),
+    );
+
+    try {
+      render(
+        <AgentActivityCluster
+          messages={[{
+            id: "t-diff",
+            role: "tool",
+            kind: "trace",
+            content: "edit_file()",
+            traces: ["edit_file()"],
+            fileEdits: [{
+              call_id: "call-edit",
+              tool: "edit_file",
+              path: "src/app.tsx",
+              phase: "end",
+              added: 1,
+              deleted: 1,
+              approximate: false,
+              status: "done",
+              diff: unifiedFileDiff([
+                "--- src/app.tsx",
+                "+++ src/app.tsx",
+                "@@ -10,2 +10,2 @@",
+                " function App() {",
+                "-  return <Old />;",
+                "+  return <New />;",
+              ]),
+            }],
+            createdAt: 3,
+          }]}
+          isTurnStreaming={false}
+          hasBodyBelow={false}
+        />,
+      );
+
+      expect(screen.getByTestId("file-edit-diff")).toBeInTheDocument();
+      expect(screen.getByText("return <Old />;")).toBeInTheDocument();
+      expect(screen.getByText("return <New />;")).toBeInTheDocument();
+      expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
+      expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("src/app.tsx");
+      expect(screen.getAllByTestId("activity-diff-pair")).toHaveLength(1);
+
+      act(() => {
+        writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, fileEditDisplayMode: "summary" });
+      });
+      expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
+      expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
+
+      act(() => {
+        writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, fileEditDisplayMode: "diff" });
+      });
+      expect(screen.getByTestId("file-edit-diff")).toBeInTheDocument();
+    } finally {
+      localStorage.removeItem("nanobot-webui.settings-preferences");
+    }
+  });
+
+  it("renders folded separators between separated file edit hunks", () => {
+    localStorage.setItem(
+      "nanobot-webui.settings-preferences",
+      JSON.stringify({ fileEditDisplayMode: "diff" }),
+    );
+
+    try {
+      render(
+        <AgentActivityCluster
+          messages={[{
+            id: "t-multi-hunk-diff",
+            role: "tool",
+            kind: "trace",
+            content: "edit_file()",
+            traces: ["edit_file()"],
+            fileEdits: [{
+              call_id: "call-multi-hunk-edit",
+              tool: "edit_file",
+              path: "src/app.tsx",
+              phase: "end",
+              added: 2,
+              deleted: 2,
+              approximate: false,
+              status: "done",
+              diff: unifiedFileDiff([
+                "--- src/app.tsx",
+                "+++ src/app.tsx",
+                "@@ -1,3 +1,3 @@",
+                " function first() {",
+                "-  return oldFirst;",
+                "+  return newFirst;",
+                " }",
+                "@@ -25,3 +25,3 @@",
+                " function second() {",
+                "-  return oldSecond;",
+                "+  return newSecond;",
+                " }",
+              ]),
+            }],
+            createdAt: 3,
+          }]}
+          isTurnStreaming={false}
+          hasBodyBelow={false}
+        />,
+      );
+
+      expect(screen.getByTestId("file-edit-diff-hunk-gap")).toHaveTextContent(
+        "21 unchanged lines hidden",
+      );
+      expect(screen.queryByText("@@ -25,3 +25,3 @@")).not.toBeInTheDocument();
+      expect(screen.getByText("return newSecond;")).toBeInTheDocument();
+      expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("src/app.tsx");
+    } finally {
+      localStorage.removeItem("nanobot-webui.settings-preferences");
+    }
+  });
+
+  it("keeps long file edit diffs lazy and releases them after closing", async () => {
+    localStorage.setItem(
+      "nanobot-webui.settings-preferences",
+      JSON.stringify({ fileEditDisplayMode: "diff" }),
+    );
+    const lines = Array.from({ length: 165 }, (_, index) => `line-${index + 1}`);
+
+    try {
+      render(
+        <AgentActivityCluster
+          messages={[{
+            id: "t-long-diff",
+            role: "tool",
+            kind: "trace",
+            content: "edit_file()",
+            traces: ["edit_file()"],
+            fileEdits: [{
+              call_id: "call-long-edit",
+              tool: "edit_file",
+              path: "src/long.ts",
+              phase: "end",
+              added: lines.length,
+              deleted: 0,
+              approximate: false,
+              status: "done",
+              diff: unifiedFileDiff([
+                "--- src/long.ts",
+                "+++ src/long.ts",
+                `@@ -0,0 +1,${lines.length} @@`,
+                ...lines.map((line) => `+${line}`),
+              ]),
+            }],
+            createdAt: 3,
+          }]}
+          isTurnStreaming={false}
+          hasBodyBelow={false}
+        />,
+      );
+
+      const toggle = screen.getByTestId("file-edit-diff-toggle");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveTextContent(/^Expand changes$/);
+      expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
+      expect(screen.queryByText("line-1")).not.toBeInTheDocument();
+
+      fireEvent.click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByText("line-160")).toBeInTheDocument();
+      expect(screen.queryByText("line-161")).not.toBeInTheDocument();
+      expect(screen.getByTestId("file-edit-diff-expand-lines")).toHaveTextContent(
+        "Show 5 more lines",
+      );
+
+      fireEvent.click(screen.getByTestId("file-edit-diff-expand-lines"));
+
+      expect(screen.getByText("line-165")).toBeInTheDocument();
+      expect(screen.getByTestId("file-edit-diff-collapse-lines")).toHaveTextContent(
+        "Show fewer lines",
+      );
+
+      fireEvent.click(screen.getByTestId("file-edit-diff-collapse-lines"));
+
+      expect(screen.queryByText("line-165")).not.toBeInTheDocument();
+      expect(screen.getByTestId("file-edit-diff-expand-lines")).toHaveTextContent(
+        "Show 5 more lines",
+      );
+
+      const content = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+      let finish!: () => void;
+      const finished = new Promise<void>((resolve) => { finish = resolve; });
+      Object.defineProperty(content, "getAnimations", { value: () => [{ finished }] });
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(content).toHaveAttribute("data-state", "closed");
+      expect(content).toHaveAttribute("inert");
+      expect(screen.getByTestId("file-edit-diff")).toBeInTheDocument();
+      await act(async () => { finish(); });
+      expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
+      fireEvent.click(toggle);
+      expect(screen.getByText("line-160")).toBeInTheDocument();
+      expect(screen.queryByText("line-161")).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem("nanobot-webui.settings-preferences");
+    }
+  });
+
+  it("does not mount collapsed file edit diffs until opened", () => {
+    localStorage.setItem(
+      "nanobot-webui.settings-preferences",
+      JSON.stringify({ fileEditDisplayMode: "collapsed_diff" }),
+    );
+
+    try {
+      render(
+        <AgentActivityCluster
+          messages={[{
+            id: "t-collapsed-diff",
+            role: "tool",
+            kind: "trace",
+            content: "edit_file()",
+            traces: ["edit_file()"],
+            fileEdits: [{
+              call_id: "call-collapsed-edit",
+              tool: "edit_file",
+              path: "src/app.tsx",
+              phase: "end",
+              added: 1,
+              deleted: 1,
+              approximate: false,
+              status: "done",
+              diff: unifiedFileDiff([
+                "--- src/app.tsx",
+                "+++ src/app.tsx",
+                "@@ -10,2 +10,2 @@",
+                " function App() {",
+                "-  return <Old />;",
+                "+  return <New />;",
+              ]),
+            }],
+            createdAt: 3,
+          }]}
+          isTurnStreaming={false}
+          hasBodyBelow={false}
+        />,
+      );
+
+      const toggle = screen.getByTestId("file-edit-diff-toggle");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveTextContent(/^View changes$/);
+      expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
+      expect(screen.queryByText("return <New />;")).not.toBeInTheDocument();
+
+      fireEvent.click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByTestId("file-edit-diff")).toBeInTheDocument();
+      expect(screen.getByText("return <New />;")).toBeInTheDocument();
+    } finally {
+      localStorage.removeItem("nanobot-webui.settings-preferences");
+    }
+  });
+
+  it("offers the file preview entry point when a diff payload is truncated", () => {
+    localStorage.setItem(
+      "nanobot-webui.settings-preferences",
+      JSON.stringify({ fileEditDisplayMode: "diff" }),
+    );
+    const onOpenFilePreview = vi.fn();
+
+    try {
+      render(
+        <AgentActivityCluster
+          messages={[{
+            id: "t-truncated-diff",
+            role: "tool",
+            kind: "trace",
+            content: "edit_file()",
+            traces: ["edit_file()"],
+            fileEdits: [{
+              call_id: "call-truncated-edit",
+              tool: "edit_file",
+              path: "src/app.tsx",
+              absolute_path: "/repo/src/app.tsx",
+              phase: "end",
+              added: 1,
+              deleted: 0,
+              approximate: false,
+              status: "done",
+              diff: unifiedFileDiff([
+                "--- src/app.tsx",
+                "+++ src/app.tsx",
+                "@@ -9,0 +10,1 @@",
+                "+export const value = 1;",
+              ], true),
+            }],
+            createdAt: 3,
+          }]}
+          isTurnStreaming={false}
+          hasBodyBelow={false}
+          onOpenFilePreview={onOpenFilePreview}
+        />,
+      );
+
+      const toggle = screen.getByTestId("file-edit-diff-toggle");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveTextContent("Expand changes");
+      expect(screen.queryByTestId("file-edit-diff-truncated")).not.toBeInTheDocument();
+
+      fireEvent.click(toggle);
+
+      expect(screen.getByTestId("file-edit-diff-truncated")).toHaveTextContent("Diff truncated");
+      fireEvent.click(screen.getByTestId("file-edit-diff-open-file"));
+
+      expect(onOpenFilePreview).toHaveBeenCalledWith("/repo/src/app.tsx");
+    } finally {
+      localStorage.removeItem("nanobot-webui.settings-preferences");
+    }
+  });
+
+  it.each([false, true])("labels created files with or without text diffs (hasDiff: %s)", (hasDiff) => {
+    localStorage.setItem(
+      "nanobot-webui.settings-preferences",
+      JSON.stringify({ fileEditDisplayMode: "diff" }),
+    );
+    try {
+      render(
+        <AgentActivityCluster
+          messages={[{
+            id: "create", role: "tool", kind: "trace", content: "edit_file()", createdAt: 1,
+            traces: ["edit_file()"],
+            fileEdits: [{
+              call_id: "call-create", tool: "edit_file", path: "tmp.txt", phase: "end",
+              added: hasDiff ? 1 : 0, deleted: 0, status: "done", operation: "create",
+              ...(hasDiff ? { diff: unifiedFileDiff([
+                "--- tmp.txt", "+++ tmp.txt", "@@ -0,0 +1 @@", "+hello",
+              ]) } : {}),
+            }],
+          }]}
+          isTurnStreaming={false}
+          hasBodyBelow={false}
+        />,
+      );
+      expect(screen.getByRole("img", { name: "Created" }).querySelector("svg"))
+        .toHaveClass("lucide-file-text");
+      expect(screen.getByLabelText("Created tmp.txt")).toBeInTheDocument();
+      expect(screen.queryByRole("img", { name: "Edited" })).not.toBeInTheDocument();
+      expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("tmp.txt");
+      expect(!!screen.queryByTestId("file-edit-diff")).toBe(hasDiff);
+    } finally {
+      localStorage.removeItem("nanobot-webui.settings-preferences");
     }
   });
 
@@ -473,9 +1165,11 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    expect(screen.getByRole("button", { name: /deleted angry-birds\.html/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /edited angry-birds\.html/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Deleted" }).querySelector("svg"))
+      .toHaveClass("lucide-file-code2");
+    expect(screen.queryByRole("img", { name: "Edited" })).not.toBeInTheDocument();
   });
 
   it("renders file-only edits without a redundant disclosure", () => {
@@ -506,9 +1200,12 @@ describe("AgentActivityCluster", () => {
     );
 
     expect(screen.queryByRole("button", { name: /edited app\.tsx/i })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
-    expect(screen.getByText("Edited")).toBeInTheDocument();
-    expect(screen.getByTestId("activity-header-file-reference")).toHaveTextContent("app.tsx");
+    expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
+    const marker = screen.getByRole("img", { name: "Edited" });
+    expect(marker.querySelector("svg")).toHaveClass("lucide-file-code2");
+    expect(marker.closest('[data-testid="activity-step"]')?.querySelectorAll("svg")).toHaveLength(1);
+    expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("src/app.tsx");
     expect(screen.getByText("+12")).toBeInTheDocument();
     expect(screen.getByText("-3")).toBeInTheDocument();
   });
@@ -575,10 +1272,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    const cliRuns = screen.getByTestId("activity-cli-runs");
-    expect(cliRuns).toHaveTextContent("Using");
-    expect(cliRuns).toHaveTextContent("@blender");
-    expect(cliRuns).toHaveTextContent("--json --background scene.blend");
+    expect(screen.getByLabelText("Using Blender, --json --background scene.blend")).toBeInTheDocument();
     expect(screen.getByTestId("activity-cli-logo-blender")).toBeInTheDocument();
     expect(screen.queryByText(/run_cli_app/)).not.toBeInTheDocument();
   });
@@ -626,15 +1320,226 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    const searchRow = screen.getByText("Searching").closest("li");
-    const cliRow = screen.getByText("@blender").closest("li");
-    const fetchRow = screen.getByText("Reading").closest("li");
+    openLiveActivity();
+    const searchRow = screen.getByLabelText("Searched the web, nanobot architecture").closest('[data-testid="activity-step"]');
+    const cliRow = screen.getByLabelText("Used Blender, --json project new").closest('[data-testid="activity-step"]');
+    const fetchRow = screen.getByText("example.com/diagram").closest('[data-testid="activity-step"]');
 
     expect(searchRow).not.toBeNull();
     expect(cliRow).not.toBeNull();
     expect(fetchRow).not.toBeNull();
     expect(searchRow!.compareDocumentPosition(cliRow!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(cliRow!.compareDocumentPosition(fetchRow!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("renders web search results as lightweight branded source rows", () => {
+    const line = 'web_search({"query":"agent frameworks"})';
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-web-search-results",
+          role: "tool",
+          kind: "trace",
+          content: line,
+          traces: [line],
+          toolEvents: [{
+            phase: "end",
+            call_id: "call-web-search",
+            name: "web_search",
+            arguments: { query: "agent frameworks" },
+            result: [
+              "Results for: agent frameworks",
+              "",
+              "1. OpenAI Agents SDK",
+              "   https://openai.com/index/new-tools-for-building-agents/?utm_source=test",
+              "   Build and deploy agentic applications.",
+              "2. Building effective agents",
+              "   https://www.anthropic.com/engineering/building-effective-agents",
+              "   Practical patterns for reliable agents.",
+              "3. Internal dashboard",
+              "   http://localhost:3000/search",
+            ].join("\n"),
+          }],
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    openLiveActivity();
+    expect(screen.getByLabelText("Searched the web, agent frameworks")).toBeInTheDocument();
+    expect(screen.queryByText("2 sources")).not.toBeInTheDocument();
+
+    const openAiLink = screen.getByText("OpenAI Agents SDK").closest("a");
+    const anthropicLink = screen.getByText("Building effective agents").closest("a");
+    expect(openAiLink).toHaveAttribute(
+      "href",
+      "https://openai.com/index/new-tools-for-building-agents/",
+    );
+    expect(openAiLink).not.toHaveAttribute("title");
+    expect(anthropicLink).toHaveAttribute(
+      "href",
+      "https://www.anthropic.com/engineering/building-effective-agents",
+    );
+    expect(screen.getByText("openai.com/index/new-tools-for-building-agents")).toBeInTheDocument();
+    expect(screen.getByText("anthropic.com/engineering/building-effective-agents")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-web-favicon-openai.com")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-web-favicon-anthropic.com")).toBeInTheDocument();
+    expect(screen.queryByText("Internal dashboard")).not.toBeInTheDocument();
+    expect(screen.queryByText("Build and deploy agentic applications.")).not.toBeInTheDocument();
+    const searchStep = screen.getByLabelText("Searched the web, agent frameworks").closest(
+      '[data-testid="activity-step"]',
+    );
+    const openAiStep = openAiLink!.closest('[data-testid="activity-step"]');
+    const anthropicStep = anthropicLink!.closest('[data-testid="activity-step"]');
+    expect(openAiStep).toContainElement(
+      screen.getByText("openai.com/index/new-tools-for-building-agents"),
+    );
+    expect(anthropicStep).toContainElement(
+      screen.getByText("anthropic.com/engineering/building-effective-agents"),
+    );
+    expect(searchStep?.parentElement).toBe(openAiStep?.parentElement);
+    expect(searchStep?.parentElement).toBe(anthropicStep?.parentElement);
+    expect(searchStep?.parentElement?.querySelector("ul, li, section")).toBeNull();
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(3);
+  });
+
+  it("renders hosted X search as an explicit search activity", () => {
+    const line = 'x_search({"query":"nanobot oauth"})';
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-x-search",
+          role: "tool",
+          kind: "trace",
+          content: line,
+          traces: [line],
+          toolEvents: [{
+            phase: "end",
+            call_id: "x-search-1",
+            name: "x_search",
+            arguments: { query: "nanobot oauth" },
+            result: { name: "x_semantic_search" },
+          }],
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+
+    expect(screen.getByLabelText("Searched X, nanobot oauth")).toBeInTheDocument();
+    expect(screen.queryByText(/Completed X search/i)).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(1);
+  });
+
+  it("redacts credentials from web search queries, titles, and links", () => {
+    const query = "release notes access_token=signed-secret";
+    const line = `web_search(${JSON.stringify({ query })})`;
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-web-search-secret",
+          role: "tool",
+          kind: "trace",
+          content: line,
+          traces: [line],
+          toolEvents: [{
+            phase: "end",
+            call_id: "call-web-search-secret",
+            name: "web_search",
+            arguments: { query },
+            result: [
+              "1. Release sk-proj-secret1234",
+              "   https://example.com/release?api_key=url-secret#details",
+            ].join("\n"),
+          }],
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+
+    expect(screen.queryByText(/signed-secret|secret1234|url-secret/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Searched the web, release notes access_token=<redacted>")).toBeInTheDocument();
+    expect(screen.getByText("Release <redacted>")).toBeInTheDocument();
+    expect(screen.getByText("Release <redacted>").closest("a")).toHaveClass("text-content-link", "hover:text-content-link-hover");
+    expect(screen.getByText("Release <redacted>").closest("a")).toHaveAttribute(
+      "href",
+      "https://example.com/release",
+    );
+  });
+
+  it("renders persisted search progress as one human-readable action", () => {
+    const line = 'web_search({"query":"site:linkedin.com/company Evomap startup"})';
+    render(
+      <AgentActivityCluster
+        messages={[
+          {
+            id: "search-start",
+            role: "tool",
+            kind: "trace",
+            content: "web_search()",
+            traces: ["web_search()"],
+            toolEvents: [{
+              phase: "start",
+              call_id: "hosted-search-1",
+              name: "web_search",
+              arguments: {},
+            }],
+            createdAt: 1,
+          },
+          {
+            id: "search-end",
+            role: "tool",
+            kind: "trace",
+            content: line,
+            traces: [line],
+            toolEvents: [{
+              phase: "error",
+              call_id: "hosted-search-1",
+              name: "web_search",
+              arguments: { query: "site:linkedin.com/company Evomap startup" },
+              error: "Search provider rate limited the request",
+            }],
+            createdAt: 2,
+          },
+        ]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(1);
+    expect(screen.getByLabelText("Could not search LinkedIn, Evomap startup")).toBeInTheDocument();
+    expect(screen.queryByText(/site:linkedin/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Web research")).not.toBeInTheDocument();
+  });
+
+  it("renders reasoning as a single flat activity row", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "r-flat",
+          role: "assistant",
+          content: "",
+          reasoning: "**Planning** a focused search\nfor official sources",
+          reasoningStreaming: true,
+          isStreaming: true,
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.getByText("Planning a focused search for official sources")).toBeInTheDocument();
+    expect(screen.queryByText("Thinking…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
   });
 
   it("labels rejected CLI app calls as failed instead of ran", () => {
@@ -662,11 +1567,14 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /failed @github/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Worked" }));
 
-    expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("Failed");
-    expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("@github");
-    expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("Error: CLI app 'github' not found");
+    const row = screen.getByLabelText("Could not use GitHub, --json repo view").closest(
+      '[data-testid="activity-step"]',
+    );
+    expect(row).toBeInTheDocument();
+    expect(row).not.toHaveAttribute("title");
+    expect(screen.queryByText("Error: CLI app 'github' not found")).not.toBeInTheDocument();
     expect(screen.queryByText("Ran CLI")).not.toBeInTheDocument();
   });
 
@@ -695,11 +1603,9 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    const mcpRuns = screen.getByTestId("activity-mcp-runs");
-    expect(mcpRuns).toHaveTextContent("Using");
-    expect(mcpRuns).toHaveTextContent("Browserbase");
-    expect(mcpRuns).toHaveTextContent("browser_navigate");
-    expect(mcpRuns).toHaveTextContent("url: https://example.com");
+    expect(screen.getByLabelText("Opening example.com, Browserbase")).toBeInTheDocument();
+    expect(screen.queryByText("Using")).not.toBeInTheDocument();
+    expect(screen.queryByText(/browser_navigate/)).not.toBeInTheDocument();
     expect(screen.getByTestId("activity-mcp-logo-browserbase")).toBeInTheDocument();
     expect(screen.queryByText(/mcp_browserbase_browser_navigate/)).not.toBeInTheDocument();
   });
@@ -721,9 +1627,11 @@ describe("AgentActivityCluster", () => {
     );
 
     const favicon = screen.getByTestId("activity-web-favicon-auth0.com");
-    expect(favicon.querySelector("img")?.getAttribute("src")).toContain("auth0.com");
-    expect(screen.getByText("Reading")).toBeInTheDocument();
-    expect(screen.getByText("auth0.com/blog/jwt-security-best-practices")).toBeInTheDocument();
+    expect(favicon).toHaveAttribute("src", expect.stringContaining("auth0.com"));
+    const row = screen.getByText("auth0.com/blog/jwt-security-best-practices").closest(
+      '[data-testid="activity-step"]',
+    );
+    expect(row).toHaveTextContent("Reading");
   });
 
   it("renders plain-text fetch progress with the site favicon", () => {
@@ -743,8 +1651,43 @@ describe("AgentActivityCluster", () => {
     );
 
     expect(screen.getByTestId("activity-web-favicon-auth0.com")).toBeInTheDocument();
-    expect(screen.getByText("Reading")).toBeInTheDocument();
-    expect(screen.getByText("auth0.com/blog/jwt-security-best-practices")).toBeInTheDocument();
+    const row = screen.getByText("auth0.com/blog/jwt-security-best-practices").closest(
+      '[data-testid="activity-step"]',
+    );
+    expect(row).toHaveTextContent("Reading");
+  });
+
+  it("renders a completed fetch as one linked title and URL row", () => {
+    const line = 'web_fetch({"url":"https://example.com/docs"})';
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-web-fetch-title",
+          role: "tool",
+          kind: "trace",
+          content: line,
+          traces: [line],
+          toolEvents: [{
+            phase: "end",
+            call_id: "fetch-title",
+            name: "web_fetch",
+            arguments: { url: "https://example.com/docs" },
+            result: "# Example documentation\n\nPage body",
+          }],
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+
+    const title = screen.getByText("Example documentation");
+    const url = screen.getByText("example.com/docs");
+    const row = title.closest('[data-testid="activity-step"]');
+    expect(row).toContainElement(url);
+    expect(title.closest("a")).toHaveAttribute("href", "https://example.com/docs");
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(1);
   });
 
   it("does not request favicons for private web fetch targets", () => {
@@ -764,7 +1707,173 @@ describe("AgentActivityCluster", () => {
     );
 
     expect(screen.queryByTestId("activity-web-favicon-localhost")).not.toBeInTheDocument();
-    expect(screen.getByText("url: http://localhost:3000/dashboard")).toBeInTheDocument();
+    expect(screen.getByText("Reading Private address")).toBeInTheDocument();
+    expect(screen.queryByText("http://localhost:3000/dashboard")).not.toBeInTheDocument();
+  });
+
+  it("presents generic tool traces as one-line semantic actions", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-generic-tools",
+          role: "tool",
+          kind: "trace",
+          content: 'grep({"pattern":"dream_cursor"})',
+          traces: [
+            'find_files({"query":"thread","glob":"*.tsx"})',
+            'list_dir({"path":"memory"})',
+            'grep({"pattern":"dream_cursor"})',
+          ],
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    openLiveActivity();
+    expect(screen.getByText("Found files *.tsx")).toBeInTheDocument();
+    expect(screen.getByText("Listed files memory")).toBeInTheDocument();
+    expect(screen.getByText("Searching files “dream_cursor”")).toBeInTheDocument();
+    expect(screen.queryByText("Technical details")).not.toBeInTheDocument();
+    expect(document.querySelector("details")).not.toBeInTheDocument();
+  });
+
+  it("keeps the working header animated while waiting after a tool completes", () => {
+    const args = { path: "skills/weather/SKILL.md" };
+    const line = `read_file(${JSON.stringify(args)})`;
+    const messages: UIMessage[] = [{
+      id: "t-read-weather-skill",
+      role: "tool",
+      kind: "trace",
+      content: line,
+      traces: [line],
+      toolEvents: [{
+        phase: "end",
+        call_id: "call-read-weather-skill",
+        name: "read_file",
+        arguments: args,
+        result: "Weather skill instructions",
+      }],
+      createdAt: Date.now(),
+    }];
+    const view = render(
+      <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />,
+    );
+    openLiveActivity();
+    const header = screen.getByText(/^Working for /);
+    expect(header).toHaveAttribute("data-sheen-text", header.textContent);
+    const tool = screen.getByText("Read file skills/weather/SKILL.md");
+    expect(tool).toHaveClass("text-muted-foreground");
+    expect(tool).not.toHaveAttribute("data-sheen-text");
+
+    view.rerender(
+      <AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow={false} />,
+    );
+    expect(screen.getByText(/^Worked/)).toBe(header);
+    expect(header).toHaveClass("text-muted-foreground");
+    expect(header).not.toHaveAttribute("data-sheen-text");
+  });
+
+  it("groups repeated searches over internal tool results without exposing raw paths", () => {
+    const pattern = "Jul (1[0-7]), 2026|July (1[0-7]), 2026|2026-07-(1[0-7])";
+    const secondPattern = "Anthropic|OpenAI|DeepMind";
+    const firstPath = "/Users/test/.nanobot/workspace/.nanobot/tool-results/websocket_session/call_first-result.txt";
+    const secondPath = "/Users/test/.nanobot/workspace/.nanobot/tool-results/websocket_session/call_second-result.txt";
+    const traces = [
+      `grep(${JSON.stringify({ pattern, path: firstPath })})`,
+      `grep(${JSON.stringify({ pattern: secondPattern, path: secondPath })})`,
+    ];
+
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-grouped-grep",
+          role: "tool",
+          kind: "trace",
+          content: traces.join("\n"),
+          traces,
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+
+    const run = screen.getByLabelText(/Reviewed sources.*2 files/).closest('[data-testid="activity-step"]');
+    expect(run).toBeInTheDocument();
+    expect(screen.queryByText(firstPath)).not.toBeInTheDocument();
+    expect(screen.queryByText(secondPath)).not.toBeInTheDocument();
+
+    expect(screen.queryByText(pattern)).not.toBeInTheDocument();
+    expect(screen.queryByText(secondPattern)).not.toBeInTheDocument();
+    expect(screen.queryByText("call_first-result.txt")).not.toBeInTheDocument();
+    expect(screen.queryByText("call_second-result.txt")).not.toBeInTheDocument();
+  });
+
+  it("surfaces generic tool failures without dumping their arguments", () => {
+    const args = { pattern: "needle", path: "workspace/file.txt" };
+    const line = `grep(${JSON.stringify(args)})`;
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-grep-error",
+          role: "tool",
+          kind: "trace",
+          content: line,
+          traces: [line],
+          toolEvents: [{
+            phase: "error",
+            call_id: "call-grep-error",
+            name: "grep",
+            arguments: args,
+            error: JSON.stringify({
+              message: "Permission denied",
+              headers: { Authorization: "Bearer sk-live-secret" },
+              token: "super-secret",
+            }),
+          }],
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+
+    const row = screen.getByText("Could not search files “needle”").closest(
+      '[data-testid="activity-step"]',
+    );
+    expect(row).toBeInTheDocument();
+    expect(row).not.toHaveAttribute("title");
+    expect(screen.queryByText(/Permission denied/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/super-secret/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sk-live-secret/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Authorization/)).not.toBeInTheDocument();
+  });
+
+  it("redacts credentials from generic tool URL details", () => {
+    const line = 'download_asset({"url":"https://user:password@example.com/file?access_token=signed-secret&format=png"})';
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-generic-url-secret",
+          role: "tool",
+          kind: "trace",
+          content: line,
+          traces: [line],
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+
+    expect(screen.queryByText(/password|signed-secret/)).not.toBeInTheDocument();
+    expect(screen.getByText("Completed Download asset")).toBeInTheDocument();
+    expect(screen.queryByText(/example\.com/)).not.toBeInTheDocument();
   });
 
   it("summarizes long shell traces instead of dumping scripts", () => {
@@ -792,13 +1901,34 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /1 tool calls/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Worked" }));
 
-    expect(screen.getByText("Command")).toBeInTheDocument();
-    expect(screen.getByText(/cat << 'EOF' \| bash · script, 6 lines/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Ran command cat << 'EOF' | bash, script (6 lines)")).toBeInTheDocument();
     expect(screen.queryByText(/SECRET_TOKEN/)).not.toBeInTheDocument();
     expect(screen.queryByText(/for id in/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Done$/)).not.toBeInTheDocument();
+  });
+
+  it("presents time checks as an intent instead of a raw command", () => {
+    const line = `exec(${JSON.stringify({ command: "date '+%Y-%m-%d %H:%M:%S %Z'" })})`;
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-date",
+          role: "tool",
+          kind: "trace",
+          content: line,
+          traces: [line],
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.getByText("Checking time")).toBeInTheDocument();
+    expect(screen.queryByText(/%Y-%m-%d/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Web")).not.toBeInTheDocument();
   });
 
   it("does not render zero diff counters for completed edits", () => {
@@ -826,8 +1956,9 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    expect(screen.getByRole("button", { name: /edited app\.tsx/i })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
     expect(screen.queryByText("+0")).not.toBeInTheDocument();
     expect(screen.queryByText("-0")).not.toBeInTheDocument();
   });
@@ -891,7 +2022,6 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: /preparing edit/i })).toBeInTheDocument();
     expect(screen.getByText("Preparing file edit…")).toBeInTheDocument();
   });
 
@@ -921,10 +2051,12 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    fireEvent.click(screen.getByRole("button", { name: /failed angry-birds\.html/i }));
-
-    expect(screen.getByText("Target text was not found in angry-birds.html.")).toBeInTheDocument();
+    const row = screen.getByRole("img", { name: "Could not edit" }).closest('[data-testid="activity-step"]');
+    expect(row).toBeInTheDocument();
+    expect(row).not.toHaveAttribute("title");
+    expect(screen.queryByText("Target text was not found in angry-birds.html.")).not.toBeInTheDocument();
   });
 
   it("keeps permission errors readable for failed file edits", () => {
@@ -953,15 +2085,20 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    fireEvent.click(screen.getByRole("button", { name: /failed composition\.html/i }));
-
-    expect(screen.getByText("No permission to change this location.")).toBeInTheDocument();
+    const row = screen.getByRole("img", { name: "Could not edit" }).closest('[data-testid="activity-step"]');
+    expect(row).toBeInTheDocument();
+    expect(row).not.toHaveAttribute("title");
+    expect(screen.queryByText("No permission to change this location.")).not.toBeInTheDocument();
     expect(screen.queryByText(/\[Errno 13\]/)).not.toBeInTheDocument();
   });
 
-  it("merges repeated edits for the same path and lets successful edits win over failures", async () => {
-    const restoreMotion = installReducedMotion();
+  it("keeps repeated edits for the same path as separate actions", () => {
+    localStorage.setItem(
+      "nanobot-webui.settings-preferences",
+      JSON.stringify({ fileEditDisplayMode: "diff" }),
+    );
     try {
       render(
         <AgentActivityCluster
@@ -981,6 +2118,13 @@ describe("AgentActivityCluster", () => {
                 deleted: 1,
                 approximate: false,
                 status: "done",
+                diff: unifiedFileDiff([
+                  "--- minecraft-fps/index.html",
+                  "+++ minecraft-fps/index.html",
+                  "@@ -1,1 +1,2 @@",
+                  " <main>",
+                  "+  <canvas />",
+                ]),
               },
               {
                 call_id: "call-edit-2",
@@ -1002,6 +2146,15 @@ describe("AgentActivityCluster", () => {
                 deleted: 6,
                 approximate: false,
                 status: "done",
+                diff: unifiedFileDiff([
+                  "--- minecraft-fps/index.html",
+                  "+++ minecraft-fps/index.html",
+                  "@@ -8,2 +8,2 @@",
+                  "-const fps = 30;",
+                  "+const fps = 60;",
+                  " start();",
+
+                ]),
               },
             ],
             createdAt: 3,
@@ -1010,25 +2163,75 @@ describe("AgentActivityCluster", () => {
           hasBodyBelow={false}
         />,
       );
-
-      expect(screen.getByRole("button", { name: /edited index\.html/i })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /failed index\.html/i })).not.toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: /edited index\.html/i }));
+      fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
       const fileRefs = screen.getAllByTestId("activity-file-reference");
-      expect(fileRefs).toHaveLength(1);
-      expect(fileRefs[0]).toHaveTextContent("minecraft-fps/index.html");
-      expect(screen.queryByText("Failed")).not.toBeInTheDocument();
-      await waitFor(() => {
-        expect(screen.getAllByText("+8").length).toBeGreaterThan(0);
-        expect(screen.getAllByText("-7").length).toBeGreaterThan(0);
-      });
+      expect(fileRefs).toHaveLength(3);
+      expect(fileRefs.every((ref) => ref.textContent?.includes("minecraft-fps/index.html"))).toBe(true);
+      const failedRow = screen.getByRole("img", { name: "Could not edit" }).closest(
+        '[data-testid="activity-step"]',
+      );
+      expect(failedRow).toBeInTheDocument();
+      expect(failedRow).not.toHaveAttribute("title");
+      expect(screen.queryByText("patch failed")).not.toBeInTheDocument();
+      expect(screen.getAllByTestId("file-edit-diff")).toHaveLength(2);
+      expect(screen.getByText("<canvas />")).toBeInTheDocument();
+      expect(screen.getByText("const fps = 60;")).toBeInTheDocument();
+      expect(screen.getAllByText("+2").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("-1").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("+6").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("-6").length).toBeGreaterThan(0);
     } finally {
-      restoreMotion();
+      localStorage.removeItem("nanobot-webui.settings-preferences");
     }
   });
 
-  it("renders tool event embeds as inline activity evidence", () => {
+  it("keeps the latest failed attempt visible after an earlier edit succeeded", () => {
+    render(
+      <AgentActivityCluster
+        messages={activityMessages("", {
+          id: "t2",
+          role: "tool",
+          kind: "trace",
+          content: "edit_file()",
+          traces: ["edit_file()"],
+          fileEdits: [
+            {
+              call_id: "call-edit-1",
+              tool: "edit_file",
+              path: "src/app.tsx",
+              phase: "end",
+              added: 1,
+              deleted: 0,
+              approximate: false,
+              status: "done",
+            },
+            {
+              call_id: "call-edit-2",
+              tool: "edit_file",
+              path: "src/app.tsx",
+              phase: "error",
+              added: 0,
+              deleted: 0,
+              approximate: false,
+              status: "error",
+              error: "patch failed",
+            },
+          ],
+          createdAt: 3,
+        })}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+
+    expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Could not edit" })).toBeInTheDocument();
+    expect(screen.getAllByTestId("activity-file-reference")).toHaveLength(2);
+  });
+
+  it("keeps tool event embeds out of the flat activity list", () => {
     render(
       <AgentActivityCluster
         messages={[{
@@ -1055,15 +2258,92 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Web")).toBeInTheDocument();
-    expect(screen.getByTestId("activity-evidence-preview")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Homepage screenshot" })).toHaveAttribute(
-      "src",
-      "/api/media/signed/screenshot.png",
-    );
+    expect(screen.queryByText("Web")).not.toBeInTheDocument();
+    const row = screen.getByText("example.com").closest('[data-testid="activity-step"]');
+    expect(row).toHaveTextContent("Read");
+    expect(screen.queryByText(/Found image/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Homepage screenshot" })).not.toBeInTheDocument();
   });
 
-  it("shows missing evidence as a file-safe placeholder", () => {
+  it("keeps image generation status to one activity line", () => {
+    const message: UIMessage = {
+      id: "image-run",
+      role: "tool",
+      kind: "trace",
+      content: 'generate_image({"prompt":"an orange nanobot on a desk","aspect_ratio":"4:3"})',
+      traces: ['generate_image({"prompt":"an orange nanobot on a desk","aspect_ratio":"4:3"})'],
+      toolEvents: [{
+        phase: "start",
+        call_id: "image-call",
+        name: "generate_image",
+        arguments: { prompt: "an orange nanobot on a desk", aspect_ratio: "4:3" },
+      }],
+      createdAt: 1,
+    };
+    const { rerender } = render(
+      <AgentActivityCluster messages={[message]} isTurnStreaming hasBodyBelow={false} />,
+    );
+
+    expect(screen.getByText("Generating image")).toBeInTheDocument();
+
+    rerender(
+      <AgentActivityCluster
+        messages={[{
+          ...message,
+          toolEvents: [{
+            ...message.toolEvents![0],
+            phase: "end",
+            files: [{
+              url: "/api/media/signed/generated.png",
+              name: "generated.png",
+              type: "image/png",
+            }],
+          }],
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+    expect(screen.getByText("Generated image")).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "generated.png" })).not.toBeInTheDocument();
+  });
+
+  it("keeps image-generation failures visible and actionable", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "image-error",
+          role: "tool",
+          kind: "trace",
+          content: 'generate_image({"prompt":"a launch poster"})',
+          traces: ['generate_image({"prompt":"a launch poster"})'],
+          toolEvents: [{
+            phase: "error",
+            call_id: "image-error-call",
+            name: "generate_image",
+            arguments: { prompt: "a launch poster" },
+            error: "Image provider quota exceeded",
+          }],
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+
+    expect(screen.getByText("Could not generate image")).toBeInTheDocument();
+    const row = screen.getByText("Could not generate image").closest(
+      '[data-testid="activity-step"]',
+    );
+    expect(row).toBeInTheDocument();
+    expect(row).not.toHaveAttribute("title");
+    expect(screen.queryByText("Image provider quota exceeded")).not.toBeInTheDocument();
+  });
+
+  it("does not add a secondary evidence row when evidence is missing", () => {
     render(
       <AgentActivityCluster
         messages={[{
@@ -1086,8 +2366,106 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Vision")).toBeInTheDocument();
-    expect(screen.getByTestId("activity-evidence-preview")).toBeInTheDocument();
-    expect(screen.getByText("missing.png")).toBeInTheDocument();
+    expect(screen.queryByText("Vision")).not.toBeInTheDocument();
+    expect(screen.getByText("Captured screenshot")).toBeInTheDocument();
+    expect(screen.queryByText("missing.png")).not.toBeInTheDocument();
+  });
+
+  it("keeps every default activity action on one structural line", () => {
+    render(
+      <AgentActivityCluster
+        messages={[
+          {
+            id: "reasoning-line",
+            role: "assistant",
+            content: "",
+            reasoning: "**Planning** the next step\nwithout a nested title",
+            reasoningStreaming: false,
+            createdAt: 1,
+          },
+          {
+            id: "tool-line",
+            role: "tool",
+            kind: "trace",
+            content: 'grep({"pattern":"needle","path":"workspace/file.txt"})',
+            traces: ['grep({"pattern":"needle","path":"workspace/file.txt"})'],
+            createdAt: 2,
+          },
+          {
+            id: "fetch-line",
+            role: "tool",
+            kind: "trace",
+            content: 'web_fetch({"url":"https://example.com/docs"})',
+            traces: ['web_fetch({"url":"https://example.com/docs"})'],
+            createdAt: 3,
+          },
+        ]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+
+    const steps = screen.getAllByTestId("activity-step");
+    expect(steps.length).toBeGreaterThanOrEqual(3);
+    for (const step of steps) {
+      expect(step).toHaveClass("grid-cols-[1.125rem_minmax(0,1fr)]");
+      const line = step.children[1]?.firstElementChild;
+      expect(line).toHaveClass("overflow-hidden");
+      expect(line).toHaveClass("whitespace-nowrap");
+      expect(step.querySelector("br")).not.toBeInTheDocument();
+    }
+    expect(document.querySelector("details")).not.toBeInTheDocument();
+    expect(document.querySelector("ul, li, section")).not.toBeInTheDocument();
+  });
+
+  it("does not expose tool inputs or credentials in the activity surface", () => {
+    const cliLine = 'run_cli_app({"name":"blender","args":["--token","xoxb-1234567890-secret","render"],"json":true})';
+    const mcpLine = 'mcp_browserbase_browser_fill({"element":"Password","text":"mcp-private-value"})';
+    const genericLine = 'third_party_sync({"token":"sk-proj-1234567890-secret","payload":"private-payload"})';
+    const { container } = render(
+      <AgentActivityCluster
+        messages={[
+          {
+            id: "private-cli",
+            role: "tool",
+            kind: "trace",
+            content: cliLine,
+            traces: [cliLine],
+            createdAt: 1,
+          },
+          {
+            id: "private-mcp",
+            role: "tool",
+            kind: "trace",
+            content: mcpLine,
+            traces: [mcpLine],
+            createdAt: 2,
+          },
+          {
+            id: "private-generic",
+            role: "tool",
+            kind: "trace",
+            content: genericLine,
+            traces: [genericLine],
+            createdAt: 3,
+          },
+        ]}
+        isTurnStreaming
+        hasBodyBelow={false}
+        cliApps={[BLENDER_CLI_APP]}
+        mcpPresets={[BROWSERBASE_MCP]}
+      />,
+    );
+
+    expect(container.innerHTML).not.toContain("xoxb-1234567890-secret");
+    expect(container.innerHTML).not.toContain("mcp-private-value");
+    expect(container.innerHTML).not.toContain("sk-proj-1234567890-secret");
+    expect(container.innerHTML).not.toContain("private-payload");
+    expect(container.textContent).not.toMatch(/run_cli_app\(|browser_fill\(|third_party_sync\(/);
+    openLiveActivity();
+    expect(container.innerHTML).not.toMatch(/xoxb-1234567890-secret|mcp-private-value|sk-proj-1234567890-secret|private-payload/);
+    expect(container.textContent).not.toMatch(/run_cli_app\(|browser_fill\(|third_party_sync\(/);
+    expect(container.textContent).toMatch(/<redacted>|••••/);
   });
 });

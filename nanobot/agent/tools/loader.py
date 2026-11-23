@@ -1,19 +1,23 @@
-"""Tool discovery and registration via package scanning."""
+# pyright: reportIncompatibleVariableOverride=false
+
 from __future__ import annotations
 
 import importlib
 import pkgutil
 from importlib.metadata import entry_points
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
 
+if TYPE_CHECKING:
+    from nanobot.agent.tools.context import RequestContext, ToolContext
+
 _SKIP_MODULES = frozenset({
     "base", "schema", "registry", "context", "loader", "config",
-    "file_state", "sandbox", "mcp", "__init__", "runtime_state",
+    "file_state", "sandbox", "mcp", "__init__", "runtime_control",
 })
 
 
@@ -60,7 +64,6 @@ class ToolLoader:
         return results
 
     def _discover_plugins(self) -> dict[str, type[Tool]]:
-        """Discover external tool plugins registered via entry_points."""
         if self._plugins is not None:
             return self._plugins
         plugins: dict[str, type[Tool]] = {}
@@ -83,8 +86,10 @@ class ToolLoader:
         self._plugins = plugins
         return plugins
 
-    def load(self, ctx: Any, registry: ToolRegistry, *, scope: str = "core") -> list[str]:
+    def load(self, ctx: ToolContext, registry: ToolRegistry, *, scope: str = "core") -> list[str]:
+        """Load defaults while preserving tools already supplied by the caller."""
         registered: list[str] = []
+        supplied_names = set(registry.tool_names)
         builtin_names: set[str] = set()
         sources = [(self.discover(), False), (self._discover_plugins().values(), True)]
         for source, is_plugin_source in sources:
@@ -98,6 +103,10 @@ class ToolLoader:
                     tool = tool_cls.create(ctx)
                     if is_plugin_source:
                         tool = _LegacyErrorPrefixTool(tool)
+                    if tool.name in supplied_names:
+                        if not is_plugin_source:
+                            builtin_names.add(tool.name)
+                        continue
                     if registry.has(tool.name):
                         if is_plugin_source and tool.name in builtin_names:
                             logger.warning(
@@ -115,6 +124,12 @@ class ToolLoader:
                         builtin_names.add(tool.name)
                 except Exception:
                     logger.exception("Failed to register tool: %s", cls_label)
+            if not is_plugin_source and "rg" in builtin_names:
+                replaced = (builtin_names & {"grep", "find_files"}) - supplied_names
+                for name in replaced:
+                    registry.unregister(name)
+                registered = [name for name in registered if name not in replaced]
+                builtin_names.difference_update(replaced)
         return registered
 
 
@@ -138,6 +153,9 @@ class _LegacyErrorPrefixTool(Tool):
     def parameters(self) -> dict[str, Any]:
         return self._wrapped.parameters
 
+    def runtime_context_provider(self):
+        return self._wrapped.runtime_context_provider()
+
     @property
     def read_only(self) -> bool:
         return self._wrapped.read_only
@@ -154,13 +172,10 @@ class _LegacyErrorPrefixTool(Tool):
     def config_key(self) -> str:
         return getattr(self._wrapped, "config_key", "")
 
-    def set_context(self, ctx: Any) -> None:
+    def set_context(self, ctx: RequestContext) -> None:
         set_context = getattr(self._wrapped, "set_context", None)
         if callable(set_context):
             set_context(ctx)
-
-    def cast_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._wrapped.cast_params(params)
 
     def validate_params(self, params: dict[str, Any]) -> list[str]:
         return self._wrapped.validate_params(params)

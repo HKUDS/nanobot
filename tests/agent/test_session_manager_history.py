@@ -1,4 +1,11 @@
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_HISTORY_META,
+    RuntimeContextBlock,
+    append_runtime_context,
+)
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 
 def _assert_no_orphans(history: list[dict]) -> None:
@@ -31,7 +38,7 @@ def _tool_turn(prefix: str, idx: int) -> list[dict]:
     ]
 
 
-def test_list_sessions_includes_metadata_title(tmp_path):
+def test_list_sessions_includesmetadata_title(tmp_path):
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:chat-title")
     session.metadata["title"] = "自动生成标题"
@@ -82,6 +89,17 @@ def test_list_sessions_includes_user_preview(tmp_path):
     assert rows[0]["preview"] == "帮我总结一下 OpenAI 的最新硬件计划"
 
 
+def test_list_sessions_previews_literal_image_marker_as_text(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-image-marker")
+    marker = "[image: /tmp/example.png]"
+    session.add_message("user", marker)
+    session.add_message("assistant", "That's an image marker.")
+    manager.save(session)
+
+    assert manager.list_sessions()[0]["preview"] == marker
+
+
 def test_list_sessions_bounds_preview_scan(tmp_path):
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:chat-long-preview")
@@ -113,10 +131,7 @@ def test_get_history_drops_orphan_tool_results_when_window_cuts_tool_calls():
     assert history[-1]["content"] == "new telegram question"
 
 
-# --- Positive test: legitimate pairs survive trimming ---
-
 def test_legitimate_tool_pairs_preserved_after_trim():
-    """Complete tool-call groups within the window must not be dropped."""
     session = Session(key="test:positive")
     session.messages.append({"role": "user", "content": "hello"})
     for i in range(5):
@@ -130,67 +145,12 @@ def test_legitimate_tool_pairs_preserved_after_trim():
     assert history[0]["role"] == "user"
 
 
-def test_retain_recent_legal_suffix_keeps_recent_messages():
-    session = Session(key="test:trim")
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-
-    session.retain_recent_legal_suffix(4)
-
-    assert len(session.messages) == 4
-    assert session.messages[0]["content"] == "msg6"
-    assert session.messages[-1]["content"] == "msg9"
-
-
-def test_retain_recent_legal_suffix_adjusts_last_consolidated():
-    session = Session(key="test:trim-cons")
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-    session.last_consolidated = 7
-
-    session.retain_recent_legal_suffix(4)
-
-    assert len(session.messages) == 4
-    assert session.last_consolidated == 1
-
-
-def test_retain_recent_legal_suffix_zero_clears_session():
-    session = Session(key="test:trim-zero")
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-    session.last_consolidated = 5
-
-    session.retain_recent_legal_suffix(0)
-
-    assert session.messages == []
-    assert session.last_consolidated == 0
-
-
-def test_retain_recent_legal_suffix_keeps_legal_tool_boundary():
-    session = Session(key="test:trim-tools")
-    session.messages.append({"role": "user", "content": "old"})
-    session.messages.extend(_tool_turn("old", 0))
-    session.messages.append({"role": "user", "content": "keep"})
-    session.messages.extend(_tool_turn("keep", 0))
-    session.messages.append({"role": "assistant", "content": "done"})
-
-    session.retain_recent_legal_suffix(4)
-
-    history = session.get_history(max_messages=500)
-    _assert_no_orphans(history)
-    assert history[0]["role"] == "user"
-    assert history[0]["content"] == "keep"
-
-
-# --- last_consolidated > 0 ---
-
-def test_orphan_trim_with_last_consolidated():
-    """Orphan trimming works correctly when session is partially consolidated."""
+def test_orphan_trim_with_last_archived():
     session = Session(key="test:consolidated")
     for i in range(10):
         session.messages.append({"role": "user", "content": f"old {i}"})
         session.messages.extend(_tool_turn("cons", i))
-    session.last_consolidated = 30
+    session.last_archived = 30
 
     session.messages.append({"role": "user", "content": "recent"})
     for i in range(15):
@@ -202,7 +162,89 @@ def test_orphan_trim_with_last_consolidated():
     assert all(m.get("role") != "tool" or m["tool_call_id"].startswith("new_") for m in history)
 
 
-# --- Edge: no tool messages at all ---
+def test_get_history_does_not_replay_messages_after_full_archive():
+    session = Session(key="test:fully-archived")
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"u{i}"})
+        session.messages.append({"role": "assistant", "content": f"a{i}"})
+    session.last_archived = len(session.messages)
+
+    history = session.get_history(max_messages=100)
+
+    assert history == []
+
+
+def test_get_history_omits_persisted_summary_marker_after_reload(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("cli:compacted")
+    session.add_message("user", "finish the task")
+    session.add_message("assistant", "done")
+    session.commit_summary_checkpoint("The task is complete.")
+    manager.save(session)
+    manager.invalidate(session.key)
+
+    reloaded = manager.get_or_create(session.key)
+    assert reloaded.messages[-1]["content"] == SUMMARY_CONTINUATION_TEXT
+    assert reloaded.messages[-1][HIDDEN_HISTORY_META] is True
+    assert reloaded.get_history() == []
+
+    reloaded.add_message("user", "hi")
+    assert reloaded.get_history() == [{"role": "user", "content": "hi"}]
+
+
+def test_get_history_keeps_real_user_continuation_and_hidden_subagent_result():
+    session = Session(key="cli:followups")
+    session.add_message("user", SUMMARY_CONTINUATION_TEXT)
+    session.add_message(
+        "user", "Subagent finished the requested check.",
+        **{HIDDEN_HISTORY_META: {"kind": "subagent_result"}},
+    )
+
+    assert [message["content"] for message in session.get_history()] == [
+        SUMMARY_CONTINUATION_TEXT, "Subagent finished the requested check.",
+    ]
+
+
+def test_get_history_does_not_restore_archived_user_turn():
+    session = Session(key="test:archived-tool-turn")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "old answer"},
+            {"role": "user", "content": "run tools"},
+            *_tool_turn("keep", 0),
+            *_tool_turn("keep", 1),
+            *_tool_turn("keep", 2),
+            {"role": "assistant", "content": "done"},
+        ]
+    )
+    session.last_archived = len(session.messages)
+
+    history = session.get_history(max_messages=100)
+
+    assert history == []
+    assert len(session.messages) > 8
+
+
+def test_archived_tool_turn_stays_out_of_replay():
+    session = Session(key="test:long-archived-tool-turn")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "old answer"},
+            {"role": "user", "content": "run many tools"},
+        ]
+    )
+    for i in range(50):
+        session.messages.extend(_tool_turn("keep", i))
+    session.messages.append({"role": "assistant", "content": "done"})
+    session.last_archived = len(session.messages)
+
+    history = session.get_history(max_messages=120)
+
+    assert history == []
+    assert len(session.messages) > 8
+
 
 def test_no_tool_messages_unchanged():
     session = Session(key="test:plain")
@@ -215,10 +257,7 @@ def test_no_tool_messages_unchanged():
     _assert_no_orphans(history)
 
 
-# --- Edge: all leading messages are orphan tool results ---
-
 def test_all_orphan_prefix_stripped():
-    """If the window starts with orphan tool results and nothing else, they're all dropped."""
     session = Session(key="test:all-orphan")
     session.messages.append({"role": "tool", "tool_call_id": "gone_1", "name": "x", "content": "ok"})
     session.messages.append({"role": "tool", "tool_call_id": "gone_2", "name": "y", "content": "ok"})
@@ -230,8 +269,6 @@ def test_all_orphan_prefix_stripped():
     assert history[0]["role"] == "user"
     assert len(history) == 2
 
-
-# --- Edge: empty session ---
 
 def test_empty_session_history():
     session = Session(key="test:empty")
@@ -267,7 +304,6 @@ def test_get_history_preserves_reasoning_content():
 
 
 def test_get_history_does_not_inject_persisted_timestamps_into_replay_content():
-    """Persisted timestamps are session metadata, not prompt content."""
     session = Session(key="test:timestamps")
     session.messages.append({
         "role": "user",
@@ -297,7 +333,6 @@ def test_get_history_does_not_inject_persisted_timestamps_into_replay_content():
 
 
 def test_get_history_keeps_proactive_delivery_timestamps_out_of_replay_content():
-    """Timestamp metadata remains persisted without becoming prompt text."""
     session = Session(key="test:proactive-timestamps")
     session.messages.append({
         "role": "assistant",
@@ -340,10 +375,7 @@ def test_get_history_does_not_inject_tool_result_timestamps():
     assert tool_result["content"] == "ok"
 
 
-# --- Window cuts mid-group: assistant present but some tool results orphaned ---
-
 def test_window_cuts_mid_tool_group():
-    """If the window starts between an assistant's tool results, the partial group is trimmed."""
     session = Session(key="test:mid-cut")
     session.messages.append({"role": "user", "content": "setup"})
     session.messages.append({
@@ -359,45 +391,29 @@ def test_window_cuts_mid_tool_group():
     session.messages.extend(_tool_turn("intact", 0))
     session.messages.append({"role": "assistant", "content": "final"})
 
-    # Window of 6 should cut off the "setup" user msg and the assistant with split_a/split_b,
-    # leaving orphan tool results for split_a at the front.
     history = session.get_history(max_messages=6)
     _assert_no_orphans(history)
     assert history[0]["role"] == "user"
 
 
-# --- Image breadcrumbs: media kwarg is synthesized into content for replay ---
-
-
-def test_get_history_synthesizes_image_breadcrumb_from_media_kwarg():
-    """Persisted user turns carry image paths as a ``media`` kwarg; LLM
-    replay must still see an ``[image: path]`` breadcrumb so the assistant's
-    follow-up reply has a referent instead of trailing an empty user row."""
+def test_get_history_preserves_user_text_with_media_metadata():
     session = Session(key="test:media")
-    session.messages.append(
-        {"role": "user", "content": "look", "media": ["/m/a.png", "/m/b.png"]}
-    )
-    session.messages.append({"role": "assistant", "content": "nice"})
+    session.add_message("user", "look", media=["/m/pic.png"])
 
-    history = session.get_history(max_messages=500)
+    assert session.get_history() == [{"role": "user", "content": "look"}]
 
-    assert history == [
-        {"role": "user", "content": "look\n[image: /m/a.png]\n[image: /m/b.png]"},
-        {"role": "assistant", "content": "nice"},
+
+def test_get_history_marks_missing_image_snapshot():
+    session = Session(key="test:missing-image")
+    session.add_message("user", [
+        {"type": "image_attachment", "id": "a" * 64},
+        {"type": "text", "text": "look"},
+    ])
+
+    assert session.get_history()[0]["content"] == [
+        {"type": "text", "text": "[Previous image unavailable]"},
+        {"type": "text", "text": "look"},
     ]
-
-
-def test_get_history_synthesizes_breadcrumb_for_image_only_turn():
-    """Turns with no text but attached images must not replay as empty
-    strings — the LLM would otherwise see a bare user turn followed by an
-    unexplained assistant answer."""
-    session = Session(key="test:image-only")
-    session.messages.append({"role": "user", "content": "", "media": ["/m/pic.png"]})
-    session.messages.append({"role": "assistant", "content": "I see a cat"})
-
-    history = session.get_history(max_messages=500)
-
-    assert history[0] == {"role": "user", "content": "[image: /m/pic.png]"}
 
 
 def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
@@ -425,12 +441,66 @@ def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
     }]
 
 
+def test_get_history_does_not_duplicate_persisted_cli_app_runtime_context():
+    content, marker = append_runtime_context(
+        "please use @drawio",
+        [RuntimeContextBlock(
+            source="cli_apps",
+            content="[Runtime Context]\nCLI App Attachment: @drawio",
+        )],
+    )
+    session = Session(key="test:cli-app-persisted")
+    session.messages.append({
+        "role": "user",
+        "content": content,
+        "cli_apps": [{
+            "name": "drawio",
+            "entry_point": "cli-anything-drawio",
+        }],
+        RUNTIME_CONTEXT_HISTORY_META: marker,
+        "input_id": "user:cli-app",
+    })
+
+    model_history = session.get_history(max_messages=500)
+    public_history = session.get_history(
+        max_messages=500,
+        include_runtime_context=False,
+    )
+
+    assert model_history == [{"role": "user", "content": content, "_meta": {"input_id": "user:cli-app"}}]
+    assert model_history[0]["content"].count("CLI App Attachment: @drawio") == 1
+    assert public_history == [{"role": "user", "content": "please use @drawio"}]
+
+
+def test_public_history_omits_cli_app_breadcrumb():
+    session = Session(key="test:legacy-capabilities")
+    session.messages.append({
+        "role": "user",
+        "content": "please use the attachments",
+        "cli_apps": [{"name": "drawio", "entry_point": "cli-anything-drawio"}],
+    })
+
+    public_history = session.get_history(
+        max_messages=500,
+        include_runtime_context=False,
+    )
+
+    assert public_history == [{
+        "role": "user",
+        "content": "please use the attachments",
+    }]
+
+
 def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
+    from nanobot.goal.runtime import GOAL_GENERATION_VOLATILE_KEYS
+
     manager = SessionManager(tmp_path)
+    manager.exclude_generation_metadata(GOAL_GENERATION_VOLATILE_KEYS)
     source = manager.get_or_create("websocket:source")
     source.metadata["webui"] = True
     source.metadata["title"] = "Old title"
     source.metadata["goal_state"] = {"status": "active", "objective": "do not inherit"}
+    source.metadata["_sustained_goal_continuation_rounds"] = 7
     source.add_message("user", "round1")
     source.add_message("assistant", "answer1")
     source.add_message("user", "round2 fork me")
@@ -449,8 +519,43 @@ def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
     assert forked.metadata["webui"] is True
     assert "title" not in forked.metadata
     assert "goal_state" not in forked.metadata
+    assert "_sustained_goal_continuation_rounds" not in forked.metadata
     saved = manager.read_session_file("websocket:fork")
     assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
+
+
+def test_fork_session_drops_source_runtime_context(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    content, marker = append_runtime_context(
+        "round1",
+        [
+            RuntimeContextBlock(source="goal", content="host-only goal guidance"),
+            RuntimeContextBlock(source="cli_apps", content="attached CLI App context"),
+        ],
+    )
+    source.add_message(
+        "user",
+        content,
+        cli_apps=[{"name": "drawio", "entry_point": "cli-anything-drawio"}],
+        **{RUNTIME_CONTEXT_HISTORY_META: marker},
+    )
+    source.add_message("assistant", "answer1")
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+    )
+
+    assert forked is not None
+    assert forked.messages[0]["content"] == "round1"
+    assert RUNTIME_CONTEXT_HISTORY_META not in forked.messages[0]
+    model_content = forked.get_history()[0]["content"]
+    assert model_content.startswith("round1")
+    assert "CLI App Attachment: @drawio" in model_content
+    assert "host-only goal guidance" not in model_content
 
 
 def test_fork_session_rejects_negative_missing_and_out_of_range(tmp_path):
@@ -481,7 +586,41 @@ def test_fork_session_allows_index_equal_to_user_count(tmp_path):
     assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
 
 
-def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefix(tmp_path):
+def test_fork_session_user_index_ignores_hidden_checkpoint_anchor(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.add_message("user", "round1")
+    source.add_message("assistant", "answer1")
+    source.add_message("user", "round2")
+    source.add_message(
+        "user",
+        SUMMARY_CONTINUATION_TEXT,
+        **{HIDDEN_HISTORY_META: True},
+    )
+    source.add_message("assistant", "answer2")
+    source.last_archived = 3
+    source.metadata["_last_summary"] = {"text": "round1 and round2"}
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        2,
+    )
+
+    assert forked is not None
+    assert [message["content"] for message in forked.messages] == [
+        "round1",
+        "answer1",
+        "round2",
+        SUMMARY_CONTINUATION_TEXT,
+        "answer2",
+    ]
+    assert forked.last_archived == 3
+    assert forked.metadata["_last_summary"]["text"] == "round1 and round2"
+
+
+def test_fork_session_drops_summary_when_fork_point_is_inside_archived_prefix(tmp_path):
     manager = SessionManager(tmp_path)
     source = manager.get_or_create("websocket:source")
     source.messages = [
@@ -490,7 +629,7 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefi
         {"role": "user", "content": "round2 fork me"},
         {"role": "assistant", "content": "answer2"},
     ]
-    source.last_consolidated = 4
+    source.last_archived = 4
     source.metadata["_last_summary"] = {"text": "round2 fork me and answer2"}
     manager.save(source)
 
@@ -502,25 +641,20 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefi
 
     assert forked is not None
     assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
-    assert forked.last_consolidated == 0
+    assert forked.last_archived == 0
     assert "_last_summary" not in forked.metadata
 
 
 def test_get_history_ignores_media_kwarg_on_non_user_rows():
-    """``media`` only ever appears on user entries in practice, but the
-    synthesizer must be defensive: assistants / tools with list content
-    don't get the breadcrumb pasted on top."""
     session = Session(key="test:defensive")
     session.messages.append(
         {
             "role": "assistant",
             "content": [{"type": "text", "text": "structured"}],
-            "media": ["/m/x.png"],  # nonsense but shouldn't crash
+            "media": ["/m/x.png"],
         }
     )
     history = session.get_history(max_messages=500)
-    # List content is passed through verbatim — the synthesizer only
-    # rewrites plain-string content.
     assert history[0]["content"] == [{"type": "text", "text": "structured"}]
 
 
@@ -539,24 +673,30 @@ def test_get_history_does_not_paste_assistant_media_paths_into_replay():
     assert history == [{"role": "assistant", "content": "来了 🎨"}]
 
 
-def test_get_history_sanitizes_existing_assistant_replay_artifacts():
-    session = Session(key="test:polluted-assistant")
-    session.messages.append(
-        {
-            "role": "assistant",
-            "content": (
-                "[Message Time: 2026-05-09 00:33:48]\n"
-                "来了 🎨\n"
-                "[image: /home/user/.nanobot/media/generated/img_old.png]\n\n"
-                "generate_image(\"16:9\")\n"
-                "message(\"来了 🎨\")"
-            ),
-        }
+def test_get_history_preserves_assistant_text_verbatim():
+    session = Session(key="test:assistant-example")
+    draft = 'message("欢迎加入")'
+    image_marker = "[image: /tmp/example.png]"
+    example = (
+        "[Message Time: 2026-05-09 00:33:48]\r\n"
+        "Here is the photo delivery example:\r\n"
+        '    generate_image("16:9")\r\n'
+        '    message("来了 🎨")\r\n'
     )
+    session.add_message("user", "Draft a welcome message.")
+    session.add_message("assistant", draft)
+    session.add_message("user", "Show a photo delivery example.")
+    session.add_message("assistant", example)
+    session.add_message("user", "Repeat the image marker exactly.")
+    session.add_message("assistant", image_marker)
 
-    history = session.get_history(max_messages=500)
+    history = session.get_history()
 
-    assert history == [{"role": "assistant", "content": "来了 🎨"}]
+    assert [message["content"] for message in history if message["role"] == "assistant"] == [
+        draft,
+        example,
+        image_marker,
+    ]
 
 
 def test_get_history_respects_max_tokens(monkeypatch):
@@ -602,44 +742,6 @@ def test_get_history_recovers_user_when_token_slice_would_be_assistant_only(monk
     assert [m["content"] for m in history] == ["u2", "a2"]
 
 
-def test_retain_recent_legal_suffix_hard_cap_with_long_non_user_chain():
-    session = Session(key="test:hard-cap-chain")
-    session.messages.append({"role": "user", "content": "u0"})
-    session.messages.append(
-        {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
-            ],
-        }
-    )
-    for i in range(12):
-        session.messages.append({"role": "assistant", "content": f"a{i}"})
-
-    session.retain_recent_legal_suffix(6)
-
-    assert len(session.messages) <= 6
-
-
-def test_retain_recent_legal_suffix_can_extend_to_user_for_long_recent_turn():
-    session = Session(key="test:extend-to-user")
-    session.messages.append({"role": "user", "content": "old"})
-    session.messages.append({"role": "assistant", "content": "old answer"})
-    session.messages.append({"role": "user", "content": "record this"})
-    for i in range(4):
-        session.messages.extend(_tool_turn("recent", i))
-    session.messages.append({"role": "assistant", "content": "done"})
-
-    session.retain_recent_legal_suffix(8, extend_to_user=True)
-
-    assert len(session.messages) > 8
-    assert session.messages[0]["content"] == "record this"
-    assert session.messages[-1]["content"] == "done"
-    history = session.get_history(max_messages=500)
-    _assert_no_orphans(history)
-
-
 def test_get_history_can_extend_to_user_for_long_recent_turn():
     session = Session(key="test:history-extend-to-user")
     session.messages.append({"role": "user", "content": "old"})
@@ -674,157 +776,3 @@ def test_get_history_extend_to_user_keeps_newer_user_inside_window():
 
     assert [m["content"] for m in history] == ["new question", "new answer"]
     _assert_no_orphans(history)
-
-
-# --- enforce_file_cap archive correctness (issue #4128) ---
-
-
-def test_retain_recent_legal_suffix_returns_dropped_messages():
-    """retain_recent_legal_suffix returns the actually-dropped messages."""
-    session = Session(key="test:return-dropped")
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-
-    result = session.retain_recent_legal_suffix(4)
-
-    assert len(result.dropped) == 6
-    assert [m["content"] for m in result.dropped] == [f"msg{i}" for i in range(6)]
-    assert len(session.messages) == 4
-    assert result.already_consolidated_count == 0
-
-
-def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
-    """No messages dropped → empty list returned."""
-    session = Session(key="test:no-drop")
-    for i in range(3):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-
-    result = session.retain_recent_legal_suffix(4)
-
-    assert result.dropped == []
-    assert result.already_consolidated_count == 0
-    assert len(session.messages) == 3
-
-
-def test_retain_recent_legal_suffix_returns_all_on_zero():
-    """max_messages=0 clears session and returns all messages."""
-    session = Session(key="test:zero-return")
-    for i in range(5):
-        session.messages.append({"role": "user", "content": f"msg{i}"})
-    session.last_consolidated = 3
-
-    result = session.retain_recent_legal_suffix(0)
-
-    assert len(result.dropped) == 5
-    assert result.already_consolidated_count == 3
-    assert session.messages == []
-
-
-def test_enforce_file_cap_no_duplicate_archive_in_else_branch():
-    """When the tail is assistant-only, enforce_file_cap must not archive
-    messages that are also retained (the bug from issue #4128)."""
-    from unittest.mock import MagicMock
-
-    session = Session(key="test:else-archive")
-    # Build: 15 user messages, then 10 assistant messages (no user in tail)
-    for i in range(15):
-        session.messages.append({"role": "user", "content": f"u{i}"})
-    for i in range(10):
-        session.messages.append({"role": "assistant", "content": f"a{i}"})
-
-    archive_fn = MagicMock()
-    session.enforce_file_cap(on_archive=archive_fn, limit=6)
-
-    assert len(session.messages) <= 6
-
-    # Verify archived messages have NO overlap with retained
-    if archive_fn.called:
-        archived = archive_fn.call_args.args[0]
-        archived_ids = set(id(m) for m in archived)
-        retained_ids = set(id(m) for m in session.messages)
-        assert not archived_ids & retained_ids, (
-            f"Duplicate messages in archive and retained: "
-            f"overlap contents = {[m['content'] for m in archived if id(m) in retained_ids]}"
-        )
-
-
-def test_enforce_file_cap_no_message_loss_in_else_branch():
-    """In the else branch, no messages should silently disappear — every
-    message must be either retained or archived."""
-    from unittest.mock import MagicMock
-
-    session = Session(key="test:else-no-loss")
-    all_messages = []
-    for i in range(15):
-        msg = {"role": "user", "content": f"u{i}"}
-        session.messages.append(msg)
-        all_messages.append(msg)
-    for i in range(10):
-        msg = {"role": "assistant", "content": f"a{i}"}
-        session.messages.append(msg)
-        all_messages.append(msg)
-
-    archive_fn = MagicMock()
-    session.enforce_file_cap(on_archive=archive_fn, limit=6)
-
-    # Collect all messages accounted for (retained + archived)
-    accounted = set(id(m) for m in session.messages)
-    if archive_fn.called:
-        for m in archive_fn.call_args.args[0]:
-            accounted.add(id(m))
-
-    all_ids = set(id(m) for m in all_messages)
-    missing = all_ids - accounted
-    assert not missing, (
-        f"Lost {len(missing)} message(s) — neither retained nor archived"
-    )
-
-
-def test_enforce_file_cap_correct_archive_with_last_consolidated_in_else_branch():
-    """When last_consolidated > 0 and the else branch fires, only the
-    unconsolidated dropped messages should be raw-archived.  Messages in the
-    consolidated prefix that are dropped do NOT need raw archiving."""
-    from unittest.mock import MagicMock
-
-    session = Session(key="test:else-lc-archive")
-    # 20 messages total: u0..u9 (user), a0..a9 (assistant)
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"u{i}"})
-    for i in range(10):
-        session.messages.append({"role": "assistant", "content": f"a{i}"})
-    # First 8 messages already consolidated
-    session.last_consolidated = 8
-
-    archive_fn = MagicMock()
-    session.enforce_file_cap(on_archive=archive_fn, limit=4)
-
-    if archive_fn.called:
-        archived = archive_fn.call_args.args[0]
-        # Archived messages should NOT include any from the consolidated prefix
-        # (u0..u7). They should only be unconsolidated dropped messages.
-        archived_contents = [m["content"] for m in archived]
-        for c in archived_contents:
-            assert c not in [f"u{i}" for i in range(8)], (
-                f"Consolidated message {c!r} should not be raw-archived"
-            )
-
-
-def test_retain_recent_legal_suffix_last_consolidated_correct_in_else_branch():
-    """last_consolidated after retain_recent_legal_suffix should reflect how
-    many retained messages were inside the old consolidated prefix."""
-    session = Session(key="test:else-lc-correct")
-    # 20 messages: u0..u9, a0..a9
-    for i in range(10):
-        session.messages.append({"role": "user", "content": f"u{i}"})
-    for i in range(10):
-        session.messages.append({"role": "assistant", "content": f"a{i}"})
-    session.last_consolidated = 12  # u0..u9, a0, a1 consolidated
-
-    result = session.retain_recent_legal_suffix(4)
-
-    # Retained messages start from latest user (u9) + max_messages forward
-    # so retained = [u9, a0..a9][:4] → but these are from original indices 9..12
-    # Of those, indices 9,10,11 are < 12 (before_lc), so new_lc = 3
-    assert session.last_consolidated == 3
-    # already_cons should count dropped messages with original index < 12
-    assert result.already_consolidated_count == 9

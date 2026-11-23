@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "Open Matrix setup",
+    "officialLabel": "Open Matrix clients",
+    "fields": {
+      "homeserver": {
+        "label": "Homeserver",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "User ID",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "Password",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "Access token",
+        "placeholder": "Enter an access token"
+      },
+      "deviceId": {
+        "label": "Device ID",
+        "placeholder": "Required with an access token"
+      },
+      "groupPolicy": {
+        "label": "Group rules",
+        "choices": {
+          "mention": "Mentions only",
+          "open": "All messages",
+          "allowlist": "Allowlist",
+          "listen": "Listen (reply on mention)"
+        }
+      },
+      "groupPolicyOverrides": {
+        "label": "Room policy overrides (JSON)"
+      },
+      "allowFrom": {
+        "label": "Allowed users"
+      },
+      "e2eeEnabled": {
+        "label": "End-to-end encryption",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS verification",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Sync stop wait (seconds)"
+      },
+      "maxMediaBytes": {
+        "label": "Media size limit (bytes)"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Parallel downloads"
+      },
+      "groupAllowFrom": {
+        "label": "Allowed groups"
+      },
+      "allowRoomMentions": {
+        "label": "Room mentions",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "replyToMessage": {
+        "label": "Quote replies",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "useProxy": {
+        "label": "Use proxy"
+      }
+    }
+  }
+}

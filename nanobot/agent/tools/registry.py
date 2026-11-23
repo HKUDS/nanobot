@@ -1,12 +1,28 @@
-"""Tool registry for dynamic tool management."""
+from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.context import ContextAware, current_request_context
+
+if TYPE_CHECKING:
+    from nanobot.runtime_context import RuntimeContextProvider
+
+_ERROR_HINT = (
+    "\n\n[Consider this result in the context of the user's goal "
+    "and decide whether and how to proceed.]"
+)
 
 
-def is_tool_error_result(name: str, result: Any) -> bool:
+def with_tool_error_hint(payload: str) -> str:
+    """Append tool error guidance exactly once."""
+    if payload.endswith(_ERROR_HINT):
+        return payload
+    return payload + _ERROR_HINT
+
+
+def is_tool_error_result(result: Any) -> bool:
     return isinstance(result, ToolResult) and result.is_error
 
 
@@ -35,6 +51,15 @@ class ToolRegistry:
         """Get a tool by name."""
         return self._tools.get(name)
 
+    def get_runtime_context_providers(self) -> list[RuntimeContextProvider]:
+        """Return tool-owned providers in stable tool-name order."""
+        providers: list[RuntimeContextProvider] = []
+        for name in sorted(self._tools):
+            provider = self._tools[name].runtime_context_provider()
+            if provider is not None:
+                providers.append(provider)
+        return providers
+
     @staticmethod
     def _lookup_key(name: str) -> str:
         """Normalize names for suggestions only; never for execution."""
@@ -55,14 +80,14 @@ class ToolRegistry:
 
     def has(self, name: str) -> bool:
         """Check if a tool is registered."""
-        return name in self._tools
+        return self.get(name) is not None
 
     @staticmethod
     def _schema_name(schema: dict[str, Any]) -> str:
         """Extract a normalized tool name from either OpenAI or flat schemas."""
         fn = schema.get("function")
         if isinstance(fn, dict):
-            name = fn.get("name")
+            name = cast(dict[str, Any], fn).get("name")
             if isinstance(name, str):
                 return name
         name = schema.get("name")
@@ -72,25 +97,24 @@ class ToolRegistry:
         """Get tool definitions with stable ordering for cache-friendly prompts.
 
         Built-in tools are sorted first as a stable prefix, then MCP tools are
-        sorted and appended.  The result is cached until the next
+        sorted and appended. The result is cached until the next
         register/unregister call.
         """
-        if self._cached_definitions is not None:
-            return self._cached_definitions
+        if self._cached_definitions is None:
+            definitions = [tool.to_schema() for tool in self._tools.values()]
+            builtins: list[dict[str, Any]] = []
+            mcp_tools: list[dict[str, Any]] = []
+            for schema in definitions:
+                name = self._schema_name(schema)
+                if name.startswith("mcp_"):
+                    mcp_tools.append(schema)
+                else:
+                    builtins.append(schema)
 
-        definitions = [tool.to_schema() for tool in self._tools.values()]
-        builtins: list[dict[str, Any]] = []
-        mcp_tools: list[dict[str, Any]] = []
-        for schema in definitions:
-            name = self._schema_name(schema)
-            if name.startswith("mcp_"):
-                mcp_tools.append(schema)
-            else:
-                builtins.append(schema)
+            builtins.sort(key=self._schema_name)
+            mcp_tools.sort(key=self._schema_name)
+            self._cached_definitions = builtins + mcp_tools
 
-        builtins.sort(key=self._schema_name)
-        mcp_tools.sort(key=self._schema_name)
-        self._cached_definitions = builtins + mcp_tools
         return self._cached_definitions
 
     def prepare_call(
@@ -98,8 +122,8 @@ class ToolRegistry:
         name: str,
         params: Any,
     ) -> tuple[Tool | None, Any, str | None]:
-        """Resolve, cast, and validate one tool call."""
-        tool = self._tools.get(name)
+        """Resolve and validate one tool call without changing argument values."""
+        tool = self.get(name)
         if not tool:
             suggestion = self._suggest_name(str(name))
             hint = f" Did you mean '{suggestion}'? Tool names must match exactly." if suggestion else ""
@@ -108,6 +132,11 @@ class ToolRegistry:
                     f"Error: Tool '{name}' not found.{hint} Available: {', '.join(self.tool_names)}"
                 )
             )
+        # Compatibility for external tools that still implement the legacy
+        # setter protocol. Built-ins read the authoritative ContextVar
+        # directly and never copy routing state.
+        if isinstance(tool, ContextAware) and (ctx := current_request_context()) is not None:
+            tool.set_context(ctx)
 
         params = self._coerce_params(tool, params)
         if not isinstance(params, dict):
@@ -119,13 +148,13 @@ class ToolRegistry:
                 )
             )
 
-        cast_params = tool.cast_params(params)
-        errors = tool.validate_params(cast_params)
+        arguments = cast(dict[str, Any], params)
+        errors = tool.validate_params(arguments)
         if errors:
-            return tool, cast_params, (
+            return tool, arguments, (
                 ToolResult.error(f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors))
             )
-        return tool, cast_params, None
+        return tool, arguments, None
 
     @classmethod
     def _coerce_argument_value(cls, value: Any) -> Any:
@@ -155,28 +184,33 @@ class ToolRegistry:
 
     @classmethod
     def _unwrap_arguments_payload(cls, tool: Tool, params: Any) -> Any:
-        if not isinstance(params, dict) or set(params) != {"arguments"}:
+        if not isinstance(params, dict):
             return params
+        arguments_payload = cast(dict[str, Any], params)
+        if set(arguments_payload) != {"arguments"}:
+            return arguments_payload
         properties = (tool.parameters or {}).get("properties", {})
         if isinstance(properties, dict) and "arguments" in properties:
-            return params
-        return cls._coerce_argument_value(params.get("arguments"))
+            return arguments_payload
+        return cls._coerce_argument_value(arguments_payload.get("arguments"))
 
     async def execute(self, name: str, params: Any) -> Any:
         """Execute a tool by name with given parameters."""
-        hint = "\n\n[Analyze the error above and try a different approach.]"
         tool, params, error = self.prepare_call(name, params)
         if error:
-            return ToolResult.error(str(error) + hint)
+            return ToolResult.error(with_tool_error_hint(str(error)))
 
         try:
             assert tool is not None  # guarded by prepare_call()
             result = await tool.execute(**params)
-            if is_tool_error_result(name, result):
-                return ToolResult.error(str(result) + hint)
+            if is_tool_error_result(result):
+                return ToolResult.error(
+                    with_tool_error_hint(str(result)),
+                    error_code=result.error_code if isinstance(result, ToolResult) else None,
+                )
             return result
         except Exception as e:
-            return ToolResult.error(f"Error executing {name}: {str(e)}" + hint)
+            return ToolResult.error(with_tool_error_hint(f"Error executing {name}: {str(e)}"))
 
     @property
     def tool_names(self) -> list[str]:
@@ -187,4 +221,4 @@ class ToolRegistry:
         return len(self._tools)
 
     def __contains__(self, name: str) -> bool:
-        return name in self._tools
+        return self.has(name)

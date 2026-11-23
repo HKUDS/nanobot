@@ -1,44 +1,110 @@
-"""Model-message governance for agent runner requests.
+"""Model-message governance and compaction for agent runner requests.
 
-This module owns model-facing message shaping and tool-result content normalization.
-It may return copied messages or persisted-result placeholders, but it must not
-mutate an existing session history list in place.
+This module owns model-facing message shaping, request pressure, H/delta
+compaction state, and tool-result content normalization. It may return copied
+messages or persisted-result placeholders, but it must not mutate an existing
+session history list in place.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from collections.abc import Awaitable, Callable
+from contextvars import copy_context
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
+from uuid import uuid4
 
 from loguru import logger
 
+from nanobot.agent.context import TranscriptInput
+from nanobot.context_sources import drain_system_sources
+from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
+from nanobot.providers.base import (
+    CONTEXT_SAFETY_BUFFER,
+    LLMResponse,
+    LLMUsage,
+    ProviderCallContext,
+    ProviderConversationState,
+)
+from nanobot.providers.conversation_state import (
+    ProviderConversationStateController,
+    allows_conversation_message_merge,
+)
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_MESSAGE_META,
+    detach_runtime_context,
+    reattach_runtime_context,
+)
+from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.session.summary import (
+    SUMMARY_CONTINUATION_TEXT,
+    SessionSummaryCheckpoint,
+)
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import (
-    estimate_message_tokens,
     estimate_prompt_tokens_chain,
-    find_legal_message_start,
     maybe_persist_tool_result,
     truncate_text,
 )
 from nanobot.utils.runtime import ensure_nonempty_tool_result
 
 if TYPE_CHECKING:
+    from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.providers.base import LLMProvider
 
-SNIP_SAFETY_BUFFER = 1024
-MICROCOMPACT_KEEP_RECENT = 10
-MICROCOMPACT_MIN_CHARS = 500
-INFLIGHT_COMPACT_TARGET_RATIO = 0.85
-COMPACTABLE_TOOLS = frozenset({
-    "read_file", "exec", "grep", "find_files",
-    "web_search", "web_fetch", "list_dir", "list_exec_sessions",
-})
-# read_file is the recovery path for persisted results; exempting it prevents persist->read->persist loops.
+TranscriptBuilder = Callable[[TranscriptInput], list[dict[str, Any]]]
+SummaryTranscriptBuilder = Callable[[str], list[dict[str, Any]]]
+HistoryConsolidator = Callable[
+    [list[dict[str, Any]], str | None],
+    Awaitable[str | None],
+]
+ProviderCompactionConsolidator = Callable[
+    [ProviderConversationState, list[dict[str, Any]], str | None],
+    Awaitable[str | None],
+]
+
+# read_file has its own bound; exempt it to avoid persist->read->persist loops.
 TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 PLACEHOLDER_TEXTS = frozenset({
     "[Previous assistant message omitted.]",
 })
+_PreparationArgs = ParamSpec("_PreparationArgs")
+_PreparationResult = TypeVar("_PreparationResult")
+
+
+class ContextWindowExceededError(RuntimeError):
+    """Raised before a request that exceeds its local context budget."""
+
+    def __init__(
+        self,
+        *,
+        session_key: str | None,
+        estimated_tokens: int,
+        input_budget: int,
+        source: str,
+    ) -> None:
+        self.session_key = session_key
+        self.estimated_tokens = estimated_tokens
+        self.input_budget = input_budget
+        self.source = source
+        super().__init__(
+            "Model input exceeds the local context budget "
+            f"for {session_key or 'default'}: {estimated_tokens}/{input_budget} via {source}"
+        )
+
+
+def _request_extends_measured(
+    measured: list[dict[str, Any]],
+    current: list[dict[str, Any]],
+) -> bool:
+    return len(current) >= len(measured) and all(
+        current[index] == measured[index] for index in range(len(measured))
+    )
 
 
 def _tool_call_name_is_valid(tool_call: Any) -> bool:
@@ -50,8 +116,9 @@ def _tool_call_name_is_valid(tool_call: Any) -> bool:
     """
     if not isinstance(tool_call, dict):
         return False
-    fn = tool_call.get("function")
-    name = fn.get("name") if isinstance(fn, dict) else tool_call.get("name")
+    tool_call_data = cast(dict[str, Any], tool_call)
+    fn = tool_call_data.get("function")
+    name = cast(dict[str, Any], fn).get("name") if isinstance(fn, dict) else tool_call_data.get("name")
     return isinstance(name, str) and bool(name)
 
 
@@ -59,34 +126,700 @@ def _tool_call_name_is_valid(tool_call: Any) -> bool:
 class ContextGovernanceConfig:
     provider: LLMProvider
     model: str
-    tools: Any
+    tools: ToolRegistry
     workspace: Path | None
     session_key: str | None
     max_tool_result_chars: int
     context_window_tokens: int | None = None
-    context_block_limit: int | None = None
     max_tokens: int | None = None
-    inflight_start_index: int = 0
+
+
+@dataclass(slots=True)
+class ContextCompactionState:
+    """Track accepted provider input H separately from the unsent delta."""
+
+    raw_messages: list[dict[str, Any]]
+    accepted_messages: list[dict[str, Any]]
+    raw_accepted_boundary: int
+    active_summary: str | None
+    summary_transcript_builder: SummaryTranscriptBuilder
+    consolidate_history: HistoryConsolidator
+    consolidate_provider_compaction: ProviderCompactionConsolidator | None
+    summary_checkpoint: SessionSummaryCheckpoint | None = None
+
+    @classmethod
+    def from_transcript(
+        cls,
+        transcript_input: TranscriptInput,
+        transcript_builder: TranscriptBuilder,
+        consolidate_history: HistoryConsolidator,
+        consolidate_provider_compaction: ProviderCompactionConsolidator | None,
+    ) -> tuple[list[dict[str, Any]], ContextCompactionState]:
+        """Build the raw transcript and its initial H/delta boundary."""
+        messages = list(transcript_builder(transcript_input))
+        accepted_history_boundary = 1 + len(transcript_input.history)
+
+        def build_summary_transcript(summary: str) -> list[dict[str, Any]]:
+            return transcript_builder(
+                replace(
+                    transcript_input,
+                    history=[],
+                    current_message=None,
+                    media=None,
+                    session_summary={
+                        "text": summary,
+                        "last_active": datetime.now().astimezone().isoformat(),
+                    },
+                    runtime_context_blocks=None,
+                )
+            )
+
+        return messages, cls(
+            raw_messages=messages,
+            accepted_messages=deepcopy(messages[:accepted_history_boundary]),
+            raw_accepted_boundary=accepted_history_boundary,
+            active_summary=(
+                transcript_input.session_summary["text"]
+                if transcript_input.session_summary is not None
+                else None
+            ),
+            summary_transcript_builder=build_summary_transcript,
+            consolidate_history=consolidate_history,
+            consolidate_provider_compaction=consolidate_provider_compaction,
+        )
+
+    @classmethod
+    def from_messages(
+        cls,
+        messages: list[dict[str, Any]],
+        consolidate_history: HistoryConsolidator,
+        consolidate_provider_compaction: ProviderCompactionConsolidator | None,
+    ) -> ContextCompactionState:
+        """Create compaction state for a standalone runner transcript."""
+        raw_messages = messages
+        instruction_prefix: list[dict[str, Any]] = []
+        for message in raw_messages:
+            if message.get("role") not in {"system", "developer"}:
+                break
+            instruction_prefix.append(dict(message))
+
+        def build_summary_transcript(summary: str) -> list[dict[str, Any]]:
+            archived_context = (
+                "[Archived Context Summary]\n\n"
+                "Previous conversation summary:\n"
+                f"{summary}"
+            )
+            prefix = deepcopy(instruction_prefix)
+            for index in range(len(prefix) - 1, -1, -1):
+                content = prefix[index].get("content")
+                if isinstance(content, str):
+                    prefix[index]["content"] = (
+                        f"{content}\n\n---\n\n{archived_context}"
+                    )
+                    return prefix
+            return [{"role": "system", "content": archived_context}, *prefix]
+
+        return cls(
+            raw_messages=raw_messages,
+            accepted_messages=deepcopy(raw_messages),
+            raw_accepted_boundary=len(raw_messages),
+            active_summary=None,
+            summary_transcript_builder=build_summary_transcript,
+            consolidate_history=consolidate_history,
+            consolidate_provider_compaction=consolidate_provider_compaction,
+        )
+
+    def request_messages(
+        self,
+        raw_messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            *deepcopy(self.accepted_messages),
+            *deepcopy(raw_messages[self.raw_accepted_boundary:]),
+        ]
+
+    def delta_after_accepted(
+        self,
+        request_messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return deepcopy(request_messages[len(self.accepted_messages):])
+
+@dataclass(slots=True)
+class ModelRequestState:
+    """Context state shared by every provider request in one runner turn."""
+
+    config: ContextGovernanceConfig
+    conversation: ProviderConversationStateController
+    compaction: ContextCompactionState
+    usage: LLMUsage | None = None
+    messages: list[dict[str, Any]] | None = None
+    tool_definitions: list[dict[str, Any]] | None = None
+    provider_compaction_applied: bool = False
+    compacted_tool_results: set[str] = field(default_factory=set)
+    events: EventSink = NO_EVENTS
+    request_run_id: str = field(default_factory=lambda: uuid4().hex)
+    request_sequence: int = 0
+    request_usage: LLMUsage | None = None
+    # Current response targets, shared by requests that recover the same answer.
+    response_input_ids: tuple[str, ...] = ()
+    # Reported usage per runner round; recovery requests update the same slot.
+    recent_round_usages: list[LLMUsage | None] = field(default_factory=list)
 
 
 class ContextGovernor:
-    """Prepare model-copy messages while preserving persisted history."""
+    """Own model-request context while preserving persisted history."""
+
+    def __init__(self) -> None:
+        self._preparation_slots = asyncio.Semaphore(1)
+        self._preparation_jobs: set[Awaitable[object]] = set()
+
+    async def prepare_in_background(
+        self, operation: Callable[_PreparationArgs, _PreparationResult],
+        *args: _PreparationArgs.args, **kwargs: _PreparationArgs.kwargs,
+    ) -> _PreparationResult:
+        """Run read-only prompt preparation with one physical job at a time."""
+        await self._preparation_slots.acquire()
+        context = copy_context()
+
+        def prepare() -> _PreparationResult:
+            return context.run(operation, *args, **kwargs)
+
+        try:
+            future = asyncio.get_running_loop().run_in_executor(None, prepare)
+        except BaseException:
+            self._preparation_slots.release()
+            raise
+        self._preparation_jobs.add(future)
+
+        def finished(done: asyncio.Future[_PreparationResult]) -> None:
+            self._preparation_jobs.discard(done)
+            self._preparation_slots.release()
+            if not done.cancelled():
+                done.exception()
+
+        future.add_done_callback(finished)
+        # The caller can stop immediately; its worker holds the slot until it exits.
+        return await asyncio.shield(future)
+
+    async def accept_request(
+        self, state: ModelRequestState, model_messages: list[dict[str, Any]],
+        *, raw_boundary: int,
+    ) -> None:
+        """Advance accepted history on the loop after copying its payload."""
+        accepted = await self.prepare_in_background(deepcopy, model_messages)
+        state.compaction.accepted_messages = accepted
+        state.compaction.raw_accepted_boundary = raw_boundary
+
+    @staticmethod
+    def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
+        if isinstance(left, str) and isinstance(right, str):
+            return f"{left}\n\n{right}" if left else right
+
+        def _to_blocks(value: Any) -> list[dict[str, Any]]:
+            if isinstance(value, list):
+                return [
+                    cast(dict[str, Any], item)
+                    if isinstance(item, dict)
+                    else {"type": "text", "text": str(item)}
+                    for item in cast(list[Any], value)
+                ]
+            if value is None:
+                return []
+            return [{"type": "text", "text": str(value)}]
+
+        return _to_blocks(left) + _to_blocks(right)
+
+    @classmethod
+    def _merge_adjacent_user_messages_for_model(
+        cls,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Merge adjacent visible user messages only in the model-facing copy."""
+        prepared: list[dict[str, Any]] = []
+        for source in messages:
+            injection = deepcopy(source)
+            if (
+                prepared
+                and injection.get("role") == "user"
+                and prepared[-1].get("role") == "user"
+                and injection.get("content") != SUMMARY_CONTINUATION_TEXT
+                and prepared[-1].get("content") != SUMMARY_CONTINUATION_TEXT
+                and not is_hidden_history_message(injection)
+                and not is_hidden_history_message(prepared[-1])
+                and allows_conversation_message_merge(injection)
+                and allows_conversation_message_merge(prepared[-1])
+            ):
+                merged = dict(prepared[-1])
+                left_meta = merged.get("_meta")
+                right_meta = injection.get("_meta")
+                left_meta_dict = (
+                    cast(dict[str, Any], left_meta) if isinstance(left_meta, dict) else None
+                )
+                right_meta_dict = (
+                    cast(dict[str, Any], right_meta) if isinstance(right_meta, dict) else None
+                )
+                left_marker = (
+                    left_meta_dict.get(RUNTIME_CONTEXT_MESSAGE_META)
+                    if left_meta_dict is not None
+                    else None
+                )
+                right_marker = (
+                    right_meta_dict.get(RUNTIME_CONTEXT_MESSAGE_META)
+                    if right_meta_dict is not None
+                    else None
+                )
+                left_marker_dict = (
+                    cast(dict[str, Any], left_marker) if isinstance(left_marker, dict) else None
+                )
+                right_marker_dict = (
+                    cast(dict[str, Any], right_marker) if isinstance(right_marker, dict) else None
+                )
+                empty_sources: list[str] = []
+                empty_blocks: list[dict[str, Any]] = []
+                detached_left = (
+                    detach_runtime_context(merged.get("content"), left_marker_dict)
+                    if left_marker_dict is not None
+                    else (merged.get("content"), empty_sources, empty_blocks)
+                )
+                detached_right = (
+                    detach_runtime_context(injection.get("content"), right_marker_dict)
+                    if right_marker_dict is not None
+                    else (injection.get("content"), empty_sources, empty_blocks)
+                )
+                if detached_left is not None and detached_right is not None:
+                    left_content, left_sources, left_blocks = detached_left
+                    right_content, right_sources, right_blocks = detached_right
+                    merged_content = cls._merge_message_content(left_content, right_content)
+                    context_blocks = [*left_blocks, *right_blocks]
+                    if context_blocks:
+                        merged_content, marker = reattach_runtime_context(
+                            merged_content,
+                            [*left_sources, *right_sources],
+                            context_blocks,
+                        )
+                        internal_meta = (
+                            dict(left_meta_dict) if left_meta_dict is not None else {}
+                        )
+                        if right_meta_dict is not None:
+                            for key, value in right_meta_dict.items():
+                                internal_meta.setdefault(key, value)
+                        internal_meta[RUNTIME_CONTEXT_MESSAGE_META] = marker
+                        merged["_meta"] = internal_meta
+                    merged["content"] = merged_content
+                else:
+                    merged["content"] = cls._merge_message_content(
+                        merged.get("content"),
+                        injection.get("content"),
+                    )
+                prepared[-1] = merged
+                continue
+            prepared.append(injection)
+        return prepared
+
+    def prepare_messages_for_model(
+        self,
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Build the normalized model-facing copy of a raw transcript."""
+        governed = self.prepare_for_model(config, messages)
+        return self._merge_adjacent_user_messages_for_model(governed)
 
     def prepare_for_model(
         self,
         config: ContextGovernanceConfig,
         messages: list[dict[str, Any]],
-        compacted_tool_call_ids: set[str],
     ) -> list[dict[str, Any]]:
         updated = self.strip_placeholder_assistant_messages(messages)
         updated = self.strip_malformed_tool_calls(updated)
         updated = self.drop_orphan_tool_results(updated)
         updated = self.backfill_missing_tool_results(updated)
-        updated = self.apply_tool_result_budget(config, updated)
-        updated = self.compact_inflight_overflow(config, updated, compacted_tool_call_ids)
-        updated = self.snip_history(config, updated)
-        updated = self.drop_orphan_tool_results(updated)
-        return self.backfill_missing_tool_results(updated)
+        return self.apply_tool_result_budget(config, updated)
+
+    def ensure_request_fits(
+        self,
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+        *,
+        tool_definitions: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """Validate an exact model request without dropping any messages."""
+        if not config.context_window_tokens:
+            return messages
+        budget = self.input_budget(config)
+        estimated, source = estimate_prompt_tokens_chain(
+            config.provider,
+            config.model,
+            messages,
+            tool_definitions,
+        )
+        if budget > 0 and estimated <= budget:
+            return messages
+        raise ContextWindowExceededError(
+            session_key=config.session_key,
+            estimated_tokens=estimated,
+            input_budget=budget,
+            source=source,
+        )
+
+    def _fit_pending_file_reads(
+        self,
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+        delta_messages: list[dict[str, Any]],
+        *,
+        tool_definitions: list[dict[str, Any]] | None,
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        notice = (
+            "Error: read_file result was not sent because the combined request exceeds "
+            "the context budget. No file was modified by this recovery. Read one file at a time "
+            "with a smaller offset/limit range; for large single-line JSON, use exec "
+            "to select only the needed records or fields."
+        )
+        pending_ids = {
+            message.get("tool_call_id") for message in delta_messages
+            if message.get("role") == "tool" and message.get("name") == "read_file"
+            and isinstance(message.get("tool_call_id"), str)
+        }
+        candidates = iter(sorted(
+            (
+                index for index, message in enumerate(messages)
+                if message.get("role") == "tool"
+                and message.get("tool_call_id") in pending_ids
+                and isinstance(message.get("content"), str)
+                and len(message["content"].encode("utf-8")) > len(notice)
+            ),
+            key=lambda index: len(messages[index]["content"].encode("utf-8")),
+            reverse=True,
+        ))
+        prepared = list(messages)
+        replacements: dict[str, str] = {}
+        while True:
+            try:
+                fitted = self.ensure_request_fits(
+                    config, prepared, tool_definitions=tool_definitions,
+                )
+                return fitted, replacements
+            except ContextWindowExceededError:
+                index = next(candidates, None)
+                if index is None:
+                    raise
+                # Only unread results can change. Record the same text for replay,
+                # so a later turn does not restore content the model never received.
+                replacements[prepared[index]["tool_call_id"]] = notice
+                prepared[index] = {**prepared[index], "content": notice}
+
+    def request_pressure(
+        self,
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+        usage: LLMUsage | None,
+        *,
+        usage_matches_messages: bool,
+        usage_prefixes_messages: bool,
+        tool_definitions: list[dict[str, Any]] | None,
+        request_context_tokens: int | None = None,
+    ) -> tuple[int, str] | None:
+        """Return the authoritative measurement when a request is pressured."""
+        if not config.context_window_tokens:
+            return None
+        budget = self.input_budget(config)
+        if request_context_tokens is not None:
+            measured = request_context_tokens
+            source = "resumed provider state plus pending messages"
+        elif (
+            usage_matches_messages
+            and usage is not None
+            and usage.context_tokens is not None
+        ):
+            measured = usage.context_tokens
+            source = "matching provider usage"
+        else:
+            measured, source = estimate_prompt_tokens_chain(
+                config.provider,
+                config.model,
+                messages,
+                tool_definitions,
+            )
+            if (
+                usage_prefixes_messages
+                and usage is not None
+                and usage.reported_tokens > 0
+                and usage.context_tokens is not None
+                and usage.context_tokens > measured
+            ):
+                measured = usage.context_tokens
+                source = "prior provider usage plus pending messages"
+        if budget > 0 and measured < budget:
+            return None
+        return measured, source
+
+    @staticmethod
+    def _summary_transcript(
+        compaction: ContextCompactionState,
+        summary: str,
+    ) -> list[dict[str, Any]]:
+        """Rebuild only the stable system prefix around a replacement summary."""
+        return compaction.summary_transcript_builder(summary)
+
+    async def summarize_provider_compaction(
+        self,
+        state: ModelRequestState,
+        response: LLMResponse,
+        *,
+        current_request_boundary: int | None,
+    ) -> None:
+        """Materialize the exact input replaced by provider-native compaction."""
+        compaction = state.compaction
+        if response.provider_compaction_applied:
+            # Native compaction can omit results while the local transcript keeps
+            # their full text. They no longer prove what the model can read.
+            replaced_messages = (
+                compaction.accepted_messages
+                if response.provider_compaction_scope == "prior_context"
+                else state.messages or []
+            )
+            state.compacted_tool_results.update(
+                message["tool_call_id"] for message in replaced_messages
+                if message.get("role") == "tool"
+                and isinstance(message.get("tool_call_id"), str)
+            )
+            if response.provider_compaction_event_id is None:
+                response.provider_compaction_event_id = uuid4().hex
+                await shield_and_drain(state.events.emit(ContextCompactionEvent(
+                    response.provider_compaction_event_id, "succeeded", reason="provider_native",
+                )))
+        if (
+            not response.provider_compaction_applied
+            or response.provider_compaction_state is None
+            or compaction.consolidate_provider_compaction is None
+        ):
+            return
+
+        if response.provider_compaction_scope == "prior_context":
+            accepted_messages = compaction.accepted_messages
+            transcript_boundary = compaction.raw_accepted_boundary
+        elif (
+            response.provider_compaction_scope == "current_request"
+            and state.messages is not None
+            and current_request_boundary is not None
+        ):
+            accepted_messages = state.messages
+            transcript_boundary = current_request_boundary
+        else:
+            logger.warning(
+                "Ignoring provider compaction with missing request-boundary scope for {}",
+                state.config.session_key or "default",
+            )
+            return
+
+        summary = await compaction.consolidate_provider_compaction(
+            response.provider_compaction_state,
+            await self.prepare_in_background(deepcopy, accepted_messages),
+            compaction.active_summary,
+        )
+        if not summary:
+            return
+        compaction.active_summary = summary
+        compaction.summary_checkpoint = SessionSummaryCheckpoint(
+            summary=summary,
+            transcript_boundary=transcript_boundary,
+        )
+
+    async def _compact_request_history(
+        self,
+        state: ModelRequestState,
+        compaction: ContextCompactionState,
+        messages: list[dict[str, Any]],
+        pressure: tuple[int, str],
+        *,
+        tool_definitions: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        measured, _source = pressure
+        compaction_id = uuid4().hex
+        await state.events.emit(
+            ContextCompactionEvent(compaction_id=compaction_id, phase="started", reason="context_pressure"),
+        )
+        try:
+            delta_messages = await self.prepare_in_background(
+                compaction.delta_after_accepted, messages,
+            )
+            consolidation_prefix = await self.prepare_in_background(
+                self.prepare_messages_for_model, state.config,
+                compaction.accepted_messages,
+            )
+            summary = await compaction.consolidate_history(
+                await self.prepare_in_background(deepcopy, consolidation_prefix),
+                compaction.active_summary,
+            )
+            if not summary:
+                raise ContextWindowExceededError(
+                    session_key=state.config.session_key,
+                    estimated_tokens=measured,
+                    input_budget=self.input_budget(state.config),
+                    source=_source,
+                )
+
+            compaction.active_summary = summary
+            # Fresh user input defines the next task. Only ongoing work without
+            # new user input needs a temporary instruction to resume after H is replaced.
+            continuation = (
+                []
+                if any(message.get("role") == "user" for message in delta_messages)
+                else [{"role": "user", "content": SUMMARY_CONTINUATION_TEXT}]
+            )
+            summary_transcript = await self.prepare_in_background(
+                self._summary_transcript, compaction, summary,
+            )
+            prepared = await self.prepare_in_background(
+                self.prepare_messages_for_model, state.config,
+                [
+                    *summary_transcript,
+                    *continuation,
+                    *delta_messages,
+                ],
+            )
+            prepared, replacements = await self.prepare_in_background(
+                self._fit_pending_file_reads, state.config,
+                prepared,
+                delta_messages,
+                tool_definitions=tool_definitions,
+            )
+            # Commit only after the complete request fits, on the owning loop.
+            # Source files remain available for a narrower read. Previously
+            # accepted results and all tool call/result pairs remain unchanged.
+            for message in compaction.raw_messages[compaction.raw_accepted_boundary:]:
+                if message.get("role") == "tool" and message.get("tool_call_id") in replacements:
+                    message["content"] = replacements[message["tool_call_id"]]
+            # Responses-style state is append-only. Replacing H with a
+            # checkpoint requires a fresh request; a successful response may
+            # establish a new provider-owned state at the rewritten boundary.
+            state.conversation.replace_transcript(compaction.raw_messages)
+            state.usage = None
+            compaction.summary_checkpoint = SessionSummaryCheckpoint(
+                summary=summary,
+                transcript_boundary=compaction.raw_accepted_boundary,
+            )
+        except (Exception, asyncio.CancelledError) as exc:
+            await state.events.emit(
+                ContextCompactionEvent(
+                    compaction_id=compaction_id,
+                    phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                    reason="context_pressure",
+                ),
+            )
+            raise
+        async def publish_success() -> None:
+            if (sources := drain_system_sources()) is not None:
+                await state.events.emit(sources)
+            await state.events.emit(
+                ContextCompactionEvent(
+                    compaction_id=compaction_id,
+                    phase="succeeded",
+                    reason="context_pressure",
+                ),
+            )
+
+        await shield_and_drain(publish_success())
+        return prepared
+
+    async def prepare_request(
+        self,
+        state: ModelRequestState,
+        messages: list[dict[str, Any]],
+        *,
+        tool_definitions: list[dict[str, Any]] | None,
+        transcript: list[dict[str, Any]] | None = None,
+    ) -> tuple[list[dict[str, Any]], ProviderCallContext | None]:
+        """Prepare or compact and record the exact provider payload."""
+        prepared = await self.prepare_in_background(
+            self.prepare_messages_for_model, state.config, messages,
+        )
+        model_messages: list[dict[str, Any]] | None = prepared
+        supplemental_messages: list[dict[str, Any]] | None = None
+        request_context_tokens = None
+        if transcript is not None:
+            if tool_definitions is None:
+                model_messages = None
+                supplemental_messages = [prepared[-1]]
+            request_context_tokens = await self.prepare_in_background(
+                state.conversation.estimate_request_context_tokens, transcript,
+                model_messages=model_messages,
+                supplemental_messages=supplemental_messages,
+                tool_definitions=tool_definitions,
+            )
+        usage_matches_messages = (
+            state.messages is not None
+            and prepared == state.messages
+            and tool_definitions == state.tool_definitions
+        )
+        usage_prefixes_messages = (
+            state.messages is not None
+            and tool_definitions == state.tool_definitions
+            and _request_extends_measured(state.messages, prepared)
+        )
+        pressure = await self.prepare_in_background(
+            self.request_pressure, state.config,
+            prepared,
+            state.usage,
+            usage_matches_messages=usage_matches_messages,
+            usage_prefixes_messages=usage_prefixes_messages,
+            tool_definitions=tool_definitions,
+            request_context_tokens=request_context_tokens,
+        )
+        provider_context = (
+            state.conversation.prepare_request(
+                transcript,
+                context_window_tokens=state.config.context_window_tokens,
+                model_messages=model_messages,
+                supplemental_messages=supplemental_messages,
+            )
+            if transcript is not None
+            else state.conversation.independent_request_context(
+                context_window_tokens=state.config.context_window_tokens,
+            )
+        )
+        if pressure is not None:
+            input_budget = self.input_budget(state.config)
+            if (
+                input_budget > 0
+                and provider_context is not None
+                and provider_context.conversation_state is not None
+                and state.config.provider.supports_pre_request_compaction(state.config.model) is True
+            ):
+                # Keep the resumable state until its owner has compacted it. Inline
+                # server compaction alone cannot make an oversized request safe.
+                provider_context = replace(provider_context, compaction_input_budget=input_budget)
+                logger.info(
+                    "Request requires provider pre-request compaction for {}: tokens={} budget={} via {}",
+                    state.config.session_key or "default", pressure[0], input_budget, pressure[1],
+                )
+            else:
+                prepared = await self._compact_request_history(
+                    state,
+                    state.compaction,
+                    messages,
+                    pressure,
+                    tool_definitions=tool_definitions,
+                )
+                provider_context = state.conversation.independent_request_context(
+                    context_window_tokens=state.config.context_window_tokens,
+                )
+        if state.events.publish is not None:
+            provider_context = replace(
+                provider_context or ProviderCallContext(), events=state.events,
+            )
+        state.messages, state.tool_definitions = await self.prepare_in_background(
+            self._request_snapshot, prepared, tool_definitions,
+        )
+        return prepared, provider_context
+
+    @staticmethod
+    def _request_snapshot(
+        messages: list[dict[str, Any]],
+        tool_definitions: list[dict[str, Any]] | None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
+        return deepcopy(messages), deepcopy(tool_definitions)
 
     @staticmethod
     def input_budget(config: ContextGovernanceConfig) -> int:
@@ -101,9 +834,7 @@ class ContextGovernor:
         max_output = config.max_tokens if isinstance(config.max_tokens, int) else (
             provider_max_tokens if isinstance(provider_max_tokens, int) else 4096
         )
-        budget = config.context_block_limit or (
-            config.context_window_tokens - max_output - SNIP_SAFETY_BUFFER
-        )
+        budget = config.context_window_tokens - max_output - CONTEXT_SAFETY_BUFFER
         return budget if budget > 0 else 0
 
     @staticmethod
@@ -116,24 +847,48 @@ class ContextGovernor:
         result = ensure_nonempty_tool_result(tool_name, result)
         if tool_name in TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
             return result
-        try:
+
+        def persist_text(text: str, call_id: str) -> str:
             content = maybe_persist_tool_result(
                 config.workspace,
                 config.session_key,
-                tool_call_id,
-                result,
+                call_id,
+                text,
                 max_chars=config.max_tool_result_chars,
             )
+            # Persisted references must retain their complete paths.
+            return truncate_text(content, config.max_tool_result_chars) if config.workspace is None else content
+
+        original_result: object = result
+        try:
+            if isinstance(result, str):
+                return persist_text(result, tool_call_id)
+            if isinstance(result, list):
+                result = cast(list[object], result)
+                blocks: list[dict[str, Any]] = []
+                for raw_block in result:
+                    if not isinstance(raw_block, dict):
+                        return result
+                    block = cast(dict[str, Any], raw_block)
+                    if not isinstance(block.get("type"), str):
+                        return result
+                    if block["type"] == "text" and not isinstance(block.get("text"), str):
+                        return result
+                    blocks.append(block)
+                # Image redaction must not change how neighboring text is normalized.
+                return [
+                    {**block, "text": persist_text(block["text"], f"{tool_call_id}_text_{index}")}
+                    if block["type"] == "text" else block
+                    for index, block in enumerate(blocks)
+                ]
         except Exception:
             logger.exception(
                 "Tool result persist failed for {} in {}; using raw result",
                 tool_call_id,
                 config.session_key or "default",
             )
-            content = result
-        if isinstance(content, str) and len(content) > config.max_tool_result_chars:
-            return truncate_text(content, config.max_tool_result_chars)
-        return content
+            return truncate_text(result, config.max_tool_result_chars) if isinstance(result, str) else original_result
+        return result
 
     @staticmethod
     def strip_placeholder_assistant_messages(
@@ -200,7 +955,7 @@ class ContextGovernor:
                 if updated is not None:
                     updated.append(msg)
                 continue
-            kept = [tc for tc in calls if _tool_call_name_is_valid(tc)]
+            kept = [tc for tc in cast(list[Any], calls) if _tool_call_name_is_valid(tc)]
             if len(kept) == len(calls):
                 if updated is not None:
                     updated.append(msg)
@@ -232,21 +987,26 @@ class ContextGovernor:
     def drop_orphan_tool_results(
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Drop tool results that have no matching assistant tool_call earlier in history."""
+        """Drop invalid tool results before history is sent back to providers."""
         declared: set[str] = set()
+        fulfilled: set[str] = set()
         updated: list[dict[str, Any]] | None = None
         for idx, msg in enumerate(messages):
             role = msg.get("role")
             if role == "assistant":
-                for tc in msg.get("tool_calls") or []:
-                    if isinstance(tc, dict) and tc.get("id"):
-                        declared.add(str(tc["id"]))
+                for tc in cast(list[Any], msg.get("tool_calls") or []):
+                    if isinstance(tc, dict):
+                        tool_call = cast(dict[str, Any], tc)
+                        if tool_call.get("id"):
+                            declared.add(str(tool_call["id"]))
             if role == "tool":
                 tid = msg.get("tool_call_id")
-                if tid and str(tid) not in declared:
+                tid_str = str(tid) if tid else ""
+                if not tid_str or tid_str not in declared or tid_str in fulfilled:
                     if updated is None:
                         updated = [dict(m) for m in messages[:idx]]
                     continue
+                fulfilled.add(tid_str)
             if updated is not None:
                 updated.append(dict(msg))
 
@@ -264,13 +1024,17 @@ class ContextGovernor:
         for idx, msg in enumerate(messages):
             role = msg.get("role")
             if role == "assistant":
-                for tc in msg.get("tool_calls") or []:
-                    if isinstance(tc, dict) and tc.get("id"):
+                for tc in cast(list[Any], msg.get("tool_calls") or []):
+                    if isinstance(tc, dict):
                         name = ""
-                        func = tc.get("function")
-                        if isinstance(func, dict):
-                            name = func.get("name", "")
-                        declared.append((idx, str(tc["id"]), name))
+                        tool_call = cast(dict[str, Any], tc)
+                        if tool_call.get("id"):
+                            func = tool_call.get("function")
+                            if isinstance(func, dict):
+                                func_data = cast(dict[str, Any], func)
+                                raw_name = func_data.get("name", "")
+                                name = raw_name if isinstance(raw_name, str) else str(raw_name)
+                            declared.append((idx, str(tool_call["id"]), name))
             elif role == "tool":
                 tid = msg.get("tool_call_id")
                 if tid:
@@ -315,189 +1079,3 @@ class ContextGovernor:
                     updated = [dict(m) for m in messages]
                 updated[idx]["content"] = normalized
         return updated
-
-    def compact_inflight_overflow(
-        self,
-        config: ContextGovernanceConfig,
-        messages: list[dict[str, Any]],
-        compacted_tool_call_ids: set[str],
-    ) -> list[dict[str, Any]]:
-        """Compact in-flight tool results only when the request would overflow."""
-        budget = self.input_budget(config)
-        if budget <= 0:
-            return messages
-
-        tools = config.tools.get_definitions()
-        updated = self._apply_recorded_compactions(messages, compacted_tool_call_ids)
-        estimate, source = estimate_prompt_tokens_chain(
-            config.provider,
-            config.model,
-            updated,
-            tools,
-        )
-        if estimate <= budget:
-            return updated
-
-        target = int(budget * INFLIGHT_COMPACT_TARGET_RATIO)
-        candidates = self._inflight_compaction_candidates(
-            config,
-            updated,
-            compacted_tool_call_ids,
-        )
-        if not candidates:
-            return updated
-
-        for candidate_idx, (idx, tool_call_id) in enumerate(candidates):
-            is_newest_candidate = candidate_idx == len(candidates) - 1
-            if is_newest_candidate and estimate <= budget:
-                break
-            if tool_call_id in compacted_tool_call_ids:
-                continue
-            if updated is messages:
-                updated = [dict(m) for m in messages]
-            compacted_tool_call_ids.add(tool_call_id)
-            self._compact_tool_result_at(updated, idx)
-            estimate, source = estimate_prompt_tokens_chain(
-                config.provider,
-                config.model,
-                updated,
-                tools,
-            )
-            if estimate <= target:
-                break
-
-        logger.debug(
-            "In-flight context compaction for {}: prompt={} budget={} target={} via {}, ids={}",
-            config.session_key or "default",
-            estimate,
-            budget,
-            target,
-            source,
-            len(compacted_tool_call_ids),
-        )
-        return updated
-
-    def snip_history(
-        self,
-        config: ContextGovernanceConfig,
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        if not messages or not config.context_window_tokens:
-            return messages
-
-        budget = self.input_budget(config)
-        if budget <= 0:
-            return messages
-
-        tools = config.tools.get_definitions()
-        estimate, _ = estimate_prompt_tokens_chain(
-            config.provider,
-            config.model,
-            messages,
-            tools,
-        )
-        if estimate <= budget:
-            return messages
-
-        system_messages = [dict(msg) for msg in messages if msg.get("role") == "system"]
-        non_system = [dict(msg) for msg in messages if msg.get("role") != "system"]
-        if not non_system:
-            return messages
-
-        system_tokens = sum(estimate_message_tokens(msg) for msg in system_messages)
-        fixed_tokens, _ = estimate_prompt_tokens_chain(
-            config.provider,
-            config.model,
-            system_messages,
-            tools,
-        )
-        remaining_budget = max(0, budget - max(system_tokens, fixed_tokens))
-        kept: list[dict[str, Any]] = []
-        kept_tokens = 0
-        for message in reversed(non_system):
-            msg_tokens = estimate_message_tokens(message)
-            if kept and kept_tokens + msg_tokens > remaining_budget:
-                break
-            kept.append(message)
-            kept_tokens += msg_tokens
-        kept.reverse()
-
-        return system_messages + self._legal_history_tail(kept, non_system)
-
-    @staticmethod
-    def _summary_for(message: dict[str, Any]) -> str:
-        name = message.get("name", "tool")
-        return f"[{name} result omitted from context]"
-
-    def _legal_history_tail(
-        self,
-        kept: list[dict[str, Any]],
-        non_system: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        fallback = kept if kept else (non_system[-1:] if non_system else [])
-        kept = self._user_tail(kept) or self._user_tail(non_system, last=True) or fallback
-
-        start = find_legal_message_start(kept)
-        return kept[start:] if start else kept
-
-    @staticmethod
-    def _user_tail(messages: list[dict[str, Any]], *, last: bool = False) -> list[dict[str, Any]]:
-        indexes = range(len(messages) - 1, -1, -1) if last else range(len(messages))
-        for idx in indexes:
-            if messages[idx].get("role") == "user":
-                return messages[idx:]
-        return []
-
-    def _apply_recorded_compactions(
-        self,
-        messages: list[dict[str, Any]],
-        compacted_tool_call_ids: set[str],
-    ) -> list[dict[str, Any]]:
-        if not compacted_tool_call_ids:
-            return messages
-        updated = messages
-        for idx, msg in enumerate(messages):
-            if msg.get("role") != "tool":
-                continue
-            tool_call_id = msg.get("tool_call_id")
-            if not tool_call_id or str(tool_call_id) not in compacted_tool_call_ids:
-                continue
-            summary = self._summary_for(msg)
-            if msg.get("content") == summary:
-                continue
-            if updated is messages:
-                updated = [dict(m) for m in messages]
-            updated[idx]["content"] = summary
-        return updated
-
-    def _inflight_compaction_candidates(
-        self,
-        config: ContextGovernanceConfig,
-        messages: list[dict[str, Any]],
-        compacted_tool_call_ids: set[str],
-    ) -> list[tuple[int, str]]:
-        compactable: list[tuple[int, str]] = []
-        for idx, msg in enumerate(messages):
-            if idx < config.inflight_start_index:
-                continue
-            if msg.get("role") != "tool" or msg.get("name") not in COMPACTABLE_TOOLS:
-                continue
-            tool_call_id = msg.get("tool_call_id")
-            if not tool_call_id or str(tool_call_id) in compacted_tool_call_ids:
-                continue
-            content = msg.get("content")
-            if not isinstance(content, str) or len(content) < MICROCOMPACT_MIN_CHARS:
-                continue
-            compactable.append((idx, str(tool_call_id)))
-
-        if not compactable:
-            return []
-        primary_count = max(0, len(compactable) - MICROCOMPACT_KEEP_RECENT)
-        primary = compactable[:primary_count]
-        # Hard overflow beats the keep-recent preference. Return recent results
-        # after stale ones so the newest result is naturally last.
-        fallback = compactable[primary_count:]
-        return primary + fallback
-
-    def _compact_tool_result_at(self, messages: list[dict[str, Any]], idx: int) -> None:
-        messages[idx]["content"] = self._summary_for(messages[idx])

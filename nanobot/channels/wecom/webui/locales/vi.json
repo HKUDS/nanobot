@@ -1,0 +1,23 @@
+{
+  "setup": {
+    "docsLabel": "Mở hướng dẫn WeCom",
+    "officialLabel": "Mở bảng điều khiển WeCom",
+    "fields": {
+      "botId": {
+        "label": "Bot ID",
+        "placeholder": "Bot ID WeCom"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
+      },
+      "welcomeMessage": {
+        "label": "Tin nhắn chào mừng"
+      }
+    }
+  }
+}

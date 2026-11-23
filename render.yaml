@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: nanobot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Render's Docker Command replaces the image startup command. The entrypoint
+    # prepares the mounted disk, drops privileges, initializes config.json from
+    # render-config.json if needed, and appends --config.
+    dockerCommand: /usr/local/bin/entrypoint.sh gateway
+    # Deploy-to-Render templates should not auto-deploy on every repo push
+    # (Render's recommendation); trigger deploys manually or via the Dashboard.
+    autoDeploy: false
+    plan: starter
+    healthCheckPath: /
+    envVars:
+      # Anthropic API key — powers the agent's LLM calls. Get one at
+      # https://console.anthropic.com/settings/keys
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # WebUI access secret — the gate for the public WebUI. Generate a strong
+      # random value (e.g. `openssl rand -hex 32`) and keep it private.
+      - key: NANOBOT_WEB_TOKEN
+        sync: false
+      - key: PORT
+        value: 8765
+    # Persist sessions, memory, and the WebUI display transcripts across deploys.
+    # The entrypoint copies the config onto this mount, so nanobot's runtime
+    # data_dir (config_path.parent) resolves here too — keeping webui/ (chat
+    # history the UI renders), cron, media, and logs durable, not just session
+    # files. Starter / 1 GB is the lean default; history persistence needs this
+    # disk, not a bigger plan. Note: persistent disks require a paid service
+    # (they are unavailable on Render's free tier).
+    disk:
+      name: nanobot-data
+      mountPath: /home/nanobot/.nanobot
+      sizeGB: 1

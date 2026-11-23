@@ -1,12 +1,31 @@
-import { AlertCircle, CheckCircle2, CircleDashed } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { DisclosureContent } from "@/components/ui/disclosure";
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  ExternalLink,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { FileReferenceChip } from "@/components/FileReferenceChip";
-import type { UIFileEdit } from "@/lib/types";
+import { FileReferenceChip, fileIconForPath } from "@/components/FileReferenceChip";
+import { codeLanguageFromPath } from "@/lib/code-language";
+import {
+  hasRenderableFileDiff,
+  parseRenderableFileDiff,
+  type RenderableFileDiff,
+} from "@/lib/file-diff";
+import type { FileEditDisplayMode } from "@/lib/local-preferences";
+import type { UIFileDiff, UIFileEdit } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { ActivityStep } from "./ActivityStep";
+import { formatActivityTarget } from "./activity-text";
 import { DiffPair } from "./DiffPair";
+import { DiffSyntaxHighlight } from "./DiffSyntaxHighlight";
+
+const INITIAL_VISIBLE_DIFF_LINES = 160;
+const AUTO_COLLAPSE_DIFF_LINES = INITIAL_VISIBLE_DIFF_LINES;
 
 export interface FileEditSummary {
   key: string;
@@ -20,125 +39,270 @@ export interface FileEditSummary {
   operation?: UIFileEdit["operation"];
   pending: boolean;
   error?: string;
+  diff?: UIFileDiff;
 }
 
 export function FileEditGroup({
   edits,
+  displayMode,
   onOpenFilePreview,
 }: {
   edits: FileEditSummary[];
+  displayMode: FileEditDisplayMode;
   onOpenFilePreview?: (path: string) => void;
 }) {
   if (edits.length === 0) return null;
   return (
-    <ul className="space-y-1">
+    <>
       {edits.map((edit) => (
         <FileEditRow
           key={edit.key}
           edit={edit}
+          displayMode={displayMode}
           onOpenFilePreview={onOpenFilePreview}
         />
       ))}
-    </ul>
+    </>
   );
 }
 
 function FileEditRow({
   edit,
+  displayMode,
   onOpenFilePreview,
 }: {
   edit: FileEditSummary;
+  displayMode: FileEditDisplayMode;
   onOpenFilePreview?: (path: string) => void;
 }) {
   const { t } = useTranslation();
   const editing = edit.status === "editing";
   const failed = edit.status === "error";
+  const action = fileEditAction(edit, editing, failed, t);
   const hasCountedDiff = !failed && !edit.binary && hasVisibleDiffStats(edit);
-  const rawFailureDetail = failed ? cleanFileEditError(edit.error) : "";
-  const failureDetail = failed
-    ? formatFileEditError(edit.error)
-      || t("message.fileEditFailedFallback", { defaultValue: "File change was not applied." })
-    : "";
-  const statusIcon = failed ? (
-    <AlertCircle className="h-3 w-3" aria-hidden />
-  ) : editing ? (
-    <CircleDashed className="h-3 w-3 animate-spin" aria-hidden />
-  ) : (
-    <CheckCircle2 className="h-3 w-3" aria-hidden />
-  );
+  const showDiff = canRenderDiff(edit, displayMode);
+
   return (
-    <ActivityStep
-      as="li"
-      marker={(
-        <span
-          className={cn(
-            "grid h-3.5 w-3.5 place-items-center rounded-full border bg-background transition-colors",
-            failed && "border-destructive/30 text-destructive/78",
-            editing && "border-muted-foreground/24 text-muted-foreground/65",
-            !failed && !editing && "border-emerald-500/28 text-emerald-500/78",
+    <div className="min-w-0">
+      <ActivityStep
+        icon={fileIconForPath(edit.absolute_path || edit.path)}
+        markerLabel={action}
+        active={editing}
+        tone={failed ? "error" : editing ? "active" : "success"}
+        className="text-xs"
+        ariaLabel={formatActivityTarget(t, action, edit.path)}
+        label={edit.pending && !edit.path
+          ? t("message.fileEditPreparing", { defaultValue: "Preparing file edit…" })
+          : (
+            <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
+              <span className="flex min-w-0 shrink overflow-hidden">
+                <FileReferenceChip
+                  path={edit.path}
+                  tooltipPath={edit.absolute_path || edit.path}
+                  previewPath={edit.absolute_path || edit.path}
+                  onOpen={onOpenFilePreview}
+                  display="path"
+                  showIcon={false}
+                  active={editing}
+                  className="min-w-0"
+                  truncateFromStart
+                  textClassName="text-[12px]"
+                  testId="activity-file-reference"
+                />
+              </span>
+              {hasCountedDiff ? <DiffPair added={edit.added} deleted={edit.deleted} /> : null}
+            </span>
           )}
-        >
-          {statusIcon}
-        </span>
-      )}
-      active={editing}
-      tone={failed ? "error" : editing ? "active" : "success"}
-      className="text-xs"
-      contentClassName={failed ? "min-w-0" : "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3"}
-      title={rawFailureDetail || edit.absolute_path || edit.path}
-      label={edit.pending && !edit.path
-        ? t("message.fileEditPreparing", { defaultValue: "Preparing file edit…" })
-        : (
-          <FileReferenceChip
-            path={edit.path}
-            tooltipPath={edit.absolute_path}
-            previewPath={edit.absolute_path || edit.path}
-            onOpen={onOpenFilePreview}
-            display="path"
-            active={editing}
-            className="min-w-0"
-            textClassName="text-[12px]"
-            testId="activity-file-reference"
-          />
-        )}
-      detail={null}
-      aside={hasCountedDiff ? <DiffPair added={edit.added} deleted={edit.deleted} /> : null}
-    >
-      {failed ? (
-        <span className="block max-w-[42rem] truncate text-[11px] leading-4 text-destructive/75">
-          {failureDetail}
-        </span>
+      />
+      {showDiff ? (
+        <FileUnifiedDiff
+          diff={edit.diff!}
+          collapsed={displayMode === "collapsed_diff"}
+          previewPath={edit.absolute_path || edit.path}
+          onOpenFilePreview={onOpenFilePreview}
+        />
       ) : null}
-    </ActivityStep>
+    </div>
   );
 }
 
-export function hasVisibleDiffStats(edit: Pick<FileEditSummary, "added" | "deleted">): boolean {
+function hasVisibleDiffStats(edit: Pick<FileEditSummary, "added" | "deleted">): boolean {
   return edit.added > 0 || edit.deleted > 0;
 }
 
-function cleanFileEditError(error?: string): string {
-  const firstLine = (error || "").replace(/\s+/g, " ").trim();
-  if (!firstLine) return "";
-  return firstLine
-    .replace(/^Error applying patch:\s*/i, "")
-    .replace(/^Error writing file:\s*/i, "")
-    .replace(/^Error editing file:\s*/i, "")
-    .replace(/^Error:\s*/i, "");
+function fileEditAction(
+  edit: FileEditSummary,
+  editing: boolean,
+  failed: boolean,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  const deleting = edit.operation === "delete";
+  if (failed) return t(`message.agentActivity.${deleting ? "deleteFileFailed" : "editFileFailedShort"}`);
+  if (editing) return t(`message.agentActivity.${deleting ? "deletingFile" : "editingFileShort"}`);
+  if (edit.operation === "create") return t("message.agentActivity.createdFile");
+  return t(`message.agentActivity.${deleting ? "deletedFile" : "editedFileShort"}`);
 }
 
-function formatFileEditError(error?: string): string {
-  const cleaned = cleanFileEditError(error);
-  if (!cleaned) return "";
+function canRenderDiff(edit: FileEditSummary, displayMode: FileEditDisplayMode): boolean {
+  return (
+    displayMode !== "summary"
+    && edit.status !== "editing"
+    && edit.status !== "error"
+    && hasRenderableFileDiff(edit.diff)
+  );
+}
 
-  if (/\bpermission denied\b/i.test(cleaned) || /\boperation not permitted\b/i.test(cleaned)) {
-    return "No permission to change this location.";
-  }
+function FileUnifiedDiff({
+  diff,
+  collapsed,
+  previewPath,
+  onOpenFilePreview,
+}: {
+  diff: UIFileDiff;
+  collapsed: boolean;
+  previewPath?: string;
+  onOpenFilePreview?: (path: string) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [open, setOpen] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
+  const contentId = useId();
+  const [expandedLines, setExpandedLines] = useState(false);
+  const renderableDiff = useMemo(() => parseRenderableFileDiff(diff), [diff]);
+  const language = useMemo(() => codeLanguageFromPath(previewPath), [previewPath]);
+  const totalLineCount = useMemo(() => countDiffLines(renderableDiff), [renderableDiff]);
+  const shouldAutoCollapse = totalLineCount > AUTO_COLLAPSE_DIFF_LINES || !!diff.truncated;
+  const startsCollapsed = collapsed || shouldAutoCollapse;
+  const shouldRenderBody = !startsCollapsed || hasOpened;
+  const shouldLimitLines = totalLineCount > INITIAL_VISIBLE_DIFF_LINES;
+  const lineLimit = expandedLines || !shouldLimitLines
+    ? totalLineCount
+    : INITIAL_VISIBLE_DIFF_LINES;
+  const hiddenLineCount = totalLineCount - lineLimit;
+  const viewDiffLabel = shouldAutoCollapse
+    ? tx("message.fileEditViewLargeDiff", "View large diff")
+    : tx("message.fileEditViewDiff", "View diff");
 
-  return cleaned
-    .replace(/^old_text not found in (.+)$/i, "Target text was not found in $1.")
-    .replace(/^old_text appears multiple times in (.+)$/i, "Target text matched multiple places in $1.")
-    .replace(/^file to (?:update|delete) does not exist: (.+)$/i, "File does not exist: $1.")
-    .replace(/^path to (?:update|delete) is not a file: (.+)$/i, "Path is not a file: $1.")
-    .slice(0, 180);
+  useEffect(() => {
+    setOpen(false);
+    setHasOpened(false);
+    setExpandedLines(false);
+  }, [diff]);
+
+  const handleToggleOpen = () => {
+    if (!open) {
+      setHasOpened(true);
+      setExpandedLines(false);
+    }
+    setOpen(!open);
+  };
+  const releaseBody = useCallback(() => {
+    setHasOpened(false);
+    setExpandedLines(false);
+  }, []);
+
+  if (totalLineCount === 0) return null;
+
+  const renderBody = () => (
+    <div
+      className="file-edit-diff-surface mt-1 overflow-hidden rounded-md border border-border/55 bg-background/80 shadow-[0_1px_0_rgba(15,23,42,0.03)]"
+      data-testid="file-edit-diff"
+    >
+      <DiffSyntaxHighlight language={language} text={diff.text!} diff={renderableDiff} lineLimit={lineLimit} />
+      {hiddenLineCount > 0 ? (
+        <div className="border-t border-border/45 bg-muted/30 px-2 py-1">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium",
+              "text-muted-foreground transition-colors hover:bg-muted/65 hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+            data-testid="file-edit-diff-expand-lines"
+            onClick={() => setExpandedLines(true)}
+          >
+            <ChevronDown className="h-3 w-3" aria-hidden />
+            {t("message.fileEditShowMoreLines", {
+              count: hiddenLineCount,
+              defaultValue: "Show {{count}} more lines",
+            })}
+          </button>
+        </div>
+      ) : expandedLines && shouldLimitLines ? (
+        <div className="border-t border-border/45 bg-muted/30 px-2 py-1">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium",
+              "text-muted-foreground transition-colors hover:bg-muted/65 hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+            data-testid="file-edit-diff-collapse-lines"
+            onClick={() => setExpandedLines(false)}
+          >
+            <ChevronUp className="h-3 w-3" aria-hidden />
+            {tx("message.fileEditShowFewerLines", "Show fewer lines")}
+          </button>
+        </div>
+      ) : null}
+      {diff.truncated ? (
+        <div
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/45 bg-muted/35 px-2 py-1 text-[11px] text-muted-foreground"
+          data-testid="file-edit-diff-truncated"
+        >
+          <span>
+            {tx("message.fileEditDiffTruncated", "Diff truncated. Open the file for the full change.")}
+          </span>
+          {previewPath && onOpenFilePreview ? (
+            <button
+              type="button"
+              className={cn(
+                "inline-flex items-center gap-1 rounded px-1 py-0.5 font-medium",
+                "text-muted-foreground transition-colors hover:bg-muted/65 hover:text-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+              data-testid="file-edit-diff-open-file"
+              onClick={() => onOpenFilePreview(previewPath)}
+            >
+              <ExternalLink className="h-3 w-3" aria-hidden />
+              {tx("message.fileEditOpenFile", "Open file")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  if (!startsCollapsed) return renderBody();
+
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={contentId}
+        data-testid="file-edit-diff-toggle"
+        onClick={handleToggleOpen}
+        className={cn(
+          "flex w-full cursor-pointer items-center gap-2 rounded-md border border-border/45 bg-muted/35 px-2 py-1 text-left",
+          "text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/50",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+      >
+        <ChevronRight
+          className={cn("h-3 w-3 shrink-0 transition-transform duration-200 motion-reduce:transition-none", open && "rotate-90")}
+          aria-hidden
+        />
+        <span className="min-w-0 flex-1">{viewDiffLabel}</span>
+      </button>
+      <DisclosureContent id={contentId} open={open} onExitComplete={releaseBody}>
+        {shouldRenderBody ? renderBody() : null}
+      </DisclosureContent>
+    </div>
+  );
+}
+
+function countDiffLines(diff: RenderableFileDiff): number {
+  return diff.hunks.reduce((total, hunk) => total + hunk.lines.length, 0);
 }

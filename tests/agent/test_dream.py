@@ -1,8 +1,7 @@
-"""Tests for Dream memory consolidation — build_dream_prompt and cursor management."""
-
 import pytest
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMResponse
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
@@ -24,36 +23,6 @@ class TestBuildDreamPrompt:
     def test_returns_none_when_no_history(self, store):
         assert store.build_dream_prompt() is None
 
-    def test_returns_prompt_with_history(self, store):
-        store.append_history("hello")
-        result = store.build_dream_prompt()
-        assert result is not None
-        prompt, cursor = result
-        assert cursor > 0
-        assert "## Conversation History" in prompt
-        assert "hello" in prompt
-
-    def test_cursor_advances_only_new_entries(self, store):
-        store.append_history("first")
-        r1 = store.build_dream_prompt()
-        assert r1 is not None
-        _, c1 = r1
-
-        # Cursor not yet advanced — same entries are still available
-        assert store.build_dream_prompt() is not None
-
-        # Advance cursor
-        store.set_last_dream_cursor(c1)
-        # Now no new entries
-        assert store.build_dream_prompt() is None
-
-        # Add new entry
-        store.append_history("second")
-        r2 = store.build_dream_prompt()
-        assert r2 is not None
-        _, c2 = r2
-        assert c2 > c1
-
     def test_prompt_includes_skill_creator_path(self, store):
         store.append_history("test")
         result = store.build_dream_prompt()
@@ -61,41 +30,70 @@ class TestBuildDreamPrompt:
         prompt, _ = result
         assert "skill-creator" in prompt
 
-    def test_truncates_long_entries(self, store):
-        long_content = "x" * 2000
-        store.append_history(long_content)
+    def test_workspace_dream_prompt_overrides_default(self, store):
+        store.dream_prompt_file.parent.mkdir(parents=True)
+        store.dream_prompt_file.write_text(
+            "Custom Dream prompt.",
+            encoding="utf-8",
+        )
+        store.append_history("keep this fact")
+
         result = store.build_dream_prompt()
+
         assert result is not None
         prompt, _ = result
-        # The full 2000 chars should not appear — truncated to 500
-        assert long_content not in prompt
-        assert "x" * 500 in prompt
+        assert prompt.startswith("Custom Dream prompt.")
+        assert "## Conversation History" in prompt
+        assert f"History file: {store.history_file.resolve()}" in prompt
+        assert "Read lines 1-1" in prompt
 
-    def test_batches_oldest_unprocessed_entries_first(self, store):
-        for i in range(25):
+    def test_workspace_dream_prompt_override_is_capped(self, store):
+        store.dream_prompt_file.parent.mkdir(parents=True)
+        store.dream_prompt_file.write_text("x" * 40_000, encoding="utf-8")
+        store.append_history("keep this fact")
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, _ = result
+        assert "x" * 40_000 not in prompt
+        assert "... (truncated)" in prompt
+        assert "## Conversation History" in prompt
+        assert "Read lines 1-1" in prompt
+
+    def test_empty_workspace_dream_prompt_uses_default(self, store):
+        store.dream_prompt_file.parent.mkdir(parents=True)
+        store.dream_prompt_file.write_text("  \n", encoding="utf-8")
+        store.append_history("test")
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, _ = result
+        assert prompt.startswith(store.default_dream_prompt() + "\n\n## Conversation History\n")
+
+    def test_range_covers_all_pending_records_after_history_retention(self, store):
+        for i in range(35):
             store.append_history(f"entry-{i + 1:02d}")
+        store.set_last_dream_cursor(10)
+        store.max_history_entries = 30
+        store.compact_history()
 
-        result = store.build_dream_prompt(max_entries=20)
+        result = store.build_dream_prompt()
         assert result is not None
         prompt, cursor = result
 
-        assert cursor == 20
-        assert "entry-01" in prompt
-        assert "entry-20" in prompt
-        assert "entry-21" not in prompt
-
+        assert cursor == 35
+        assert "Read lines 6-30 (inclusive): 25 pending records" in prompt
+        assert "10 < cursor <= 35" in prompt
+        assert store.get_last_dream_cursor() == 10
         store.set_last_dream_cursor(cursor)
-        next_result = store.build_dream_prompt(max_entries=20)
-        assert next_result is not None
-        next_prompt, next_cursor = next_result
-        assert next_cursor == 25
-        assert "entry-21" in next_prompt
-        assert "entry-25" in next_prompt
+        assert store.build_dream_prompt() is None
 
     def test_skips_malformed_history_entries(self, store):
-        """Dream prompt building should tolerate externally corrupted JSONL rows."""
         store.history_file.write_text(
             '{"cursor": 1, "timestamp": "2026-04-01 10:00"}\n'
+            '\nnot-json\n'
             '{"cursor": 2, "timestamp": "2026-04-01 10:01", "content": "usable memory"}\n',
             encoding="utf-8",
         )
@@ -105,7 +103,20 @@ class TestBuildDreamPrompt:
         assert result is not None
         prompt, cursor = result
         assert cursor == 2
-        assert "usable memory" in prompt
+        assert "Read lines 4-4 (inclusive): 1 pending records" in prompt
+
+    async def test_history_range_counts_unicode_separators_as_read_file_lines(self, store):
+        store.append_history("old\u2028record")
+        store.set_last_dream_cursor(1)
+        store.append_history("new\u2028record")
+        prompt, cursor = store.build_dream_prompt()
+        assert "Read lines 3-4" in prompt
+        assert cursor == 2
+        result = await store.build_dream_tools().execute("read_file", {
+            "path": str(store.history_file), "offset": 3, "limit": 2,
+        })
+        assert '"cursor": 2' in result
+        assert '4| record"}' in result
 
     def test_dream_prompt_consumes_consolidator_attribute_tags(self):
         prompt = render_template(
@@ -118,6 +129,34 @@ class TestBuildDreamPrompt:
         assert "[skip]: audit-only" in prompt
         assert "[correction]: replace the older conflicting fact" in prompt
         assert "Always strip these bracketed tags from saved memory content" in prompt
+
+
+class TestDreamRunCompletion:
+
+    class _Resp:
+        def __init__(self, stop_reason: str = "completed") -> None:
+            self.metadata = {"_stop_reason": stop_reason}
+
+    def test_completed_stop_reason_completes(self):
+        assert MemoryStore.dream_run_completed(self._Resp())
+
+    @pytest.mark.parametrize(
+        "stop_reason",
+        ["error", "tool_error", "max_iterations", "cancelled"],
+    )
+    def test_non_completed_stop_reason_blocks(self, stop_reason: str):
+        assert not MemoryStore.dream_run_completed(self._Resp(stop_reason))
+
+    def test_missing_response_metadata_blocks(self):
+        assert not MemoryStore.dream_run_completed(None)
+
+    def test_incompletion_reason_names_the_cause(self):
+        assert MemoryStore.dream_incompletion_reason(
+            self._Resp("max_iterations")
+        ) == "stop_reason: max_iterations"
+        assert MemoryStore.dream_incompletion_reason(None) == (
+            "stop_reason: missing response metadata"
+        )
 
 
 class TestDreamTools:
@@ -156,11 +195,37 @@ class TestDreamTools:
                 "new_text": "Precise",
             },
         )
+        user_result = await tools.execute(
+            "write_file",
+            {
+                "path": "USER.md",
+                "content": "# User Profile\n\n- **Name**: Ada\n",
+            },
+        )
 
         assert "Patch applied" in memory_result
-        assert "Successfully edited" in soul_result
+        assert "Patch applied" in soul_result
+        assert "Successfully wrote" in user_result
         assert "Project Y active" in store.memory_file.read_text(encoding="utf-8")
         assert "Precise" in store.soul_file.read_text(encoding="utf-8")
+        assert "**Name**: Ada" in store.user_file.read_text(encoding="utf-8")
+
+    @pytest.mark.asyncio
+    async def test_dream_can_create_and_update_wiki_pages(self, store):
+        tools = store.build_dream_tools()
+        path = "memory/wiki/projects/example.md"
+        assert "Successfully wrote" in await tools.execute(
+            "write_file", {"path": path, "content": "# Example\nRegion east\n"},
+        )
+        assert "Region east" in await tools.execute("read_file", {"path": path})
+        assert "Patch applied" in await tools.execute("apply_patch", {"edits": [{
+            "path": path, "action": "replace", "old_text": "Region east", "new_text": "Region west",
+        }]})
+        await tools.execute("read_file", {"path": path})
+        assert "Patch applied" in await tools.execute("edit_file", {
+            "path": path, "old_text": "Region west", "new_text": "Region north",
+        })
+        assert "Region north" in (store.workspace / path).read_text(encoding="utf-8")
 
     @pytest.mark.asyncio
     async def test_dream_can_write_workspace_skills(self, store):
@@ -240,9 +305,17 @@ class TestDreamTools:
                 "new_text": "2",
             },
         )
+        history_write_result = await tools.execute(
+            "write_file",
+            {
+                "path": "memory/history.jsonl",
+                "content": "after\n",
+            },
+        )
 
         assert "outside allowed directory" in history_result
         assert "outside allowed directory" in cursor_result
+        assert "outside allowed directory" in history_write_result
         assert store.history_file.read_text(encoding="utf-8") == "before\n"
         assert store._dream_cursor_file.read_text(encoding="utf-8") == "1"
 
@@ -265,11 +338,10 @@ class TestDreamTools:
             },
         )
         user_result = await tools.execute(
-            "edit_file",
+            "write_file",
             {
                 "path": "USER.md/evil.txt",
-                "old_text": "",
-                "new_text": "owned",
+                "content": "owned",
             },
         )
 
@@ -280,7 +352,6 @@ class TestDreamTools:
 
 
 class TestEphemeralDirect:
-    """Tests for the ephemeral flag that skips history.jsonl writes for Dream."""
 
     @pytest.fixture
     def _make_loop(self, tmp_path):
@@ -300,28 +371,58 @@ class TestEphemeralDirect:
         provider.get_default_model.return_value = "test-model"
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
-        provider.chat_with_retry = AsyncMock(
-            return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop", usage={})
+        provider.estimate_prompt_tokens.return_value = (100, "test")
+        provider.chat_stream_with_retry = AsyncMock(
+            return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop", usage=None)
         )
 
         with (
-            patch("nanobot.agent.loop.SessionManager"),
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
-            patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
-            mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,
                 provider=provider,
                 workspace=tmp_path,
-                context_window_tokens=8000,
+                context_window_tokens=32_000,
             )
 
         return loop, store
 
+    def test_dream_runtime_uses_preset_without_changing_default(self, _make_loop):
+        loop, _ = _make_loop
+        loop.runtime_resolver._model_presets = {
+            "dream": ModelPresetConfig(model="dream-model"),
+        }
+        loop.dream_model_preset = "dream"
+
+        runtime = loop.dream_runtime()
+
+        assert runtime is not None
+        assert runtime.model == "dream-model"
+        assert runtime.model_preset == "dream"
+        assert loop.model == "test-model"
+        assert loop.model_preset is None
+
+    async def test_dream_stays_pending_when_initial_request_cannot_fit(self, _make_loop):
+        from nanobot.agent.dream import run_dream
+
+        loop, _ = _make_loop
+        store = loop.context.memory
+        checkpoint = "[durable] Project knowledge.\n" * 500 + "TAIL: current decision"
+        cursor = store.append_history(checkpoint)
+        loop.provider.estimate_prompt_tokens.return_value = (100_000, "test-provider")
+
+        result = await run_dream(loop, commit_prefix="dream: manual run")
+
+        assert result.error and "context budget" in result.error
+        assert store.get_last_dream_cursor() == 0
+        assert store.read_unprocessed_history(0)[0]["cursor"] == cursor
+        measured = loop.provider.estimate_prompt_tokens.call_args.args[0]
+        assert any("Read lines 1-1" in str(message.get("content")) for message in measured)
+        loop.provider.chat_stream_with_retry.assert_not_awaited()
+
     async def test_ephemeral_skips_raw_archive(self, tmp_path, _make_loop):
-        """When ephemeral=True, raw_archive must not be called."""
         from unittest.mock import patch
 
         loop, store = _make_loop
@@ -333,29 +434,71 @@ class TestEphemeralDirect:
             mock_archive.assert_not_called()
 
     async def test_non_ephemeral_runs_normally(self, tmp_path, _make_loop):
-        """Without ephemeral, the normal path returns the model response."""
         loop, store = _make_loop
         response = await loop.process_direct("test", session_key="cli:normal")
 
         assert response is not None
         assert response.content == "done"
-        loop.provider.chat_with_retry.assert_awaited()
+        loop.provider.chat_stream_with_retry.assert_awaited()
+
+    async def test_dream_progress_only_turn_skips_run_transcript_snapshots(self, tmp_path):
+        from copy import deepcopy
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.queue import MessageBus
+        from nanobot.providers.base import GenerationSettings
+
+        store = MemoryStore(tmp_path)
+        store.write_memory("# Memory")
+        store.append_history("Dream input")
+        dream_prompt = store.build_dream_prompt()
+        assert dream_prompt is not None
+        prompt, _ = dream_prompt
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.supports_tools = True
+        provider.generation = GenerationSettings()
+        provider.estimate_prompt_tokens.return_value = (100, "test")
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+        loop = AgentLoop(
+            bus=MessageBus(), provider=provider, workspace=tmp_path,
+            context_window_tokens=32_000,
+        )
+
+        async def _silent(*_args, **_kwargs):
+            pass
+
+        with patch("nanobot.agent.runner.deepcopy", wraps=deepcopy) as copy_state:
+            response = await loop.process_direct(
+                prompt, session_key=MemoryStore.dream_session_key(), ephemeral=True,
+                tools=store.build_dream_tools(), on_progress=_silent,
+            )
+
+        assert response is not None
+        assert response.content == "done"
+        assert MemoryStore.dream_run_completed(response) is True
+        provider.chat_stream_with_retry.assert_awaited_once()
+        transcript_copies = [
+            call.args[0] for call in copy_state.call_args_list
+            if call.args[0] and "role" in call.args[0][0]
+        ]
+        assert len(transcript_copies) == 0
 
     async def test_ephemeral_sets_ctx_flag(self, tmp_path, _make_loop):
-        """Verify that ephemeral=True is forwarded to TurnContext."""
         from unittest.mock import patch
 
         loop, store = _make_loop
 
         captured = {}
 
-        original_save = loop._state_save
+        original_save = loop._persist_turn
 
         async def patched_save(ctx):
             captured["ephemeral"] = ctx.ephemeral
             return await original_save(ctx)
 
-        with patch.object(loop, "_state_save", side_effect=patched_save):
+        with patch.object(loop, "_persist_turn", side_effect=patched_save):
             await loop.process_direct(
                 "test", session_key="dream:check", ephemeral=True,
             )
@@ -363,41 +506,26 @@ class TestEphemeralDirect:
         assert captured.get("ephemeral") is True
 
     async def test_default_ephemeral_is_false(self, tmp_path, _make_loop):
-        """By default ephemeral is False in TurnContext."""
         from unittest.mock import patch
 
         loop, store = _make_loop
 
         captured = {}
 
-        original_save = loop._state_save
+        original_save = loop._persist_turn
 
         async def patched_save(ctx):
             captured["ephemeral"] = ctx.ephemeral
             return await original_save(ctx)
 
-        with patch.object(loop, "_state_save", side_effect=patched_save):
+        with patch.object(loop, "_persist_turn", side_effect=patched_save):
             await loop.process_direct("test", session_key="cli:normal")
 
         assert captured.get("ephemeral") is False
 
-    async def test_ephemeral_skips_consolidator(self, tmp_path, _make_loop):
-        """When ephemeral=True, consolidator.maybe_consolidate_by_tokens is not called."""
-        from unittest.mock import patch
-
-        loop, store = _make_loop
-
-        with patch.object(
-            loop.consolidator, "maybe_consolidate_by_tokens",
-        ) as mock_consolidate:
-            await loop.process_direct(
-                "test", session_key="dream:consolidate-test", ephemeral=True,
-            )
-            mock_consolidate.assert_not_called()
-
     async def test_ephemeral_response_reports_stop_reason(self, tmp_path, _make_loop):
         loop, store = _make_loop
-        loop.provider.chat_with_retry.return_value = LLMResponse(
+        loop.provider.chat_stream_with_retry.return_value = LLMResponse(
             content="provider error",
             finish_reason="error",
         )
@@ -410,59 +538,46 @@ class TestEphemeralDirect:
         assert resp.metadata["_stop_reason"] == "error"
         assert MemoryStore.dream_run_completed(resp) is False
 
-    async def test_dream_turn_can_skip_unbatched_recent_history(self, tmp_path):
-        """Dream must only see the batch selected by build_dream_prompt."""
-        from unittest.mock import MagicMock
+    async def test_completed_response_after_tool_error_is_success(self, _make_loop):
+        from unittest.mock import AsyncMock
 
-        from nanobot.agent.loop import AgentLoop
-        from nanobot.bus.queue import MessageBus
+        from nanobot.providers.base import ToolCallRequest
 
-        store = MemoryStore(tmp_path)
-        for i in range(60):
-            store.append_history(f"entry-{i + 1:02d}")
+        loop, store = _make_loop
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+            LLMResponse(
+                content="trying an edit",
+                finish_reason="tool_calls",
+                tool_calls=[ToolCallRequest(
+                    id="call_edit",
+                    name="edit_file",
+                    arguments={
+                        "path": "SOUL.md",
+                        "old_text": "text that is not present",
+                        "new_text": "replacement",
+                    },
+                )],
+                usage=None,
+            ),
+            LLMResponse(content="done", finish_reason="stop", tool_calls=[], usage=None),
+        ])
 
-        result = store.build_dream_prompt(max_entries=20)
-        assert result is not None
-        prompt, cursor = result
-        assert cursor == 20
-
-        captured: dict[str, list[dict]] = {}
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        provider.supports_tools = True
-        provider.generation = MagicMock(max_tokens=4096)
-
-        async def chat_with_retry(**kwargs):
-            captured["messages"] = kwargs["messages"]
-            return LLMResponse(content="done", finish_reason="stop")
-
-        provider.chat_with_retry = chat_with_retry
-        loop = AgentLoop(
-            bus=MessageBus(),
-            provider=provider,
-            workspace=tmp_path,
-            context_window_tokens=8000,
-        )
-
-        await loop.process_direct(
-            prompt,
-            session_key="dream:test",
+        resp = await loop.process_direct(
+            "test",
+            session_key="dream:handled-tool-error",
             ephemeral=True,
             tools=store.build_dream_tools(),
         )
 
-        messages = captured["messages"]
-        system_prompt = messages[0]["content"]
-        request_text = "\n".join(str(message.get("content", "")) for message in messages)
-        assert "# Recent History" not in system_prompt
-        assert "entry-01" in request_text
-        assert "entry-20" in request_text
-        assert "entry-21" not in request_text
-        assert "entry-60" not in request_text
+        assert resp is not None
+        assert resp.metadata["_stop_reason"] == "completed"
+        assert MemoryStore.dream_run_completed(resp) is True
+        second_request = loop.provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
+        tool_result = next(message for message in second_request if message["role"] == "tool")
+        assert "Error" in tool_result["content"]
 
 
 class TestEphemeralHooks:
-    """When ephemeral=True, extra hooks must not fire."""
 
     @pytest.fixture
     def _make_loop_with_spy(self, tmp_path):
@@ -472,42 +587,41 @@ class TestEphemeralHooks:
         from nanobot.agent.hook import AgentHook
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.queue import MessageBus
+        from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
-        provider.chat_with_retry = AsyncMock(
-            return_value=MagicMock(
-                content="done", finish_reason="stop", tool_calls=[], usage={},
+        provider.estimate_prompt_tokens.return_value = (100, "test")
+        provider.chat_stream_with_retry = AsyncMock(
+            return_value=LLMResponse(
+                content="done", finish_reason="stop", tool_calls=[], usage=None,
             )
         )
 
         spy = MagicMock(spec=AgentHook)
         spy.wants_streaming.return_value = False
-        spy.before_iteration = AsyncMock()
-        spy.after_iteration = AsyncMock()
+        spy.finalize_content.side_effect = lambda context, content: content
+        spy.before_iteration = AsyncMock(return_value=None)
+        spy.after_iteration = AsyncMock(return_value=None)
 
         with (
-            patch("nanobot.agent.loop.SessionManager"),
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
-            patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
-            mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,
                 provider=provider,
                 workspace=tmp_path,
-                context_window_tokens=8000,
+                context_window_tokens=32_000,
                 hooks=[spy],
             )
 
         return loop, spy
 
     async def test_extra_hooks_skipped_when_ephemeral(self, tmp_path, _make_loop_with_spy):
-        """When ephemeral=True, extra hooks must not fire."""
         loop, spy = _make_loop_with_spy
 
         await loop.process_direct(
@@ -517,55 +631,142 @@ class TestEphemeralHooks:
         spy.after_iteration.assert_not_called()
 
     async def test_extra_hooks_fire_for_normal_sessions(self, tmp_path, _make_loop_with_spy):
-        """Without ephemeral, extra hooks should fire normally."""
         loop, spy = _make_loop_with_spy
 
         await loop.process_direct("test", session_key="cli:normal")
         spy.before_iteration.assert_called()
 
 class TestDreamCommitMessage:
-    async def test_commit_includes_response_summary(self, tmp_path):
-        """Git auto-commit after Dream should include the LLM response in the body."""
-        import subprocess
-        from unittest.mock import AsyncMock, MagicMock
+    def test_commit_message_reflects_real_diff_not_narrative(self, tmp_path):
+        """The Dream commit message must mirror the real git diff and ignore the
+        LLM's narrative, so ``/dream-log`` can never lie.
 
-        from nanobot.agent.memory import MemoryStore
+        Regression for the hallucinated-commit bug: commit ``a72ca2a`` claimed a
+        "Medical Research" section that never reached the diff.
+        """
+        import subprocess
 
         store = MemoryStore(tmp_path)
         store.write_soul("# Soul")
         store.write_memory("# Memory")
-        store.append_history("user discussed project goals")
-
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        provider.supports_tools = True
-        provider.generation = MagicMock(max_tokens=4096)
-        provider.chat_with_retry = AsyncMock(return_value=MagicMock(
-            content="Identified 2 new facts about project goals",
-            finish_reason="stop",
-            tool_calls=[],
-            usage={},
-        ))
-
         store.git.init()
         store.git.auto_commit("initial state")
 
-        # Simulate what the cron handler does: produce a resp with content,
-        # build the commit message via the actual function, then commit.
-        resp_content = "Identified 2 new facts about project goals"
-        resp = MagicMock(content=resp_content)
-        msg = MemoryStore.build_dream_commit_message(
-            "dream: periodic memory consolidation", resp,
-        )
+        store.write_memory("# Memory\n- DMSO research notes")
 
-        # Write a change so auto_commit has something to commit
-        store.write_memory("# Memory\n- Updated by Dream")
+        lying = "Added a Medical Research section (Mastic Gum, DMSO) to MEMORY.md"
+        diff_body = store.dream_content_diff()
+        assert diff_body, "real edit must be detected"
+        assert "DMSO research notes" in diff_body
+        assert lying not in diff_body
+
+        msg = MemoryStore.build_dream_commit_message(
+            "dream: periodic memory consolidation", diff_body,
+        )
+        assert lying not in msg
+        assert "DMSO research notes" in msg
+
         sha = store.git.auto_commit(msg)
         assert sha is not None
-
         log = subprocess.check_output(
             ["git", "log", "-1", "--format=%B"],
             cwd=str(tmp_path), text=True,
         ).strip()
         assert "dream: periodic memory consolidation" in log
-        assert "Identified 2 new facts" in log
+        assert "DMSO research notes" in log
+        assert lying not in log
+
+    def test_commit_message_is_bare_prefix_when_no_changes(self, tmp_path):
+        store = MemoryStore(tmp_path)
+        store.write_soul("# Soul")
+        store.write_memory("# Memory")
+        store.git.init()
+        store.git.auto_commit("initial state")
+
+        assert store.dream_content_diff() == ""
+        msg = MemoryStore.build_dream_commit_message(
+            "dream: manual run", store.dream_content_diff(),
+        )
+        assert msg == "dream: manual run"
+
+    def test_build_commit_message_ignores_none_and_empty_body(self):
+        assert MemoryStore.build_dream_commit_message("dream: x", "") == "dream: x"
+        assert MemoryStore.build_dream_commit_message("dream: x", None) == "dream: x"
+        assert MemoryStore.build_dream_commit_message("dream: x", "  ") == "dream: x"
+        assert (
+            MemoryStore.build_dream_commit_message("dream: x", "SOUL.md: +1 -0")
+            == "dream: x\n\nSOUL.md: +1 -0"
+        )
+
+
+class TestDreamContentDiff:
+
+    def test_empty_when_git_not_initialized(self, store):
+        assert store.dream_content_diff() == ""
+
+    def test_empty_when_no_tracked_changes(self, store):
+        store.git.init()
+        store.git.auto_commit("initial")
+        assert store.dream_content_diff() == ""
+
+    def test_ignores_platform_line_ending_normalization(self, store, monkeypatch):
+        import subprocess
+
+        system_config = store.workspace / "system.gitconfig"
+        global_config = store.workspace / "global.gitconfig"
+        system_config.touch()
+        global_config.touch()
+        subprocess.run(
+            [
+                "git", "config", "--file", str(system_config),
+                "core.autocrlf", "false",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+        monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system_config))
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+
+        store.soul_file.write_bytes(b"# Soul\r\n- Helpful")
+        store.memory_file.write_bytes(b"# Memory\r\n- Project X active")
+        store.git.init()
+
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain", "--", "SOUL.md", "memory/MEMORY.md"],
+            cwd=store.workspace,
+            text=True,
+        )
+        assert status == ""
+        assert store.dream_content_diff() == ""
+
+    @pytest.mark.parametrize(
+        ("before", "after", "changed"),
+        [
+            (b"# Memory\r\n", b"# Memory\n", False),
+            (b"# Memory\n", b"# Memory", True),
+            (b"# Memory\r", b"# Memory\n", True),
+        ],
+    )
+    def test_only_ignores_crlf_lf_changes(self, store, before, after, changed):
+        store.memory_file.write_bytes(before)
+        store.git.init()
+
+        store.memory_file.write_bytes(after)
+
+        assert bool(store.dream_content_diff()) is changed
+
+    def test_reflects_real_content_edits(self, store):
+        store.git.init()
+        store.git.auto_commit("initial")
+        store.write_memory("# Memory\n- DMSO research notes")
+        diff = store.dream_content_diff()
+        assert diff
+        assert "memory/MEMORY.md" in diff
+        assert "DMSO research notes" in diff
+
+    def test_ignores_cursor_only_changes(self, store):
+        store.git.init()
+        store.git.auto_commit("initial")
+        store.set_last_dream_cursor(99)
+        assert store.dream_content_diff() == ""

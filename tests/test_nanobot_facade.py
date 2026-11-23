@@ -1,5 +1,3 @@
-"""Tests for the Nanobot programmatic facade."""
-
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +28,13 @@ from nanobot.nanobot import (
     StreamEvent,
     StreamEventType,
 )
+from nanobot.providers.base import LLMUsage
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_HISTORY_META,
+    RuntimeContextBlock,
+    append_runtime_context,
+)
+from nanobot.utils.llm_runtime import runtime_from_provider_snapshot
 
 
 def _write_config(tmp_path: Path, overrides: dict | None = None) -> Path:
@@ -39,7 +44,9 @@ def _write_config(tmp_path: Path, overrides: dict | None = None) -> Path:
     }
     if overrides:
         data.update(overrides)
-    config_path = tmp_path / "config.json"
+    config_dir = tmp_path.parent / f"{tmp_path.name}-instance"
+    config_dir.mkdir(exist_ok=True)
+    config_path = config_dir / "config.json"
     config_path.write_text(json.dumps(data))
     return config_path
 
@@ -55,16 +62,145 @@ def _fake_provider(name: str, *, max_tokens: int = 8192) -> MagicMock:
     return provider
 
 
+async def _admit_fake_runtime(bot, session_key, callback, runtime=None) -> None:
+    admitted = runtime or (await bot._loop.runtime_for_session(
+        bot._loop.sessions.get_or_create(session_key)
+    ))
+    await callback(admitted)
+
+
 def test_from_config_missing_file():
     with pytest.raises(FileNotFoundError):
         Nanobot.from_config("/nonexistent/config.json")
 
 
+def test_from_config_missing_env_reports_explicit_config_path(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from nanobot.config.errors import ConfigLoadError
+
+    name = "NANOBOT_TEST_SDK_MISSING_KEY"
+    monkeypatch.delenv(name, raising=False)
+    config_path = tmp_path / "custom.json"
+    config_path.write_text(
+        json.dumps({"providers": {"openrouter": {"apiKey": f"${{{name}}}"}}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigLoadError) as exc_info:
+        Nanobot.from_config(config_path)
+
+    assert exc_info.value.path == config_path.resolve()
+
+
 def test_from_config_creates_instance(tmp_path):
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    workspace = tmp_path / "workspace"
+    bot = Nanobot.from_config(config_path, workspace=workspace)
     assert bot._loop is not None
-    assert bot._loop.workspace == tmp_path
+    assert bot._loop.workspace == workspace
+    assert bot._loop.sessions.sessions_dir.parent == config_path.parent / "sessions"
+
+
+@pytest.mark.asyncio
+async def test_shared_history_remains_readable_after_retirement(tmp_path):
+    from nanobot.session.manager import SessionManager
+
+    config_path = _write_config(tmp_path, {
+        "agents": {"defaults": {"model": "openai/gpt-4.1", "unifiedSession": True}},
+    })
+    workspace = tmp_path / "workspace"
+    before = SessionManager(workspace, sessions_root=config_path.parent / "sessions")
+    shared = before.get_or_create("unified:default")
+    shared.metadata["last_channel"] = "telegram:legacy-chat"
+    shared.add_message("user", "Old shared question")
+    shared.add_message("assistant", "Old shared answer")
+    before.save(shared)
+    await before.state.aclose()
+    config_bytes = config_path.read_bytes()
+
+    for _ in range(2):
+        async with Nanobot.from_config(config_path, workspace=workspace) as bot:
+            assert {row.key for row in await bot.sessions.list()} >= {"unified:default"}
+            snapshot = await bot.sessions.get("unified:default")
+            assert snapshot is not None
+            assert [row["content"] for row in snapshot.messages] == [
+                "Old shared question", "Old shared answer",
+            ]
+    assert config_path.read_bytes() == config_bytes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_key", ["unifiedSession", "unified_session"])
+async def test_legacy_unified_config_keeps_runs_isolated(tmp_path, monkeypatch, legacy_key):
+    from nanobot.providers.base import LLMResponse
+
+    config_path = _write_config(tmp_path, {
+        "agents": {"defaults": {"model": "openai/gpt-4.1", legacy_key: True}},
+    })
+    original_config = config_path.read_bytes()
+    provider = _fake_provider("test-model")
+    provider.aclose = AsyncMock()
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="reply"))
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda *_args: provider)
+
+    async with Nanobot.from_config(config_path, workspace=tmp_path / "workspace") as bot:
+        await bot.run("alice secret", session_key="sdk:alice")
+        await bot.run("bob secret", session_key="sdk:bob")
+        await bot.run("alice followup", session_key="sdk:alice")
+        alice = await bot.sessions.get("sdk:alice")
+        bob = await bot.sessions.get("sdk:bob")
+        assert [m["content"] for m in alice.messages] == [
+            "alice secret", "reply", "alice followup", "reply",
+        ]
+        assert [m["content"] for m in bob.messages] == ["bob secret", "reply"]
+        prompts = [str(call.kwargs["messages"]) for call in provider.chat_stream_with_retry.await_args_list]
+        assert "alice secret" not in prompts[1]
+        assert "alice secret" in prompts[2]
+        assert "bob secret" not in prompts[2]
+    assert config_path.read_bytes() == original_config
+
+
+def test_from_config_composes_configured_mcp_outside_agent_loop(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        {"tools": {"mcpServers": {"demo": {"command": "fake-mcp"}}}},
+    )
+
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    assert bot._mcp_provider is not None
+    assert bot._mcp_provider.configured_server_names == {"demo"}
+    assert bot._mcp_provider._registry is bot._loop.tools
+
+
+@pytest.mark.parametrize("provider_name", ["openrouter", "SenseNova"])
+def test_from_config_uses_instance_image_settings(tmp_path, monkeypatch, provider_name):
+    from nanobot.agent.tools.image_generation import ImageGenerationTool
+
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "default.json")
+    config_path = _write_config(
+        tmp_path,
+        {
+            "providers": {
+                "openrouter": {"apiKey": "sk-test-key"},
+                "SenseNova": {"apiKey": "named-image-key", "apiBase": "https://images.test/v1"},
+            },
+            "tools": {"imageGeneration": {
+                "enabled": True, "model": "instance-image-model", "provider": provider_name,
+            }},
+        },
+    )
+
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    tool = bot._loop.tools.get("generate_image")
+    assert isinstance(tool, ImageGenerationTool)
+    assert tool.config.model == "instance-image-model"
+    client = tool._provider_client()
+    assert client is not None
+    assert client.api_key == ("sk-test-key" if provider_name == "openrouter" else "named-image-key")
 
 
 def test_from_config_accepts_default_model_override(tmp_path):
@@ -209,27 +345,6 @@ def test_workspace_override(tmp_path):
     assert bot._loop.workspace == custom_ws
 
 
-def test_sdk_make_provider_uses_github_copilot_backend():
-    from nanobot.config.schema import Config
-    from nanobot.providers.factory import make_provider
-
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "github-copilot",
-                    "model": "github-copilot/gpt-4.1",
-                }
-            }
-        }
-    )
-
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = make_provider(config)
-
-    assert provider.__class__.__name__ == "GitHubCopilotProvider"
-
-
 @pytest.mark.asyncio
 async def test_run_custom_session_key(tmp_path):
     from nanobot.bus.events import OutboundMessage
@@ -250,10 +365,397 @@ async def test_run_custom_session_key(tmp_path):
     )
 
 
+@pytest.mark.parametrize("generation_kwargs", [{}, {"session_generation": "generation-1"}])
+def test_request_context_preserves_legacy_positional_arguments(tmp_path, generation_kwargs):
+    from nanobot.agent.tools.context import RequestContext
+
+    context = RequestContext(
+        "cli",
+        "direct",
+        "message-1",
+        "sdk:legacy",
+        "hello",
+        None,
+        {"trusted": True},
+        "alice",
+        "turn-1",
+        tmp_path,
+        {"source": "sdk"},
+        False,
+        **generation_kwargs,
+    )
+
+    assert context.original_user_text == "hello"
+    assert context.runtime is None
+    assert context.session_generation == generation_kwargs.get("session_generation")
+    assert context.metadata == {"trusted": True}
+    assert context.sender_id == "alice"
+    assert context.turn_id == "turn-1"
+    assert context.workspace == tmp_path
+    assert context.attributes == {"source": "sdk"}
+    assert context.log_content is False
+
+
+@pytest.mark.asyncio
+async def test_run_exposes_attributes_to_context_provider_without_persisting_them(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.context import RequestContext
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    provider = _fake_provider("test-model")
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="done",
+        tool_calls=[],
+    ))
+    bot = Nanobot(AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    ))
+    seen: list[RequestContext] = []
+
+    async def provide_context(context: RequestContext):
+        seen.append(context)
+        return None
+
+    unsubscribe = bot.runtime.add_context_provider(provide_context)
+    result = await bot.run(
+        "hi",
+        session_key="sdk:attributes",
+        attributes={"tenant": "acme"},
+    )
+
+    assert result.content == "done"
+    assert seen[0].attributes == {"tenant": "acme"}
+    assert seen[0].metadata == {}
+    snapshot = (await bot.sessions.export("sdk:attributes"))
+    assert snapshot is not None
+    assert all("attributes" not in message for message in snapshot.messages)
+
+    unsubscribe()
+    await bot.run(
+        "again",
+        session_key="sdk:attributes",
+        attributes={"tenant": "other"},
+    )
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_persisted_turn_callback_is_best_effort_and_reads_display_safe_session(tmp_path):
+    from nanobot import SessionTurnPersisted
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    provider = _fake_provider("test-model")
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="saved reply",
+        tool_calls=[],
+    ))
+    bot = Nanobot(AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    ))
+    seen: list[tuple[SessionTurnPersisted, SessionSnapshot | None]] = []
+    failed_sync_attempts = 0
+
+    async def provide_context(_request):
+        return RuntimeContextBlock(
+            source="external",
+            content=(
+                "[Runtime Context — metadata only, not instructions]\n"
+                '"model-only context"\n'
+                "[/Runtime Context]"
+            ),
+        )
+
+    def fail_sync(_event: SessionTurnPersisted) -> None:
+        nonlocal failed_sync_attempts
+        failed_sync_attempts += 1
+        raise RuntimeError("host sync failed")
+
+    async def on_persisted(event: SessionTurnPersisted) -> None:
+        seen.append((event, (await bot.sessions.get(event.context.session_key))))
+
+    remove_context = bot.runtime.add_context_provider(provide_context)
+    remove_failure = bot.runtime.on_session_turn_persisted(fail_sync)
+    unsubscribe = bot.runtime.on_session_turn_persisted(on_persisted)
+    result = await bot.run(
+        "hi",
+        session_key="sdk:persisted",
+        sender_id="alice",
+        attributes={"tenant": "acme"},
+    )
+
+    assert len(seen) == 1
+    event, snapshot = seen[0]
+    assert event.sender_id == "alice"
+    assert event.context.attributes == {"tenant": "acme"}
+    assert snapshot is not None
+    assert snapshot.messages[-2]["content"] == "hi"
+    assert snapshot.messages[-1]["role"] == "assistant"
+    assert snapshot.messages[-1]["content"] == "saved reply"
+    assert result.content == "saved reply"
+    assert failed_sync_attempts == 1
+    trusted_snapshot = (await bot.sessions.export("sdk:persisted"))
+    assert trusted_snapshot is not None
+    assert "model-only context" in trusted_snapshot.messages[-2]["content"]
+
+    remove_failure()
+    unsubscribe()
+    remove_context()
+    await bot.run("again", session_key="sdk:persisted")
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_persisted_turn_callback_observes_saved_command_turn(tmp_path):
+    from nanobot import SessionTurnPersisted
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    bot = Nanobot(AgentLoop(
+        bus=MessageBus(),
+        provider=_fake_provider("test-model"),
+        workspace=tmp_path,
+        model="test-model",
+    ))
+    seen: list[SessionTurnPersisted] = []
+    bot.runtime.on_session_turn_persisted(seen.append)
+
+    await bot.run("/skill", session_key="sdk:command")
+
+    assert len(seen) == 1
+    snapshot = (await bot.sessions.export("sdk:command"))
+    assert snapshot is not None
+    assert [message["role"] for message in snapshot.messages[-2:]] == [
+        "user",
+        "assistant",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_run_does_not_invoke_persisted_turn_callback(tmp_path):
+    from nanobot import SessionTurnPersisted
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    provider = _fake_provider("test-model")
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="temporary",
+        tool_calls=[],
+    ))
+    bot = Nanobot(AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    ))
+    seen: list[SessionTurnPersisted] = []
+    bot.runtime.on_session_turn_persisted(seen.append)
+
+    await bot.run("hi", session_key="sdk:ephemeral", ephemeral=True)
+
+    assert seen == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing_session", [False, True])
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_ephemeral_goal_is_rejected_without_changing_session(
+    tmp_path, monkeypatch, existing_session, streamed,
+):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.goal.assembly import install_goal
+
+    provider = _fake_provider("test-model")
+    provider.aclose = AsyncMock()
+    provider.chat_stream_with_retry = AsyncMock()
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+                     builtin_assembly=install_goal)
+    bot = Nanobot(loop)
+    key = "sdk:temporary-goal"
+    if existing_session:
+        session = await loop.sessions.state.get(key)
+        session.add_message("user", "Earlier durable message")
+        await loop.sessions.state.prepare_input(session)
+    before = loop.sessions.read_session_file(key)
+    prepare_input = AsyncMock(wraps=loop.sessions.state.prepare_input)
+    monkeypatch.setattr(loop.sessions.state, "prepare_input", prepare_input)
+    try:
+        if streamed:
+            run = await bot.run_streamed("/goal temporary task", session_key=key, ephemeral=True)
+            result = await run.wait()
+        else:
+            result = await bot.run("/goal temporary task", session_key=key, ephemeral=True)
+
+        assert result.content == "Goals can't start in a temporary session. Use a persistent session for `/goal`."
+        provider.chat_stream_with_retry.assert_not_awaited()
+        prepare_input.assert_not_awaited()
+        assert loop.sessions.read_session_file(key) == before
+        current = await loop.sessions.state.read(key)
+        if existing_session:
+            assert current is not None and current.policy.persist
+            assert [row["content"] for row in current.messages] == ["Earlier durable message"]
+        else:
+            assert current is None
+    finally:
+        await bot.aclose()
+
+
+@pytest.mark.asyncio
+async def test_sdk_from_config_assembles_goal_for_direct_runs(tmp_path, monkeypatch):
+    import json
+
+    from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
+
+    config = tmp_path / "instance" / "config.json"
+    config.parent.mkdir()
+    config.write_text(json.dumps({"agents": {"defaults": {
+        "workspace": str(tmp_path / "workspace"), "model": "test-model", "maxToolIterations": 1,
+    }}}), encoding="utf-8")
+    provider = _fake_provider("test-model")
+    provider.aclose = AsyncMock()
+    provider.generation = GenerationSettings()
+    provider.estimate_prompt_tokens.return_value = (100, "test")
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="create", name="create_goal", arguments={"objective": "Verify the SDK task."},
+        )]),
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="complete", name="update_goal", arguments={"action": "complete", "recap": "Verified."},
+        )]),
+        LLMResponse(content="Verified."),
+    ])
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda *_args: provider)
+    bot = Nanobot.from_config(config)
+    try:
+        result = await bot.run("/goal Verify the SDK task", session_key="sdk:goal")
+        assert result.content == "Verified."
+        session = await bot._loop.sessions.state.read("sdk:goal")
+        assert session.metadata["goal_state"]["status"] == "completed"
+        assert provider.chat_stream_with_retry.await_count == 3
+        assert all(call.kwargs["tools"] for call in provider.chat_stream_with_retry.await_args_list[:2])
+        assert not provider.chat_stream_with_retry.await_args.kwargs.get("tools")
+    finally:
+        await bot.aclose()
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_sdk_turn_cannot_update_a_durable_goal(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.goal.assembly import install_goal
+    from nanobot.providers.base import LLMResponse, ToolCallRequest
+
+    provider = _fake_provider("test-model")
+    provider.aclose = AsyncMock()
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="update", name="update_goal", arguments={"action": "complete", "recap": "Not allowed."},
+        )]),
+        LLMResponse(content="Temporary reply."),
+    ])
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+                     builtin_assembly=install_goal)
+    bot = Nanobot(loop)
+    session = await loop.sessions.state.get("sdk:existing-goal")
+    await loop.sessions.state.update_metadata(session.key, {
+        "goal_state": {"status": "active", "objective": "Keep this durable goal."},
+    })
+    before = loop.sessions.read_session_file(session.key)
+    try:
+        result = await bot.run("Temporary question", session_key=session.key, ephemeral=True)
+        assert result.content == "Temporary reply."
+        assert "requires an active chat session" in str(provider.chat_stream_with_retry.await_args.kwargs["messages"])
+        assert loop.sessions.read_session_file(session.key) == before
+        current = await loop.sessions.state.read(session.key)
+        assert current.metadata["goal_state"]["status"] == "active"
+    finally:
+        await bot.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["clear", "delete"])
+async def test_sdk_goal_tool_cannot_write_after_session_generation_changes(tmp_path, operation):
+    from nanobot.agent.hook import AgentHook
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.goal.assembly import install_goal
+    from nanobot.providers.base import LLMResponse, ToolCallRequest
+
+    waiting = asyncio.Event()
+    release = asyncio.Event()
+    executed = asyncio.Event()
+    finish = asyncio.Event()
+
+    class HoldTool(AgentHook):
+        async def before_execute_tools(self, _context):
+            waiting.set()
+            await release.wait()
+
+        async def _settle(self):
+            executed.set()
+            await finish.wait()
+
+        async def after_execute_tool(self, _context, _call, _tool, _params, _result):
+            await self._settle()
+
+        async def on_execute_tool_error(self, _context, _call, _tool, _params, _error):
+            await self._settle()
+
+    provider = _fake_provider("test-model")
+    provider.aclose = AsyncMock()
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content=None, tool_calls=[
+        ToolCallRequest(id="create", name="create_goal", arguments={"objective": "Old execution."}),
+    ]))
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+                     builtin_assembly=install_goal)
+    bot = Nanobot(loop)
+    key = "sdk:generation-check"
+    run = asyncio.create_task(bot.run("/goal Old execution", session_key=key, hooks=[HoldTool()]))
+    try:
+        await asyncio.wait_for(waiting.wait(), 5)
+        if operation == "clear":
+            await bot.sessions.clear(key)
+        else:
+            assert await bot.sessions.delete(key)
+        release.set()
+        await asyncio.wait_for(executed.wait(), 5)
+        current = await loop.sessions.state.read_header(key)
+        if operation == "delete":
+            assert current is None
+        else:
+            assert current is not None and "goal_state" not in current.metadata
+        finish.set()
+        await asyncio.gather(run, return_exceptions=True)
+        current = await loop.sessions.state.read_header(key)
+        if operation == "delete":
+            assert current is None
+        else:
+            assert current is not None and "goal_state" not in current.metadata
+    finally:
+        release.set()
+        finish.set()
+        await asyncio.gather(run, return_exceptions=True)
+        await bot.aclose()
+
+
 def test_import_from_top_level():
     import nanobot
 
     assert nanobot.Nanobot is Nanobot
+    assert nanobot.RequestContext.__name__ == "RequestContext"
+    assert nanobot.RuntimeContextBlock.__name__ == "RuntimeContextBlock"
+    assert nanobot.RuntimeContextProvider is not None
+    assert nanobot.SessionTurnPersisted.__name__ == "SessionTurnPersisted"
     assert nanobot.RunResult is RunResult
     assert nanobot.RunStream is RunStream
     assert nanobot.SessionInfo is SessionInfo
@@ -293,13 +795,8 @@ def test_stream_event_constants_are_stable():
     assert len(set(STREAM_EVENT_TYPES)) == len(STREAM_EVENT_TYPES)
 
 
-# ---------------------------------------------------------------------------
-# RunResult.tools_used / messages — populated from the agent iterations
-# ---------------------------------------------------------------------------
-
 @pytest.mark.asyncio
 async def test_run_populates_tools_used_across_iterations(tmp_path):
-    """tools_used collects every tool name fired across all iterations, in order."""
     from nanobot.agent.hook import AgentHookContext
     from nanobot.bus.events import OutboundMessage
     from nanobot.providers.base import ToolCallRequest
@@ -331,7 +828,6 @@ async def test_run_populates_tools_used_across_iterations(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_populates_final_messages(tmp_path):
-    """messages reflects the agent's message list at the last iteration."""
     from nanobot.agent.hook import AgentHookContext
     from nanobot.bus.events import OutboundMessage
 
@@ -358,7 +854,6 @@ async def test_run_populates_final_messages(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_no_iterations_leaves_defaults_empty(tmp_path):
-    """If process_direct never triggers after_iteration, tools_used/messages stay []."""
     from nanobot.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
@@ -369,7 +864,7 @@ async def test_run_no_iterations_leaves_defaults_empty(tmp_path):
     result = await bot.run("hi")
     assert result.tools_used == []
     assert result.messages == []
-    assert result.usage == {}
+    assert result.usage is None
     assert result.stop_reason is None
     assert result.error is None
 
@@ -390,7 +885,7 @@ async def test_run_populates_observability_fields(tmp_path):
             ],
             final_content="done",
             tools_used=["read_file"],
-            usage={"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+            usage=LLMUsage.reported(input_tokens=10, output_tokens=2),
             stop_reason="completed",
             error=None,
             tool_events=[{"tool": "read_file", "status": "ok"}],
@@ -409,7 +904,7 @@ async def test_run_populates_observability_fields(tmp_path):
 
     assert result.content == "done"
     assert result.tools_used == ["read_file"]
-    assert result.usage == {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+    assert result.usage == LLMUsage.reported(input_tokens=10, output_tokens=2)
     assert result.stop_reason == "completed"
     assert result.error is None
     assert result.metadata == {"latency_ms": 42}
@@ -423,10 +918,10 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
 
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="done",
         tool_calls=[],
-        usage={"total_tokens": 3},
+        usage=LLMUsage.reported(input_tokens=3, output_tokens=0),
     ))
     bot = Nanobot(AgentLoop(
         bus=MessageBus(),
@@ -438,8 +933,7 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
     result = await bot.run("hi", ephemeral=True)
 
     assert result.content == "done"
-    assert result.usage["total_tokens"] == 3
-    assert result.usage["provider_tokens"] == 3
+    assert result.usage == LLMUsage.reported(input_tokens=3, output_tokens=0)
 
 
 @pytest.mark.asyncio
@@ -471,6 +965,7 @@ async def test_run_forwards_non_default_runtime_options(tmp_path):
         media=["/tmp/image.png"],
         ephemeral=True,
         _run_extra_hooks_for_ephemeral=True,
+        _session_policy=ANY,
         hooks=ANY,
     )
 
@@ -504,45 +999,57 @@ async def test_run_allows_parallel_sessions_without_model_override(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_model_overrides_are_serialized_before_snapshot_build(tmp_path):
+async def test_run_model_overrides_can_overlap_without_default_mutation(tmp_path):
     from nanobot.bus.events import OutboundMessage
     from nanobot.providers.factory import ProviderSnapshot
 
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    original_model = bot._loop.model
-    active_models: list[str] = []
-    snapshot_base_models: list[str] = []
+    original_runtime = bot._loop.runtime_resolver.runtime
+    active_runs: list[tuple[str, str]] = []
     first_entered = asyncio.Event()
+    both_entered = asyncio.Event()
     release_first = asyncio.Event()
 
-    def fake_snapshot(*, model, model_preset):
+    def fake_resolve(*, model, model_preset, config):
         assert model is not None
         assert model_preset is None
-        snapshot_base_models.append(bot._loop.model)
-        return ProviderSnapshot(
+        assert config is bot._config
+        return runtime_from_provider_snapshot(ProviderSnapshot(
             provider=_fake_provider(model, max_tokens=2048),
             model=model,
             context_window_tokens=4096,
             signature=("sdk", model),
-        )
+        ))
 
-    bot._runtime_overrides.model_override_snapshot = MagicMock(side_effect=fake_snapshot)
+    bot._loop.runtime_resolver.resolve_override = MagicMock(side_effect=fake_resolve)
 
-    async def fake_process_direct(message, *, session_key, hooks):
-        active_models.append(bot._loop.model)
+    async def fake_process_direct(message, *, session_key, hooks, runtime):
+        active_runs.append((session_key, runtime.model))
+        assert bot._loop.runtime_resolver.runtime is original_runtime
         if message == "first":
             first_entered.set()
-            await asyncio.wait_for(release_first.wait(), timeout=1)
+        if len(active_runs) == 2:
+            both_entered.set()
+        await asyncio.wait_for(release_first.wait(), timeout=1)
         return OutboundMessage(channel="cli", chat_id="direct", content=message)
 
     bot._loop.process_direct = fake_process_direct
 
-    first = asyncio.create_task(bot.run("first", model="model:first"))
+    first = asyncio.create_task(bot.run(
+        "first",
+        session_key="sdk:first",
+        model="model:first",
+    ))
     await asyncio.wait_for(first_entered.wait(), timeout=1)
 
-    second = asyncio.create_task(bot.run("second", model="model:second"))
-    await asyncio.sleep(0)
+    second = asyncio.create_task(bot.run(
+        "second",
+        session_key="sdk:second",
+        model="model:second",
+    ))
+    await asyncio.wait_for(both_entered.wait(), timeout=1)
+    assert not first.done()
     assert not second.done()
 
     release_first.set()
@@ -550,21 +1057,21 @@ async def test_run_model_overrides_are_serialized_before_snapshot_build(tmp_path
 
     assert first_result.content == "first"
     assert second_result.content == "second"
-    assert active_models == ["model:first", "model:second"]
-    assert snapshot_base_models == [original_model, original_model]
-    assert bot._loop.model == original_model
+    assert set(active_runs) == {
+        ("sdk:first", "model:first"),
+        ("sdk:second", "model:second"),
+    }
+    assert bot._loop.runtime_resolver.runtime is original_runtime
 
 
 @pytest.mark.asyncio
-async def test_run_model_override_is_per_run_and_restores_default(tmp_path):
+async def test_run_model_override_is_per_run_without_default_mutation(tmp_path):
     from nanobot.bus.events import OutboundMessage
     from nanobot.providers.factory import ProviderSnapshot
 
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    original_provider = bot._loop.provider
-    original_model = bot._loop.model
-    original_signature = bot._loop._provider_signature
+    original_runtime = bot._loop.runtime_resolver.runtime
     override_provider = _fake_provider("override-provider", max_tokens=2048)
     override = ProviderSnapshot(
         provider=override_provider,
@@ -572,13 +1079,16 @@ async def test_run_model_override_is_per_run_and_restores_default(tmp_path):
         context_window_tokens=4096,
         signature=("sdk", "override"),
     )
-    bot._runtime_overrides.model_override_snapshot = MagicMock(return_value=override)
+    override_runtime = runtime_from_provider_snapshot(override)
+    bot._loop.runtime_resolver.resolve_override = MagicMock(
+        return_value=override_runtime
+    )
 
-    async def fake_process_direct(message, *, session_key, hooks):
-        assert bot._loop.provider is override_provider
-        assert bot._loop.runner.provider is override_provider
-        assert bot._loop.model == "openai/gpt-4.1-mini"
-        assert bot._loop.context_window_tokens == 4096
+    async def fake_process_direct(message, *, session_key, hooks, runtime):
+        assert runtime is override_runtime
+        assert runtime.model == "openai/gpt-4.1-mini"
+        assert runtime.context_window_tokens == 4096
+        assert bot._loop.runtime_resolver.runtime is original_runtime
         return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
     bot._loop.process_direct = fake_process_direct
@@ -586,14 +1096,12 @@ async def test_run_model_override_is_per_run_and_restores_default(tmp_path):
     result = await bot.run("hi", model="openai/gpt-4.1-mini")
 
     assert result.content == "ok"
-    bot._runtime_overrides.model_override_snapshot.assert_called_once_with(
+    bot._loop.runtime_resolver.resolve_override.assert_called_once_with(
         model="openai/gpt-4.1-mini",
         model_preset=None,
+        config=bot._config,
     )
-    assert bot._loop.provider is original_provider
-    assert bot._loop.runner.provider is original_provider
-    assert bot._loop.model == original_model
-    assert bot._loop._provider_signature == original_signature
+    assert bot._loop.runtime_resolver.runtime is original_runtime
 
 
 @pytest.mark.asyncio
@@ -603,27 +1111,34 @@ async def test_run_model_preset_override_is_per_run(tmp_path):
 
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    original_model = bot._loop.model
+    original_runtime = bot._loop.runtime_resolver.runtime
     override_provider = _fake_provider("preset-provider", max_tokens=1024)
     override = ProviderSnapshot(
         provider=override_provider,
         model="openai/gpt-4.1-mini",
         context_window_tokens=2048,
         signature=("preset", "fast"),
+        model_preset="fast",
     )
-    bot._loop._build_model_preset_snapshot = MagicMock(return_value=override)
+    override_runtime = runtime_from_provider_snapshot(override)
+    bot._loop.runtime_resolver.resolve_override = MagicMock(
+        return_value=override_runtime
+    )
 
-    async def fake_process_direct(message, *, session_key, hooks):
-        assert bot._loop.provider is override_provider
-        assert bot._loop.model == "openai/gpt-4.1-mini"
+    async def fake_process_direct(message, *, session_key, hooks, runtime):
+        assert runtime is override_runtime
         return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
     bot._loop.process_direct = fake_process_direct
 
     await bot.run("hi", model_preset="fast")
 
-    bot._loop._build_model_preset_snapshot.assert_called_once_with("fast")
-    assert bot._loop.model == original_model
+    bot._loop.runtime_resolver.resolve_override.assert_called_once_with(
+        model=None,
+        model_preset="fast",
+        config=bot._config,
+    )
+    assert bot._loop.runtime_resolver.runtime is original_runtime
     assert bot._loop.model_preset is None
 
 
@@ -638,7 +1153,6 @@ async def test_run_rejects_multiple_model_selectors(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_user_hooks_still_fire_alongside_capture(tmp_path):
-    """Capture hook must not displace user-provided hooks."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.bus.events import OutboundMessage
 
@@ -717,7 +1231,6 @@ async def test_concurrent_run_hooks_are_isolated_per_call(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_restores_extra_hooks_even_on_populated_iterations(tmp_path):
-    """Previously-installed _extra_hooks must be restored regardless of capture state."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.bus.events import OutboundMessage
 
@@ -745,9 +1258,13 @@ async def test_stream_yields_text_events_in_order(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+    async def fake_process_direct(
+        message, *, session_key, on_stream, on_stream_end, hooks, on_runtime_admitted,
+        runtime=None
+    ):
         assert message == "hi"
         assert session_key == "sdk:default"
+        await _admit_fake_runtime(bot, session_key, on_runtime_admitted, runtime)
         await on_stream("Hel")
         await on_stream("lo")
         await on_stream_end(resuming=False)
@@ -780,7 +1297,11 @@ async def test_run_streamed_wait_returns_full_result_without_consuming_events(tm
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+    async def fake_process_direct(
+        message, *, session_key, on_stream, on_stream_end, hooks, on_runtime_admitted,
+        runtime=None
+    ):
+        await _admit_fake_runtime(bot, session_key, on_runtime_admitted, runtime)
         await on_stream("done")
         await on_stream_end(resuming=False)
         ctx = AgentRunHookContext(
@@ -790,7 +1311,7 @@ async def test_run_streamed_wait_returns_full_result_without_consuming_events(tm
             ],
             final_content="done",
             tools_used=["read_file"],
-            usage={"total_tokens": 9},
+            usage=LLMUsage.reported(input_tokens=9, output_tokens=0),
             stop_reason="completed",
         )
         for hook in hooks:
@@ -810,7 +1331,7 @@ async def test_run_streamed_wait_returns_full_result_without_consuming_events(tm
 
     assert result.content == "done"
     assert result.tools_used == ["read_file"]
-    assert result.usage == {"total_tokens": 9}
+    assert result.usage == LLMUsage.reported(input_tokens=9, output_tokens=0)
     assert result.stop_reason == "completed"
     assert result.metadata == {"latency_ms": 5}
 
@@ -822,7 +1343,11 @@ async def test_run_streamed_cancel_releases_full_queue_without_consuming(tmp_pat
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+    async def fake_process_direct(
+        message, *, session_key, on_stream, on_stream_end, hooks, on_runtime_admitted,
+        runtime=None
+    ):
+        await _admit_fake_runtime(bot, session_key, on_runtime_admitted, runtime)
         for i in range(400):
             await on_stream(str(i))
         await on_stream_end(resuming=False)
@@ -871,6 +1396,7 @@ async def test_run_streamed_forwards_runtime_options(tmp_path):
         sender_id="alice",
         media=["/tmp/image.png"],
         ephemeral=True,
+        attributes={"tenant": "acme"},
     )
     await run.wait()
 
@@ -883,19 +1409,22 @@ async def test_run_streamed_forwards_runtime_options(tmp_path):
     assert kwargs["sender_id"] == "alice"
     assert kwargs["media"] == ["/tmp/image.png"]
     assert kwargs["ephemeral"] is True
+    assert kwargs["attributes"] == {"tenant": "acme"}
     assert callable(kwargs["on_stream"])
     assert callable(kwargs["on_stream_end"])
     assert kwargs["hooks"]
+    assert "runtime" not in kwargs
+    assert callable(kwargs["on_runtime_admitted"])
 
 
 @pytest.mark.asyncio
-async def test_run_streamed_model_override_reports_model_and_restores(tmp_path):
+async def test_run_streamed_model_override_reports_admitted_runtime(tmp_path):
     from nanobot.bus.events import OutboundMessage
     from nanobot.providers.factory import ProviderSnapshot
 
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    original_model = bot._loop.model
+    original_runtime = bot._loop.runtime_resolver.runtime
     override_provider = _fake_provider("stream-provider", max_tokens=2048)
     override = ProviderSnapshot(
         provider=override_provider,
@@ -903,11 +1432,24 @@ async def test_run_streamed_model_override_reports_model_and_restores(tmp_path):
         context_window_tokens=4096,
         signature=("sdk", "stream"),
     )
-    bot._runtime_overrides.model_override_snapshot = MagicMock(return_value=override)
+    override_runtime = runtime_from_provider_snapshot(override)
+    bot._loop.runtime_resolver.resolve_override = MagicMock(
+        return_value=override_runtime
+    )
 
-    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
-        assert bot._loop.provider is override_provider
-        assert bot._loop.model == "openai/gpt-4.1-mini"
+    async def fake_process_direct(
+        message,
+        *,
+        session_key,
+        on_stream,
+        on_stream_end,
+        hooks,
+        on_runtime_admitted,
+        runtime,
+    ):
+        assert runtime is override_runtime
+        assert bot._loop.runtime_resolver.runtime is original_runtime
+        await on_runtime_admitted(runtime)
         await on_stream("ok")
         await on_stream_end(resuming=False)
         return OutboundMessage(channel="cli", chat_id="direct", content="ok")
@@ -922,7 +1464,7 @@ async def test_run_streamed_model_override_reports_model_and_restores(tmp_path):
     assert events[0].type == "run.started"
     assert events[0].metadata["model"] == "openai/gpt-4.1-mini"
     assert events[0].metadata["model_preset"] is None
-    assert bot._loop.model == original_model
+    assert bot._loop.runtime_resolver.runtime is original_runtime
 
 
 @pytest.mark.asyncio
@@ -947,7 +1489,11 @@ async def test_run_streamed_emits_tool_events(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+    async def fake_process_direct(
+        message, *, session_key, on_stream, on_stream_end, hooks, on_runtime_admitted,
+        runtime=None
+    ):
+        await _admit_fake_runtime(bot, session_key, on_runtime_admitted, runtime)
         calls = [
             ToolCallRequest(id="call_ok", name="read_file", arguments={"path": "README.md"}),
             ToolCallRequest(id="call_bad", name="exec", arguments={"cmd": "false"}),
@@ -993,7 +1539,11 @@ async def test_run_streamed_emits_reasoning_events(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+    async def fake_process_direct(
+        message, *, session_key, on_stream, on_stream_end, hooks, on_runtime_admitted,
+        runtime=None
+    ):
+        await _admit_fake_runtime(bot, session_key, on_runtime_admitted, runtime)
         for hook in hooks:
             await hook.emit_reasoning("thinking")
             await hook.emit_reasoning_end()
@@ -1020,7 +1570,11 @@ async def test_stream_generator_break_cancels_underlying_run(tmp_path):
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     cancelled = asyncio.Event()
 
-    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+    async def fake_process_direct(
+        message, *, session_key, on_stream, on_stream_end, hooks, on_runtime_admitted,
+        runtime=None
+    ):
+        await _admit_fake_runtime(bot, session_key, on_runtime_admitted, runtime)
         try:
             await on_stream("first")
             await asyncio.sleep(10)
@@ -1101,13 +1655,13 @@ async def test_sdk_capture_prefers_run_level_snapshot():
     await hook.after_run(AgentRunHookContext(
         messages=final_messages,
         tools_used=["read_file"],
-        usage={"total_tokens": 3},
+        usage=LLMUsage.reported(input_tokens=3, output_tokens=0),
         stop_reason="completed",
     ))
 
     assert hook.tools_used == ["read_file"]
     assert hook.messages == final_messages
-    assert hook.usage == {"total_tokens": 3}
+    assert hook.usage == LLMUsage.reported(input_tokens=3, output_tokens=0)
     assert hook.stop_reason == "completed"
 
 
@@ -1116,7 +1670,6 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     bot._loop.process_direct = AsyncMock()
-    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
 
     snapshot = await bot.sessions.ingest(
         "sdk:history",
@@ -1131,6 +1684,7 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
                 "role": "assistant",
                 "content": "Congratulations on your degree.",
                 "timestamp": "2023/05/30 (Tue) 17:27",
+                "source": "original-source",
             },
         ],
         metadata={"title": "LongMemEval case"},
@@ -1144,13 +1698,97 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     assert snapshot.messages[0]["timestamp"] == "2023/05/30 (Tue) 17:27"
     assert snapshot.messages[0]["source_session_id"] == "answer_1"
     assert snapshot.messages[0]["source"] == "longmemeval"
-    assert snapshot.messages[1]["source"] == "longmemeval"
+    assert snapshot.messages[1]["source"] == "original-source"
     bot._loop.process_direct.assert_not_called()
-    bot._loop.consolidator.maybe_consolidate_by_tokens.assert_not_called()
 
-    reloaded = bot.sessions.get("sdk:history")
+    reloaded = (await bot.sessions.get("sdk:history"))
     assert reloaded is not None
     assert reloaded.messages == snapshot.messages
+
+    await bot.aclose()
+    async with Nanobot.from_config(config_path, workspace=tmp_path) as restarted:
+        assert await restarted.sessions.export("sdk:history") == snapshot
+
+
+@pytest.mark.asyncio
+async def test_sessions_ingest_detaches_inputs_and_is_immediately_durable(tmp_path):
+    config_path = _write_config(tmp_path)
+    metadata = {"import": {"dataset": "original"}}
+    messages = [{
+        "role": " user ",
+        "content": [{"type": "text", "text": "hello"}],
+        "import_info": {"index": 1},
+    }]
+    async with Nanobot.from_config(config_path, workspace=tmp_path) as bot:
+        snapshot = await bot.sessions.ingest(
+            "sdk:imported", iter(messages), metadata=metadata,
+        )
+        metadata["import"]["dataset"] = "changed"
+        messages[0]["content"][0]["text"] = "changed"
+        messages[0]["import_info"]["index"] = 2
+
+        assert snapshot.metadata == {"import": {"dataset": "original"}}
+        assert snapshot.messages[0]["role"] == "user"
+        assert snapshot.messages[0]["content"] == [{"type": "text", "text": "hello"}]
+        assert snapshot.messages[0]["import_info"] == {"index": 1}
+        assert await bot.sessions.get("sdk:imported") == snapshot
+        async with Nanobot.from_config(config_path, workspace=tmp_path) as reader:
+            assert await reader.sessions.export("sdk:imported") == snapshot
+
+    async with Nanobot.from_config(config_path, workspace=tmp_path) as restarted:
+        assert await restarted.sessions.export("sdk:imported") == snapshot
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing", [False, True], ids=["new-session", "existing-session"])
+@pytest.mark.parametrize("invalid_message", [
+    pytest.param({"role": "developer", "content": "invalid role"}, id="role"),
+    pytest.param({"role": "assistant"}, id="content"),
+])
+async def test_sessions_ingest_rejects_batch_without_session_changes(
+    tmp_path, existing, invalid_message,
+):
+    config_path = _write_config(tmp_path)
+    key = "sdk:rejected"
+    async with Nanobot.from_config(config_path, workspace=tmp_path) as bot:
+        if existing:
+            await bot.sessions.ingest(
+                key, [{"role": "user", "content": "original history"}],
+                metadata={"title": "Original", "import": {"dataset": "original"}},
+            )
+        before = await bot.sessions.export(key)
+
+        with pytest.raises(ValueError, match="role|content"):
+            await bot.sessions.ingest(
+                key,
+                iter([{"role": "user", "content": "valid first message"}, invalid_message]),
+                metadata={"title": "Changed", "new_field": "must not leak"},
+            )
+
+        assert await bot.sessions.get(key) == before
+        assert await bot.sessions.export(key) == before
+
+    async with Nanobot.from_config(config_path, workspace=tmp_path) as restarted:
+        assert await restarted.sessions.export(key) == before
+
+
+@pytest.mark.asyncio
+async def test_sessions_ingest_preserves_full_transcript(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    snapshot = await bot.sessions.ingest(
+        "sdk:overflow",
+        [
+            {"role": "user", "content": f"message-{index}"}
+            for index in range(2_001)
+        ],
+    )
+
+    assert len(snapshot.messages) == 2_001
+    assert snapshot.messages[0]["content"] == "message-0"
+    assert snapshot.messages[-1]["content"] == "message-2000"
+    assert bot.memory.read_history(session_key="sdk:overflow") == []
 
 
 @pytest.mark.asyncio
@@ -1172,21 +1810,122 @@ async def test_session_helpers_get_list_export_clear_delete_flush(tmp_path):
 
     await bot.sessions.ingest("sdk:first", [{"role": "user", "content": "hello"}])
 
-    listed = bot.sessions.list()
+    listed = (await bot.sessions.list())
     assert listed
     assert isinstance(listed[0], SessionInfo)
     assert {row.key for row in listed} == {"sdk:first"}
 
-    exported = bot.sessions.export("sdk:first")
+    exported = (await bot.sessions.export("sdk:first"))
     assert exported is not None
     exported.messages[0]["content"] = "mutated copy"
-    assert bot.sessions.get("sdk:first").messages[0]["content"] == "hello"
+    assert (await bot.sessions.get("sdk:first")).messages[0]["content"] == "hello"
 
-    cleared = bot.sessions.clear("sdk:first")
+    state_before_clear = bot._loop._file_state_store.for_session("sdk:first")
+    cleared = (await bot.sessions.clear("sdk:first"))
     assert cleared.messages == []
-    assert bot.sessions.flush() >= 1
-    assert bot.sessions.delete("sdk:first") is True
-    assert bot.sessions.get("sdk:first") is None
+    state_after_clear = bot._loop._file_state_store.for_session("sdk:first")
+    assert state_after_clear is not state_before_clear
+    state_before_delete = state_after_clear
+    assert (await bot.sessions.delete("sdk:first")) is True
+    assert bot._loop._file_state_store.for_session("sdk:first") is not state_before_delete
+    assert (await bot.sessions.get("sdk:first")) is None
+
+
+async def test_session_helpers_read_only_committed_state(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    sessions = bot._loop.sessions
+    active = sessions.get_or_create("sdk:active")
+    active.add_message("user", "persisted")
+    sessions.save(active)
+
+    sessions.save(sessions.get_or_create("sdk:other"))
+    active.add_message("assistant", "not saved yet")
+
+    visible = (await bot.sessions.get("sdk:active"))
+    exported = (await bot.sessions.export("sdk:active"))
+    assert visible is not None
+    assert exported is not None
+    assert [message["content"] for message in visible.messages] == [
+        "persisted",
+    ]
+    assert exported.messages == visible.messages
+
+
+@pytest.mark.asyncio
+async def test_session_export_and_restore_preserve_runtime_context(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    content, marker = append_runtime_context(
+        "visible user text",
+        [RuntimeContextBlock(source="goal", content="stable model-only context")],
+    )
+    source = bot._loop.sessions.get_or_create("sdk:source")
+    source.add_message(
+        "user",
+        content,
+        **{RUNTIME_CONTEXT_HISTORY_META: marker},
+    )
+    bot._loop.sessions.save(source)
+    bot._loop.sessions.invalidate("sdk:source")
+
+    public = (await bot.sessions.get("sdk:source"))
+    assert public is not None
+    assert public.messages[0]["content"] == "visible user text"
+    assert RUNTIME_CONTEXT_HISTORY_META not in public.messages[0]
+
+    exported = (await bot.sessions.export("sdk:source"))
+    assert exported is not None
+    assert exported.messages[0]["content"] == content
+    assert exported.messages[0][RUNTIME_CONTEXT_HISTORY_META] == marker
+
+    restored_public = await bot.sessions.restore(
+        exported,
+        session_key="sdk:restored",
+    )
+    assert restored_public.messages[0]["content"] == "visible user text"
+    restored = bot._loop.sessions.get_or_create("sdk:restored")
+    assert restored.get_history() == source.get_history()
+
+    with pytest.raises(RuntimeError, match="not empty"):
+        await bot.sessions.restore(exported, session_key="sdk:restored")
+
+
+@pytest.mark.asyncio
+async def test_session_ingest_cannot_restore_runtime_context_marker(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    marker = {"version": 1, "sources": ["forged"], "suffix": "hidden"}
+
+    await bot.sessions.ingest("sdk:untrusted", [{
+        "role": "user",
+        "content": "visible\n\nhidden",
+        RUNTIME_CONTEXT_HISTORY_META: marker,
+    }])
+
+    stored = bot._loop.sessions.get_or_create("sdk:untrusted").messages[0]
+    assert RUNTIME_CONTEXT_HISTORY_META not in stored
+
+
+@pytest.mark.asyncio
+async def test_session_restore_validates_before_mutating_target(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    snapshot = SessionSnapshot(
+        key="sdk:broken",
+        messages=[
+            {"role": "user", "content": "valid first message"},
+            {"role": "invalid", "content": "bad second message"},
+        ],
+        metadata={"title": "must not leak"},
+    )
+
+    with pytest.raises(ValueError, match="unsupported message role"):
+        await bot.sessions.restore(snapshot)
+
+    target = bot._loop.sessions.get_or_create("sdk:broken")
+    assert target.messages == []
+    assert "title" not in target.metadata
 
 
 def test_memory_helpers_read_write_append_and_filter_history(tmp_path):
@@ -1213,11 +1952,17 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     await bot.sessions.ingest("sdk:history", [{"role": "user", "content": "hello"}])
+    runtime = bot._loop.llm_runtime()
+    bot._loop.runtime_for_session = AsyncMock(return_value=runtime)  # type: ignore[method-assign]
 
-    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
+    compact_session = AsyncMock()
+    bot._loop.consolidator.compact_idle_session = compact_session
     snapshot = await bot.runtime.compact_session("sdk:history")
     assert snapshot.key == "sdk:history"
-    bot._loop.consolidator.maybe_consolidate_by_tokens.assert_awaited_once()
+    compact_session.assert_awaited_once_with(
+        "sdk:history",
+        runtime=runtime,
+    )
     assert bot.runtime.model == bot._loop.model
     assert bot.runtime.workspace == tmp_path
 
@@ -1226,42 +1971,46 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     assert summary == "Summary."
     bot._loop.consolidator.compact_idle_session.assert_awaited_once_with(
         "sdk:history",
+        runtime=runtime,
         max_suffix=4,
     )
 
 
 @pytest.mark.asyncio
-async def test_aclose_delegates_to_loop_close_mcp(tmp_path):
+async def test_aclose_releases_loop_and_mcp_provider(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    bot._loop.close_mcp = AsyncMock()
+    bot._loop.aclose = AsyncMock()
+    assert bot._mcp_provider is not None
+    bot._mcp_provider.aclose = AsyncMock()
 
     await bot.aclose()
 
-    bot._loop.close_mcp.assert_awaited_once()
+    bot._loop.aclose.assert_awaited_once()
+    bot._mcp_provider.aclose.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_context_manager_calls_aclose_on_exit(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    bot._loop.close_mcp = AsyncMock()
+    bot._loop.aclose = AsyncMock()
 
     async with bot as b:
         assert b is bot
 
-    bot._loop.close_mcp.assert_awaited_once()
+    bot._loop.aclose.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_context_manager_does_not_swallow_exceptions(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    bot._loop.close_mcp = AsyncMock()
+    bot._loop.aclose = AsyncMock()
 
     with pytest.raises(ValueError):
         async with bot as b:
             assert b is bot
             raise ValueError("boom")
 
-    bot._loop.close_mcp.assert_awaited_once()
+    bot._loop.aclose.assert_awaited_once()

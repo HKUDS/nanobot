@@ -1,0 +1,35 @@
+{
+  "setup": {
+    "primaryAction": "Hubungkan WhatsApp",
+    "docsLabel": "Buka panduan WhatsApp",
+    "officialLabel": "Buka bantuan WhatsApp",
+    "fields": {
+      "allowFrom": {
+        "label": "Kontak diizinkan",
+        "placeholder": "Nomor telepon atau ID WhatsApp"
+      },
+      "groupPolicy": {
+        "label": "Aturan grup",
+        "choices": {
+          "mention": "Hanya mention",
+          "open": "Semua pesan",
+          "allowlist": "Daftar izin"
+        }
+      },
+      "useProxy": {
+        "label": "Gunakan proxy"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Kode QR penautan WhatsApp",
+    "scanTitle": "Tautkan WhatsApp",
+    "scanDescription": "Di WhatsApp, buka Perangkat tertaut, pilih Tautkan perangkat, lalu pindai kode ini.",
+    "waiting": "Menunggu WhatsApp…",
+    "connected": "WhatsApp terhubung.",
+    "stopped": "Upaya koneksi berhenti. Mulai lagi untuk mendapatkan kode baru.",
+    "connecting": "Menghubungkan…",
+    "scanAgain": "Tautkan akun lain",
+    "connect": "Tautkan WhatsApp"
+  }
+}

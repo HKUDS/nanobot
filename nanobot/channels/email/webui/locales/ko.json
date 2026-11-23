@@ -1,0 +1,165 @@
+{
+  "displayName": "이메일",
+  "setup": {
+    "docsLabel": "이메일 설정 가이드 열기",
+    "officialLabel": "앱 비밀번호 가이드 열기",
+    "presetLabel": "빠른 입력",
+    "sections": {
+      "receiving": "메일 수신",
+      "sending": "메일 발신"
+    },
+    "presets": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "icloud": "iCloud"
+    },
+    "fields": {
+      "consentGranted": {
+        "label": "메일 읽기 및 쓰기",
+        "choices": {
+          "true": "동의함",
+          "false": "동의하지 않음"
+        }
+      },
+      "imapHost": {
+        "label": "IMAP 호스트",
+        "placeholder": "imap.gmail.com"
+      },
+      "imapUsername": {
+        "label": "IMAP 사용자 이름",
+        "placeholder": "bot@example.com"
+      },
+      "imapPassword": {
+        "label": "IMAP 비밀번호",
+        "placeholder": "앱 비밀번호"
+      },
+      "smtpHost": {
+        "label": "SMTP 호스트",
+        "placeholder": "smtp.gmail.com"
+      },
+      "smtpUsername": {
+        "label": "SMTP 사용자 이름",
+        "placeholder": "bot@example.com"
+      },
+      "smtpPassword": {
+        "label": "SMTP 비밀번호",
+        "placeholder": "앱 비밀번호"
+      },
+      "imapPort": {
+        "label": "IMAP 포트",
+        "placeholder": "993"
+      },
+      "smtpPort": {
+        "label": "SMTP 포트",
+        "placeholder": "587"
+      },
+      "fromAddress": {
+        "label": "보내는 주소",
+        "placeholder": "bot@example.com"
+      },
+      "pollIntervalSeconds": {
+        "label": "메일 확인 간격(초)",
+        "placeholder": "30"
+      },
+      "allowFrom": {
+        "label": "허용 발신자",
+        "placeholder": "이메일 주소, 쉼표로 구분"
+      },
+      "verifyDkim": {
+        "label": "DKIM 확인",
+        "choices": {
+          "true": "켜짐",
+          "false": "꺼짐"
+        }
+      },
+      "verifySpf": {
+        "label": "SPF 확인",
+        "choices": {
+          "true": "켜짐",
+          "false": "꺼짐"
+        }
+      },
+      "imapMailbox": {
+        "label": "IMAP 사서함"
+      },
+      "imapUseSsl": {
+        "label": "IMAP SSL",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "smtpUseTls": {
+        "label": "SMTP TLS",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SMTP SSL",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "자동 답장",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "markSeen": {
+        "label": "읽음으로 표시",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "postAction": {
+        "label": "처리 후",
+        "choices": {
+          "delete": "삭제",
+          "move": "이동"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "대상 메일함"
+      },
+      "postActionExpunge": {
+        "label": "영구 삭제",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "건너뛴 메일 보존",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "maxBodyChars": {
+        "label": "본문 길이 상한(글자)"
+      },
+      "subjectPrefix": {
+        "label": "제목 접두사"
+      },
+      "allowedAttachmentTypes": {
+        "label": "첨부 파일 형식"
+      },
+      "maxAttachmentSize": {
+        "label": "첨부당 크기 상한(바이트)"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "첨부 수 상한"
+      },
+      "trustedAuthservIds": {
+        "label": "신뢰할 인증 서비스",
+        "placeholder": "mx.google.com, 쉼표로 구분"
+      }
+    }
+  }
+}

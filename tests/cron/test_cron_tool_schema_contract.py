@@ -9,9 +9,11 @@ and tightens the runtime error for ``add`` without ``message``.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 
-from nanobot.agent.tools.context import RequestContext
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.registry import ToolRegistry
 
@@ -19,7 +21,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 class _SvcStub:
     """Minimal CronService stand-in; we only exercise schema/dispatch paths."""
 
-    def list_jobs(self):
+    def list_jobs(self, include_disabled=False):
         return []
 
     def get_job(self, _job_id):
@@ -39,24 +41,22 @@ class _SvcStub:
 
 
 @pytest.fixture
-def registry() -> ToolRegistry:
+def registry() -> Iterator[ToolRegistry]:
     tool = CronTool(_SvcStub(), default_timezone="UTC")
-    tool.set_context(
-        RequestContext(channel="channel", chat_id="chat-id", session_key="channel:chat-id")
-    )
     reg = ToolRegistry()
     reg.register(tool)
-    return reg
+    with request_context(
+        RequestContext(channel="channel", chat_id="chat-id", session_key="channel:chat-id")
+    ):
+        yield reg
 
 
 class TestSchemaContract:
     def test_list_accepted_without_message(self, registry: ToolRegistry) -> None:
-        # action='list' must pass schema validation with nothing but 'action'.
         _, _, err = registry.prepare_call("cron", {"action": "list"})
         assert err is None
 
     def test_remove_accepted_without_message(self, registry: ToolRegistry) -> None:
-        # action='remove' must pass schema validation with just 'action' + 'job_id'.
         _, _, err = registry.prepare_call("cron", {"action": "remove", "job_id": "abc"})
         assert err is None
 
@@ -100,3 +100,15 @@ class TestSchemaSelfDescribesRequirements:
         # accidentally introduced).
         tool = CronTool(_SvcStub())
         assert tool.parameters["required"] == ["action"]
+
+
+async def test_invalid_action_returns_tool_error_and_allows_correction(registry):
+    from nanobot.agent.tools.registry import is_tool_error_result
+
+    arguments = {"action": ["list"]}
+    result = await registry.execute("cron", arguments)
+
+    assert is_tool_error_result(result)
+    assert "action:" in result and "string" in result
+    assert arguments == {"action": ["list"]}
+    assert await registry.execute("cron", {"action": "list"}) == "No scheduled jobs."

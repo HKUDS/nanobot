@@ -1,0 +1,46 @@
+/* The width clips one sidebar, while its panel paint and labels fade to the rail. */
+.sidebar-dock-frame {
+  --sidebar-dock-duration: 300ms;
+  --sidebar-dock-ease: cubic-bezier(0, 0, 0.2, 1);
+  transition: width var(--sidebar-dock-duration) var(--sidebar-dock-ease);
+}
+.sidebar-dock-frame[data-resizing] { --sidebar-dock-duration: 0ms; }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-dock-frame { --sidebar-dock-duration: 0ms; }
+}
+.sidebar-dock-surface,
+.sidebar-dock-history,
+.sidebar-dock-label,
+.sidebar-dock-host [data-sidebar-host-label] {
+  transition: opacity var(--sidebar-dock-duration) var(--sidebar-dock-ease),
+    visibility var(--sidebar-dock-duration) var(--sidebar-dock-ease);
+}
+.sidebar-dock-history {
+  /* Keep the rows at their open width until they are clipped out of sight. */
+  min-width: var(--sidebar-open-width);
+}
+.sidebar-dock-frame[data-collapsed] .sidebar-dock-surface,
+[data-sidebar-collapsed="true"] :is(.sidebar-dock-history, .sidebar-dock-label, .sidebar-dock-host [data-sidebar-host-label]) {
+  opacity: 0;
+  visibility: hidden;
+}
+.sidebar-dock-footer-row {
+  --sidebar-settings-width: max(5.5rem, 36%);
+  position: relative;
+  padding-block-end: 0;
+  transition: padding-block-end var(--sidebar-dock-duration) var(--sidebar-dock-ease);
+}
+.sidebar-dock-footer-row > .sidebar-dock-settings {
+  width: var(--sidebar-settings-width);
+}
+.sidebar-dock-host {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-end: 0;
+  inset-inline-start: calc(var(--sidebar-settings-width) + 0.25rem);
+  transition: inset-inline-start var(--sidebar-dock-duration) var(--sidebar-dock-ease);
+}
+.sidebar-dock-host [data-host-switcher] { overflow: hidden; }
+[data-sidebar-collapsed="true"] .sidebar-dock-footer-row { padding-block-end: 2.25rem; }
+[data-sidebar-collapsed="true"] .sidebar-dock-footer-row > .sidebar-dock-settings { width: 100%; }
+[data-sidebar-collapsed="true"] .sidebar-dock-host { inset-inline-start: 0; }

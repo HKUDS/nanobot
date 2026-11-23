@@ -1,10 +1,8 @@
-"""Web search provider usage fetchers for /status command."""
-
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 
 @dataclass
@@ -12,8 +10,8 @@ class SearchUsageInfo:
     """Structured usage info returned by a provider fetcher."""
 
     provider: str
-    supported: bool = False          # True if the provider has a usage API
-    error: str | None = None         # Set when the API call failed
+    supported: bool = False
+    error: str | None = None
 
     # Usage counters (None = not available for this provider)
     used: int | None = None
@@ -28,7 +26,7 @@ class SearchUsageInfo:
 
     def format(self) -> str:
         """Return a human-readable multi-line string for /status output."""
-        lines = [f"🔍 Web Search: {self.provider}"]
+        lines: list[str] = [f"🔍 Web Search: {self.provider}"]
 
         if not self.supported:
             lines.append("   Usage tracking: not available for this provider")
@@ -43,8 +41,7 @@ class SearchUsageInfo:
         elif self.used is not None:
             lines.append(f"   Usage: {self.used} requests")
 
-        # Tavily breakdown
-        breakdown_parts = []
+        breakdown_parts: list[str] = []
         if self.search_used is not None:
             breakdown_parts.append(f"Search: {self.search_used}")
         if self.extract_used is not None:
@@ -86,12 +83,7 @@ async def fetch_search_usage(
         return SearchUsageInfo(provider=p, supported=False)
 
 
-# ---------------------------------------------------------------------------
-# Tavily
-# ---------------------------------------------------------------------------
-
 async def _fetch_tavily_usage(api_key: str | None) -> SearchUsageInfo:
-    """Fetch usage from GET https://api.tavily.com/usage."""
     import httpx
 
     key = api_key or os.environ.get("TAVILY_API_KEY", "")
@@ -109,7 +101,7 @@ async def _fetch_tavily_usage(api_key: str | None) -> SearchUsageInfo:
                 headers={"Authorization": f"Bearer {key}"},
             )
             r.raise_for_status()
-        data: dict[str, Any] = r.json()
+        data = cast(dict[str, Any], r.json())
         return _parse_tavily_usage(data)
     except httpx.HTTPStatusError as e:
         return SearchUsageInfo(
@@ -126,30 +118,11 @@ async def _fetch_tavily_usage(api_key: str | None) -> SearchUsageInfo:
 
 
 def _parse_tavily_usage(data: dict[str, Any]) -> SearchUsageInfo:
-    """
-    Parse Tavily /usage response.
+    raw_account = data.get("account")
+    account = cast(dict[str, Any], raw_account) if isinstance(raw_account, dict) else {}
+    used = _optional_int(account.get("plan_usage"))
+    limit = _optional_int(account.get("plan_limit"))
 
-    Actual API response shape:
-    {
-      "account": {
-        "current_plan": "Researcher",
-        "plan_usage": 20,
-        "plan_limit": 1000,
-        "search_usage": 20,
-        "crawl_usage": 0,
-        "extract_usage": 0,
-        "map_usage": 0,
-        "research_usage": 0,
-        "paygo_usage": 0,
-        "paygo_limit": null
-      }
-    }
-    """
-    account = data.get("account") or {}
-    used = account.get("plan_usage")
-    limit = account.get("plan_limit")
-
-    # Compute remaining
     remaining = None
     if used is not None and limit is not None:
         remaining = max(0, limit - used)
@@ -160,9 +133,18 @@ def _parse_tavily_usage(data: dict[str, Any]) -> SearchUsageInfo:
         used=used,
         limit=limit,
         remaining=remaining,
-        search_used=account.get("search_usage"),
-        extract_used=account.get("extract_usage"),
-        crawl_used=account.get("crawl_usage"),
+        search_used=_optional_int(account.get("search_usage")),
+        extract_used=_optional_int(account.get("extract_usage")),
+        crawl_used=_optional_int(account.get("crawl_usage")),
     )
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 

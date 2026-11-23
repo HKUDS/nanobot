@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "Mở hướng dẫn QQ",
+    "officialLabel": "Mở bảng điều khiển bot QQ",
+    "sections": {
+      "credentials": "Thông tin xác thực nhập thủ công",
+      "advanced": "Nâng cao"
+    },
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "App ID bot QQ"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "Open ID, phân tách bằng dấu phẩy"
+      },
+      "msgFormat": {
+        "label": "Định dạng tin nhắn",
+        "choices": {
+          "plain": "Văn bản thuần",
+          "markdown": "Markdown"
+        }
+      },
+      "ackMessage": {
+        "label": "Tin nhắn xác nhận nhận"
+      },
+      "mediaDir": {
+        "label": "Thư mục phương tiện"
+      },
+      "downloadChunkSize": {
+        "label": "Kích thước khối (byte)"
+      },
+      "downloadMaxBytes": {
+        "label": "Giới hạn tải xuống (byte)"
+      },
+      "showCompactionNotices": {
+        "label": "Thông báo nén",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      }
+    }
+  },
+  "custom": {
+    "scanTitle": "Quét bằng QQ trên điện thoại",
+    "waiting": "Đang chờ quét mã…",
+    "connected": "Liên kết hoàn tất",
+    "stopped": "Đã hủy",
+    "connecting": "Đang chuẩn bị mã QR…",
+    "qrAlt": "Mã QR liên kết QQ",
+    "scanAgainWarning": "Liên kết lại có thể làm gián đoạn các ứng dụng khác đang dùng bot QQ này. Nếu App Secret được đặt lại, khóa cũ sẽ mất hiệu lực và các ứng dụng đó cần cập nhật khóa mới.",
+    "configured": "Đã cấu hình",
+    "bind": "Liên kết bot QQ",
+    "rebind": "Liên kết lại bot",
+    "refresh": "Làm mới mã QR",
+    "retry": "Thử lại",
+    "expired": "Mã QR đã hết hạn",
+    "failed": "Liên kết thất bại",
+    "cancelFailed": "Không thể hủy",
+    "retrying": "Đang thử lại…",
+    "manualSetup": "Nhập thông tin xác thực thủ công"
+  }
+}

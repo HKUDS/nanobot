@@ -1,47 +1,47 @@
-"""Shell execution tool."""
-
 from __future__ import annotations
 
 import asyncio
 import os
 import re
+import shlex
 import shutil
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import unquote
 
 from loguru import logger
-from pydantic import Field
 
-from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_session_key
+from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.context import ToolContext, current_request_session_key
 from nanobot.agent.tools.exec_session import (
     DEFAULT_EXEC_SESSION_MANAGER,
     DEFAULT_MAX_OUTPUT_CHARS,
     DEFAULT_YIELD_MS,
     MAX_OUTPUT_CHARS,
     MAX_YIELD_MS,
+    ExecSessionManager,
     clamp_session_int,
     format_session_poll,
 )
-from nanobot.agent.tools.sandbox import wrap_command
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.agent.tools.shell_config import ExecToolConfig
 from nanobot.config.paths import get_media_dir
-from nanobot.config_base import Base
+from nanobot.execution.sandbox import build_sandbox_argv
+from nanobot.security.sandbox_launcher import SandboxLauncherError
 from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
 
 _IS_WINDOWS = sys.platform == "win32"
 
 
-# Policy note appended to recoverable workspace-boundary guard errors.
 _WORKSPACE_BOUNDARY_NOTE = (
     "\n\nNote: this is a hard policy boundary, not a transient failure. "
     "Do NOT retry with shell tricks (symlinks, base64 piping, alternative "
@@ -51,21 +51,9 @@ _WORKSPACE_BOUNDARY_NOTE = (
 )
 
 
-class ExecToolConfig(Base):
-    """Shell exec tool configuration."""
-    enable: bool = True
-    timeout: int = Field(default=60, ge=0)  # Hard timeout (s); 0 = no limit. Not capped by the per-call max.
-    path_prepend: str = ""
-    path_append: str = ""
-    sandbox: str = ""
-    allowed_env_keys: list[str] = Field(default_factory=list)
-    allow_patterns: list[str] = Field(default_factory=list)
-    deny_patterns: list[str] = Field(default_factory=list)
-
-
 @dataclass(slots=True)
 class _PreparedCommand:
-    command: str
+    command: str | list[str]
     cwd: str
     env: dict[str, str]
     timeout: int | None
@@ -73,61 +61,61 @@ class _PreparedCommand:
     login: bool
 
 
-@tool_parameters(
-    tool_parameters_schema(
+def _exec_parameters(config: ExecToolConfig) -> dict[str, Any]:
+    return tool_parameters_schema(
         command=StringSchema("The shell command to execute"),
         cmd=StringSchema("Compatibility alias for command"),
         working_dir=StringSchema("Optional working directory for the command"),
         workdir=StringSchema("Compatibility alias for working_dir"),
-        timeout=IntegerSchema(
-            60,
+        max_runtime=IntegerSchema(
             description=(
-                "Timeout in seconds. Increase for long-running commands "
-                "like compilation or installation (default 60, max 600)."
+                "Hard runtime budget in seconds. Omit for the configured default "
+                f"({'unlimited' if config.max_runtime == 0 else str(config.max_runtime) + 's'}). "
+                f"Explicit requests must not exceed {config.max_runtime_limit}s. "
+                "Output does not extend the budget."
             ),
             minimum=1,
-            maximum=600,
+            maximum=config.max_runtime_limit,
+        ),
+        timeout=IntegerSchema(
+            description="Compatibility alias for max_runtime; cannot be combined with it.",
+            minimum=1,
+            maximum=config.max_runtime_limit,
         ),
         shell=StringSchema(
-            "Optional shell binary to launch. On Unix, supports sh, bash, or zsh.",
+            (
+                "Shell override; omit for PowerShell, or pass 'cmd' for cmd.exe."
+                if _IS_WINDOWS
+                else "Shell override; omit for bash, or pass 'sh' or 'zsh'."
+            ),
             nullable=True,
         ),
         login=BooleanSchema(
-            description="Whether to run bash/zsh with login shell semantics (default false).",
+            description="Run bash/zsh as a login shell.",
             default=False,
             nullable=True,
         ),
         yield_time_ms=IntegerSchema(
-            description=(
-                "Optional milliseconds to wait before returning output. "
-                "When set, a still-running command returns a session_id that "
-                "can be polled or written to with write_stdin. Omit this field "
-                "to keep one-shot exec behavior."
-            ),
+            description="Return after this many milliseconds if still running (default 1000, max 30000); execution continues.",
             minimum=0,
             maximum=MAX_YIELD_MS,
             nullable=True,
         ),
         max_output_chars=IntegerSchema(
-            description=(
-                "Maximum output characters to return when yield_time_ms is used "
-                "(default 10000, max 50000)."
-            ),
+            description="Session output limit in characters (default 10000, max 50000).",
             minimum=1000,
             maximum=MAX_OUTPUT_CHARS,
             nullable=True,
         ),
         max_output_tokens=IntegerSchema(
-            description=(
-                "Compatibility alias for max_output_chars. The current runtime "
-                "uses a character budget."
-            ),
+            description="Compatibility alias for max_output_chars.",
             minimum=1000,
             maximum=MAX_OUTPUT_CHARS,
             nullable=True,
         ),
     )
-)
+
+
 class ExecTool(Tool):
     """Tool to execute shell commands."""
     _scopes = {"core", "subagent"}
@@ -139,28 +127,35 @@ class ExecTool(Tool):
         return ExecToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.exec.enable
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
+    def create(cls, ctx: ToolContext) -> Tool:
         cfg = ctx.config.exec
         return cls(
             working_dir=ctx.workspace,
-            timeout=cfg.timeout,
+            max_runtime=cfg.max_runtime,
+            max_runtime_limit=cfg.max_runtime_limit,
+            idle_timeout=cfg.idle_timeout,
+            idle_action=cfg.idle_action,
             restrict_to_workspace=ctx.config.restrict_to_workspace,
             webui_allow_local_service_access=ctx.config.webui_allow_local_service_access,
             sandbox=cfg.sandbox,
+            sandbox_launcher=cfg.sandbox_launcher,
             path_prepend=cfg.path_prepend,
             path_append=cfg.path_append,
+            sandbox_ro_binds=cfg.sandbox_ro_binds,
+            sandbox_rw_binds=cfg.sandbox_rw_binds,
             allowed_env_keys=cfg.allowed_env_keys,
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
+            session_manager=ctx.exec_session_manager,
         )
 
     def __init__(
         self,
-        timeout: int = 60,
+        timeout: int | None = None,
         working_dir: str | None = None,
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
@@ -170,30 +165,46 @@ class ExecTool(Tool):
         sandbox: str = "",
         path_prepend: str = "",
         path_append: str = "",
+        sandbox_ro_binds: list[str] | None = None,
+        sandbox_rw_binds: list[str] | None = None,
         allowed_env_keys: list[str] | None = None,
-        session_manager: Any | None = None,
+        session_manager: ExecSessionManager | None = None,
+        *,
+        max_runtime: int | None = None,
+        max_runtime_limit: int | None = None,
+        idle_timeout: int = 300,
+        idle_action: Literal["report", "terminate"] = "report",
+        sandbox_launcher: str = "",
     ):
-        self.timeout = timeout
+        if timeout is not None and max_runtime is not None:
+            raise ValueError("timeout and max_runtime are mutually exclusive")
+        values: dict[str, Any] = {"idle_timeout": idle_timeout, "idle_action": idle_action}
+        if (runtime := max_runtime if max_runtime is not None else timeout) is not None:
+            values["max_runtime"] = runtime
+        if max_runtime_limit is not None:
+            values["max_runtime_limit"] = max_runtime_limit
+        self._exec_config = ExecToolConfig.model_validate(values)
         self.working_dir = working_dir
         self.sandbox = sandbox
+        self.sandbox_launcher = sandbox_launcher
         self.deny_patterns = (deny_patterns or []) + [
-            r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
-            r"\bdel\s+/[fq]\b",              # del /f, del /q
-            r"\brmdir\s+/s\b",               # rmdir /s
-            r"(?:^|[;&|]\s*)format(?!=)\b",   # format (as standalone command only)
-            r"\b(mkfs|diskpart)\b",          # disk operations
-            r"\bdd\s+if=",                   # dd
-            r">\s*/dev/sd",                  # write to disk
-            r"\b(shutdown|reboot|poweroff)\b",  # system power
-            r":\(\)\s*\{.*\};\s*:",          # fork bomb
+            r"\brm\s+-[rf]{1,2}\b",
+            r"\bdel\s+/[fq]\b",
+            r"\brmdir\s+/s\b",
+            r"(?:^|[;&|]\s*)format(?!=)\b",
+            r"\b(mkfs|diskpart)\b",
+            r"\bdd\s+if=",
+            r">\s*/dev/sd",
+            r"\b(shutdown|reboot|poweroff)\b",
+            r":\(\)\s*\{.*\};\s*:",
             # Block writes to nanobot internal state files (#2989).
             # history.jsonl / .dream_cursor are managed by append_history();
             # direct writes corrupt the cursor format and crash /dream.
-            r">>?\s*\S*(?:history\.jsonl|\.dream_cursor)",            # > / >> redirect
-            r"\btee\b[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",     # tee / tee -a
-            r"\b(?:cp|mv)\b(?:\s+[^\s|;&<>]+)+\s+\S*(?:history\.jsonl|\.dream_cursor)",  # cp/mv target
-            r"\bdd\b[^|;&<>]*\bof=\S*(?:history\.jsonl|\.dream_cursor)",  # dd of=
-            r"\bsed\s+-i[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",  # sed -i
+            r">>?\s*\S*(?:history\.jsonl|\.dream_cursor)",
+            r"\btee\b[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",
+            r"\b(?:cp|mv)\b(?:\s+[^\s|;&<>]+)+\s+\S*(?:history\.jsonl|\.dream_cursor)",
+            r"\bdd\b[^|;&<>]*\bof=\S*(?:history\.jsonl|\.dream_cursor)",
+            r"\bsed\s+-i[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
@@ -202,6 +213,8 @@ class ExecTool(Tool):
         self.webui_allow_local_service_access = webui_allow_local_service_access
         self.path_prepend = path_prepend
         self.path_append = path_append
+        self.sandbox_ro_binds = self._normalize_bind_roots(sandbox_ro_binds)
+        self.sandbox_rw_binds = self._normalize_bind_roots(sandbox_rw_binds)
         self.allowed_env_keys = allowed_env_keys or []
         self._session_manager = session_manager or DEFAULT_EXEC_SESSION_MANAGER
 
@@ -209,8 +222,13 @@ class ExecTool(Tool):
     def name(self) -> str:
         return "exec"
 
-    _MAX_TIMEOUT = 600
-    _MAX_OUTPUT = 10_000
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return _exec_parameters(self._exec_config)
+
+    @property
+    def timeout(self) -> int:
+        return self._exec_config.max_runtime
 
     # Kernel device files safe as stdio redirect targets (#3599).
     _BENIGN_DEVICE_PATHS: frozenset[str] = frozenset({
@@ -227,30 +245,20 @@ class ExecTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "Execute a shell command and return its output. "
-            "Use this for tests, builds, package commands, git commands, and "
-            "other process execution. Prefer read_file/find_files/grep for "
-            "inspection and apply_patch/write_file/edit_file for file changes "
-            "instead of cat, shell find/grep, echo, or sed. "
-            "Use -y or --yes flags to avoid interactive prompts. "
-            "For long-running or interactive commands, pass yield_time_ms; "
-            "if the command keeps running, exec returns a session_id that can "
-            "be polled or written to with write_stdin. Output is truncated at "
-            "10 000 chars; timeout defaults to 60s."
-        )
+        return "Execute a shell command. timeout and max_runtime are mutually exclusive."
 
     @property
     def exclusive(self) -> bool:
         return True
 
     async def execute(
-        self, command: str | None = None, cmd: str | None = None,
+        self, command: str | list[str] | None = None, cmd: str | None = None,
         working_dir: str | None = None, workdir: str | None = None,
         timeout: int | None = None, shell: str | None = None,
         login: bool | None = None, yield_time_ms: int | None = None,
         max_output_chars: int | None = None,
         max_output_tokens: int | None = None,
+        max_runtime: int | None = None,
         **kwargs: Any,
     ) -> str:
         command = command or cmd
@@ -260,67 +268,36 @@ class ExecTool(Tool):
         if max_output_chars is None:
             max_output_chars = max_output_tokens
 
-        prepared = self._prepare_command(command, working_dir, timeout, shell, login)
+        if timeout is not None and max_runtime is not None:
+            return ToolResult.error("Error: timeout and max_runtime are mutually exclusive.")
+        try:
+            prepared = self._prepare_command(
+                command, working_dir, max_runtime if max_runtime is not None else timeout,
+                shell, login,
+            )
+        except ValueError as exc:
+            return ToolResult.error(f"Error: {exc}")
         if isinstance(prepared, str):
             return prepared
+        return await self._execute_session(prepared, yield_time_ms, max_output_chars)
 
-        if yield_time_ms is not None:
-            return await self._execute_session(prepared, yield_time_ms, max_output_chars)
-
+    async def execute_to_completion(self, command: str, working_dir: str) -> str:
+        """Return the complete result for a trusted user shell command, without an agent observer."""
         try:
-            process = await self._spawn(
-                prepared.command,
-                prepared.cwd,
-                prepared.env,
-                prepared.shell_program,
-                prepared.login,
-            )
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=prepared.timeout,
-                )
-            except asyncio.TimeoutError:
-                await self._kill_process(process)
-                return ToolResult.error(f"Error: Command timed out after {prepared.timeout} seconds")
-            except asyncio.CancelledError:
-                await self._kill_process(process)
-                raise
-
-            output_parts = []
-
-            if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
-
-            if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
-                if stderr_text.strip():
-                    output_parts.append(f"STDERR:\n{stderr_text}")
-
-            output_parts.append(f"\nExit code: {process.returncode}")
-
-            result = "\n".join(output_parts) if output_parts else "(no output)"
-
-            max_len = clamp_session_int(max_output_chars, self._MAX_OUTPUT, 1000, MAX_OUTPUT_CHARS)
-            if len(result) > max_len:
-                half = max_len // 2
-                result = (
-                    result[:half]
-                    + f"\n\n... ({len(result) - max_len:,} chars truncated) ...\n\n"
-                    + result[-half:]
-                )
-
-            return result
-
-        except Exception as e:
-            return ToolResult.error(f"Error executing command: {str(e)}")
+            prepared = self._prepare_command(command, working_dir)
+        except ValueError as exc:
+            return ToolResult.error(f"Error: {exc}")
+        if isinstance(prepared, str):
+            return prepared
+        return await self._execute_session(prepared, None, None, until_exit=True)
 
     async def _execute_session(
         self,
         prepared: _PreparedCommand,
         yield_time_ms: int | None,
         max_output_chars: int | None,
+        *,
+        until_exit: bool = False,
     ) -> str:
         try:
             session_id, poll = await self._session_manager.start(
@@ -330,7 +307,13 @@ class ExecTool(Tool):
                 timeout=prepared.timeout,
                 shell_program=prepared.shell_program,
                 login=prepared.login,
-                yield_time_ms=clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS),
+                yield_time_ms=0 if until_exit else clamp_session_int(
+                    yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS,
+                ),
+                until_exit=until_exit,
+                stdin=(asyncio.subprocess.DEVNULL if yield_time_ms is None else asyncio.subprocess.PIPE),
+                idle_timeout=self._exec_config.idle_timeout,
+                idle_action=self._exec_config.idle_action,
                 owner_session_key=current_request_session_key(),
                 max_output_chars=clamp_session_int(
                     max_output_chars,
@@ -340,27 +323,32 @@ class ExecTool(Tool):
                 ),
             )
             result = format_session_poll(session_id, poll)
-            return ToolResult.error(result) if poll.timed_out else result
+            if not poll.done:
+                result += "\nInitial wait ended; session remains active."
+            return ToolResult.error(result) if poll.failed else result
         except Exception as exc:
-            return ToolResult.error(f"Error executing command: {exc}")
+            # Only an OS rejection of the actual launcher is attributable here.
+            # A command's nonzero exit or stderr is not proof of a sandbox fault.
+            code = "sandbox_start_failed" if (
+                isinstance(exc, OSError) and self.sandbox and not _IS_WINDOWS
+                and isinstance(prepared.command, list) and exc.filename == prepared.command[0]
+            ) else None
+            return ToolResult.error(f"Error executing command: {exc}", error_code=code)
 
-    def _resolve_timeout(self, timeout: int | None) -> int | None:
-        """Resolve the effective hard timeout in seconds (None = no limit).
-
-        A per-call timeout supplied by the model stays capped at _MAX_TIMEOUT so
-        the LLM cannot request unbounded execution. The config-level default
-        (self.timeout) may exceed that cap, and 0 disables the limit entirely
-        for trusted long-running tasks (#3595).
-        """
-        if timeout:
-            return min(timeout, self._MAX_TIMEOUT)
-        if self.timeout and self.timeout > 0:
-            return self.timeout
-        return None
+    def _resolve_timeout(self, timeout: object) -> int | None:
+        if timeout is not None:
+            if isinstance(timeout, bool) or not isinstance(timeout, int):
+                raise ValueError("max_runtime must be an integer number of seconds")
+            if not 1 <= timeout <= self._exec_config.max_runtime_limit:
+                raise ValueError(
+                    f"max_runtime must be between 1 and {self._exec_config.max_runtime_limit} seconds"
+                )
+            return timeout
+        return self.timeout or None
 
     def _prepare_command(
         self,
-        command: str,
+        command: str | list[str],
         working_dir: str | None = None,
         timeout: int | None = None,
         shell: str | None = None,
@@ -372,8 +360,15 @@ class ExecTool(Tool):
             sandbox_restricts_workspace=bool(self.sandbox),
         )
         workspace_root = str(access.project_path) if access.project_path is not None else self.working_dir
-        cwd = working_dir or workspace_root or os.getcwd()
-
+        if working_dir:
+            requested_dir = Path(working_dir).expanduser()
+            cwd = str(
+                requested_dir
+                if requested_dir.is_absolute()
+                else Path(workspace_root or os.getcwd()) / requested_dir
+            )
+        else:
+            cwd = workspace_root or os.getcwd()
         # Prevent an LLM-supplied working_dir from escaping the configured
         # workspace when restrict_to_workspace is enabled (#2826). Without
         # this, a caller can pass working_dir="/etc" and then all absolute
@@ -394,30 +389,26 @@ class ExecTool(Tool):
                     + _WORKSPACE_BOUNDARY_NOTE
                 )
 
-        guard_error = self._guard_command(
-            command,
-            cwd,
-            restrict_to_workspace=access.restrict_to_workspace,
-            workspace_root=workspace_root,
-        )
-        if guard_error:
-            return guard_error
-
-        if self.sandbox:
-            if _IS_WINDOWS:
-                logger.warning(
-                    "Sandbox '{}' is not supported on Windows; running unsandboxed",
-                    self.sandbox,
-                )
-            else:
-                workspace = workspace_root or cwd
-                command = wrap_command(self.sandbox, command, workspace, cwd)
-                cwd = str(Path(workspace).resolve())
+        # Full access is an explicit trust decision. Keep the application-level
+        # command guard aligned with the selected access mode instead of
+        # continuing to block commands after workspace restriction is disabled.
+        if access.restrict_to_workspace:
+            guard_error = self._guard_command(
+                shlex.join(command) if isinstance(command, list) else command,
+                cwd,
+                restrict_to_workspace=True,
+                workspace_root=workspace_root,
+            )
+            if guard_error:
+                return guard_error
 
         effective_timeout = self._resolve_timeout(timeout)
         env = self._build_env()
 
-        if self.path_prepend or self.path_append:
+        if isinstance(command, list):
+            parent_path = os.environ.get("PATH", env.get("PATH", ""))
+            env["PATH"] = self._compose_path(parent_path)
+        elif self.path_prepend or self.path_append:
             if _IS_WINDOWS:
                 env["PATH"] = self._compose_path(env.get("PATH", ""))
             else:
@@ -426,6 +417,41 @@ class ExecTool(Tool):
         shell_program, shell_error = self._resolve_shell(shell)
         if shell_error:
             return shell_error
+
+        if self.sandbox:
+            if _IS_WINDOWS:
+                logger.warning(
+                    "Sandbox '{}' is not supported on Windows; running unsandboxed",
+                    self.sandbox,
+                )
+            else:
+                # The host launches the sandbox, not a caller-selected shell.
+                # Shell selection, profiles and PATH setup run after confinement.
+                if isinstance(command, list):
+                    payload = shlex.join(command)
+                else:
+                    interpreter = shell_program or shutil.which("bash") or "/bin/bash"
+                    args = [interpreter]
+                    if login and Path(interpreter).name in {"bash", "zsh"}:
+                        args.append("-l")
+                    payload = shlex.join([*args, "-c", command])
+                workspace = workspace_root or cwd
+                try:
+                    command = build_sandbox_argv(
+                        self.sandbox, payload, workspace, cwd,
+                        launcher=self.sandbox_launcher,
+                        sandbox_ro_binds=map(str, self.sandbox_ro_binds),
+                        sandbox_rw_binds=map(str, self.sandbox_rw_binds),
+                    )
+                except SandboxLauncherError as exc:
+                    if exc.reason == "launcher_missing":
+                        return ToolResult.error(
+                            f"Error: sandbox launcher not found: {exc.launcher}", error_code="sandbox_launcher_missing",
+                        )
+                    return ToolResult.error(
+                        f"Error: sandbox launcher rejected: {exc.reason}", error_code=f"sandbox_{exc.reason}",
+                    )
+                cwd = str(Path(workspace).resolve())
 
         return _PreparedCommand(
             command=command,
@@ -437,7 +463,7 @@ class ExecTool(Tool):
         )
 
     def _compose_path(self, current_path: str) -> str:
-        parts = []
+        parts: list[str] = []
         if self.path_prepend:
             parts.append(self.path_prepend)
         if current_path:
@@ -447,7 +473,7 @@ class ExecTool(Tool):
         return os.pathsep.join(parts)
 
     def _wrap_path_export(self, command: str, env: dict[str, str]) -> str:
-        segments = []
+        segments: list[str] = []
         if self.path_prepend:
             env["NANOBOT_PATH_PREPEND"] = self.path_prepend
             segments.append("$NANOBOT_PATH_PREPEND")
@@ -459,55 +485,36 @@ class ExecTool(Tool):
         return f'export PATH="{path_expr}"; {command}'
 
     @staticmethod
-    async def _spawn(
-        command: str, cwd: str, env: dict[str, str],
-        shell_program: str | None = None,
-        login: bool = False,
-        *,
-        stdin: int = asyncio.subprocess.DEVNULL,
-    ) -> asyncio.subprocess.Process:
-        """Launch *command* in a platform-appropriate shell."""
-        if _IS_WINDOWS:
-            if "\n" in command:
-                return await asyncio.create_subprocess_exec(
-                    "powershell", "-NoProfile", "-Command", command,
-                    stdin=stdin,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd,
-                    env=env,
-                )
-            return await asyncio.create_subprocess_shell(
-                command,
-                stdin=stdin,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-            )
-        shell_program = shell_program or shutil.which("bash") or "/bin/bash"
-        args = [shell_program]
-        shell_name = Path(shell_program).name.lower()
-        if login and shell_name in {"bash", "bash.exe", "zsh", "zsh.exe"}:
-            args.append("-l")
-        args.extend(["-c", command])
-        return await asyncio.create_subprocess_exec(
-            *args,
-            stdin=stdin,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
-            env=env,
-        )
-
-    @staticmethod
     def _resolve_shell(shell: str | None) -> tuple[str | None, str | None]:
         if not shell:
             return None, None
-        if _IS_WINDOWS:
-            return None, ToolResult.error("Error: shell parameter is not supported on Windows")
         if "\0" in shell or "\n" in shell or "\r" in shell:
             return None, ToolResult.error("Error: shell contains invalid characters")
+        if _IS_WINDOWS:
+            win_allowed = {"powershell", "powershell.exe", "pwsh", "pwsh.exe", "cmd", "cmd.exe"}
+            path = Path(shell).expanduser()
+            if path.is_absolute():
+                name = path.name.lower()
+                if name not in win_allowed:
+                    return None, ToolResult.error(
+                        f"Error: unsupported shell {shell!r}. "
+                        "Allowed: powershell, pwsh, cmd"
+                    )
+                if not path.is_file():
+                    return None, ToolResult.error(f"Error: shell is not found: {shell}")
+                return str(path), None
+            if "/" in shell or "\\" in shell:
+                return None, ToolResult.error("Error: shell must be a shell name or absolute path")
+            if shell.lower() not in win_allowed:
+                return None, ToolResult.error(
+                    f"Error: unsupported shell {shell!r}. "
+                    "Allowed: powershell, pwsh, cmd"
+                )
+            if shell.lower() in ("cmd", "cmd.exe"):
+                resolved = os.environ.get("COMSPEC") or shutil.which("cmd") or "cmd"
+                return resolved, None
+            resolved = shutil.which(shell) or shell
+            return resolved, None
         allowed = {"sh", "bash", "zsh"}
         path = Path(shell).expanduser()
         if path.is_absolute():
@@ -525,30 +532,13 @@ class ExecTool(Tool):
             return None, ToolResult.error(f"Error: shell not found: {shell}")
         return resolved, None
 
-    @staticmethod
-    async def _kill_process(process: asyncio.subprocess.Process) -> None:
-        """Kill a subprocess and reap it to prevent zombies."""
-        process.kill()
-        try:
-            with suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(process.wait(), timeout=5.0)
-        finally:
-            if not _IS_WINDOWS:
-                try:
-                    os.waitpid(process.pid, os.WNOHANG)
-                except (ProcessLookupError, ChildProcessError) as e:
-                    logger.debug("Process already reaped or not found: {}", e)
-
     def _build_env(self) -> dict[str, str]:
-        """Build a minimal environment for subprocess execution.
+        """Use platform defaults plus explicitly allowed environment keys.
 
-        On Unix, only HOME/LANG/TERM are passed by default. If callers request
-        ``login=True``, bash/zsh may source the user's profile and add PATH or
-        other variables.
-
-        On Windows, ``cmd.exe`` has no login-profile mechanism, so a curated
-        set of system variables (including PATH) is forwarded.  API keys and
-        other secrets are still excluded.
+        Unix defaults include HOME, LANG, TERM and PYTHONUNBUFFERED; Windows
+        keeps a curated set of host variables. ``allowed_env_keys`` opts in to
+        forwarding additional values, including secrets. A requested login
+        shell may also load environment from the user's profile.
         """
         if _IS_WINDOWS:
             sr = os.environ.get("SYSTEMROOT", r"C:\Windows")
@@ -596,15 +586,17 @@ class ExecTool(Tool):
         restrict_to_workspace: bool | None = None,
         workspace_root: str | None = None,
     ) -> str | None:
-        """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
         lower = cmd.lower()
 
         # allow_patterns take priority over deny_patterns so that users can
         # exempt specific commands (e.g. "rm -rf" inside a build directory)
-        # from the hardcoded deny list via configuration.
-        explicitly_allowed = bool(self.allow_patterns) and any(
-            re.fullmatch(p, lower) for p in self.allow_patterns
+        # from the hardcoded deny list via configuration. A chained command is
+        # only explicitly allowed when every top-level shell segment matches.
+        segments = self._split_shell_segments(lower)
+        explicitly_allowed = bool(self.allow_patterns) and bool(segments) and all(
+            any(re.fullmatch(pattern, segment) for pattern in self.allow_patterns)
+            for segment in segments
         )
         if not explicitly_allowed:
             for pattern in self.deny_patterns:
@@ -638,16 +630,42 @@ class ExecTool(Tool):
                 if workspace_root
                 else None
             )
+            sandbox_bind_roots = self._active_sandbox_bind_roots(
+                resolved_workspace or cwd_path
+            )
 
             for raw in self._extract_absolute_paths(cmd):
                 try:
                     expanded = os.path.expandvars(raw.strip())
+                    # Python's expanduser() intentionally does not implement
+                    # shell directory-stack forms. ``~+`` is the active cwd,
+                    # while ``~-`` and indexed forms can resolve outside it;
+                    # normalize the former and fail closed on the latter.
+                    if expanded == "~+":
+                        p = cwd_path
+                    elif expanded.startswith("~+/"):
+                        p = (cwd_path / expanded[3:]).resolve()
+                    elif re.match(r"^~(?:-|[+-]\d+)(?:/|$)", expanded):
+                        return ToolResult.error(
+                            "Error: Command blocked by safety guard "
+                            "(path outside working dir)"
+                            + _WORKSPACE_BOUNDARY_NOTE
+                        )
+                    else:
+                        try:
+                            home_path = Path(expanded).expanduser()
+                        except RuntimeError:
+                            return ToolResult.error(
+                                "Error: Command blocked by safety guard "
+                                "(path outside working dir)"
+                                + _WORKSPACE_BOUNDARY_NOTE
+                            )
+                        p = home_path.resolve()
                     # Match against the un-resolved path first.  On Linux,
                     # /dev/stderr is a symlink to /proc/self/fd/2 and
                     # ``Path.resolve()`` would mask the device-file intent.
                     if self._is_benign_device_path(expanded):
                         continue
-                    p = Path(expanded).expanduser().resolve()
                 except Exception:
                     continue
 
@@ -661,6 +679,8 @@ class ExecTool(Tool):
                 )
                 if not allowed and resolved_workspace is not None:
                     allowed = is_path_within(p, resolved_workspace)
+                if not allowed and sandbox_bind_roots:
+                    allowed = any(is_path_within(p, root) for root in sandbox_bind_roots)
                 if p.is_absolute() and not allowed:
                     return ToolResult.error(
                         "Error: Command blocked by safety guard (path outside working dir)"
@@ -668,6 +688,86 @@ class ExecTool(Tool):
                     )
 
         return None
+
+    @staticmethod
+    def _split_shell_segments(command: str) -> list[str]:
+        """Split shell commands on top-level chaining operators."""
+        segments: list[str] = []
+        current: list[str] = []
+        quote: str | None = None
+        escaped = False
+        paren_depth = 0
+        i = 0
+
+        while i < len(command):
+            ch = command[i]
+
+            if escaped:
+                current.append(ch)
+                escaped = False
+                i += 1
+                continue
+
+            if ch == "\\" and quote != "'":
+                current.append(ch)
+                escaped = True
+                i += 1
+                continue
+
+            if quote is not None:
+                current.append(ch)
+                if ch == quote:
+                    quote = None
+                i += 1
+                continue
+
+            if ch in {"'", '"', "`"}:
+                current.append(ch)
+                quote = ch
+                i += 1
+                continue
+
+            if ch == "(":
+                paren_depth += 1
+                current.append(ch)
+                i += 1
+                continue
+
+            if ch == ")" and paren_depth > 0:
+                paren_depth -= 1
+                current.append(ch)
+                i += 1
+                continue
+
+            operator_len = 0
+            if paren_depth == 0:
+                if command.startswith(("&&", "||"), i):
+                    operator_len = 2
+                elif ch == "&" and not (
+                    (i > 0 and command[i - 1] in "<>") or command.startswith("&>", i)
+                ):
+                    current.append(ch)
+                    operator_len = 1
+                # A newline separates commands just like ";" does, so a payload
+                # smuggled onto its own line must be checked on its own too.
+                elif ch in {";", "|", "\n", "\r"}:
+                    operator_len = 1
+
+            if operator_len:
+                segment = "".join(current).strip()
+                if segment:
+                    segments.append(segment)
+                current = []
+                i += operator_len
+                continue
+
+            current.append(ch)
+            i += 1
+
+        segment = "".join(current).strip()
+        if segment:
+            segments.append(segment)
+        return segments
 
     @classmethod
     def _is_benign_device_path(cls, path: str) -> bool:
@@ -684,6 +784,166 @@ class ExecTool(Tool):
             r"(?<![A-Za-z])(?:[A-Za-z]:[^\s\"'|><;]*|\\\\[^\s\"'|><;]+(?:\\[^\s\"'|><;]+)*)",
             command
         )
-        posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
-        home_paths = re.findall(r"(?:^|[\s>'\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
-        return win_paths + posix_paths + home_paths
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&")
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            tokens = list(lexer)
+        except ValueError:
+            # Keep malformed quoting fail-closed. The shell will normally reject
+            # it too, but a conservative raw scan must not turn it into a bypass.
+            tokens = [command]
+
+        paths = [*win_paths]
+        seen = set(win_paths)
+        for index, token in enumerate(tokens):
+            for path in ExecTool._extract_posix_paths_from_token(token):
+                if path not in seen:
+                    paths.append(path)
+                    seen.add(path)
+            if index > 0 and tokens[index - 1] in {"-c", "-lc", "--command"}:
+                for path in ExecTool._extract_absolute_paths(token):
+                    if path not in seen:
+                        paths.append(path)
+                        seen.add(path)
+        return paths
+
+    @staticmethod
+    def _extract_posix_paths_from_token(token: str) -> list[str]:
+        """Extract local POSIX/home paths from one shell-decoded token.
+
+        ``shlex`` separates real grouping/redirection operators while preserving
+        parentheses and spaces that were quoted or escaped as part of a path.
+        Embedded scripts (for example ``sh -c \"cat /tmp/x\"``) still need a
+        small boundary scan. Colons are not general boundaries: treating them
+        as such misclassifies URLs, ``host:/remote`` and ``C:/Windows``. They
+        are considered only inside a syntactically valid assignment, where
+        shells expand each colon-delimited tilde component.
+        """
+        paths: list[str] = []
+        for match in re.finditer(
+            r"file://(?:[^/\s\"']+)?(/[^\s\"'<>|;&]*)",
+            token,
+            flags=re.IGNORECASE,
+        ):
+            uri_prefix = token[: match.start()]
+            raw_path = match.group(1)
+            if uri_prefix.count("(") > uri_prefix.count(")"):
+                raw_path = raw_path.split(")", 1)[0]
+            if uri_prefix.count("{") > uri_prefix.count("}"):
+                raw_path = raw_path.split(",", 1)[0].split("}", 1)[0]
+            raw_path = raw_path.split("?", 1)[0].split("#", 1)[0]
+            if raw_path:
+                paths.append(unquote(raw_path))
+        boundary_chars = frozenset(" \t\r\n=({,<>|;&\"'")
+        i = 0
+        while i < len(token):
+            is_posix = token[i] == "/"
+            home_match = re.match(
+                r"~(?:[+-](?:\d+)?|[A-Za-z0-9_.@-]+)?(?=/|:|$)",
+                token[i:],
+            )
+            is_home = home_match is not None
+            if not is_posix and not is_home:
+                i += 1
+                continue
+
+            prefix = token[:i]
+            parameter_default = (
+                i >= 2 and token[i - 2] == ":" and token[i - 1] in "-+?="
+            )
+            word_start = max(
+                (prefix.rfind(char) for char in " \t\r\n<>|;&"),
+                default=-1,
+            ) + 1
+            word_prefix = prefix[word_start:]
+            assignment_component = bool(
+                re.fullmatch(
+                    r"(?:[A-Za-z_][A-Za-z0-9_]*|--?[A-Za-z0-9_.-]+)="
+                    r"(?:[^:=\s]*:)*",
+                    word_prefix,
+                )
+            )
+            at_boundary = i == 0 or token[i - 1] in boundary_chars
+            if is_home:
+                # A shell word beginning with ``~`` is a separate shlex token.
+                # Mid-token expansion is valid only after ``=`` or a colon in
+                # an assignment. This avoids PromQL/Loki ``=~`` and ``|~``
+                # match operators while covering PATH-like values.
+                at_boundary = i == 0 or assignment_component
+            if not at_boundary and not parameter_default:
+                i += 1
+                continue
+
+            if re.search(r"[A-Za-z][A-Za-z0-9+.-]*://", word_prefix) or re.match(
+                r"(?:[^/:=\s]+@)?[^/:=\s]+:$",
+                word_prefix,
+            ):
+                # HTTP-style URL path/query fragments and scp-style remote paths
+                # are not local filesystem references. ``file://`` paths were
+                # decoded above. Windows drive paths are already captured by the
+                # platform-specific expression above.
+                i += 1
+                continue
+
+            assignment_value = assignment_component
+            if i == 0 or assignment_value:
+                end = len(token)
+                if assignment_value:
+                    separator = token.find(":", i)
+                    if separator >= 0:
+                        end = separator
+            elif token[i - 1] in {"'", '"'}:
+                quote = token[i - 1]
+                closing = token.find(quote, i)
+                end = len(token) if closing < 0 else closing
+            else:
+                end_chars = set(" \t\r\n\"'<>|;&")
+                if prefix.count("(") > prefix.count(")"):
+                    end_chars.add(")")
+                if prefix.count("{") > prefix.count("}"):
+                    end_chars.update({",", "}"})
+                end = i
+                while end < len(token) and token[end] not in end_chars:
+                    end += 1
+
+            candidate = token[i:end]
+            if candidate:
+                paths.append(candidate)
+            i = max(end, i + 1)
+        return paths
+
+    @staticmethod
+    def _normalize_bind_roots(paths: list[str] | None) -> list[Path]:
+        roots: list[Path] = []
+        seen: set[str] = set()
+        for raw in paths or []:
+            value = str(raw).strip()
+            if not value:
+                continue
+            path = Path(os.path.expandvars(value)).expanduser()
+            if not path.is_absolute():
+                continue
+            with suppress(OSError, RuntimeError, ValueError):
+                resolved = path.resolve(strict=False)
+                key = os.path.normcase(os.fspath(resolved))
+                if key in seen:
+                    continue
+                seen.add(key)
+                roots.append(resolved)
+        return roots
+
+    def _active_sandbox_bind_roots(
+        self,
+        workspace_root: Path | None = None,
+    ) -> list[Path]:
+        if self.sandbox not in ("bwrap", "seatbelt") or _IS_WINDOWS:
+            return []
+        roots = [*self.sandbox_ro_binds, *self.sandbox_rw_binds]
+        if workspace_root is None:
+            return roots
+        return [
+            root
+            for root in roots
+            if not is_path_within(workspace_root, root)
+        ]

@@ -1,12 +1,10 @@
-"""Workspace access scope and sandbox capability helpers."""
-
 from __future__ import annotations
 
 import os
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 WorkspaceAccessMode = Literal["restricted", "full"]
 WORKSPACE_SCOPE_METADATA_KEY = "workspace_scope"
@@ -19,6 +17,7 @@ _PROVIDER_LABELS = {
     "unknown": "Unknown system sandbox",
     "macos_app_sandbox": "macOS App Sandbox",
     "bwrap": "Bubblewrap",
+    "seatbelt": "macOS Seatbelt",
 }
 
 _CURRENT_WORKSPACE_SCOPE: ContextVar["WorkspaceScope | None"] = ContextVar(
@@ -124,17 +123,6 @@ class WorkspaceScopeResolver:
             self.default_restrict_to_workspace,
         )
 
-    def for_message(
-        self,
-        msg: Any,
-        session_metadata: Any,
-    ) -> WorkspaceScope:
-        return self.for_turn(
-            channel=getattr(msg, "channel", None),
-            message_metadata=getattr(msg, "metadata", None),
-            session_metadata=session_metadata,
-        )
-
     def for_turn(
         self,
         *,
@@ -158,9 +146,10 @@ class WorkspaceScopeResolver:
         metadata = getattr(msg, "metadata", None)
         if not isinstance(metadata, dict):
             return
-        raw = metadata.get(WORKSPACE_SCOPE_METADATA_KEY)
+        metadata_data = cast(dict[str, Any], metadata)
+        raw = metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY)
         if isinstance(raw, dict):
-            session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = dict(raw)
+            session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = dict(cast(dict[str, Any], raw))
 
 
 def workspace_sandbox_status(
@@ -172,6 +161,17 @@ def workspace_sandbox_status(
     """Return how workspace restriction is enforced in the current host."""
 
     workspace_root = str(Path(workspace).expanduser().resolve(strict=False))
+    return _workspace_sandbox_status(
+        restrict_to_workspace=restrict_to_workspace,
+        workspace_root=workspace_root,
+        environ=environ,
+    )
+
+
+def _workspace_sandbox_status(
+    *, restrict_to_workspace: bool, workspace_root: str,
+    environ: dict[str, str] | None = None,
+) -> WorkspaceSandboxStatus:
     provider = _env_system_provider(environ)
     if not restrict_to_workspace:
         return WorkspaceSandboxStatus(
@@ -224,9 +224,9 @@ def build_workspace_scope(
         project_path=root,
         access_mode=mode,
         restrict_to_workspace=restrict,
-        sandbox_status=workspace_sandbox_status(
+        sandbox_status=_workspace_sandbox_status(
             restrict_to_workspace=restrict,
-            workspace=root,
+            workspace_root=str(root),
         ),
         source_channel=source_channel,
     )
@@ -261,8 +261,9 @@ def validate_workspace_scope_payload(
         )
     if not isinstance(raw, dict):
         raise WorkspaceScopeError("workspace_scope must be an object")
+    scope_data = cast(dict[str, Any], raw)
 
-    raw_path = raw.get("project_path") or raw.get("path")
+    raw_path = scope_data.get("project_path") or scope_data.get("path")
     if raw_path is None or raw_path == "":
         raw_path = str(Path(default_workspace).expanduser().resolve(strict=False))
     if not isinstance(raw_path, str):
@@ -277,7 +278,7 @@ def validate_workspace_scope_payload(
     if not project.is_dir():
         raise WorkspaceScopeError("project_path must be an existing directory")
 
-    raw_mode = raw.get("access_mode")
+    raw_mode = scope_data.get("access_mode")
     if raw_mode is None:
         raw_mode = default_access_mode(default_restrict_to_workspace)
     if not isinstance(raw_mode, str):
@@ -300,8 +301,9 @@ def workspace_scope_from_metadata(
             source_channel=source_channel,
         )
     try:
+        metadata_data = cast(dict[str, Any], metadata)
         return validate_workspace_scope_payload(
-            metadata.get(WORKSPACE_SCOPE_METADATA_KEY),
+            metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY),
             default_workspace=default_workspace,
             default_restrict_to_workspace=default_restrict_to_workspace,
             source_channel=source_channel,
@@ -323,8 +325,9 @@ def resolve_effective_workspace_scope(
     source_channel: str | None = None,
 ) -> WorkspaceScope:
     if isinstance(message_metadata, dict) and WORKSPACE_SCOPE_METADATA_KEY in message_metadata:
+        message_metadata_data = cast(dict[str, Any], message_metadata)
         return workspace_scope_from_metadata(
-            message_metadata,
+            message_metadata_data,
             default_workspace=default_workspace,
             default_restrict_to_workspace=default_restrict_to_workspace,
             source_channel=source_channel,
@@ -354,10 +357,11 @@ def current_tool_workspace(
     *,
     restrict_to_workspace: bool = False,
     sandbox_restricts_workspace: bool = False,
+    scope: WorkspaceScope | None = None,
 ) -> ToolWorkspace:
-    """Return the workspace/access policy for the current tool call."""
+    """Resolve tool policy from an explicit request scope or the bound call scope."""
 
-    scope = current_workspace_scope()
+    scope = scope if scope is not None else current_workspace_scope()
     project_path = (
         scope.project_path
         if scope is not None

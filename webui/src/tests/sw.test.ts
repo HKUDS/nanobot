@@ -1,0 +1,560 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Vitest runs with the webui/ directory as the working directory.
+const SW_SCRIPT = readFileSync(resolve(process.cwd(), "public/sw.js"), "utf8");
+
+const ORIGIN = "https://nanobot.test";
+const CACHE_NAME = "nanobot-static-v2";
+const ICON_CACHE_NAME = "nanobot-icons-v1";
+const ICON_CACHE_LIMIT = 128;
+
+class FakeCacheStore {
+  entries = new Map<string, Response>();
+
+  private key(input: Request | string): string {
+    return new URL(typeof input === "string" ? input : input.url, ORIGIN).href;
+  }
+
+  async addAll(urls: string[]): Promise<void> {
+    for (const url of urls) {
+      this.entries.set(this.key(url), new Response("ok"));
+    }
+  }
+
+  async match(input: Request | string): Promise<Response | undefined> {
+    return this.entries.get(this.key(input));
+  }
+
+  async put(input: Request | string, response: Response): Promise<void> {
+    this.entries.set(this.key(input), response);
+  }
+
+  async delete(input: Request | string): Promise<boolean> {
+    return this.entries.delete(this.key(input));
+  }
+
+  async keys(): Promise<Request[]> {
+    return [...this.entries.keys()].map((url) => new Request(url));
+  }
+}
+
+interface LoadedSw {
+  store: FakeCacheStore;
+  iconStore: FakeCacheStore;
+  deletedCacheNames: string[];
+  fetchMock: ReturnType<typeof vi.fn>;
+  skipWaitingMock: ReturnType<typeof vi.fn>;
+  claimMock: ReturnType<typeof vi.fn>;
+  showNotification: ReturnType<typeof vi.fn>;
+  matchClients: ReturnType<typeof vi.fn>;
+  openWindow: ReturnType<typeof vi.fn>;
+  noticeStore: FakeCacheStore;
+  fire: (type: string, event?: Record<string, unknown>) => Promise<void>;
+}
+
+function loadSw(noticeStore = new FakeCacheStore()): LoadedSw {
+  const listeners = new Map<string, Array<(event: Record<string, unknown>) => void>>();
+  const skipWaitingMock = vi.fn();
+  const claimMock = vi.fn();
+  const showNotification = vi.fn().mockResolvedValue(undefined);
+  const matchClients = vi.fn().mockResolvedValue([]);
+  const openWindow = vi.fn().mockResolvedValue(null);
+  const self = {
+    location: { origin: ORIGIN },
+    skipWaiting: skipWaitingMock,
+    clients: { claim: claimMock, matchAll: matchClients, openWindow },
+    registration: { showNotification },
+    addEventListener: (type: string, cb: (event: Record<string, unknown>) => void) => {
+      listeners.set(type, [...(listeners.get(type) ?? []), cb]);
+    },
+  };
+  const store = new FakeCacheStore();
+  const iconStore = new FakeCacheStore();
+  const stores = new Map<string, FakeCacheStore>([
+    [CACHE_NAME, store],
+    [ICON_CACHE_NAME, iconStore],
+    ["nanobot-notification-receipts-v1", noticeStore],
+  ]);
+  const deletedCacheNames: string[] = [];
+  const caches = {
+    open: vi.fn(async (name: string) => {
+      const existing = stores.get(name);
+      if (existing) return existing;
+      const created = new FakeCacheStore();
+      stores.set(name, created);
+      return created;
+    }),
+    match: vi.fn(async (input: Request | string) => {
+      for (const cache of stores.values()) {
+        const response = await cache.match(input);
+        if (response) return response;
+      }
+      return undefined;
+    }),
+    keys: vi.fn(async () => [
+      CACHE_NAME,
+      ICON_CACHE_NAME,
+      "nanobot-static-v1",
+      "nanobot-icons-v0",
+      "other-app-cache",
+    ]),
+    delete: vi.fn(async (name: string) => {
+      deletedCacheNames.push(name);
+      stores.delete(name);
+      return true;
+    }),
+  };
+  const fetchMock = vi.fn();
+  // Execute the plain public/sw.js script inside a controlled scope so the
+  // service worker globals (self/caches/fetch) are fully mocked.
+  new Function("self", "caches", "fetch", SW_SCRIPT)(self, caches, fetchMock);
+
+  const fire = async (type: string, event: Record<string, unknown> = {}) => {
+    for (const cb of listeners.get(type) ?? []) {
+      let waitPromise: Promise<unknown> = Promise.resolve();
+      const wrapped = {
+        ...event,
+        waitUntil: (promise: Promise<unknown>) => {
+          waitPromise = promise;
+        },
+      };
+      await cb(wrapped);
+      await waitPromise;
+    }
+  };
+
+  return {
+    store,
+    iconStore,
+    deletedCacheNames,
+    fetchMock,
+    skipWaitingMock,
+    claimMock,
+    showNotification,
+    matchClients,
+    openWindow,
+    noticeStore,
+    fire,
+  };
+}
+
+describe("browser notification worker", () => {
+  const source = { id: "tab-1", url: `${ORIGIN}/?token=private` };
+  const url = `${ORIGIN}/#/chat/websocket%3Aone`;
+  const data = { type: "nanobot:notify", key: "turn-1", body: "Task completed", url };
+  async function send(sw: LoadedSw, overrides = {}) {
+    const reply = vi.fn();
+    await sw.fire("message", { data: { ...data, ...overrides }, source, ports: [{ postMessage: reply }] });
+    return reply;
+  }
+
+  it("confirms notification support without displaying a test notification", async () => {
+    const sw = loadSw();
+    const reply = await send(sw, { type: "nanobot:notification-probe" });
+    expect(reply).toHaveBeenCalledWith("ready");
+    expect(sw.showNotification).not.toHaveBeenCalled();
+  });
+
+  it("returns test clicks to notification settings, including a still-open older page", async () => {
+    const sw = loadSw();
+    for (const section of ["notifications", "appearance"]) {
+      const target = `${ORIGIN}/#/settings?section=${section}`;
+      expect(await send(sw, { test: true, key: section, url: target })).toHaveBeenCalledWith("submitted");
+      await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url: target } } });
+      expect(sw.openWindow).toHaveBeenLastCalledWith(target);
+    }
+  });
+
+  it("deduplicates concurrent tabs, dismissed notifications, and worker restarts", async () => {
+    const sw = loadSw();
+    const replies = await Promise.all([send(sw), send(sw)]);
+    expect(sw.showNotification).toHaveBeenCalledOnce();
+    expect(replies[0]).toHaveBeenCalledWith("submitted");
+    expect(replies[1]).toHaveBeenCalledWith("skipped");
+    const restarted = loadSw(sw.noticeStore);
+    expect(await send(restarted)).toHaveBeenCalledWith("skipped");
+    expect(restarted.showNotification).not.toHaveBeenCalled();
+    expect(sw.showNotification).toHaveBeenCalledWith("nanobot", expect.objectContaining({
+      body: "Task completed", data: { url, clientId: "tab-1" },
+    }));
+  });
+
+  it("isolates display rejection, then allows a later test or task", async () => {
+    const sw = loadSw();
+    sw.showNotification.mockRejectedValueOnce(new TypeError("unsupported display"));
+    expect(await send(sw)).toHaveBeenCalledWith("displayFailed");
+    expect(await send(sw)).toHaveBeenCalledWith("submitted");
+  });
+
+  it("suppresses background tabs if another tab on the host is visible, but permits testing", async () => {
+    const sw = loadSw();
+    sw.matchClients.mockResolvedValue([{ visibilityState: "visible" }]);
+    expect(await send(sw)).toHaveBeenCalledWith("skipped");
+    expect(sw.showNotification).not.toHaveBeenCalled();
+    expect(await send(sw, { key: "test-1", test: true })).toHaveBeenCalledWith("submitted");
+  });
+
+  it.each(["https://evil.test/#/chat/one", `${ORIGIN}/?token=secret#/chat/one`, `${ORIGIN}/admin`, `https://user:pass@nanobot.test/#/chat/one`])("rejects an unsafe destination %s", async (unsafe) => {
+    const sw = loadSw();
+    expect(await send(sw, { url: unsafe })).toHaveBeenCalledWith("displayFailed");
+    await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url: unsafe } } });
+    expect(sw.showNotification).not.toHaveBeenCalled();
+    expect(sw.openWindow).not.toHaveBeenCalled();
+  });
+
+  it("focuses the original tab without reloading its connection or drafts", async () => {
+    const sw = loadSw();
+    const tab = { id: "tab-1", frameType: "top-level", postMessage: vi.fn(), focus: vi.fn().mockResolvedValue(null) };
+    sw.matchClients.mockResolvedValue([tab]);
+    const close = vi.fn();
+    await sw.fire("notificationclick", { notification: { close, data: { url, clientId: "tab-1" } } });
+    expect(close).toHaveBeenCalledOnce();
+    expect(tab.postMessage).toHaveBeenCalledWith({ type: "nanobot:notification-click", url });
+    expect(tab.focus).toHaveBeenCalledOnce();
+    expect(sw.openWindow).not.toHaveBeenCalled();
+  });
+
+  it("opens the destination when the source closed, even if an older page is still open", async () => {
+    const sw = loadSw();
+    const oldTab = { id: "old-page", frameType: "top-level", postMessage: vi.fn(), focus: vi.fn() };
+    sw.matchClients.mockResolvedValue([oldTab]);
+    await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url, clientId: "closed" } } });
+    expect(sw.openWindow).toHaveBeenCalledWith(url);
+    expect(oldTab.postMessage).not.toHaveBeenCalled();
+    expect(oldTab.focus).not.toHaveBeenCalled();
+  });
+
+  it("opens the same host with ordinary auth, but cannot restore a closed temporary chat", async () => {
+    const sw = loadSw();
+    await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url, clientId: "closed" } } });
+    expect(sw.openWindow).toHaveBeenCalledWith(url);
+    await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url: `${ORIGIN}/#/temporary/one`, clientId: "closed" } } });
+    expect(sw.openWindow).toHaveBeenLastCalledWith("/#/new");
+  });
+});
+
+function indexHtml(assetPaths: string[]): Response {
+  const refs = assetPaths
+    .map(
+      (path) =>
+        `<script type="module" crossorigin src="${path}"></script><link rel="stylesheet" crossorigin href="${path}">`,
+    )
+    .join("");
+  return new Response(`<!doctype html><html><head>${refs}</head></html>`);
+}
+
+function fetchEvent(url: string, init?: RequestInit) {
+  const respondWith = vi.fn();
+  const event = {
+    request: new Request(url, init),
+    respondWith,
+  };
+  return { event, respondWith };
+}
+
+function imageRequest(url: string): Request {
+  const request = new Request(url);
+  Object.defineProperty(request, "destination", { value: "image" });
+  return request;
+}
+
+function opaqueImageResponse(body = "icon bytes"): Response {
+  const response = new Response(body);
+  Object.defineProperty(response, "type", { value: "opaque" });
+  return response;
+}
+
+describe("service worker", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("precaches the shell and manifest on install", async () => {
+    const sw = loadSw();
+
+    await sw.fire("install");
+
+    expect(sw.skipWaitingMock).toHaveBeenCalledTimes(1);
+    expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/manifest.json`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/asset-manifest.json`)).toBe(true);
+  });
+
+  it("removes stale cache names and prunes unreferenced static entries on activate", async () => {
+    const sw = loadSw();
+    await sw.fire("install");
+    await sw.store.put(`${ORIGIN}/`, indexHtml(["/assets/index-v2.js", "/assets/index-v2.css"]));
+    await sw.store.put(`${ORIGIN}/assets/index-v2.js`, new Response("v2"));
+    await sw.store.put(`${ORIGIN}/assets/index-v2.css`, new Response("v2 css"));
+    await sw.store.put(`${ORIGIN}/assets/lazy-v2.js`, new Response("lazy v2"));
+    await sw.store.put(`${ORIGIN}/assets/index-v1.js`, new Response("v1"));
+    await sw.store.put(`${ORIGIN}/assets/index-v1.css`, new Response("v1 css"));
+    await sw.store.put(`${ORIGIN}/asset-manifest.json`, new Response(JSON.stringify({
+      "src/main.tsx": {
+        file: "assets/index-v2.js",
+        css: ["assets/index-v2.css"],
+      },
+      "src/lazy.tsx": { file: "assets/lazy-v2.js", isDynamicEntry: true },
+    })));
+
+    await sw.fire("activate");
+
+    expect(sw.deletedCacheNames).toEqual(["nanobot-static-v1", "nanobot-icons-v0"]);
+    expect(sw.claimMock).toHaveBeenCalledTimes(1);
+    expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/manifest.json`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/asset-manifest.json`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/assets/index-v2.js`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/assets/index-v2.css`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/assets/lazy-v2.js`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/assets/index-v1.js`)).toBe(false);
+    expect(sw.store.entries.has(`${ORIGIN}/assets/index-v1.css`)).toBe(false);
+  });
+
+  it("does not intercept dynamic or unknown endpoint requests", async () => {
+    const sw = loadSw();
+    const paths = [
+      "/api/v1/models",
+      "/auth/session",
+      "/__nanobot/ws",
+      "/__nanobot/socket.io",
+      "/api/chat/completions",
+      "/webui/bootstrap",
+      "/webui/session/list",
+      "/custom-token",
+      "/mcp-oauth/callback",
+    ];
+
+    for (const path of paths) {
+      const { event, respondWith } = fetchEvent(`${ORIGIN}${path}`);
+      await sw.fire("fetch", event);
+      expect(respondWith, path).not.toHaveBeenCalled();
+    }
+    expect(sw.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not intercept non-GET or unrelated cross-origin requests", async () => {
+    const sw = loadSw();
+
+    const { event: postEvent, respondWith: post } = fetchEvent(
+      `${ORIGIN}/assets/app.js`, { method: "POST" },
+    );
+    await sw.fire("fetch", postEvent);
+    expect(post).not.toHaveBeenCalled();
+
+    const { event: crossEvent, respondWith: cross } = fetchEvent("https://other.test/assets/app.js");
+    await sw.fire("fetch", crossEvent);
+    expect(cross).not.toHaveBeenCalled();
+    expect(sw.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "https://favicon.im/openai.com?larger=true",
+    "https://www.google.com/s2/favicons?domain=openai.com&sz=64",
+    "https://icons.duckduckgo.com/ip3/openai.com.ico",
+    "https://telegram.org/favicon.ico",
+  ])("caches public icon requests across page loads: %s", async (iconUrl) => {
+    const sw = loadSw();
+    sw.fetchMock.mockResolvedValue(opaqueImageResponse());
+
+    const first = { request: imageRequest(iconUrl), respondWith: vi.fn() };
+    await sw.fire("fetch", first);
+    await first.respondWith.mock.calls[0][0];
+
+    const second = { request: imageRequest(iconUrl), respondWith: vi.fn() };
+    await sw.fire("fetch", second);
+    await second.respondWith.mock.calls[0][0];
+
+    expect(sw.fetchMock).toHaveBeenCalledTimes(1);
+    expect(sw.iconStore.entries.has(iconUrl)).toBe(true);
+  });
+
+  it("leaves arbitrary remote images outside the icon cache", async () => {
+    const sw = loadSw();
+    const request = imageRequest("https://media.example.test/private-photo.png");
+    const event = { request, respondWith: vi.fn() };
+
+    await sw.fire("fetch", event);
+
+    expect(event.respondWith).not.toHaveBeenCalled();
+    expect(sw.fetchMock).not.toHaveBeenCalled();
+    expect(sw.iconStore.entries.size).toBe(0);
+  });
+
+  it("bounds the public icon cache and keeps the newest entry", async () => {
+    const sw = loadSw();
+    const oldestUrl = "https://www.google.com/s2/favicons?domain=oldest.test&sz=64";
+    await sw.iconStore.put(oldestUrl, opaqueImageResponse("oldest"));
+    for (let index = 1; index < ICON_CACHE_LIMIT; index += 1) {
+      await sw.iconStore.put(
+        `https://www.google.com/s2/favicons?domain=icon-${index}.test&sz=64`,
+        opaqueImageResponse(String(index)),
+      );
+    }
+    const newestUrl = "https://icons.duckduckgo.com/ip3/newest.test.ico";
+    sw.fetchMock.mockResolvedValue(opaqueImageResponse("newest"));
+    const event = { request: imageRequest(newestUrl), respondWith: vi.fn() };
+
+    await sw.fire("fetch", event);
+    await event.respondWith.mock.calls[0][0];
+
+    expect(sw.iconStore.entries.size).toBe(ICON_CACHE_LIMIT);
+    expect(sw.iconStore.entries.has(oldestUrl)).toBe(false);
+    expect(sw.iconStore.entries.has(newestUrl)).toBe(true);
+  });
+
+  it("serves cached static assets without touching the network", async () => {
+    const sw = loadSw();
+    const assetUrl = `${ORIGIN}/assets/index-a1b2c3.js`;
+    await sw.store.put(assetUrl, new Response("cached js"));
+
+    const { event, respondWith } = fetchEvent(assetUrl);
+    await sw.fire("fetch", event);
+
+    const response = (await respondWith.mock.calls[0][0]) as Response;
+    expect(response).toBeDefined();
+    expect(await response.text()).toBe("cached js");
+    expect(sw.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fetches static assets on miss and caches the response, passing the original request", async () => {
+    const sw = loadSw();
+    const assetUrl = `${ORIGIN}/assets/index-x9y8z7.js`;
+    const originalRequest = new Request(assetUrl);
+    sw.fetchMock.mockResolvedValue(new Response("fresh js"));
+
+    const event = { request: originalRequest, respondWith: vi.fn() };
+    await sw.fire("fetch", event);
+
+    const response = (await event.respondWith.mock.calls[0][0]) as Response;
+    expect(await response.text()).toBe("fresh js");
+    // The exact request object is handed to fetch() — credentials mode and
+    // other properties are preserved, never reconstructed.
+    expect(sw.fetchMock).toHaveBeenCalledWith(originalRequest);
+    expect(sw.store.entries.has(assetUrl)).toBe(true);
+  });
+
+  it.each(["private", "no-cache", "no-store"])(
+    "does not cache a %s response even under the static asset prefix",
+    async (cacheControl) => {
+      const sw = loadSw();
+      const tokenUrl = `${ORIGIN}/assets/custom-token`;
+      const originalRequest = new Request(tokenUrl);
+      sw.fetchMock.mockResolvedValue(
+        new Response('{"token":"short-lived"}', {
+          headers: {
+            "Cache-Control": cacheControl,
+            "Content-Type": "application/json",
+          },
+        }),
+      );
+
+      const event = { request: originalRequest, respondWith: vi.fn() };
+      await sw.fire("fetch", event);
+
+      const response = (await event.respondWith.mock.calls[0][0]) as Response;
+      expect(await response.json()).toEqual({ token: "short-lived" });
+      expect(sw.store.entries.has(tokenUrl)).toBe(false);
+    },
+  );
+
+  it("keeps un-hashed brand assets on the network-first path", async () => {
+    const sw = loadSw();
+    const iconUrl = `${ORIGIN}/brand/nanobot_icon_192.png`;
+    const originalRequest = new Request(iconUrl);
+    sw.fetchMock.mockResolvedValue(new Response("png bytes"));
+
+    const event = { request: originalRequest, respondWith: vi.fn() };
+    await sw.fire("fetch", event);
+
+    const response = (await event.respondWith.mock.calls[0][0]) as Response;
+    expect(await response.text()).toBe("png bytes");
+    // Unlike hashed /assets/ files, brand icons are fetched every load so a
+    // future icon swap reaches installed clients.
+    expect(sw.fetchMock).toHaveBeenCalledWith(originalRequest);
+    expect(sw.store.entries.has(iconUrl)).toBe(true);
+  });
+
+  it("clones network responses before yielding their body to the browser", async () => {
+    const sw = loadSw();
+    const request = new Request(`${ORIGIN}/brand/nanobot_icon_192.png`);
+    let browserOwnsBody = false;
+    let clonedBeforeBrowser = false;
+    const response = {
+      ok: true,
+      clone: vi.fn(() => {
+        clonedBeforeBrowser = !browserOwnsBody;
+        return new Response("cached png bytes");
+      }),
+    } as unknown as Response;
+    sw.fetchMock.mockResolvedValue(response);
+    const respondWith = vi.fn((pending: Promise<Response>) => {
+      void pending.then(() => {
+        browserOwnsBody = true;
+      });
+    });
+
+    await sw.fire("fetch", { request, respondWith });
+
+    expect(clonedBeforeBrowser).toBe(true);
+    expect(response.clone).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves navigation network-first, prunes on shell refresh, and falls back when offline", async () => {
+    const sw = loadSw();
+    await sw.store.put(`${ORIGIN}/`, indexHtml(["/assets/index-v2.js"]));
+    await sw.store.put(`${ORIGIN}/assets/index-v2.js`, new Response("v2"));
+    await sw.store.put(`${ORIGIN}/assets/index-v1.js`, new Response("v1"));
+
+    sw.fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    const offlineEvent = {
+      request: new Request(`${ORIGIN}/`),
+      respondWith: vi.fn(),
+    };
+    await sw.fire("fetch", offlineEvent);
+    const offlineResponse = (await offlineEvent.respondWith.mock.calls[0][0]) as Response;
+    expect(await offlineResponse.text()).toContain("assets/index-v2.js");
+
+    const freshShell = indexHtml(["/assets/index-v3.js"]);
+    sw.fetchMock.mockImplementation((input: Request | string) => {
+      const url = new URL(typeof input === "string" ? input : input.url, ORIGIN);
+      if (url.pathname === "/asset-manifest.json") {
+        return Promise.resolve(new Response(JSON.stringify({
+          "src/main.tsx": { file: "assets/index-v3.js" },
+        })));
+      }
+      return Promise.resolve(freshShell.clone());
+    });
+    const onlineEvent = {
+      request: new Request(`${ORIGIN}/`),
+      respondWith: vi.fn(),
+    };
+    await sw.fire("fetch", onlineEvent);
+    const onlineResponse = (await onlineEvent.respondWith.mock.calls[0][0]) as Response;
+    expect(await onlineResponse.text()).toContain("assets/index-v3.js");
+    // The prune is fire-and-forget; give its microtasks a chance to settle.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/assets/index-v1.js`)).toBe(false);
+    expect(sw.store.entries.has(`${ORIGIN}/assets/index-v2.js`)).toBe(false);
+  });
+
+  it("serves the cached app shell for offline deep-link navigations", async () => {
+    const sw = loadSw();
+    await sw.store.put(`${ORIGIN}/`, indexHtml(["/assets/index-v2.js"]));
+    sw.fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    // happy-dom's Request ignores `mode: "navigate"` in the constructor;
+    // force it so the service worker treats this as a navigation.
+    const request = new Request(`${ORIGIN}/settings`);
+    Object.defineProperty(request, "mode", { value: "navigate" });
+    const event = { request, respondWith: vi.fn() };
+    await sw.fire("fetch", event);
+
+    const response = (await event.respondWith.mock.calls[0][0]) as Response;
+    expect(await response.text()).toContain("assets/index-v2.js");
+  });
+});

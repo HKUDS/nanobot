@@ -1,0 +1,21 @@
+import type { ChannelUiContribution } from "@/channel-plugins/types";
+import { chatAppGuideUrl } from "@/channel-plugins/catalog";
+
+export default {
+  presentation: {
+    logoUrl: "/brand/channels/telegram.svg",
+    displayName: "Telegram",
+    initials: "TG",
+    color: "#229ED9",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("telegram"),
+      fields: [
+        { key: "channels.telegram.token", section: "credentials" },
+        { key: "channels.telegram.useProxy", section: "connection", control: "switch" },
+        { key: "channels.telegram.allowFrom", section: "access" },
+        { key: "channels.telegram.groupPolicy", section: "behavior" },
+      ],
+    },
+  },
+} satisfies ChannelUiContribution;

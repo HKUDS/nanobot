@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan Signal",
+    "officialLabel": "Buka panduan signal-cli",
+    "fields": {
+      "phoneNumber": {
+        "label": "Nomor telepon",
+        "placeholder": "+1234567890"
+      },
+      "daemonHost": {
+        "label": "Host daemon",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "Port daemon",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "Pengguna DM diizinkan",
+        "placeholder": "Nomor telepon atau UUID"
+      },
+      "group_allowFrom": {
+        "label": "Grup diizinkan",
+        "placeholder": "ID grup"
+      },
+      "groupMessageBufferSize": {
+        "label": "Pesan konteks"
+      },
+      "attachmentsDir": {
+        "label": "Direktori lampiran"
+      },
+      "dm_enabled": {
+        "label": "Aktifkan pesan langsung",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "dm_policy": {
+        "label": "Akses pesan langsung",
+        "choices": {
+          "allowlist": "Daftar yang diizinkan",
+          "open": "Buka"
+        }
+      },
+      "group_enabled": {
+        "label": "Aktifkan grup",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "group_policy": {
+        "label": "Akses grup",
+        "choices": {
+          "allowlist": "Daftar yang diizinkan",
+          "open": "Buka"
+        }
+      },
+      "group_requireMention": {
+        "label": "Wajib mention di grup",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      }
+    }
+  }
+}

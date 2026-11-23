@@ -1,0 +1,44 @@
+{
+  "setup": {
+    "docsLabel": "DingTalk 設定ガイドを開く",
+    "officialLabel": "DingTalk コンソールを開く",
+    "fields": {
+      "clientId": {
+        "label": "Client ID",
+        "placeholder": "DingTalk Client ID"
+      },
+      "clientSecret": {
+        "label": "Client Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "許可ユーザー",
+        "placeholder": "ユーザー ID（カンマ区切り）"
+      },
+      "allowRemoteMediaRedirects": {
+        "label": "メディア転送",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "remoteMediaRedirectAllowedHosts": {
+        "label": "転送先ホスト"
+      },
+      "groupUserIsolation": {
+        "label": "メンバー別セッション",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "disablePrivateChat": {
+        "label": "ダイレクトメッセージを無効にする",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      }
+    }
+  }
+}

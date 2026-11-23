@@ -1,0 +1,117 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Protocol, cast
+
+from loguru import logger as default_logger
+
+from nanobot.agent.subagent import SubagentControlError
+from nanobot.providers.base import LLMUsage
+from nanobot.session.model_selection import SessionModelPreset
+from nanobot.session.recovery import recovery_state_from_metadata
+from nanobot.session.state import SessionState
+from nanobot.session.webui_turns import latest_live_websocket_turn
+from nanobot.webui.goal_state import goal_state_ws_blob
+
+if TYPE_CHECKING:
+    from nanobot.agent.subagent import SubagentManager
+
+
+class SessionMetadataReader(Protocol):
+    """Narrow persisted-session dependency used by WebUI projections."""
+
+    @property
+    def state(self) -> SessionState: ...
+
+
+class WebUISessionProjection:
+    """Project session metadata and owned child observations for WebUI clients."""
+
+    def __init__(
+        self,
+        sessions: SessionMetadataReader | None,
+        *,
+        subagent_manager: SubagentManager | None = None,
+        log: Any = default_logger,
+    ) -> None:
+        self._sessions = sessions
+        self._subagents = subagent_manager
+        self._log = log
+
+    def subagent_task(self, session_key: str, task_id: str) -> dict[str, object] | None:
+        """Read the current public snapshot only while the parent still owns it."""
+        if self._subagents is None:
+            return None
+        try:
+            return self._subagents.check(task_id, session_key).as_dict()
+        except SubagentControlError:
+            return None
+
+    async def attach_fields(self, session_key: str) -> dict[str, Any]:
+        """Return the session runtime facts sent with an attach handshake."""
+        if self._sessions is None:
+            return {}
+        snapshot = await self._sessions.state.read_metadata(session_key)
+        raw_metadata = snapshot.get("metadata") if snapshot is not None else None
+        metadata = cast(dict[str, object], raw_metadata) if isinstance(raw_metadata, dict) else None
+
+        try:
+            selection = SessionModelPreset.from_metadata(metadata)
+        except ValueError:
+            self._log.warning("ignoring invalid model preset metadata for session_key={}", session_key)
+            selection = SessionModelPreset()
+        fields: dict[str, Any] = {
+            "model_preset": selection.base_preset,
+            "model_options": selection.overrides.to_dict(),
+        }
+        if metadata is None:
+            return fields
+
+        recovery_state = recovery_state_from_metadata(metadata)
+        if recovery_state is not None:
+            fields["recovery_state"] = recovery_state
+        usage = LLMUsage.from_dict(metadata.get("_last_usage"))
+        if usage is not None:
+            fields["usage"] = usage.to_turn_dict()
+        return fields
+
+    async def hydration_events(self, session_key: str, chat_id: str) -> tuple[dict[str, Any], ...]:
+        """Return reconnect events for durable and same-process session state."""
+        events: list[dict[str, Any]] = []
+        goal_state = await self.persisted_goal_state(session_key)
+        if goal_state is not None:
+            events.append(
+                {
+                    "event": "goal_state",
+                    "chat_id": chat_id,
+                    "goal_state": goal_state,
+                }
+            )
+        active_turn = self.active_turn_status(chat_id)
+        if active_turn is not None:
+            started_at, turn_id = active_turn
+            event: dict[str, Any] = {
+                "event": "goal_status",
+                "chat_id": chat_id,
+                "status": "running",
+                "started_at": started_at,
+            }
+            if turn_id is not None:
+                event["turn_id"] = turn_id
+            events.append(event)
+        return tuple(events)
+
+    async def persisted_goal_state(self, session_key: str) -> dict[str, Any] | None:
+        """Return the persisted goal snapshot, including an inactive state on reconnect."""
+        if self._sessions is None:
+            return None
+        snapshot = await self._sessions.state.read_metadata(session_key)
+        if snapshot is None:
+            return None
+        raw_metadata = snapshot.get("metadata")
+        metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
+        return goal_state_ws_blob(metadata)
+
+    @staticmethod
+    def active_turn_status(chat_id: str) -> tuple[float, str | None] | None:
+        """Return same-process running-turn state for reconnect hydration."""
+        return latest_live_websocket_turn(chat_id)

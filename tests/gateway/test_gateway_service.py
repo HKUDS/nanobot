@@ -38,6 +38,8 @@ def test_systemd_install_dry_run_renders_user_unit(tmp_path):
     assert 'WorkingDirectory="/tmp/nanobot workspace"' in result.content
     assert 'ExecStart=/venv/bin/python -m nanobot gateway --foreground --port 18790 --verbose' in result.content
     assert '--workspace "/tmp/nanobot workspace" --config /tmp/nanobot/config.json' in result.content
+    assert 'Restart=on-failure' in result.content
+    assert 'SuccessExitStatus=SIGTERM' in result.content
 
 
 def test_systemd_install_writes_unit_and_runs_commands(tmp_path):

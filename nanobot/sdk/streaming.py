@@ -1,5 +1,3 @@
-"""Streaming support for the high-level Python SDK."""
-
 from __future__ import annotations
 
 import asyncio
@@ -59,6 +57,8 @@ class RunStream:
                 if item is _STREAM_SENTINEL:
                     self._events_done = True
                     break
+                if not isinstance(item, StreamEvent):
+                    raise TypeError("SDK event queue contained an invalid item")
                 yield item
         finally:
             self._stream_active = False
@@ -156,15 +156,11 @@ class SDKStreamEmitter:
             resuming=resuming,
         ))
 
-    def close(self) -> None:
+    async def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        if self._queue.full():
-            with suppress(asyncio.QueueEmpty):
-                self._queue.get_nowait()
-        with suppress(asyncio.QueueFull):
-            self._queue.put_nowait(_STREAM_SENTINEL)
+        await self._queue.put(_STREAM_SENTINEL)
 
 
 class SDKStreamingHook(AgentHook):

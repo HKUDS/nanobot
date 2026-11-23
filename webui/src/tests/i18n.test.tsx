@@ -1,26 +1,39 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { Window } from "happy-dom";
+import { renderToStaticMarkup } from "react-dom/server";
+
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { StartupSkeleton } from "@/components/StartupSkeleton";
+import { MessageBubble } from "@/components/MessageBubble";
+import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import { resources } from "@/i18n";
-import { LOCALE_STORAGE_KEY, resolveInitialLocale } from "@/i18n/config";
+import { resources, setAppLanguage } from "@/i18n";
+import {
+  LOCALE_STORAGE_KEY,
+  resolveInitialLocale,
+  supportedLocales,
+} from "@/i18n/config";
 
 const QUICK_ACTION_KEYS = ["plan", "analyze", "brainstorm", "code", "summarize", "more"];
 const IMAGE_QUICK_ACTION_KEYS = ["icon", "sticker", "poster", "product", "portrait", "edit"];
-const HERO_GREETING_KEYS = ["workOn", "start", "build", "tackle"];
 const SLASH_COMMAND_KEYS = [
   "new",
+  "compact",
   "stop",
   "restart",
   "status",
   "model",
-  "history",
   "dream",
   "dream_log",
   "dream_restore",
+  "dream_prompt",
   "goal",
+  "trigger",
   "help",
   "pairing",
 ];
@@ -36,6 +49,7 @@ const SETTINGS_NAV_KEYS = [
   "advanced",
 ];
 const LOCALIZED_SETTINGS_COPY_KEYS = [
+  "settings.providers.maskedSecretMissing",
   "settings.backToChat",
   "settings.sidebar.title",
   "settings.sidebar.ariaLabel",
@@ -62,30 +76,141 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.sections.webuiSafety",
   "settings.sections.capabilities",
   "settings.sections.apps",
+  "settings.apps.description",
+  "settings.apps.restartRequired",
+  "settings.mcp.connectingAccount",
+  "settings.mcp.continueSignIn",
+  "settings.mcp.preparingSignIn",
+  "settings.mcp.openSignInToContinue",
+  "settings.mcp.finishSignInInBrowser",
+  "settings.mcp.finishingConnection",
+  "settings.mcp.activatingTools",
+  "settings.mcp.connected",
+  "settings.mcp.connectionFailed",
+  "settings.mcp.connectionCancelled",
+  "settings.mcp.reloadFailed",
+  "settings.mcp.oauthFailed",
+  "settings.skills.views",
+  "settings.skills.installedTab",
+  "settings.skills.discoverTab",
+  "settings.skills.customGroup",
+  "settings.skills.builtinGroup",
+  "settings.skills.otherGroup",
+  "settings.skills.searchInstalled",
+  "settings.skills.filterAll",
+  "settings.skills.filterEnabled",
+  "settings.skills.filterDisabled",
+  "settings.skills.noMatching",
+  "settings.skills.statusDisabled",
+  "settings.skills.statusEnabled",
+  "settings.skills.statusNeedsSetup",
+  "settings.skills.showLess",
+  "settings.skills.showMore",
+  "settings.skills.enabledControl",
+  "settings.skills.enabledDescription",
+  "settings.skills.enableSkill",
+  "settings.skills.disableSkill",
+  "settings.skills.updateFailed",
+  "settings.skills.deleteTitle",
+  "settings.skills.deleteDescription",
+  "settings.skills.deleteAction",
+  "settings.skills.deleteFailed",
+  "settings.skills.deleteConfirmTitle",
+  "settings.skills.deleteConfirmDescription",
+  "settings.skills.deleteConfirmAction",
+  "settings.skills.instructionsTitle",
+  "settings.skills.setupRequired",
+  "settings.skills.setupDescription",
+  "settings.skills.copySetupCommand",
+  "settings.skills.checkAgain",
+  "settings.skills.marketplaceSearchFailed",
+  "settings.skills.marketplaceInstallFailed",
+  "settings.skills.marketplaceSearchPlaceholder",
+  "settings.skills.marketplaceSearching",
+  "settings.skills.marketplaceProviderFilter",
+  "settings.skills.marketplaceProviderAll",
+  "settings.skills.marketplaceTrendingTitle",
+  "settings.skills.marketplaceTrendingDescription",
+  "settings.skills.marketplaceViewAll",
+  "settings.skills.marketplaceTrendingUnavailable",
+  "settings.skills.marketplaceEmpty",
+  "settings.skills.marketplaceConfirmTitle",
+  "settings.skills.marketplaceConfirmDescription",
+  "settings.skills.marketplaceConfirmInstall",
+  "settings.skills.marketplaceOpen",
+  "settings.skills.marketplaceOpenProvider",
+  "settings.skills.marketplaceInstalls24h",
+  "settings.skills.marketplaceInstalls",
+  "settings.skills.marketplaceNpxRequired",
+  "settings.skills.marketplaceInstalling",
+  "settings.skills.marketplaceInstalled",
+  "settings.skills.marketplaceInstall",
+  "settings.skills.marketplaceNoTrend",
+  "settings.skills.marketplaceTrendLabel",
+  "settings.nanobotFeatures.disable",
+  "settings.nanobotFeatures.ready",
+  "settings.nanobotFeatures.missingDependency",
+  "settings.nanobotFeatures.installConfirmTitle",
+  "settings.nanobotFeatures.installConfirmDescription",
+  "settings.nanobotFeatures.installConfirmAction",
+  "settings.nanobotFeatures.channelDisabled",
+  "settings.nanobotFeatures.notEnabled",
   "settings.sections.about",
   "settings.rows.theme",
   "settings.rows.language",
-  "settings.rows.density",
   "settings.rows.activityMode",
+  "settings.rows.fileEditDisplay",
   "settings.rows.codeWrap",
   "settings.rows.brandLogos",
+  "settings.rows.browserNotifications",
+  "settings.rows.notificationSound",
   "settings.rows.currentModel",
   "settings.rows.localServiceAccess",
   "settings.rows.webuiDefaultAccess",
   "settings.rows.contextWindow",
   "settings.help.theme",
   "settings.help.language",
-  "settings.help.density",
   "settings.help.activityMode",
+  "settings.help.fileEditDisplay",
   "settings.help.codeWrap",
   "settings.help.brandLogos",
+  "settings.help.browserNotifications",
+  "settings.nav.notifications",
+  "settings.notifications.scope",
+  "settings.notifications.intro",
+  "settings.notifications.pageRequired",
+  "settings.notifications.revoked",
+  "settings.notifications.retry",
+  "settings.notifications.statusOff",
+  "settings.notifications.statusPermission",
+  "settings.notifications.statusOn",
+  "settings.notifications.statusBlocked",
+  "settings.notifications.statusRevoked",
+  "settings.notifications.statusUnavailable",
+  "settings.notifications.statusWorker",
+  "settings.notifications.statusBusy",
+  "settings.notifications.statusError",
+  "settings.notifications.test",
+  "settings.notifications.testBody",
+  "settings.notifications.waiting",
+  "settings.notifications.insecure",
+  "settings.notifications.unsupported",
+  "settings.notifications.denied",
+  "settings.notifications.dismissed",
+  "settings.notifications.permissionFailed",
+  "settings.notifications.workerUnavailable",
+  "settings.notifications.displayFailed",
+  "settings.notifications.submitted",
+  "settings.notifications.completed",
+  "settings.notifications.failed",
+  "settings.notifications.interrupted",
+  "settings.help.notificationSound",
   "settings.help.currentModel",
   "settings.help.localServiceAccess",
   "settings.help.webuiDefaultAccess",
   "settings.values.light",
   "settings.values.dark",
-  "settings.values.comfortable",
-  "settings.values.compact",
+  "settings.values.collapsed",
   "settings.values.expanded",
   "settings.values.enabled",
   "settings.values.disabled",
@@ -103,6 +228,167 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.about.upToDate",
   "settings.about.updateAvailable",
 ];
+const LOCALIZED_WORKSPACE_COPY_KEYS = [
+  "thread.composer.workspace.accessAria",
+  "thread.composer.workspace.default",
+  "thread.composer.workspace.full",
+  "errors.workspaceScopeRejected.title",
+  "errors.workspaceScopeRejected.body",
+];
+const LOCALIZED_CHANNEL_SHELL_KEYS = [
+  "settings.channels.advanced",
+  "settings.channels.checkAndEnable",
+  "settings.channels.checkConnection",
+  "settings.channels.checkedAndEnabled",
+  "settings.channels.checking",
+  "settings.channels.checkOnly",
+  "settings.channels.commandCopied",
+  "settings.channels.commandCopyFailed",
+  "settings.channels.configuredInstances",
+  "settings.channels.connectPreview",
+  "settings.channels.copyCommand",
+  "settings.channels.enabledOnly",
+  "settings.channels.filterOff",
+  "settings.channels.filterOn",
+  "settings.channels.helperCopied",
+  "settings.channels.helperCopyFailed",
+  "settings.channels.hideSecret",
+  "settings.channels.instanceConfigured",
+  "settings.channels.instanceNeedsSetup",
+  "settings.channels.managedByWebui",
+  "settings.channels.optional",
+  "settings.channels.providerPreset",
+  "settings.channels.requiredSetup",
+  "settings.channels.savedSecret",
+  "settings.channels.savedSecretPlaceholder",
+  "settings.channels.savedSettings",
+  "settings.channels.saveSettings",
+  "settings.channels.selectChannel",
+  "settings.channels.showSecret",
+  "settings.channels.toggleChannel",
+  "settings.channels.toggleInstance",
+  "settings.channels.validation.connected",
+  "settings.channels.validation.configured",
+  "settings.channels.validation.invalid",
+  "settings.channels.validation.needs_setup",
+  "settings.channels.validation.unsupported",
+  "settings.channels.validationFailed",
+];
+const LOCALIZED_NEW_SURFACE_KEYS = [
+  "chat.activity.running",
+  "chat.activity.complete",
+  "chat.activity.updated",
+  "chat.activity.recovery",
+  "chat.pin",
+  "chat.unpin",
+  "chat.rename",
+  "chat.renameProjectTitle",
+  "chat.renameProjectDescription",
+  "chat.renameProjectPlaceholder",
+  "chat.renameSave",
+  "chat.archive",
+  "chat.unarchive",
+  "chat.showArchived",
+  "chat.hideArchived",
+  "chat.groups.pinned",
+  "chat.groups.projects",
+  "chat.groups.today",
+  "chat.groups.yesterday",
+  "chat.groups.earlier",
+  "chat.groups.archived",
+  "workbench.tabAria",
+  "workbench.panesInTab",
+  "workbench.collapseTabGroup",
+  "workbench.expandTabGroup",
+  "workbench.dropPane",
+  "workbench.createGroup",
+  "workbench.moveTo",
+  "workbench.renameGroupTitle",
+  "workbench.renameGroupDescription",
+  "workbench.renameGroupPlaceholder",
+  "workbench.dissolveTab",
+  "workbench.deleteConversations",
+  "workbench.paneLimit",
+  "workbench.paneActions",
+  "workbench.detachPane",
+  "workbench.composerAria",
+  "thread.promptNavigator.railAria",
+  "thread.composer.mentions.cliTitle",
+  "thread.composer.mentions.mcpTitle",
+  "message.openLink",
+  "message.openAttachment",
+  "message.skill",
+  "settings.channels.connectionChecks",
+  "settings.channels.open",
+  "recovery.actionFailed",
+  "recovery.interrupted",
+  "recovery.completed",
+  "recovery.failed",
+  "recovery.failedHelp",
+  "recovery.resuming",
+  "recovery.review",
+  "recovery.safeResume",
+  "recovery.dismiss",
+  "recovery.continue",
+];
+const ACCIDENTALLY_SPANISH_SETTINGS_KEYS = [
+  "settings.help.provider",
+  "settings.help.configPath",
+  "settings.help.selectedPreset",
+  "settings.help.maxResults",
+  "settings.help.timeout",
+  "settings.help.jinaReader",
+  "settings.help.imageGeneration",
+  "settings.help.imageProvider",
+  "settings.help.imageProviderStatus",
+  "settings.help.imageModel",
+  "settings.help.defaultAspectRatio",
+  "settings.help.timezone",
+  "settings.help.securityManagedControls",
+  "settings.help.selectedModelProvider",
+  "settings.help.selectedModelValue",
+  "settings.help.cliAppsCatalog",
+  "settings.help.cliAppsFilter",
+  "settings.help.logs",
+  "settings.help.diagnostics",
+  "settings.help.localServiceAccessNative",
+  "settings.help.webuiDefaultAccessNative",
+  "settings.status.savedRestart",
+  "settings.status.restartAfterSaving",
+  "settings.status.savedRestartApply",
+  "settings.status.imageProviderRestart",
+  "settings.status.hostRestartAfterSaving",
+  "settings.status.hostRestartPending",
+  "settings.status.hostApiUnavailable",
+  "settings.status.logsOpened",
+  "settings.status.logsOpenFailed",
+  "settings.status.diagnosticsExported",
+  "settings.status.diagnosticsExportFailed",
+  "settings.image.missingCredential",
+  "settings.oauth.signInHelp",
+];
+const INDEX_HTML = readFileSync(resolve(process.cwd(), "index.html"), "utf8")
+  .replace("<!--startup-shell-->", renderToStaticMarkup(<StartupSkeleton />));
+async function runPrebootLocale(storedLocale: string) {
+  const preboot = new Window({
+    url: "http://preboot.test",
+    settings: { disableJavaScriptFileLoading: true, disableCSSFileLoading: true },
+  });
+  try {
+    preboot.localStorage.setItem(LOCALE_STORAGE_KEY, storedLocale);
+    // Parse the shipped document and execute inline scripts in parser order.
+    // External/module loading stays disabled: React must not repair the splash.
+    preboot.document.write(INDEX_HTML);
+    return {
+      lang: preboot.document.documentElement.lang,
+      boot: preboot.document.querySelector('[role="status"]')?.textContent.trim(),
+      description: preboot.document.querySelector('meta[name="description"]')?.getAttribute("content"),
+    };
+  } finally {
+    await preboot.happyDOM.close();
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -131,12 +417,102 @@ function interpolationKeys(value: unknown): string[] {
 }
 
 describe("webui i18n", () => {
-  it("defaults to English until the user chooses another language", () => {
-    localStorage.removeItem(LOCALE_STORAGE_KEY);
-    expect(resolveInitialLocale()).toBe("en");
+  it.each(supportedLocales)("localizes compaction states in $code", async ({ code }) => {
+    await setAppLanguage(code);
+    const copy = resources[code].common.thread.compaction;
+    const { container, rerender } = render(
+      <ContextCompactionNotice compaction={{ id: "compact-1", phase: "started", announce: true }} />,
+    );
+    for (const phase of ["started", "succeeded", "failed", "cancelled"] as const) {
+      rerender(<ContextCompactionNotice compaction={{
+        id: "compact-1", phase, announce: true,
+      }} />);
+      const notice = container.querySelector("[data-context-compaction]");
+      expect(copy[phase]).toBeTruthy();
+      expect(notice?.textContent).toBe(copy[phase]);
+      expect(notice).toHaveAttribute("aria-busy", String(phase === "started"));
+    }
+    for (const reason of ["idle", "context_pressure", "manual", "provider_native"] as const) {
+      for (const phase of ["started", "succeeded", "failed", "cancelled"] as const) {
+        rerender(<ContextCompactionNotice compaction={{ id: "compact-1", reason, phase, announce: true }} />);
+        const notice = container.querySelector("[data-context-compaction]");
+        expect(copy.reasons[reason][phase]).toBeTruthy();
+        expect(notice?.textContent).toBe(copy.reasons[reason][phase]);
+        expect(notice).toHaveAttribute("aria-busy", String(phase === "started"));
+      }
+    }
+    for (const compactReply of ["empty", "failed"] as const) {
+      rerender(<MessageBubble message={{
+        id: "reply", role: "assistant", content: "original command reply",
+        compactReply, createdAt: 1,
+      }} />);
+      expect(screen.getByText(copy[compactReply])).toBeInTheDocument();
+    }
+  });
 
-    localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
-    expect(resolveInitialLocale()).toBe("zh-CN");
+  it("localizes the parsed splash in document order for every registered locale", async () => {
+    for (const { code } of supportedLocales) {
+      const result = await runPrebootLocale(code);
+      const expected = resources[code].common.app;
+
+      expect({ code, ...result }).toEqual({
+        code,
+        lang: code,
+        boot: expected.loading.boot,
+        description: expected.meta.description,
+      });
+    }
+  });
+
+  it("normalizes Portuguese locales before the app bundle loads", async () => {
+    const expected = resources["pt-BR"].common.app;
+
+    for (const locale of ["pt", "pt-PT"]) {
+      expect(await runPrebootLocale(locale)).toEqual({
+        lang: "pt-BR",
+        boot: expected.loading.boot,
+        description: expected.meta.description,
+      });
+    }
+  });
+
+  it("follows the browser until the user chooses another language", () => {
+    localStorage.removeItem(LOCALE_STORAGE_KEY);
+    vi.stubGlobal("navigator", { languages: ["zh-CN"], language: "zh-CN" });
+    try {
+      expect(resolveInitialLocale()).toBe("zh-CN");
+      localStorage.setItem(LOCALE_STORAGE_KEY, "fr");
+      expect(resolveInitialLocale()).toBe("fr");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("falls back to English for an unsupported browser language", () => {
+    localStorage.removeItem(LOCALE_STORAGE_KEY);
+    vi.stubGlobal("navigator", { languages: ["de-DE"], language: "de-DE" });
+    try {
+      expect(resolveInitialLocale()).toBe("en");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("persists an explicit selection even when it matches the current language", async () => {
+    localStorage.removeItem(LOCALE_STORAGE_KEY);
+    await setAppLanguage("en");
+    expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("en");
+  });
+
+  it("lists each language by its native name", async () => {
+    const user = userEvent.setup();
+
+    render(<LanguageSwitcher />);
+    await user.click(screen.getByRole("combobox", { name: "Change language" }));
+
+    for (const { nativeLabel } of supportedLocales) {
+      expect(screen.getByRole("option", { name: nativeLabel })).toBeInTheDocument();
+    }
   });
 
   it("switches UI copy and document locale through the language switcher", async () => {
@@ -150,18 +526,18 @@ describe("webui i18n", () => {
     );
 
     expect(
-      screen.getByPlaceholderText("Type your message…"),
+      screen.getByPlaceholderText("Type / for commands, @ for chats or apps, $ for skills"),
     ).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("en");
 
-    await user.click(screen.getByRole("button", { name: "Change language" }));
-    await user.click(screen.getByRole("menuitemradio", { name: /简体中文/i }));
+    await user.click(screen.getByRole("combobox", { name: "Change language" }));
+    await user.click(screen.getByRole("option", { name: /简体中文/i }));
 
     await waitFor(() => {
       expect(document.documentElement.lang).toBe("zh-CN");
     });
     expect(localStorage.getItem("nanobot.locale")).toBe("zh-CN");
-    expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("输入 / 查看命令，@ 引用会话或应用，$ 选择技能")).toBeInTheDocument();
   });
 
   it("updates the composer aria label when the language changes", async () => {
@@ -175,12 +551,40 @@ describe("webui i18n", () => {
     expect(screen.getByLabelText("メッセージ入力欄")).toBeInTheDocument();
   });
 
+  it("localizes a backend-provided compact slash command", async () => {
+    await act(async () => {
+      const { setAppLanguage } = await import("@/i18n");
+      await setAppLanguage("zh-CN");
+    });
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        slashCommands={[{
+          command: "/compact",
+          title: "Compact context",
+          description: "Compact this chat's context and continue the conversation.",
+          icon: "archive",
+          lifecycle: "side_channel",
+          acceptsArgs: false,
+        }]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("消息输入框"), {
+      target: { value: "/co" },
+    });
+
+    expect(screen.getByRole("listbox", { name: "斜杠命令" })).toBeInTheDocument();
+    const option = screen.getByRole("option", { name: /\/compact/ });
+    expect(option).toHaveTextContent("/compact");
+    expect(option).toHaveTextContent("压缩上下文");
+    expect(option).toHaveTextContent("压缩上下文后继续对话");
+  });
+
   it("keeps empty landing resources localized for every registered locale", () => {
     for (const resource of Object.values(resources)) {
       const empty = resource.common.thread.empty;
-      for (const key of HERO_GREETING_KEYS) {
-        expect(empty.greetings[key as keyof typeof empty.greetings]).toBeTruthy();
-      }
       for (const key of QUICK_ACTION_KEYS) {
         const action = empty.quickActions[key as keyof typeof empty.quickActions];
         expect(action.title).toBeTruthy();
@@ -224,7 +628,6 @@ describe("webui i18n", () => {
       expect(slash.badges.recent).toBeTruthy();
       expect(slash.details.goalActive).toBeTruthy();
       expect(slash.details.goalReady).toBeTruthy();
-      expect(slash.details.history).toBeTruthy();
       expect(slash.details.stopRunning).toBeTruthy();
       for (const key of SLASH_COMMAND_KEYS) {
         const command = slash.commands[key as keyof typeof slash.commands];
@@ -269,8 +672,15 @@ describe("webui i18n", () => {
     for (const [locale, resource] of Object.entries(resources)) {
       if (locale === "en") continue;
       const current = flattenResource(resource.common);
-      const leaked = LOCALIZED_SETTINGS_COPY_KEYS.filter(
-        (key) => current.get(key) === english.get(key),
+      const leaked = [
+        ...LOCALIZED_SETTINGS_COPY_KEYS,
+        ...LOCALIZED_WORKSPACE_COPY_KEYS,
+        ...LOCALIZED_CHANNEL_SHELL_KEYS,
+        ...LOCALIZED_NEW_SURFACE_KEYS,
+      ].filter(
+        // “Notifications” is also the native French label.
+        (key) => current.get(key) === english.get(key)
+          && !(locale === "fr" && key === "settings.nav.notifications"),
       );
 
       expect({ locale, leaked }).toEqual({ locale, leaked: [] });
@@ -280,10 +690,54 @@ describe("webui i18n", () => {
   it("keeps Simplified Chinese settings overview copy localized", () => {
     const settings = resources["zh-CN"].common.settings;
 
-    expect(settings.nav.browser).toBe("网页");
-    expect(settings.sections.webSearch).toBe("网页搜索");
-    expect(settings.byok.tabs.webSearch).toBe("网页搜索");
-    expect(settings.overview.webSearch).toBe("网页搜索");
-    expect(settings.overview.workspace).toBe("工作区");
+    expect(settings.nav.browser).toBe("网络");
+    expect(settings.sections.webSearch).toBe("网络搜索");
+    expect(settings.byok.tabs.webSearch).toBe("网络搜索");
+    expect(settings.overview.webSearch).toBe("网络搜索");
+    expect(settings.overview.workspace).toBe("工作目录");
+    expect(settings.skills.installedTab).toBe("已安装");
+    expect(settings.skills.discoverTab).toBe("技能市场");
+    expect(settings.skills.marketplaceProviderFilter).toBe("技能来源");
+    expect(settings.skills.marketplaceProviderAll).toBe("全部");
+    expect(settings.skills.marketplaceSearchPlaceholder).toBe("搜索技能");
+    expect(settings.skills.marketplaceTrendingTitle).toBe("热门技能");
+  });
+
+  it("keeps the Simplified Chinese group workflow localized", () => {
+    const workbench = resources["zh-CN"].common.workbench;
+
+    expect(workbench.tabAria).toBe("分组：{{title}}");
+    expect(workbench.createGroup).toBe("创建分组");
+    expect(workbench.renameGroupTitle).toBe("分组改名");
+    expect(workbench.renameGroupDescription).toBe("为这个分组命名。");
+    expect(workbench.renameGroupPlaceholder).toBe("分组名称");
+    expect(workbench.moveTo).toBe("移动到");
+    expect(workbench.detachPane).toBe("移出");
+  });
+
+  it("keeps Indonesian and Vietnamese settings free of copied Spanish help text", () => {
+    const spanish = flattenResource(resources.es.common);
+
+    for (const locale of ["id", "vi"] as const) {
+      const current = flattenResource(resources[locale].common);
+      const copied = ACCIDENTALLY_SPANISH_SETTINGS_KEYS.filter(
+        (key) => current.get(key) === spanish.get(key),
+      );
+      expect({ locale, copied }).toEqual({ locale, copied: [] });
+    }
+  });
+
+  it("keeps Brazilian Portuguese settings overview copy localized", () => {
+    const settings = resources["pt-BR"].common.settings;
+    const sidebar = resources["pt-BR"].common.sidebar;
+    const chat = resources["pt-BR"].common.chat;
+
+    expect(sidebar.settings).toBe("Configurações");
+    expect(chat.newChat).toBe("Novo tópico");
+    expect(settings.nav.browser).toBe("Web");
+    expect(settings.sections.webSearch).toBe("Busca na web");
+    expect(settings.byok.tabs.webSearch).toBe("Busca na web");
+    expect(settings.overview.webSearch).toBe("Busca na web");
+    expect(settings.overview.workspace).toBe("Diretório de trabalho");
   });
 });

@@ -1,10 +1,7 @@
-"""Tests for LLMProvider._enforce_role_alternation."""
-
-from nanobot.providers.base import LLMProvider, _SYNTHETIC_USER_CONTENT
+from nanobot.providers.base import _SYNTHETIC_USER_CONTENT, LLMProvider
 
 
 class TestEnforceRoleAlternation:
-    """Verify trailing-assistant removal and consecutive same-role merging."""
 
     def test_empty_messages(self):
         assert LLMProvider._enforce_role_alternation([]) == []
@@ -112,14 +109,49 @@ class TestEnforceRoleAlternation:
         assert result[1]["content"] is None
         assert result[2]["role"] == "tool"
 
-    def test_non_string_content_uses_latest(self):
+    def test_consecutive_user_messages_preserve_text_before_multimodal_content(self):
+        image = {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,aW1hZ2U="},
+        }
         msgs = [
-            {"role": "user", "content": [{"type": "text", "text": "A"}]},
-            {"role": "user", "content": "B"},
+            {"role": "user", "content": "Earlier unanswered question"},
+            {
+                "role": "user",
+                "content": [image, {"type": "text", "text": "The error is here"}],
+            },
         ]
         result = LLMProvider._enforce_role_alternation(msgs)
-        assert len(result) == 1
-        assert result[0]["content"] == "B"
+        assert result == [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Earlier unanswered question"},
+                image,
+                {"type": "text", "text": "The error is here"},
+            ],
+        }]
+
+    def test_consecutive_user_messages_preserve_multimodal_content_before_text(self):
+        image = {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,aW1hZ2U="},
+        }
+        msgs = [
+            {
+                "role": "user",
+                "content": [image, {"type": "text", "text": "First question"}],
+            },
+            {"role": "user", "content": "Follow-up detail"},
+        ]
+        result = LLMProvider._enforce_role_alternation(msgs)
+        assert result == [{
+            "role": "user",
+            "content": [
+                image,
+                {"type": "text", "text": "First question"},
+                {"type": "text", "text": "Follow-up detail"},
+            ],
+        }]
 
     def test_original_messages_not_mutated(self):
         msgs = [
@@ -132,12 +164,11 @@ class TestEnforceRoleAlternation:
         assert len(msgs) == 2
 
     def test_trailing_assistant_recovered_as_user_when_only_system_remains(self):
-        """Subagent result injected as assistant message must not be silently dropped.
+        """A trailing assistant message must not be silently dropped.
 
-        When build_messages(current_role="assistant") produces [system, assistant],
-        _enforce_role_alternation would drop the assistant, leaving only [system].
-        Most providers (e.g. Zhipu/GLM error 1214) reject such requests.
-        The trailing assistant should be recovered as a user message instead.
+        An externally supplied [system, assistant] sequence would otherwise leave
+        only [system]. Most providers reject such requests, so the trailing
+        assistant should be recovered as a user message instead.
         """
         msgs = [
             {"role": "system", "content": "You are helpful."},
@@ -150,7 +181,6 @@ class TestEnforceRoleAlternation:
         assert "Subagent completed successfully." in result[1]["content"]
 
     def test_trailing_assistant_not_recovered_when_user_message_present(self):
-        """Recovery should NOT happen when a user message already exists."""
         msgs = [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hi"},
@@ -209,7 +239,6 @@ class TestEnforceRoleAlternation:
         non_system = [m for m in result if m["role"] != "system"]
         assert non_system[0]["role"] == "user"
         assert non_system[0]["content"] == _SYNTHETIC_USER_CONTENT
-        # The original assistant should follow.
         assert non_system[1]["role"] == "assistant"
 
     def test_leading_assistant_with_tool_calls_not_patched(self):
@@ -224,12 +253,10 @@ class TestEnforceRoleAlternation:
         ]
         result = LLMProvider._enforce_role_alternation(msgs)
         non_system = [m for m in result if m["role"] != "system"]
-        # The assistant has tool_calls so it should NOT be patched.
         assert non_system[0]["role"] == "assistant"
         assert non_system[0].get("tool_calls") is not None
 
     def test_user_after_system_not_patched(self):
-        """Normal system→user sequence is not modified."""
         msgs = [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "hello"},

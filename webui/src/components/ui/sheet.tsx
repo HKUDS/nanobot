@@ -2,10 +2,14 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { useTranslation } from "react-i18next";
 
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
+import { modalOverlayClassName, sidePanelSurfaceClassName } from "./floating-surface";
 
 const Sheet = DialogPrimitive.Root;
+const SheetTrigger = DialogPrimitive.Trigger;
 const SheetPortal = DialogPrimitive.Portal;
 
 const SheetOverlay = React.forwardRef<
@@ -15,9 +19,10 @@ const SheetOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-50 bg-black/40 backdrop-blur-sm",
+      "fixed inset-0 z-50 bg-black/40",
       "data-[state=open]:animate-in data-[state=closed]:animate-out",
       "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none",
       className,
     )}
     {...props}
@@ -26,25 +31,27 @@ const SheetOverlay = React.forwardRef<
 SheetOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 const sheetVariants = cva(
-  "fixed z-50 flex flex-col gap-4 bg-background shadow-lg transition ease-in-out",
+  "fixed z-50 flex flex-col gap-4 bg-background outline-none ease-out",
   {
     variants: {
       side: {
         top: cn(
-          "inset-x-0 top-0 border-b",
+          "inset-x-0 top-0",
           "data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
         ),
         bottom: cn(
-          "inset-x-0 bottom-0 border-t",
+          "inset-x-0 bottom-0",
           "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
         ),
         left: cn(
-          "inset-y-0 left-0 h-full w-3/4 border-r sm:max-w-sm",
-          "data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left",
+          "inset-y-2 left-2 w-3/4 max-w-[calc(100vw-1rem)] sm:max-w-sm",
+          sidePanelSurfaceClassName,
+          "data-[state=closed]:slide-out-to-left-4 data-[state=open]:slide-in-from-left-4",
         ),
         right: cn(
-          "inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm",
-          "data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
+          "inset-y-2 right-2 w-3/4 max-w-[calc(100vw-1rem)] sm:max-w-sm",
+          sidePanelSurfaceClassName,
+          "data-[state=closed]:slide-out-to-right-4 data-[state=open]:slide-in-from-right-4",
         ),
       },
     },
@@ -57,35 +64,60 @@ const sheetVariants = cva(
 interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>,
     VariantProps<typeof sheetVariants> {
+  closeButtonClassName?: string;
   showCloseButton?: boolean;
+  overlayClassName?: string;
 }
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, showCloseButton = true, ...props }, ref) => (
-  <SheetPortal>
-    <SheetOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        sheetVariants({ side }),
-        "data-[state=open]:animate-in data-[state=closed]:animate-out",
-        "duration-300",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-      {showCloseButton ? (
-        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
-          <X className="h-4 w-4" />
-          <span className="sr-only">Close</span>
-        </DialogPrimitive.Close>
-      ) : null}
-    </DialogPrimitive.Content>
-  </SheetPortal>
-));
+>((
+  {
+    side = "right",
+    className,
+    children,
+    closeButtonClassName,
+    showCloseButton = true,
+    overlayClassName,
+    ...props
+  },
+  ref,
+) => {
+  const { t } = useTranslation();
+  const surfaceRef = useOverlaySurfaceRef("dialog", ref);
+  return (
+    <SheetPortal>
+      <SheetOverlay className={cn((side === "right" || side === "left") && modalOverlayClassName, overlayClassName)} />
+      <DialogPrimitive.Content
+        ref={surfaceRef}
+        className={cn(
+          sheetVariants({ side }),
+          "data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 duration-200 motion-reduce:transition-none",
+          "motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+        {showCloseButton ? (
+          <DialogPrimitive.Close
+            className={cn(
+              "absolute right-2 top-2 grid size-10 place-items-center rounded-full opacity-70 ring-offset-background transition-opacity",
+              "hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              "disabled:pointer-events-none",
+              closeButtonClassName,
+            )}
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">{t("common.close")}</span>
+          </DialogPrimitive.Close>
+        ) : null}
+      </DialogPrimitive.Content>
+    </SheetPortal>
+  );
+});
 SheetContent.displayName = DialogPrimitive.Content.displayName;
 
 const SheetTitle = React.forwardRef<
@@ -112,4 +144,4 @@ const SheetDescription = React.forwardRef<
 ));
 SheetDescription.displayName = DialogPrimitive.Description.displayName;
 
-export { Sheet, SheetContent, SheetDescription, SheetTitle };
+export { Sheet, SheetTrigger, SheetContent, SheetDescription, SheetTitle };

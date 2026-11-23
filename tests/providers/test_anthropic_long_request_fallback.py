@@ -76,8 +76,6 @@ async def test_chat_falls_back_to_stream_on_long_request_error() -> None:
     assert captured["temperature"] == 0.5
     assert captured["reasoning_effort"] == "high"
     assert captured["tool_choice"] == "auto"
-    # The fallback must NOT pass an on_content_delta — chat() callers don't
-    # expect streaming side-effects.
     assert "on_content_delta" not in captured
 
 
@@ -100,5 +98,4 @@ async def test_chat_does_not_fall_back_on_unrelated_value_error() -> None:
     result = await provider.chat(messages=[{"role": "user", "content": "hi"}])
 
     assert called is False
-    # Generic ValueError flows through _handle_error and surfaces as an error response.
     assert result.finish_reason == "error" or "Error" in (result.content or "")

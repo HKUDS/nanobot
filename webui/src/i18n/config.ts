@@ -1,15 +1,16 @@
 export const LOCALE_STORAGE_KEY = "nanobot.locale";
 
 export const supportedLocales = [
-  { code: "en", label: "English", nativeLabel: "English" },
-  { code: "zh-CN", label: "Chinese (Simplified)", nativeLabel: "简体中文" },
-  { code: "zh-TW", label: "Chinese (Traditional)", nativeLabel: "繁體中文" },
-  { code: "fr", label: "French", nativeLabel: "Français" },
-  { code: "ja", label: "Japanese", nativeLabel: "日本語" },
-  { code: "ko", label: "Korean", nativeLabel: "한국어" },
-  { code: "es", label: "Spanish", nativeLabel: "Español" },
-  { code: "vi", label: "Vietnamese", nativeLabel: "Tiếng Việt" },
-  { code: "id", label: "Indonesian", nativeLabel: "Bahasa Indonesia" },
+  { code: "en", nativeLabel: "English" },
+  { code: "zh-CN", nativeLabel: "简体中文" },
+  { code: "zh-TW", nativeLabel: "繁體中文" },
+  { code: "fr", nativeLabel: "Français" },
+  { code: "ja", nativeLabel: "日本語" },
+  { code: "ko", nativeLabel: "한국어" },
+  { code: "es", nativeLabel: "Español" },
+  { code: "pt-BR", nativeLabel: "Português (Brasil)" },
+  { code: "vi", nativeLabel: "Tiếng Việt" },
+  { code: "id", nativeLabel: "Bahasa Indonesia" },
 ] as const;
 
 export type SupportedLocale = (typeof supportedLocales)[number]["code"];
@@ -39,6 +40,9 @@ export function normalizeLocale(
   ) {
     return "zh-TW";
   }
+  if (lower === "pt" || lower.startsWith("pt-")) {
+    return "pt-BR";
+  }
 
   const base = lower.split("-")[0];
   const baseMatch = supportedLocales.find(
@@ -47,7 +51,7 @@ export function normalizeLocale(
   return baseMatch?.code ?? defaultLocale;
 }
 
-export function readStoredLocale(): SupportedLocale | null {
+function readStoredLocale(): SupportedLocale | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(LOCALE_STORAGE_KEY);
@@ -57,21 +61,10 @@ export function readStoredLocale(): SupportedLocale | null {
   }
 }
 
-export function detectNavigatorLocale(): SupportedLocale {
-  if (typeof navigator === "undefined") return defaultLocale;
-  const candidates = [
-    ...(navigator.languages ?? []),
-    navigator.language,
-  ].filter(Boolean);
-  for (const locale of candidates) {
-    const normalized = normalizeLocale(locale);
-    if (normalized) return normalized;
-  }
-  return defaultLocale;
-}
-
 export function resolveInitialLocale(): SupportedLocale {
-  return readStoredLocale() ?? defaultLocale;
+  return readStoredLocale() ?? normalizeLocale(
+    typeof navigator === "undefined" ? null : navigator.languages?.[0] || navigator.language,
+  );
 }
 
 export function persistLocale(locale: SupportedLocale): void {
@@ -86,8 +79,4 @@ export function persistLocale(locale: SupportedLocale): void {
 export function applyDocumentLocale(locale: SupportedLocale): void {
   if (typeof document === "undefined") return;
   document.documentElement.lang = locale;
-}
-
-export function localeOption(locale: SupportedLocale) {
-  return supportedLocales.find((entry) => entry.code === locale) ?? supportedLocales[0];
 }

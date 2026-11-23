@@ -1,124 +1,54 @@
 # Multiple Instances
 
-Run multiple nanobot instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint. Optionally pass `--workspace` during `onboard` when you want to initialize or update the saved workspace for a specific instance.
+Run separate nanobot instances whenever you want completely independent settings, chat bots, and long-term memory—for example, separating personal and work agents or isolating different clients.
+
+> [!NOTE]
+> Starting a new topic or picking a different project folder inside one instance does **not** separate long-term memory. Use separate instances when data must not mix.
+>
+> Separate instances separate nanobot data, not OS permissions. For mutually untrusted users, run them under separate OS accounts or containers and configure [tool restrictions](./configuration.md#security).
 
 ## Quick Start
 
-If you want each instance to have its own dedicated workspace from the start, pass both `--config` and `--workspace` during onboarding.
-
-**Initialize instances:**
+Pass `--home <directory>` before the subcommand (without it, nanobot uses `~/.nanobot`). Give each running instance its own WebUI and gateway ports:
 
 ```bash
-# Create separate instance configs and workspaces
-nanobot onboard --config ~/.nanobot-telegram/config.json --workspace ~/.nanobot-telegram/workspace
-nanobot onboard --config ~/.nanobot-discord/config.json --workspace ~/.nanobot-discord/workspace
-nanobot onboard --config ~/.nanobot-feishu/config.json --workspace ~/.nanobot-feishu/workspace
+nanobot --home ~/.nanobot-work onboard
+nanobot --home ~/.nanobot-work webui --port 8766 --gateway-port 18791
 ```
 
-**Configure each instance:**
-
-Edit `~/.nanobot-telegram/config.json`, `~/.nanobot-discord/config.json`, etc. with different channel settings. The workspace you passed during `onboard` is saved into each config as that instance's default workspace.
-
-**Run instances:**
+Configure this instance's models in **Settings → Models** and chat apps in **Channels**. Use the same `--home` flag for any other command targeting this instance:
 
 ```bash
-# Instance A - Telegram bot
-nanobot gateway --config ~/.nanobot-telegram/config.json
-
-# Instance B - Discord bot
-nanobot gateway --config ~/.nanobot-discord/config.json
-
-# Instance C - Feishu bot with custom port
-nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
+nanobot --home ~/.nanobot-work status
+nanobot --home ~/.nanobot-work agent
+nanobot --home ~/.nanobot-work gateway --port 18791
 ```
 
-## Path Resolution
+Each concurrent instance needs distinct `--port` (WebUI, default `8765`) and `--gateway-port` (gateway health, default `18790`) values, plus its own chat-bot tokens. You can also save those ports in each instance's `config.json`.
 
-When using `--config`, nanobot derives its runtime data directory from the config file location. The workspace still comes from `agents.defaults.workspace` unless you override it with `--workspace`.
+## Where Each Instance Stores Data
 
-To open a CLI session against one of these instances locally:
+| Data | Location |
+|---|---|
+| Config | `<home>/config.json` (or explicit `--config`) |
+| Workspace (memory, skills, automations) | `<home>/workspace/` by default (or explicit `--workspace`) |
+| Sessions, media, logs, and CLI history | Inside `<home>/` (or the directory of `--config`) |
+
+Verify which paths an instance will use at any time with:
 
 ```bash
-nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello from Telegram instance"
-nanobot agent -c ~/.nanobot-discord/config.json -m "Hello from Discord instance"
-
-# Optional one-off workspace override
-nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
+nanobot --home ~/.nanobot-work status
 ```
 
-> `nanobot agent` starts a local CLI agent using the selected workspace/config. It does not attach to or proxy through an already running `nanobot gateway` process.
-
-| Component | Resolved From | Example |
-|-----------|---------------|---------|
-| **Config** | `--config` path | `~/.nanobot-A/config.json` |
-| **Workspace** | `--workspace` or config | `~/.nanobot-A/workspace/` |
-| **Cron Jobs** | workspace directory | `~/.nanobot-A/workspace/cron/` |
-| **Media / runtime state** | config directory | `~/.nanobot-A/media/` |
-
-## How It Works
-
-- `--config` selects which config file to load
-- By default, the workspace comes from `agents.defaults.workspace` in that config
-- If you pass `--workspace`, it overrides the workspace from the config file
-
-## Minimal Setup
-
-1. Copy your base config into a new instance directory.
-2. Set a different `agents.defaults.workspace` for that instance.
-3. Start the instance with `--config`.
-
-Example config fragment:
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "workspace": "~/.nanobot-telegram/workspace"
-    }
-  },
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_TELEGRAM_BOT_TOKEN"
-    }
-  },
-  "gateway": {
-    "host": "127.0.0.1",
-    "port": 18790
-  }
-}
-```
-
-The copied base config can keep using the same `modelPresets` and `agents.defaults.modelPreset`. If this instance needs a different model, add another preset and set `agents.defaults.modelPreset` to that preset name.
-
-Start separate instances:
+If you prefer custom directories instead of `--home`, pass `--config` and `--workspace` directly:
 
 ```bash
-nanobot gateway --config ~/.nanobot-telegram/config.json
-nanobot gateway --config ~/.nanobot-discord/config.json
+nanobot onboard --config ~/bots/work/config.json --workspace ~/work-agent
+nanobot webui --config ~/bots/work/config.json --port 8766 --gateway-port 18791
 ```
 
-Each gateway instance also exposes a lightweight HTTP health endpoint on `gateway.host:gateway.port`. By default, the gateway binds to `127.0.0.1`, so the endpoint stays local unless you explicitly set `gateway.host` to a public or LAN-facing address.
+Keep each instance's config file in its own directory and outside its workspace so sessions and runtime files stay cleanly separated.
 
-- `GET /health` returns `{"status":"ok"}`
-- Other paths return `404`
+## Health Check
 
-Override workspace for one-off runs when needed:
-
-```bash
-nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobot-telegram-test
-```
-
-## Common Use Cases
-
-- Run separate bots for Telegram, Discord, Feishu, and other platforms
-- Keep testing and production instances isolated
-- Use different models or providers for different teams
-- Serve multiple tenants with separate configs and runtime data
-
-## Notes
-
-- Each instance must use a different port if they run at the same time
-- Use a different workspace per instance if you want isolated memory, sessions, and skills
-- `--workspace` overrides the workspace defined in the config file
-- Cron jobs are stored in the active workspace; runtime media/state is derived from the config directory
+Each gateway exposes `GET /health` on `127.0.0.1:<gateway-port>` (`18790` by default), returning HTTP `200` when the gateway and WebSocket channel are ready (or `503` if WebSocket is enabled but not ready). See [CLI Reference: Gateway](./cli-reference.md#gateway) for service management commands.

@@ -51,7 +51,15 @@ Main files:
 - feeds tool results back into the model;
 - stops when a final answer is produced or runtime limits are hit.
 
+MCP connections are application-owned infrastructure. Composition roots create an `MCPProvider`, share its `ToolRegistry` with `AgentLoop`, await `connect()` before use, and guarantee `aclose()` during shutdown; the loop does not manage that lifecycle. `AgentLoop.from_config()` therefore requires a caller-owned `ToolRegistry`; callers using MCP share it with their application-owned `MCPProvider`.
+
 Keep this split in mind when debugging. If a problem is about channel routing, session keys, workspace selection, or outbound delivery, start in `agent/loop.py`. If it is about provider calls, tool calls, streaming, or iteration limits, start in `agent/runner.py`.
+
+After a terminal tool-iteration limit, the next ordinary turn receives a short runtime-context note to follow the current request and resume unfinished work only when asked. `session/turn_continuation.py` owns this budget-stop context; a queued Goal continuation is not a terminal stop. The note is stored with that input for stable model-history replay but is hidden from display history. Tool calls and results remain intact. New or forked histories do not inherit the pending note. This is model guidance, not a tool-execution ban or a fix for sudo authentication.
+
+## Context Budgets
+
+When file reads make a request exceed the context budget, the runner first summarizes history that the model has already received. If the new file results still do not fit, it replaces only the necessary unread text results with a budget error that asks the model to read a smaller range. It saves that same error for replay; it does not restore the oversized result on the next turn. Source files, accepted history, tool call IDs, and tool schemas stay unchanged. This recovery does not bypass the budget limit or offload `read_file` results to more files.
 
 ## Providers
 
@@ -67,6 +75,10 @@ Provider selection uses:
 
 Provider implementations live in `nanobot/providers/`. Most hosted providers use the OpenAI-compatible implementation, while Anthropic, Azure OpenAI, AWS Bedrock, OpenAI Codex, and GitHub Copilot have specialized paths.
 
+Responses API paths share `nanobot/providers/openai_responses/backend.py`. The backend constructs protocol input, dispatches SDK or HTTP/SSE requests, owns WebSocket sessions, and advances replay and compaction state. SDK, SSE, and WebSocket events use the same parser in `openai_responses/parsing.py`.
+
+Provider adapters supply authentication, endpoint and model rules, supported request fields, hosted tools, and error mapping. Codex enables WebSocket with its beta header; other adapters retain their existing HTTP transports. Protocol compatibility alone does not enable WebSocket or persistent continuation. OpenAI's `extraBody.store` override controls server storage; automatic response-ID continuation currently uses the active WebSocket connection. Full replay state remains local and scoped to the provider endpoint and model.
+
 Useful docs:
 
 - [`providers.md`](./providers.md) for practical setup;
@@ -81,11 +93,11 @@ Main files:
 | Area | Files |
 |---|---|
 | Base channel contract | `nanobot/channels/base.py` |
-| Built-in channels | `nanobot/channels/*.py` |
+| Channel packages | `nanobot/channels/<channel>/` |
 | Discovery and lifecycle | `nanobot/channels/manager.py` |
-| WebSocket/WebUI channel | `nanobot/channels/websocket.py` |
+| WebSocket/WebUI channel | `nanobot/channels/websocket/` |
 
-Channels are discovered through built-in module scanning and plugin entry points. A custom channel should follow [`channel-plugin-guide.md`](./channel-plugin-guide.md).
+Channels are discovered by scanning self-contained packages under `nanobot/channels/`. Add a channel by contributing one package that follows [`channel-package-guide.md`](./channel-package-guide.md).
 
 ## WebUI and Gateway
 
@@ -132,6 +144,8 @@ Important files:
 
 Tool behavior is part of the model contract. Keep user-visible tool names, schemas, and error messages stable unless a change is intentional.
 
+Before tool execution, arguments are validated against JSON Schema without coercion. Numeric strings and serialized nested objects or arrays are rejected when their JSON types do not match the schema; actionable tool errors let the model correct the call. MCP validation uses the server's original input schema, independently of provider-facing adaptations. Validation defaults to draft 2020-12, honors supported explicit dialects, and does not retrieve external references. The original tool-call arguments in history remain unchanged. JSON Schema integers include numbers such as 2.0; built-in tools adapt these validated values to Python integers where an index is required.
+
 ## Config and Paths
 
 The config schema lives in `nanobot/config/schema.py`. Loading and saving live in `nanobot/config/loader.py`. Runtime path helpers live in `nanobot/config/paths.py`.
@@ -142,20 +156,42 @@ Defaults:
 |---|---|
 | Config | `~/.nanobot/config.json` |
 | Workspace | `~/.nanobot/workspace/` |
-| Sessions | `<workspace>/sessions/*.jsonl` |
+| Sessions | `<config-dir>/sessions/<workspace-id>/sessions.sqlite3` (default: `~/.nanobot/sessions/...`) |
 | Memory | `<workspace>/memory/` |
 | Cron store | `<workspace>/cron/jobs.json` |
 | WebUI/media/log runtime data | config directory subdirectories such as `webui/`, `media/`, and `logs/` |
 
 The schema accepts both camelCase and snake_case keys, but saves config with camelCase aliases.
 
+### Agent-Owned State vs Effective Project Context
+
+Runtime code distinguishes the configured agent workspace from the effective project workspace carried by a session scope. They are often the same path, but a WebUI chat may select a separate project:
+
+| Concern | Path owner |
+|---|---|
+| Session namespace, `SOUL.md`, `USER.md`, memory, and custom skills | Configured agent workspace |
+| Project `AGENTS.md`, relative tool paths, and shell working directory | Effective project workspace |
+| Workspace access mode and project metadata | Session workspace scope |
+
+`ContextBuilder` combines project instructions with agent-owned profile and memory. Filesystem and search tools use the project as their ordinary boundary and receive only capability-specific read access to built-in/agent skills and the exact agent history file. Keep those cross-root capabilities read-only and explicit; do not treat the entire agent workspace as an allowed root.
+
 ## Memory and Sessions
 
 Session history is the near-term conversation replay. Memory is the longer-term workspace state.
 
+`nanobot/session/history.py` reads full persisted model history for `search_sessions` and `read_session`, including messages before summary checkpoints. Tool results contain public user and assistant text with indexes into the original session messages. Display facts are stored separately from those messages in the same SQLite database; they never become provider context or session-tool history.
+
+`SessionState` owns both logical histories. `history_entries` stores transport-neutral inputs, completed answer/reasoning segments, activity, historical file diffs, response sources, and completion statistics/outcomes; `history_turns` and `history_heads` provide bounded paging and revision/sidebar projections. WebUI converts these facts into its existing transcript protocol inside an owner-managed read snapshot. Delta frames remain transient. A turn may commit facts as it progresses; this is not a transaction held across a model request or network delivery.
+
+Every append carries the generation admitted before execution, including the display destination when an internal turn reports to a different chat. A missing or replaced session rejects the append instead of creating a new row. Delete/reset cascades through both logical histories; fork copies its canonical and display prefixes in one SQLite transaction. Future in-place history replacement should use that same owner transaction rather than file journals or replay-cache writes.
+
+`nanobot/webui/history.py` resolves legacy `<stem>.jsonl` files and numbered JSONL files inside `<stem>.segments/` directories, then imports them through `SessionState` before recovery or transport admission. Recorded chat identities determine the target session; histories without a recorded identity require an unambiguous existing canonical session. Display-only histories with a recorded identity are imported into the starting workspace namespace. Histories owned by exactly one other namespace are deferred to that namespace; duplicate owners and malformed records fail startup.
+
+`SqliteSessionStore.migrate_history()` commits the imported facts and completion markers in one transaction. Per-session ownership receipts in `storage_meta` survive session deletion, so another namespace cannot restore deleted chats by reimporting the unchanged legacy backups.
+
 | Store | File area |
 |---|---|
-| Session JSONL files | `<workspace>/sessions/` |
+| SQLite conversation state | `<config-dir>/sessions/<workspace-id>/sessions.sqlite3` |
 | Long-term memory | `<workspace>/memory/MEMORY.md` |
 | Consolidation source history | `<workspace>/memory/history.jsonl` |
 | Bootstrap identity files | `<workspace>/SOUL.md`, `<workspace>/USER.md`, templates under `nanobot/templates/` |
@@ -181,10 +217,12 @@ When changing tools, channels, file access, WebUI workspace behavior, or network
 | Extension | How |
 |---|---|
 | Provider | Add `ProviderSpec` in `providers/registry.py`, add schema field in `config/schema.py`, implement provider only if the generic backend is not enough |
-| Channel | Implement `BaseChannel`, expose an entry point, follow [`channel-plugin-guide.md`](./channel-plugin-guide.md) |
+| Channel | Export a `ChannelPlugin` descriptor, keep its runtime and optional setup surfaces in one package, and follow [`channel-package-guide.md`](./channel-package-guide.md) |
 | Tool | Implement a tool under `agent/tools/` or expose a plugin entry point |
-| MCP | Add `tools.mcpServers` config |
-| Skill | Add workspace skill files under `<workspace>/skills/` or built-in skills under `nanobot/skills/` |
+| Agent Plugin | Add a v1 package under `<workspace>/plugins/` and enable it from Apps |
+| MCP | Add `tools.mcpServers` config or bundle the server in an Agent Plugin |
+| Skill | Add workspace skills under `<workspace>/skills/`, bundle them in an Agent Plugin, or add built-in skills under `nanobot/skills/` |
+| CLI App | Add it to the CLI Apps catalog; the installer owns its executable lifecycle and writes a skills-only Agent Plugin |
 
 Prefer existing registry/discovery patterns over ad hoc wiring.
 

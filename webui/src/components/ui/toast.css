@@ -1,0 +1,47 @@
+.toast-card {
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-pill);
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px -10px rgb(0 0 0 / 0.16);
+  animation: toast-enter 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.dark .toast-card {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.18), 0 8px 24px -8px rgb(0 0 0 / 0.45);
+}
+
+.toast-card[data-toast-timed="true"]::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  --toast-sweep-width: 2.75rem;
+  background-image: linear-gradient(var(--toast-sweep-direction, to right), transparent, hsl(var(--popover-foreground) / 0.055));
+  background-repeat: no-repeat;
+  background-size: var(--toast-sweep-width) 100%;
+  animation: toast-shadow-sweep var(--toast-duration) linear both;
+  animation-play-state: var(--toast-play-state);
+}
+
+.toast-card[data-toast-timed="true"]:dir(rtl)::before {
+  --toast-sweep-direction: to left;
+  animation-direction: reverse;
+}
+
+@keyframes toast-shadow-sweep {
+  from { background-position: calc(0% - var(--toast-sweep-width)) 0; }
+  to { background-position: calc(100% + var(--toast-sweep-width)) 0; }
+}
+
+@keyframes toast-enter {
+  from { opacity: 0; transform: translateY(-0.25rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-card { animation: none; }
+  .toast-card::before { content: none; }
+}

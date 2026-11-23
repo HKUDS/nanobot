@@ -1,0 +1,57 @@
+{
+  "setup": {
+    "docsLabel": "Discord 設定ガイドを開く",
+    "officialLabel": "Discord ポータルを開く",
+    "fields": {
+      "token": {
+        "label": "ボットトークン",
+        "placeholder": "Discord ボットトークン"
+      },
+      "allowChannels": {
+        "label": "許可チャンネル",
+        "placeholder": "チャンネル ID（カンマ区切り）"
+      },
+      "groupPolicy": {
+        "label": "グループのルール",
+        "choices": {
+          "mention": "メンションのみ",
+          "open": "全メッセージ",
+          "allowlist": "許可リスト"
+        }
+      },
+      "allowFrom": {
+        "label": "許可ユーザー",
+        "placeholder": "ユーザー ID（カンマ区切り）"
+      },
+      "useProxy": {
+        "label": "プロキシを使う"
+      },
+      "intents": {
+        "label": "ゲートウェイの意図"
+      },
+      "readReceiptEmoji": {
+        "label": "絵文字を読む"
+      },
+      "workingEmoji": {
+        "label": "処理中の絵文字"
+      },
+      "workingEmojiDelay": {
+        "label": "絵文字の遅延（秒）"
+      },
+      "streaming": {
+        "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "replyToMessage": {
+        "label": "メッセージに返信",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan DingTalk",
+    "officialLabel": "Buka konsol DingTalk",
+    "fields": {
+      "clientId": {
+        "label": "Client ID",
+        "placeholder": "Client ID DingTalk"
+      },
+      "clientSecret": {
+        "label": "Client Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Pengguna diizinkan",
+        "placeholder": "ID pengguna, dipisahkan koma"
+      },
+      "allowRemoteMediaRedirects": {
+        "label": "Pengalihan media",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "remoteMediaRedirectAllowedHosts": {
+        "label": "Host pengalihan"
+      },
+      "groupUserIsolation": {
+        "label": "Sesi per anggota",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "disablePrivateChat": {
+        "label": "Nonaktifkan pesan langsung",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      }
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const render = vi.fn();
@@ -19,7 +20,7 @@ describe("main entry crypto shim", () => {
     createRoot.mockClear();
     render.mockClear();
     document.body.innerHTML = '<div id="root"></div>';
-    delete (globalThis.crypto as Crypto & { randomUUID?: Crypto["randomUUID"] }).randomUUID;
+    Reflect.deleteProperty(globalThis.crypto, "randomUUID");
   });
 
   afterEach(() => {
@@ -37,6 +38,8 @@ describe("main entry crypto shim", () => {
     expect(globalThis.crypto.randomUUID()).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
-    expect(createRoot).toHaveBeenCalledWith(document.getElementById("root"));
+    await waitFor(() => {
+      expect(createRoot).toHaveBeenCalledWith(document.getElementById("root"));
+    });
   });
 });

@@ -1,13 +1,13 @@
-"""Tests for AgentRunner security: workspace violations, SSRF, shell guard, throttling."""
-
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from agent.runner_helpers import make_run_spec
+from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools import ToolResult
+from nanobot.agent.tools.execution import is_ssrf_violation
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
@@ -23,7 +23,7 @@ async def test_runner_does_not_abort_on_workspace_violation_anymore():
     rely on ``repeated_workspace_violation_error`` to throttle bypass loops.
     """
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="trying outside",
             tool_calls=[ToolCallRequest(
@@ -40,9 +40,9 @@ async def test_runner_does_not_abort_on_workspace_violation_anymore():
         )
     )
 
-    runner = AgentRunner(provider)
+    runner = AgentRunner()
 
-    result = await runner.run(AgentRunSpec(
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[],
         tools=tools,
         model="test-model",
@@ -50,44 +50,38 @@ async def test_runner_does_not_abort_on_workspace_violation_anymore():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_count == 2, (
+    assert provider.chat_stream_with_retry.await_count == 2, (
         "workspace violation must NOT short-circuit the loop"
     )
     assert result.stop_reason != "tool_error"
     assert result.error is None
     assert result.final_content == "ok, telling the user instead"
     assert result.tool_events and result.tool_events[0]["status"] == "error"
-    # Detail still carries the workspace_violation breadcrumb for telemetry,
-    # but the runner did not raise.
     assert "workspace_violation" in result.tool_events[0]["detail"]
 
 
 def test_is_ssrf_violation_recognizes_private_url_blocks():
-    """SSRF rejections are classified separately from workspace boundaries."""
     ssrf_msg = "Error: Command blocked by safety guard (internal/private URL detected)"
-    assert AgentRunner._is_ssrf_violation(ssrf_msg) is True
-    assert AgentRunner._is_ssrf_violation(
+    assert is_ssrf_violation(ssrf_msg) is True
+    assert is_ssrf_violation(
         "URL validation failed: Blocked: host resolves to private/internal address 192.168.1.2"
     ) is True
 
-    # Workspace-bound markers are NOT classified as SSRF.
-    assert AgentRunner._is_ssrf_violation(
+    assert is_ssrf_violation(
         "Error: Command blocked by safety guard (path outside working dir)"
     ) is False
-    assert AgentRunner._is_ssrf_violation(
+    assert is_ssrf_violation(
         "Path /tmp/x is outside allowed directory /ws"
     ) is False
-    # Deny / allowlist filter messages stay non-fatal too.
-    assert AgentRunner._is_ssrf_violation(
+    assert is_ssrf_violation(
         "Error: Command blocked by deny pattern filter"
     ) is False
 
 
 @pytest.mark.asyncio
 async def test_runner_returns_non_retryable_hint_on_ssrf_violation():
-    """SSRF stays blocked, but the runtime gives the LLM a final chance to recover."""
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="curl-ing metadata",
             tool_calls=[ToolCallRequest(
@@ -107,8 +101,8 @@ async def test_runner_returns_non_retryable_hint_on_ssrf_violation():
         "Error: Command blocked by safety guard (internal/private URL detected)"
     ))
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[],
         tools=tools,
         model="test-model",
@@ -116,7 +110,7 @@ async def test_runner_returns_non_retryable_hint_on_ssrf_violation():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_count == 2
+    assert provider.chat_stream_with_retry.await_count == 2
     assert result.stop_reason == "completed"
     assert result.error is None
     assert result.final_content == "I cannot access that private URL. Please share local files."
@@ -140,8 +134,8 @@ async def test_runner_lets_llm_recover_from_shell_guard_path_outside():
     provider = MagicMock()
     captured_second_call: list[dict] = []
 
-    async def chat_with_retry(*, messages, **kwargs):
-        if provider.chat_with_retry.await_count == 1:
+    async def chat_stream_with_retry(*, messages, **kwargs):
+        if provider.chat_stream_with_retry.await_count == 1:
             return LLMResponse(
                 content="trying noisy cleanup",
                 tool_calls=[ToolCallRequest(
@@ -153,7 +147,7 @@ async def test_runner_lets_llm_recover_from_shell_guard_path_outside():
         captured_second_call[:] = list(messages)
         return LLMResponse(content="recovered final answer", tool_calls=[])
 
-    provider.chat_with_retry = AsyncMock(side_effect=chat_with_retry)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=chat_stream_with_retry)
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(
@@ -162,8 +156,8 @@ async def test_runner_lets_llm_recover_from_shell_guard_path_outside():
         )
     )
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[],
         tools=tools,
         model="test-model",
@@ -171,15 +165,29 @@ async def test_runner_lets_llm_recover_from_shell_guard_path_outside():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_count == 2, (
+    assert provider.chat_stream_with_retry.await_count == 2, (
         "guard hit must NOT short-circuit the loop -- LLM should get a second turn"
     )
     assert result.stop_reason != "tool_error"
     assert result.error is None
     assert result.final_content == "recovered final answer"
     assert result.tool_events and result.tool_events[0]["status"] == "error"
-    # v2: detail keeps the breadcrumb but the runner did not raise.
     assert "workspace_violation" in result.tool_events[0]["detail"]
+    calls = [
+        call
+        for message in captured_second_call if message.get("role") == "assistant"
+        for call in message.get("tool_calls", []) if call["id"] == "call_blocked"
+    ]
+    assert len(calls) == 1
+    assert calls[0]["function"]["name"] == "exec"
+    rejections = [
+        message for message in captured_second_call
+        if message.get("role") == "tool" and message.get("tool_call_id") == "call_blocked"
+    ]
+    assert len(rejections) == 1
+    assert rejections[0]["name"] == "exec"
+    assert "Command blocked by safety guard (path outside working dir)" in rejections[0]["content"]
+    assert "Consider this result in the context of the user's goal" in rejections[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -205,7 +213,7 @@ async def test_runner_throttles_repeated_workspace_bypass_attempts():
     responses.append(LLMResponse(content="ok telling user", tool_calls=[]))
 
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock(side_effect=responses)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=responses)
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(
@@ -214,8 +222,8 @@ async def test_runner_throttles_repeated_workspace_bypass_attempts():
         )
     )
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[],
         tools=tools,
         model="test-model",
@@ -223,12 +231,9 @@ async def test_runner_throttles_repeated_workspace_bypass_attempts():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    # All 4 bypass attempts surface to the LLM (no fatal abort), and the
-    # runner finally completes once the LLM stops asking.
     assert result.stop_reason != "tool_error"
     assert result.error is None
     assert result.final_content == "ok telling user"
-    # The third+ attempts must have been escalated -- look at the events.
     escalated = [
         ev for ev in result.tool_events
         if ev["status"] == "error"

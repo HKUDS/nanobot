@@ -1,110 +1,78 @@
-"""Tests for advanced EditFileTool enhancements inspired by claude-code:
-- Delete-line newline cleanup
-- Smart quote normalization (curly ↔ straight)
-- Quote style preservation in replacements
-- Indentation preservation when fallback match is trimmed
-- Trailing whitespace stripping for new_text
-- File size protection
-- Stale detection with content-equality fallback
-"""
-
 import os
 
 import pytest
 
-from nanobot.agent.tools import file_state
-from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, _find_match
-
-
-@pytest.fixture(autouse=True)
-def _clear_file_state():
-    file_state.clear()
-    yield
-    file_state.clear()
-
-
-# ---------------------------------------------------------------------------
-# Delete-line newline cleanup
-# ---------------------------------------------------------------------------
+from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool
 
 
 class TestDeleteLineCleanup:
-    """When new_text='' and deleting a line, trailing newline should be consumed."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
         return EditFileTool(workspace=tmp_path)
 
     @pytest.mark.asyncio
-    async def test_delete_line_consumes_trailing_newline(self, tool, tmp_path):
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    @pytest.mark.parametrize("prefix", ["", "line1\n"], ids=["first-line", "later-line"])
+    @pytest.mark.parametrize("indent", ["", "    "], ids=["unindented", "indented"])
+    async def test_delete_line_consumes_trailing_newline(
+        self, tool, tmp_path, newline, prefix, indent,
+    ):
         f = tmp_path / "a.py"
-        f.write_text("line1\nline2\nline3\n", encoding="utf-8")
-        result = await tool.execute(path=str(f), old_text="line2", new_text="")
-        assert "Successfully" in result
-        content = f.read_text()
-        # Should not leave a blank line where line2 was
-        assert content == "line1\nline3\n"
+        content = f"{prefix}{indent}line2\nline3\n"
+        f.write_bytes(content.replace("\n", newline).encode("utf-8"))
+        result = await tool.execute(path=str(f), old_text=f"{indent}line2", new_text="")
+        assert "Patch applied:" in result
+        assert f.read_bytes() == f"{prefix}line3\n".replace("\n", newline).encode("utf-8")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    @pytest.mark.parametrize("prefix", ["", "header = 0\n"], ids=["first-line", "later-line"])
+    @pytest.mark.parametrize("old_text", ["  # obsolete", "  # obsolete\n# extra comment"])
+    async def test_delete_inline_suffix_preserves_trailing_newline(
+        self, tool, tmp_path, newline, prefix, old_text,
+    ):
+        f = tmp_path / "a.py"
+        content = f"{prefix}x = 1{old_text}\ny = 2\n"
+        f.write_bytes(content.replace("\n", newline).encode("utf-8"))
+        result = await tool.execute(path=str(f), old_text=old_text, new_text="")
+        assert "Patch applied:" in result
+        expected = f"{prefix}x = 1\ny = 2\n"
+        assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    async def test_delete_all_distinguishes_inline_suffixes_from_whole_lines(
+        self, tool, tmp_path, newline,
+    ):
+        f = tmp_path / "a.py"
+        content = "x = 1  # obsolete\n  # obsolete\ny = 2  # obsolete\nz = 3\n"
+        f.write_bytes(content.replace("\n", newline).encode("utf-8"))
+        result = await tool.execute(
+            path=str(f), old_text="  # obsolete", new_text="", replace_all=True,
+        )
+        assert "Patch applied:" in result
+        expected = "x = 1\ny = 2\nz = 3\n"
+        assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
 
     @pytest.mark.asyncio
     async def test_delete_line_with_explicit_newline_in_old_text(self, tool, tmp_path):
         f = tmp_path / "a.py"
         f.write_text("line1\nline2\nline3\n", encoding="utf-8")
         result = await tool.execute(path=str(f), old_text="line2\n", new_text="")
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text() == "line1\nline3\n"
 
     @pytest.mark.asyncio
     async def test_delete_preserves_content_when_not_trailing_newline(self, tool, tmp_path):
-        """Deleting a word mid-line should not consume extra characters."""
         f = tmp_path / "a.py"
         f.write_text("hello world here\n", encoding="utf-8")
         result = await tool.execute(path=str(f), old_text="world ", new_text="")
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text() == "hello here\n"
 
 
-# ---------------------------------------------------------------------------
-# Smart quote normalization
-# ---------------------------------------------------------------------------
-
-
-class TestSmartQuoteNormalization:
-    """_find_match should handle curly ↔ straight quote fallback."""
-
-    def test_curly_double_quotes_match_straight(self):
-        content = 'She said \u201chello\u201d to him'
-        old_text = 'She said "hello" to him'
-        match, count = _find_match(content, old_text)
-        assert match is not None
-        assert count == 1
-        # Returned match should be the ORIGINAL content with curly quotes
-        assert "\u201c" in match
-
-    def test_curly_single_quotes_match_straight(self):
-        content = "it\u2019s a test"
-        old_text = "it's a test"
-        match, count = _find_match(content, old_text)
-        assert match is not None
-        assert count == 1
-        assert "\u2019" in match
-
-    def test_straight_matches_curly_in_old_text(self):
-        content = 'x = "hello"'
-        old_text = 'x = \u201chello\u201d'
-        match, count = _find_match(content, old_text)
-        assert match is not None
-        assert count == 1
-
-    def test_exact_match_still_preferred_over_quote_normalization(self):
-        content = 'x = "hello"'
-        old_text = 'x = "hello"'
-        match, count = _find_match(content, old_text)
-        assert match == old_text
-        assert count == 1
-
-
 class TestQuoteStylePreservation:
-    """When quote-normalized matching occurs, replacement should preserve actual quote style."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -119,7 +87,7 @@ class TestQuoteStylePreservation:
             old_text='message = "hello"',
             new_text='message = "goodbye"',
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text(encoding="utf-8") == 'message = “goodbye”\n'
 
     @pytest.mark.asyncio
@@ -131,17 +99,11 @@ class TestQuoteStylePreservation:
             old_text="it's fine",
             new_text="it's better",
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text(encoding="utf-8") == "it’s better\n"
 
 
-# ---------------------------------------------------------------------------
-# Indentation preservation
-# ---------------------------------------------------------------------------
-
-
 class TestIndentationPreservation:
-    """Replacement should keep outer indentation when trim fallback matched."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -161,21 +123,38 @@ class TestIndentationPreservation:
             old_text="def foo():\n    pass",
             new_text="def bar():\n    return 1",
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text(encoding="utf-8") == (
             "if True:\n"
             "    def bar():\n"
             "        return 1\n"
         )
 
-
-# ---------------------------------------------------------------------------
-# Failure diagnostics
-# ---------------------------------------------------------------------------
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    @pytest.mark.parametrize("ending", ["", "\n"], ids=["no-request-newline", "request-newline"])
+    @pytest.mark.parametrize(
+        "tail", ["\nnext_step()\n", "\n", ""],
+        ids=["followed-by-code", "terminated-eof", "unterminated-eof"],
+    )
+    async def test_trim_fallback_preserves_indentation_and_line_endings(
+        self, tool, tmp_path, newline, ending, tail,
+    ):
+        f = tmp_path / "indent.py"
+        content = "if ready:\n    x = 1\n    y = 2" + tail
+        f.write_bytes(content.replace("\n", newline).encode("utf-8"))
+        result = await tool.execute(
+            path=str(f),
+            old_text=("x = 1\ny = 2" + ending).replace("\n", newline),
+            new_text=("x = 3\ny = 4" + ending).replace("\n", newline),
+        )
+        assert "Patch applied:" in result
+        expected = "if ready:\n    x = 3\n    y = 4" + (tail or ending)
+        assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
+        compile(f.read_text(encoding="utf-8"), str(f), "exec")
 
 
 class TestEditDiagnostics:
-    """Failure paths should offer actionable hints."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -208,20 +187,15 @@ class TestEditDiagnostics:
         assert "letter case differs" in result.lower()
 
 
-# ---------------------------------------------------------------------------
-# Advanced fallback replacement behavior
-# ---------------------------------------------------------------------------
-
-
 class TestAdvancedReplaceAll:
-    """replace_all should work correctly for fallback-based matches too."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
         return EditFileTool(workspace=tmp_path)
 
     @pytest.mark.asyncio
-    async def test_replace_all_preserves_each_match_indentation(self, tool, tmp_path):
+    @pytest.mark.parametrize("ending", ["", "\n"], ids=["no-request-newline", "request-newline"])
+    async def test_replace_all_preserves_each_match_indentation(self, tool, tmp_path, ending):
         f = tmp_path / "indent_multi.py"
         f.write_text(
             "if a:\n"
@@ -234,11 +208,11 @@ class TestAdvancedReplaceAll:
         )
         result = await tool.execute(
             path=str(f),
-            old_text="def foo():\n    pass",
-            new_text="def bar():\n    return 1",
+            old_text="def foo():\n    pass" + ending,
+            new_text="def bar():\n    return 1" + ending,
             replace_all=True,
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text(encoding="utf-8") == (
             "if a:\n"
             "    def bar():\n"
@@ -249,25 +223,20 @@ class TestAdvancedReplaceAll:
         )
 
     @pytest.mark.asyncio
-    async def test_trim_and_quote_fallback_match_succeeds(self, tool, tmp_path):
+    @pytest.mark.parametrize("ending", ["", "\n"], ids=["no-request-newline", "request-newline"])
+    async def test_trim_and_quote_fallback_match_succeeds(self, tool, tmp_path, ending):
         f = tmp_path / "quote_indent.py"
         f.write_text("    message = “hello”\n", encoding="utf-8")
         result = await tool.execute(
             path=str(f),
-            old_text='message = "hello"',
-            new_text='message = "goodbye"',
+            old_text='message = "hello"' + ending,
+            new_text='message = "goodbye"' + ending,
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text(encoding="utf-8") == "    message = “goodbye”\n"
 
 
-# ---------------------------------------------------------------------------
-# Trailing whitespace stripping on new_text
-# ---------------------------------------------------------------------------
-
-
 class TestTrailingWhitespaceStrip:
-    """new_text trailing whitespace should be stripped (except .md files)."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -280,9 +249,48 @@ class TestTrailingWhitespaceStrip:
         result = await tool.execute(
             path=str(f), old_text="x = 1", new_text="x = 2   \ny = 3  ",
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         content = f.read_text()
         assert "x = 2\ny = 3\n" == content
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    @pytest.mark.parametrize(
+        "before,old_text,new_text,expected",
+        [
+            ("return value\n", "return ", "yield ", "yield value\n"),
+            ("return value\n", "return ", "yield\t", "yield\tvalue\n"),
+            ("hello-world\n", "-", " ", "hello world\n"),
+            (
+                "return value\n", "return ", "ready = True  \nyield ",
+                "ready = True\nyield value\n",
+            ),
+        ],
+        ids=["space", "tab", "whitespace-only", "multiline"],
+    )
+    async def test_inline_replacement_preserves_separator(
+        self, tool, tmp_path, newline, before, old_text, new_text, expected,
+    ):
+        f = tmp_path / "inline.py"
+        f.write_bytes(before.replace("\n", newline).encode("utf-8"))
+        result = await tool.execute(
+            path=str(f), old_text=old_text.replace("\n", newline),
+            new_text=new_text.replace("\n", newline),
+        )
+        assert "Patch applied:" in result
+        assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    async def test_replace_all_cleans_only_actual_line_endings(self, tool, tmp_path, newline):
+        f = tmp_path / "mixed.txt"
+        f.write_bytes("old value\nold \nold    \nold ".replace("\n", newline).encode("utf-8"))
+        result = await tool.execute(
+            path=str(f), old_text="old ", new_text="new ", replace_all=True,
+        )
+        assert "Patch applied:" in result
+        expected = "new value\nnew\nnew   \nnew"
+        assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
 
     @pytest.mark.asyncio
     async def test_preserves_trailing_whitespace_in_markdown(self, tool, tmp_path):
@@ -292,20 +300,13 @@ class TestTrailingWhitespaceStrip:
         result = await tool.execute(
             path=str(f), old_text="# Title", new_text="# Title  \nSubtitle  ",
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         content = f.read_text()
-        # Trailing spaces should be preserved for markdown
         assert "Title  " in content
         assert "Subtitle  " in content
 
 
-# ---------------------------------------------------------------------------
-# File size protection
-# ---------------------------------------------------------------------------
-
-
 class TestFileSizeProtection:
-    """Editing extremely large files should be rejected."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -325,7 +326,7 @@ class TestFileSizeProtection:
 
             @property
             def st_size(self):
-                return 2 * 1024 * 1024 * 1024  # 2 GiB
+                return 2 * 1024 * 1024 * 1024
 
         import unittest.mock
         with unittest.mock.patch.object(type(f), 'stat', return_value=FakeStat(f.stat())):
@@ -334,13 +335,7 @@ class TestFileSizeProtection:
         assert "too large" in result.lower() or "size" in result.lower()
 
 
-# ---------------------------------------------------------------------------
-# Stale detection with content-equality fallback
-# ---------------------------------------------------------------------------
-
-
 class TestStaleDetectionContentFallback:
-    """When mtime changed but file content is unchanged, edit should proceed without warning."""
 
     @pytest.fixture()
     def read_tool(self, tmp_path):
@@ -356,11 +351,9 @@ class TestStaleDetectionContentFallback:
         f.write_text("hello world", encoding="utf-8")
         await read_tool.execute(path=str(f))
 
-        # Bump mtime without changing content.
         stat = f.stat()
         os.utime(f, (stat.st_atime, stat.st_mtime + 10))
 
         result = await edit_tool.execute(path=str(f), old_text="world", new_text="earth")
-        assert "Successfully" in result
-        # Should NOT warn about modification since content is the same
+        assert "Patch applied:" in result
         assert "modified" not in result.lower()

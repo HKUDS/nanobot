@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "Ouvrir le guide Matrix",
+    "officialLabel": "Ouvrir la liste des clients Matrix",
+    "fields": {
+      "homeserver": {
+        "label": "Homeserver",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "ID utilisateur",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "Mot de passe",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "Jeton d’accès",
+        "placeholder": "Saisir un jeton d’accès"
+      },
+      "deviceId": {
+        "label": "ID de l’appareil",
+        "placeholder": "Requis avec un jeton d’accès"
+      },
+      "groupPolicy": {
+        "label": "Règles des groupes",
+        "choices": {
+          "mention": "Mentions uniquement",
+          "open": "Tous les messages",
+          "allowlist": "Liste d’autorisation",
+          "listen": "Écouter (réponse sur mention)"
+        }
+      },
+      "groupPolicyOverrides": {
+        "label": "Exceptions de règles par salon (JSON)"
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés"
+      },
+      "e2eeEnabled": {
+        "label": "Chiffrement de bout en bout",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "sasVerification": {
+        "label": "Vérification SAS",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Attente d’arrêt sync (secondes)"
+      },
+      "maxMediaBytes": {
+        "label": "Limite des médias (octets)"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Téléchargements simultanés"
+      },
+      "groupAllowFrom": {
+        "label": "Groupes autorisés"
+      },
+      "allowRoomMentions": {
+        "label": "Mentions de salon",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "replyToMessage": {
+        "label": "Citer le message",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "streaming": {
+        "label": "Diffusion en continu",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "useProxy": {
+        "label": "Utiliser le proxy"
+      }
+    }
+  }
+}

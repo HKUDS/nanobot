@@ -1,0 +1,41 @@
+{
+  "setup": {
+    "docsLabel": "開啟 NapCat 設定指南",
+    "officialLabel": "開啟 NapCat 文件",
+    "fields": {
+      "wsUrl": {
+        "label": "WebSocket 網址",
+        "placeholder": "ws://127.0.0.1:3001"
+      },
+      "accessToken": {
+        "label": "存取權杖",
+        "placeholder": "選填權杖"
+      },
+      "groupPolicy": {
+        "label": "群聊規則",
+        "choices": {
+          "mention": "提及回覆",
+          "open": "全部訊息",
+          "allowlist": "允許清單"
+        }
+      },
+      "allowFrom": {
+        "label": "允許使用者",
+        "placeholder": "QQ ID，以逗號分隔"
+      },
+      "groupPolicyOverrides": {
+        "label": "群聊例外（JSON）"
+      },
+      "welcomeNewMembers": {
+        "label": "入群歡迎",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "maxImageBytes": {
+        "label": "圖片上限（位元組）"
+      }
+    }
+  }
+}

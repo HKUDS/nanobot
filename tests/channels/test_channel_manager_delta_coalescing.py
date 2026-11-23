@@ -1,13 +1,22 @@
-"""Tests for ChannelManager delta coalescing to reduce streaming latency."""
 import asyncio
+from contextlib import suppress
+from copy import deepcopy
 from unittest.mock import AsyncMock
 
 import pytest
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import (
+    ProgressEvent,
+    RetryWaitEvent,
+    StreamDeltaEvent,
+    StreamEndEvent,
+    outbound_message_for_event,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
+from nanobot.channels.mattermost.runtime import MattermostChannel
 from nanobot.config.schema import Config
 
 
@@ -29,221 +38,175 @@ class MockChannel(BaseChannel):
         pass
 
     async def send(self, msg):
-        """Implement abstract method."""
         return await self._send_mock(msg)
 
-    async def send_delta(self, chat_id, delta, metadata=None):
-        """Override send_delta for testing."""
-        return await self._send_delta_mock(chat_id, delta, metadata)
+    async def send_delta(
+        self,
+        chat_id,
+        delta,
+        metadata=None,
+        *,
+        stream_id=None,
+        stream_end=False,
+        resuming=False,
+        merge_next=False,
+    ):
+        return await self._send_delta_mock(
+            chat_id,
+            delta,
+            metadata,
+            stream_id=stream_id,
+            stream_end=stream_end,
+            resuming=resuming,
+            merge_next=merge_next,
+        )
 
 
 @pytest.fixture
 def config():
     """Create a minimal config for testing."""
-    return Config()
+    return Config.model_validate({"channels": {"websocket": {"enabled": False}}})
 
 
 @pytest.fixture
 def bus():
-    """Create a message bus for testing."""
     return MessageBus()
 
 
 @pytest.fixture
-def manager(config, bus):
-    """Create a channel manager with a mock channel."""
-    manager = ChannelManager(config, bus)
-    manager.channels["mock"] = MockChannel({}, bus)
+def manager(config, bus, tmp_path):
+    manager = ChannelManager(config, bus, config_path=tmp_path / "config.json")
+    manager.channels["mock"] = manager._build_channel(MockChannel, {})
     return manager
 
 
+def _delta(content: str, *, chat_id: str = "chat1", stream_id: str | None = None):
+    return outbound_message_for_event(
+        channel="mock",
+        chat_id=chat_id,
+        event=StreamDeltaEvent(content=content, stream_id=stream_id),
+    )
+
+
+def _end(
+    content: str = "",
+    *,
+    chat_id: str = "chat1",
+    stream_id: str | None = None,
+    resuming: bool = False,
+    merge_next: bool = False,
+):
+    return outbound_message_for_event(
+        channel="mock",
+        chat_id=chat_id,
+        event=StreamEndEvent(
+            content=content,
+            stream_id=stream_id,
+            resuming=resuming,
+            merge_next=merge_next,
+        ),
+    )
+
+
 class TestDeltaCoalescing:
-    """Tests for _stream_delta message coalescing."""
 
-    @pytest.mark.asyncio
-    async def test_single_delta_not_coalesced(self, manager, bus):
-        """A single delta should be sent as-is."""
-        msg = OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="Hello",
-            metadata={"_stream_delta": True},
-        )
-        await bus.publish_outbound(msg)
-
-        # Process one message
-        async def process_one():
-            try:
-                m = await asyncio.wait_for(bus.consume_outbound(), timeout=0.1)
-                if m.metadata.get("_stream_delta"):
-                    m, pending = manager._coalesce_stream_deltas(m)
-                    # Put pending back (none expected)
-                    for p in pending:
-                        await bus.publish_outbound(p)
-                channel = manager.channels.get(m.channel)
-                if channel:
-                    await channel.send_delta(m.chat_id, m.content, m.metadata)
-            except asyncio.TimeoutError:
-                pass
-
-        await process_one()
-
-        manager.channels["mock"]._send_delta_mock.assert_called_once_with(
-            "chat1", "Hello", {"_stream_delta": True}
-        )
+    async def test_response_source_change_is_a_coalescing_boundary(self, manager, bus):
+        first, second = _delta("primary"), _delta("backup")
+        first.metadata["response_sources"] = [{"provider": "openai", "model": "m", "preset": "a"}]
+        second.metadata["response_sources"] = [{"provider": "openai", "model": "m", "preset": "b"}]
+        await bus.publish_outbound(second)
+        merged, pending = manager._coalesce_stream_deltas(first)
+        assert merged.content == "primary"
+        assert merged.metadata == first.metadata
+        assert pending == [second]
 
     @pytest.mark.asyncio
     async def test_multiple_deltas_coalesced(self, manager, bus):
-        """Multiple consecutive deltas for same chat should be merged."""
-        # Put multiple deltas in queue
         for text in ["Hello", " ", "world", "!"]:
-            await bus.publish_outbound(OutboundMessage(
-                channel="mock",
-                chat_id="chat1",
-                content=text,
-                metadata={"_stream_delta": True},
-            ))
+            await bus.publish_outbound(_delta(text))
 
-        # Process using coalescing logic
         first_msg = await bus.consume_outbound()
         merged, pending = manager._coalesce_stream_deltas(first_msg)
 
-        # Should have merged all deltas
         assert merged.content == "Hello world!"
-        assert merged.metadata.get("_stream_delta") is True
-        # No pending messages (all were coalesced)
+        assert isinstance(merged.event, StreamDeltaEvent)
         assert len(pending) == 0
 
     @pytest.mark.asyncio
     async def test_deltas_different_chats_not_coalesced(self, manager, bus):
-        """Deltas for different chats should not be merged."""
-        # Put deltas for different chats
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="Hello",
-            metadata={"_stream_delta": True},
-        ))
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat2",
-            content="World",
-            metadata={"_stream_delta": True},
-        ))
+        await bus.publish_outbound(_delta("Hello", chat_id="chat1"))
+        await bus.publish_outbound(_delta("World", chat_id="chat2"))
 
         first_msg = await bus.consume_outbound()
         merged, pending = manager._coalesce_stream_deltas(first_msg)
 
-        # First chat should not include second chat's content
         assert merged.content == "Hello"
         assert merged.chat_id == "chat1"
-        # Second chat should be in pending
         assert len(pending) == 1
         assert pending[0].chat_id == "chat2"
         assert pending[0].content == "World"
 
     @pytest.mark.asyncio
     async def test_deltas_different_stream_ids_not_coalesced(self, manager, bus):
-        """Deltas for the same chat but different streams should not be merged."""
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="A1",
-            metadata={"_stream_delta": True, "_stream_id": "stream-a"},
-        ))
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="B1",
-            metadata={"_stream_delta": True, "_stream_id": "stream-b"},
-        ))
+        await bus.publish_outbound(_delta("A1", stream_id="stream-a"))
+        await bus.publish_outbound(_delta("B1", stream_id="stream-b"))
 
         first_msg = await bus.consume_outbound()
         merged, pending = manager._coalesce_stream_deltas(first_msg)
 
         assert merged.content == "A1"
-        assert merged.metadata.get("_stream_id") == "stream-a"
+        assert isinstance(merged.event, StreamDeltaEvent)
+        assert merged.event.stream_id == "stream-a"
         assert len(pending) == 1
         assert pending[0].content == "B1"
-        assert pending[0].metadata.get("_stream_id") == "stream-b"
+        assert isinstance(pending[0].event, StreamDeltaEvent)
+        assert pending[0].event.stream_id == "stream-b"
 
     @pytest.mark.asyncio
     async def test_stream_end_terminates_coalescing(self, manager, bus):
-        """_stream_end should stop coalescing and be included in final message."""
-        # Put deltas with stream_end at the end
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="Hello",
-            metadata={"_stream_delta": True},
-        ))
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content=" world",
-            metadata={"_stream_delta": True, "_stream_end": True},
+        await bus.publish_outbound(_delta("Hello"))
+        await bus.publish_outbound(_end(
+            " world",
+            resuming=True,
+            merge_next=True,
         ))
 
         first_msg = await bus.consume_outbound()
         merged, pending = manager._coalesce_stream_deltas(first_msg)
 
-        # Should have merged content
         assert merged.content == "Hello world"
-        # Should have stream_end flag
-        assert merged.metadata.get("_stream_end") is True
-        # No pending
+        assert isinstance(merged.event, StreamEndEvent)
+        assert merged.event.resuming is True
+        assert merged.event.merge_next is True
         assert len(pending) == 0
 
     @pytest.mark.asyncio
     async def test_coalescing_stops_at_first_non_matching_boundary(self, manager, bus):
-        """Only consecutive deltas should be merged; later deltas stay queued."""
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="Hello",
-            metadata={"_stream_delta": True, "_stream_id": "seg-1"},
-        ))
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="",
-            metadata={"_stream_end": True, "_stream_id": "seg-1"},
-        ))
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="world",
-            metadata={"_stream_delta": True, "_stream_id": "seg-2"},
-        ))
+        await bus.publish_outbound(_delta("Hello", stream_id="seg-1"))
+        await bus.publish_outbound(_end(stream_id="seg-1"))
+        await bus.publish_outbound(_delta("world", stream_id="seg-2"))
 
         first_msg = await bus.consume_outbound()
         merged, pending = manager._coalesce_stream_deltas(first_msg)
 
         assert merged.content == "Hello"
-        assert merged.metadata.get("_stream_end") is None
+        assert isinstance(merged.event, StreamDeltaEvent)
         assert len(pending) == 1
-        assert pending[0].metadata.get("_stream_end") is True
-        assert pending[0].metadata.get("_stream_id") == "seg-1"
+        assert isinstance(pending[0].event, StreamEndEvent)
+        assert pending[0].event.stream_id == "seg-1"
 
-        # The next stream segment must remain in queue order for later dispatch.
         remaining = await bus.consume_outbound()
         assert remaining.content == "world"
-        assert remaining.metadata.get("_stream_id") == "seg-2"
+        assert isinstance(remaining.event, StreamDeltaEvent)
+        assert remaining.event.stream_id == "seg-2"
 
     @pytest.mark.asyncio
     async def test_non_delta_message_preserved(self, manager, bus):
-        """Non-delta messages should be preserved in pending list."""
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="Delta",
-            metadata={"_stream_delta": True},
-        ))
+        await bus.publish_outbound(_delta("Delta"))
         await bus.publish_outbound(OutboundMessage(
             channel="mock",
             chat_id="chat1",
             content="Final message",
-            metadata={},  # Not a delta
         ))
 
         first_msg = await bus.consume_outbound()
@@ -252,17 +215,11 @@ class TestDeltaCoalescing:
         assert merged.content == "Delta"
         assert len(pending) == 1
         assert pending[0].content == "Final message"
-        assert pending[0].metadata.get("_stream_delta") is None
+        assert pending[0].event is None
 
     @pytest.mark.asyncio
     async def test_empty_queue_stops_coalescing(self, manager, bus):
-        """Coalescing should stop when queue is empty."""
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="Only message",
-            metadata={"_stream_delta": True},
-        ))
+        await bus.publish_outbound(_delta("Only message"))
 
         first_msg = await bus.consume_outbound()
         merged, pending = manager._coalesce_stream_deltas(first_msg)
@@ -272,70 +229,97 @@ class TestDeltaCoalescing:
 
 
 class TestDispatchOutboundWithCoalescing:
-    """Tests for the full _dispatch_outbound flow with coalescing."""
 
     @pytest.mark.asyncio
-    async def test_dispatch_coalesces_and_processes_pending(self, manager, bus):
-        """_dispatch_outbound should coalesce deltas and process pending messages."""
-        # Put multiple deltas followed by a regular message
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="A",
-            metadata={"_stream_delta": True},
-        ))
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="B",
-            metadata={"_stream_delta": True},
-        ))
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="Final",
-            metadata={},  # Regular message
-        ))
+    @pytest.mark.parametrize("end_stream", [False, True])
+    async def test_dispatch_coalesces_and_delivers_final(self, manager, bus, end_stream):
+        await bus.publish_outbound(_delta("A", stream_id="seg-1"))
+        await bus.publish_outbound(_delta("B", stream_id="seg-1"))
+        if end_stream:
+            await bus.publish_outbound(_end(
+                "C", stream_id="seg-1", resuming=True, merge_next=True,
+            ))
+        final = OutboundMessage(channel="mock", chat_id="chat1", content="Final")
+        await bus.publish_outbound(final)
+        delivered = asyncio.Event()
+        received = []
 
-        # Run one iteration of dispatch logic manually
-        pending = []
-        processed = []
+        def record_delta(chat_id, delta, metadata, **flags):
+            received.append(("delta", chat_id, delta, metadata, flags))
 
-        # First iteration: should coalesce A+B
-        if pending:
-            msg = pending.pop(0)
-        else:
-            msg = await bus.consume_outbound()
+        def record_send(msg):
+            received.append(("send", msg.channel, msg.chat_id, msg.content, msg.event))
+            if (msg.channel, msg.chat_id, msg.content, msg.event) == ("mock", "chat1", "Final", None):
+                delivered.set()
 
-        if msg.metadata.get("_stream_delta") and not msg.metadata.get("_stream_end"):
-            msg, extra_pending = manager._coalesce_stream_deltas(msg)
-            pending.extend(extra_pending)
+        channel = manager.channels["mock"]
+        channel._send_delta_mock.side_effect = record_delta
+        channel._send_mock.side_effect = record_send
+        task = asyncio.create_task(manager._dispatch_outbound())
+        try:
+            await asyncio.wait_for(delivered.wait(), timeout=2)
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=2)
 
-        channel = manager.channels.get(msg.channel)
-        if channel:
-            await channel.send_delta(msg.chat_id, msg.content, msg.metadata)
-            processed.append(("delta", msg.content))
-
-        # Should have sent coalesced delta
-        assert processed == [("delta", "AB")]
-        # Should have pending regular message
-        assert len(pending) == 1
-        assert pending[0].content == "Final"
+        assert received == [
+            ("delta", "chat1", "ABC" if end_stream else "AB", {}, {
+                "stream_id": "seg-1",
+                "stream_end": end_stream,
+                "resuming": end_stream,
+                "merge_next": end_stream,
+            }),
+            ("send", "mock", "chat1", "Final", None),
+        ]
+        assert not manager._outbound_tasks
+        assert not manager._outbound_tails
 
 
 class TestProgressFiltering:
-    """Progress filtering should honor per-channel settings."""
 
     def test_progress_visibility_uses_global_defaults(self, manager):
         assert manager._should_send_progress("mock", tool_hint=False) is True
-        assert manager._should_send_progress("mock", tool_hint=True) is False
+        assert manager._should_send_progress("mock", tool_hint=True) is True
 
-    def test_progress_visibility_uses_channel_overrides(self, manager):
-        manager.channels["mock"].send_progress = False
-        manager.channels["mock"].send_tool_hints = True
+    def test_progress_visibility_uses_channel_overrides(self, manager, bus):
+        manager.channels["mock"] = manager._build_channel(
+            MockChannel,
+            {"sendProgress": False, "sendToolHints": False},
+        )
 
         assert manager._should_send_progress("mock", tool_hint=False) is False
-        assert manager._should_send_progress("mock", tool_hint=True) is True
+        assert manager._should_send_progress("mock", tool_hint=True) is False
+
+    def test_channel_config_defaults_do_not_override_global_policy(self, bus):
+        manager = ChannelManager.__new__(ChannelManager)
+        manager.config = Config.model_validate({
+            "channels": {
+                "sendProgress": False,
+                "sendToolHints": False,
+            },
+        })
+        manager.bus = bus
+
+        channel = manager._build_channel(
+            MattermostChannel,
+            {"enabled": True},
+        )
+
+        assert channel.send_progress is False
+        assert channel.send_tool_hints is False
+
+        opted_in = manager._build_channel(
+            MattermostChannel,
+            {
+                "enabled": True,
+                "sendProgress": True,
+                "sendToolHints": True,
+            },
+        )
+
+        assert opted_in.send_progress is True
+        assert opted_in.send_tool_hints is True
 
     def test_progress_visibility_returns_false_for_missing_channel(self, manager):
         assert manager._should_send_progress("nonexistent", tool_hint=False) is False
@@ -354,23 +338,20 @@ class TestProgressFiltering:
 
         assert manager._resolve_bool_override(FakeSection(), "send_progress", True) is False
         assert manager._resolve_bool_override(FakeSection(), "send_tool_hints", False) is True
-        # Missing attribute falls back to default
         assert manager._resolve_bool_override(FakeSection(), "unknown_key", True) is True
 
     @pytest.mark.asyncio
     async def test_channel_override_can_drop_progress_message(self, manager, bus):
         manager.channels["mock"].send_progress = False
-        await bus.publish_outbound(OutboundMessage(
+        await bus.publish_outbound(outbound_message_for_event(
             channel="mock",
             chat_id="chat1",
-            content="thinking",
-            metadata={"_progress": True},
+            event=ProgressEvent(content="thinking"),
         ))
         await bus.publish_outbound(OutboundMessage(
             channel="mock",
             chat_id="chat1",
             content="final answer",
-            metadata={},
         ))
 
         task = asyncio.create_task(manager._dispatch_outbound())
@@ -391,56 +372,116 @@ class TestProgressFiltering:
         assert send_mock.await_args_list[0].args[0].content == "final answer"
 
     @pytest.mark.asyncio
-    async def test_channel_override_can_enable_tool_hints(self, manager, bus):
-        manager.channels["mock"].send_tool_hints = True
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="read_file(foo.py)",
-            metadata={"_progress": True, "_tool_hint": True},
-        ))
+    @pytest.mark.parametrize(
+        "send_progress, send_tool_hints, expected_indices, expected_contents",
+        [
+            (False, True, [1, 3], ["read foo.py", "read missing.py", "final answer"]),
+            (True, False, [0, 2, 4], ["thinking", "", "", "final answer"]),
+        ],
+    )
+    async def test_tool_starts_and_terminals_follow_separate_visibility_settings(
+        self, manager, bus, send_progress, send_tool_hints, expected_indices, expected_contents,
+    ):
+        channel = manager._build_channel(
+            MockChannel, {"sendProgress": send_progress, "sendToolHints": send_tool_hints},
+        )
+        manager.channels["mock"] = channel
+        events = [
+            ProgressEvent(content="thinking"),
+            ProgressEvent(tool_hint=True, tool_events=[{
+                "phase": "start", "call_id": "call-1", "name": "read_file",
+                "arguments": {"path": "foo.py"},
+            }]),
+            ProgressEvent(tool_events=[{
+                "phase": "end", "call_id": "call-1", "name": "read_file", "result": "contents",
+            }]),
+            ProgressEvent(tool_hint=True, tool_events=[{
+                "phase": "start", "call_id": "call-2", "name": "read_file",
+                "arguments": {"path": "missing.py"},
+            }]),
+            ProgressEvent(tool_events=[{
+                "phase": "error", "call_id": "call-2", "name": "read_file", "error": "not found",
+            }]),
+        ]
+        messages = [
+            outbound_message_for_event(channel="mock", chat_id="chat1", event=event)
+            for event in events
+        ]
+        final = OutboundMessage(channel="mock", chat_id="chat1", content="final answer")
+        for msg in [*messages, final]:
+            await bus.publish_outbound(msg)
 
+        delivered = asyncio.Event()
+
+        def record_send(msg):
+            if msg is final:
+                delivered.set()
+
+        channel._send_mock.side_effect = record_send
         task = asyncio.create_task(manager._dispatch_outbound())
         try:
-            for _ in range(30):
-                if manager.channels["mock"]._send_mock.await_count >= 1:
-                    break
-                await asyncio.sleep(0.05)
+            await asyncio.wait_for(delivered.wait(), timeout=2)
         finally:
             task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            with suppress(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=2)
 
-        send_mock = manager.channels["mock"]._send_mock
-        assert send_mock.await_count == 1
-        assert send_mock.await_args_list[0].args[0].content == "read_file(foo.py)"
+        sent = [call.args[0] for call in channel._send_mock.await_args_list]
+        assert [msg.content for msg in sent] == expected_contents
+        assert [msg.event for msg in sent] == [events[i] for i in expected_indices] + [None]
+        if send_progress:
+            assert sent[1] is messages[2]
+            assert sent[2] is messages[4]
+        assert messages[1].content == ""
+        assert events[1].content == ""
+
+
+class TestToolEventDelivery:
+    @pytest.mark.asyncio
+    async def test_prepared_tool_hint_propagates_failure_without_mutating_core_message(self, manager):
+        manager.config.agents.defaults.tool_hint_max_length = 20
+        channel = manager._build_channel(MockChannel, {})
+        msg = outbound_message_for_event(
+            channel="mock",
+            chat_id="chat1",
+            event=ProgressEvent(tool_hint=True, stream_id="seg-1", tool_events=[{
+                "phase": "start", "call_id": "call-1", "name": "web_search",
+                "arguments": {"query": "abcdefghijklmnopqrstuvwxyz"},
+            }]),
+            metadata={"message_thread_id": 42},
+        )
+        original = deepcopy(msg)
+        error = RuntimeError("send failed")
+        channel._send_mock.side_effect = error
+        prepared = channel.prepare_tool_events(msg)
+
+        with pytest.raises(RuntimeError, match="send failed") as raised:
+            await manager._send_once(channel, prepared)
+
+        assert raised.value is error
+        channel._send_mock.assert_awaited_once()
+        sent = channel._send_mock.await_args.args[0]
+        assert sent is prepared
+        assert sent is not msg
+        assert sent.content == 'search "abcdefghijklmnopqrs…"'
+        assert sent.event is msg.event
+        assert sent.metadata == original.metadata
+        assert msg == original
 
 
 class TestRetryWaitFiltering:
-    """Internal provider retry heartbeats must never reach channels."""
 
     @pytest.mark.asyncio
     async def test_retry_wait_message_dropped(self, manager, bus):
-        """A ``_retry_wait`` message must be filtered before channel dispatch.
-
-        Regression: provider retry diagnostics like
-        ``Model request failed, retry in 1s (attempt 1).`` were being
-        delivered to end-user channels because the runner bound
-        ``on_retry_wait`` to the progress callback.
-        """
-        retry_msg = OutboundMessage(
+        retry_msg = outbound_message_for_event(
             channel="mock",
             chat_id="chat1",
-            content="Model request failed, retry in 1s (attempt 1).",
-            metadata={"_retry_wait": True},
+            event=RetryWaitEvent(content="Model request failed, retry in 1s (attempt 1)."),
         )
         real_msg = OutboundMessage(
             channel="mock",
             chat_id="chat1",
             content="final answer",
-            metadata={},
         )
         await bus.publish_outbound(retry_msg)
         await bus.publish_outbound(real_msg)
@@ -462,4 +503,4 @@ class TestRetryWaitFiltering:
         assert send_mock.await_count == 1
         sent = send_mock.await_args_list[0].args[0]
         assert sent.content == "final answer"
-        assert not sent.metadata.get("_retry_wait")
+        assert sent.event is None

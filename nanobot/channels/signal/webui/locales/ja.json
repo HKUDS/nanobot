@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "Signal 設定ガイドを開く",
+    "officialLabel": "signal-cli ガイドを開く",
+    "fields": {
+      "phoneNumber": {
+        "label": "電話番号",
+        "placeholder": "+1234567890"
+      },
+      "daemonHost": {
+        "label": "デーモンホスト",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "デーモンポート",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "許可する DM ユーザー",
+        "placeholder": "電話番号または UUID"
+      },
+      "group_allowFrom": {
+        "label": "許可グループ",
+        "placeholder": "グループ ID"
+      },
+      "groupMessageBufferSize": {
+        "label": "コンテキストの件数"
+      },
+      "attachmentsDir": {
+        "label": "添付ファイルディレクトリ"
+      },
+      "dm_enabled": {
+        "label": "ダイレクトメッセージを有効にする",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "dm_policy": {
+        "label": "ダイレクトメッセージへのアクセス",
+        "choices": {
+          "allowlist": "ホワイトリスト",
+          "open": "開く"
+        }
+      },
+      "group_enabled": {
+        "label": "グループを有効にする",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "group_policy": {
+        "label": "グループアクセス",
+        "choices": {
+          "allowlist": "ホワイトリスト",
+          "open": "開く"
+        }
+      },
+      "group_requireMention": {
+        "label": "グループのメンション必須",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      }
+    }
+  }
+}

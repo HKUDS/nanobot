@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "Teams 設定ガイドを開く",
+    "officialLabel": "Teams 開発者ポータルを開く",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID"
+      },
+      "appPassword": {
+        "label": "クライアントシークレット",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "テナント ID",
+        "placeholder": "テナント ID（任意）"
+      },
+      "path": {
+        "label": "コールバックパス",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "許可ユーザー",
+        "placeholder": "Teams ユーザー ID（カンマ区切り）"
+      },
+      "host": {
+        "label": "リッスンホスト"
+      },
+      "port": {
+        "label": "リッスンポート"
+      },
+      "replyInThread": {
+        "label": "スレッドで返信",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "メンションのみへの返信"
+      },
+      "validateInboundAuth": {
+        "label": "リクエストを検証",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "refTtlDays": {
+        "label": "参照の保持期間（日）"
+      },
+      "pruneWebChatRefs": {
+        "label": "Web Chat の参照を削除",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "グループの参照を削除",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "更新間隔（秒）"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "信頼するホスト"
+      }
+    }
+  }
+}

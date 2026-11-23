@@ -1,7 +1,6 @@
 ---
 name: my
-description: Check and set the agent's own runtime state (model, iterations, context window, token usage, web config). Use when diagnosing why something doesn't work ("why can't you search the web?", "why did you stop?"), checking resource limits before complex tasks, adapting configuration for long or simple tasks, or remembering user preferences across turns. Also use when the user asks what model you are running, how many tokens you've used, or what your settings are.
-always: true
+description: Inspect or troubleshoot the agent's runtime state, adjust runtime settings, or keep temporary session notes.
 ---
 
 # Self-Awareness
@@ -10,7 +9,7 @@ always: true
 
 1. **Identify the situation** from the categories below
 2. **Call the my tool** with the appropriate action
-3. **If set**, warn the user before changing impactful settings (model, iterations)
+3. **If set**, warn the user before changing impactful settings such as the model or runtime limits
 4. **For detailed examples**, read [references/examples.md](references/examples.md)
 
 ## When to check
@@ -35,9 +34,8 @@ always: true
 
 | Situation | Command |
 |-----------|---------|
-| Large codebase analysis | `my(action="set", key="context_window_tokens", value=262144)` |
-| Switch to a named model preset | `my(action="set", key="model_preset", value="<preset-name>")` |
-| Repetitive simple tasks without a preset | `my(action="set", key="model", value="<fast-model>")` |
+| Check capacity for a large task | `my(action="check", key="context_window_tokens")` |
+| Switch model or context capacity | `my(action="set", key="model_preset", value="<preset-name>")` |
 | Long multi-step task | `my(action="set", key="max_iterations", value=80)` |
 
 **Tradeoff:** Bias toward stability. Only set when defaults are genuinely insufficient.
@@ -58,8 +56,10 @@ always: true
 
 ## Constraints
 
-- All modifications in-memory only — restart resets everything
-- Prefer `model_preset` for configured model choices. Direct `model` changes clear the active preset and should only be used when no preset exists.
+- `model_preset` is saved for the current session; other modifications are in-memory only
+- Scratchpad values survive across turns until the agent runtime restarts and are shared by its sessions; do not treat them as private per-session storage.
+- Use `my(action="check", key="workspace_sandbox")` for the current project and file restriction. `workspace` is only a legacy agent-directory display.
+- Direct `model` and `context_window_tokens` writes are rejected during active sessions because they would change the shared instance default. Use a configured `model_preset` instead.
 - Protected params have type/range validation: `max_iterations` (1–100), `context_window_tokens` (4096–1M), `model` (non-empty str)
 - If `tools.my.allow_set` is false, check only
 
@@ -67,8 +67,8 @@ always: true
 
 | Need | Use | Persists? |
 |------|-----|-----------|
-| Per-session temp state | `my(action="set", key="...", value=...)` | No |
+| Temporary runtime notes | `my(action="set", key="...", value=...)` | Across turns, not restarts |
 | Long-term facts | Memory skill (`MEMORY.md`, `USER.md`) | Yes |
 | Permanent config change | Edit config file | Yes |
 
-**Rule of thumb:** Tomorrow? Memory. This turn only? My.
+**Rule of thumb:** Durable facts? Memory. Temporary runtime notes? My.

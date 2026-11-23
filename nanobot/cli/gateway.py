@@ -1,5 +1,3 @@
-"""Typer commands for foreground and background gateway control."""
-
 from __future__ import annotations
 
 import subprocess
@@ -14,8 +12,9 @@ from rich.console import Console
 
 from nanobot.config.schema import Config
 from nanobot.gateway import (
+    GatewayAlreadyRunningError,
+    GatewayInstance,
     GatewayRuntime,
-    GatewayRuntimePaths,
     GatewayStartOptions,
     GatewayStatus,
 )
@@ -25,11 +24,23 @@ from nanobot.gateway.service import (
     GatewayServiceResult,
     ServiceManagerKind,
 )
+from nanobot.utils.log_config import add_console_log_sink
+from nanobot.webui.build import BuildMode
 
 RuntimeConfigLoader = Callable[[str | None, str | None], Config]
 GatewayRunner = Callable[..., None]
+GatewayConfigValidator = Callable[[Config], str | None]
 GatewayRuntimeFactory = Callable[..., Any]
 GatewayServiceFactory = Callable[[], Any]
+WebUIBundlePreparer = Callable[[Config, BuildMode], None]
+
+
+def _resolved_config_selector(config: str | None) -> Path:
+    if config:
+        return Path(config).expanduser().resolve(strict=False)
+    from nanobot.config.loader import get_config_path
+
+    return get_config_path().resolve(strict=False)
 
 
 def create_gateway_app(
@@ -38,8 +49,10 @@ def create_gateway_app(
     log_handler_id: int,
     load_runtime_config: RuntimeConfigLoader,
     run_gateway: GatewayRunner,
+    validate_startup_config: GatewayConfigValidator | None = None,
     runtime_factory: GatewayRuntimeFactory | None = None,
     service_factory: GatewayServiceFactory | None = None,
+    prepare_webui_bundle: WebUIBundlePreparer | None = None,
 ) -> typer.Typer:
     gateway_app = typer.Typer(
         help="Start and manage the nanobot gateway.",
@@ -51,35 +64,31 @@ def create_gateway_app(
         if not verbose:
             return
         logger.remove(log_handler_id)
-        logger.add(
-            sys.stderr,
-            format=(
-                "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-                "<level>{level: <5}</level> | "
-                "<cyan>{extra[channel]}</cyan> | "
-                "<level>{message}</level>"
-            ),
-            level="DEBUG",
-            colorize=None,
-            filter=lambda record: record["extra"].setdefault("channel", "-") or True,
+        add_console_log_sink(sys.stderr, level="DEBUG")
+
+    def instance_for_selectors(
+        *,
+        workspace: str | None = None,
+        config: str | None = None,
+    ) -> GatewayInstance:
+        return GatewayInstance.resolve(
+            config_path=_resolved_config_selector(config),
+            workspace=workspace,
         )
 
     def runtime_for_instance(*, workspace: str | None = None, config: str | None = None):
         if runtime_factory is not None:
             return runtime_factory(workspace=workspace, config=config)
-        config_path = str(Path(config).expanduser().resolve(strict=False)) if config else None
-        workspace_path = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
-        data_dir = Path(config_path).parent if config_path else None
-        return GatewayRuntime(
-            paths=GatewayRuntimePaths.for_instance(
-                data_dir=data_dir,
-                workspace=workspace_path,
-                config_path=config_path,
-            )
-        )
+        instance = instance_for_selectors(workspace=workspace, config=config)
+        return GatewayRuntime(paths=instance.paths)
 
     def service_installer():
         return service_factory() if service_factory is not None else GatewayServiceInstaller()
+
+    def interactive_build_mode() -> BuildMode:
+        # `nanobot gateway` is often launched by tests, supervisors, or service managers.
+        # The higher-level `nanobot webui` command owns interactive first-run guidance.
+        return "warn"
 
     def start_options(
         *,
@@ -87,15 +96,15 @@ def create_gateway_app(
         verbose: bool,
         workspace: str | None,
         config: str | None,
+        loaded_config: Config | None = None,
     ) -> GatewayStartOptions:
-        cfg = load_runtime_config(config, workspace)
-        resolved_config = str(Path(config).expanduser().resolve()) if config else None
-        resolved_workspace = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
-        return GatewayStartOptions(
+        cfg = loaded_config or load_runtime_config(config, workspace)
+        return instance_for_selectors(
+            workspace=workspace,
+            config=config,
+        ).start_options(
             port=port if port is not None else cfg.gateway.port,
             verbose=verbose,
-            workspace=resolved_workspace,
-            config_path=resolved_config,
         )
 
     def print_status(status: GatewayStatus) -> None:
@@ -107,6 +116,10 @@ def create_gateway_app(
             console.print(f"Port: {status.port}")
         if status.started_at is not None:
             console.print(f"Started At: {status.started_at}")
+        if status.running:
+            console.print(f"Launch Mode: {status.launch_mode}")
+            console.print(f"Lifetime: {status.lifetime}")
+            console.print(f"Clients: {status.clients}")
         console.print(f"State: {status.state_path}")
         console.print(f"Logs: {status.log_path}")
 
@@ -122,8 +135,9 @@ def create_gateway_app(
             console.print()
             console.print(result.content)
 
+    # Typer consumes these callbacks through decorator registration.
     @gateway_app.callback(invoke_without_command=True)
-    def gateway(
+    def gateway(  # pyright: ignore[reportUnusedFunction]
         ctx: typer.Context,
         port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
@@ -134,11 +148,22 @@ def create_gateway_app(
     ) -> None:
         """Start the nanobot gateway."""
         if ctx.invoked_subcommand is not None:
+            if config is not None or workspace is not None:
+                ctx.fail(
+                    "--config and --workspace must follow a management subcommand that "
+                    "supports them. See "
+                    f"'nanobot gateway {ctx.invoked_subcommand} --help'."
+                )
             return
         if foreground and background:
             console.print("[red]Error: --foreground and --background cannot be used together.[/red]")
             raise typer.Exit(1)
         if background:
+            cfg = load_runtime_config(config, workspace)
+            if validate_startup_config is not None:
+                validate_startup_config(cfg)
+            if prepare_webui_bundle is not None:
+                prepare_webui_bundle(cfg, interactive_build_mode())
             runtime = runtime_for_instance(workspace=workspace, config=config)
             result = runtime.start_background(
                 start_options(
@@ -146,11 +171,58 @@ def create_gateway_app(
                     verbose=verbose,
                     workspace=workspace,
                     config=config,
+                    loaded_config=cfg,
                 )
             )
+            if (
+                result.message == "gateway_already_running"
+                and result.status.launch_mode == "foreground"
+            ):
+                console.print(
+                    "[yellow]Gateway is already running in the foreground; "
+                    "it cannot be detached in place.[/yellow]"
+                )
+                console.print(
+                    "[dim]Stop it with its service manager if supervised, or use "
+                    "`nanobot gateway stop`; then run `nanobot gateway --background`.[/dim]"
+                )
+                print_status(result.status)
+                raise typer.Exit(1)
+            if (
+                result.message == "gateway_already_running"
+                and result.status.launch_mode == "unknown"
+                and result.status.lifetime == "explicit"
+            ):
+                console.print(
+                    "[yellow]Gateway is already running, but this older process did "
+                    "not record whether it is attached or detached.[/yellow]"
+                )
+                console.print(
+                    "[dim]Stop it first, then rerun `nanobot gateway --background` "
+                    "to establish an unambiguous lifecycle.[/dim]"
+                )
+                print_status(result.status)
+                raise typer.Exit(1)
             if result.ok:
                 console.print("[green]Gateway started in the background.[/green]")
-                print_status(result.status)
+                print_status(runtime.status())
+                return
+            if result.message == "gateway_already_running":
+                if result.promoted:
+                    console.print(
+                        "[green]Existing on-demand gateway promoted to persistent "
+                        "background mode.[/green]"
+                    )
+                    console.print(
+                        "[dim]It will keep running after all local clients exit; "
+                        "use `nanobot gateway stop` to stop it.[/dim]"
+                    )
+                else:
+                    console.print(
+                        "[yellow]Gateway is already running in persistent "
+                        "background mode.[/yellow]"
+                    )
+                print_status(runtime.status())
                 return
             console.print(f"[yellow]Gateway was not started: {result.message}[/yellow]")
             print_status(result.status)
@@ -158,10 +230,26 @@ def create_gateway_app(
 
         configure_logging(verbose)
         cfg = load_runtime_config(config, workspace)
-        run_gateway(cfg, port=port)
+        instance = instance_for_selectors(workspace=workspace, config=config)
+        unconfigured_provider_error = None
+        if validate_startup_config is not None:
+            unconfigured_provider_error = validate_startup_config(cfg)
+        try:
+            run_gateway(
+                cfg,
+                port=port,
+                verbose=verbose,
+                webui_bundle_mode=interactive_build_mode(),
+                unconfigured_provider_error=unconfigured_provider_error,
+                gateway_instance=instance,
+            )
+        except GatewayAlreadyRunningError as exc:
+            console.print("[yellow]Gateway is already running.[/yellow]")
+            print_status(exc.status)
+            raise typer.Exit(1) from None
 
     @gateway_app.command("status")
-    def gateway_status(
+    def gateway_status(  # pyright: ignore[reportUnusedFunction]
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     ) -> None:
@@ -169,7 +257,7 @@ def create_gateway_app(
         print_status(runtime_for_instance(workspace=workspace, config=config).status())
 
     @gateway_app.command("logs")
-    def gateway_logs(
+    def gateway_logs(  # pyright: ignore[reportUnusedFunction]
         tail: int = typer.Option(200, "--tail", help="Number of recent lines to show"),
         follow: bool = typer.Option(True, "--follow/--no-follow", help="Follow new log output"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
@@ -187,13 +275,14 @@ def create_gateway_app(
             console.print(line)
 
     @gateway_app.command("stop")
-    def gateway_stop(
+    def gateway_stop(  # pyright: ignore[reportUnusedFunction]
         timeout: int = typer.Option(20, "--timeout", help="Stop timeout in seconds"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
         config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     ) -> None:
         """Stop the background gateway."""
-        result = runtime_for_instance(workspace=workspace, config=config).stop(timeout_s=timeout)
+        runtime = runtime_for_instance(workspace=workspace, config=config)
+        result = runtime.stop(timeout_s=timeout)
         if result.ok:
             console.print("[green]Gateway stopped.[/green]")
         else:
@@ -203,7 +292,7 @@ def create_gateway_app(
             raise typer.Exit(1)
 
     @gateway_app.command("restart")
-    def gateway_restart(
+    def gateway_restart(  # pyright: ignore[reportUnusedFunction]
         port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -211,6 +300,11 @@ def create_gateway_app(
         timeout: int = typer.Option(20, "--timeout", help="Restart timeout in seconds"),
     ) -> None:
         """Restart the background gateway."""
+        cfg = load_runtime_config(config, workspace)
+        if validate_startup_config is not None:
+            validate_startup_config(cfg)
+        if prepare_webui_bundle is not None:
+            prepare_webui_bundle(cfg, interactive_build_mode())
         runtime = runtime_for_instance(workspace=workspace, config=config)
         result = runtime.restart(
             start_options(
@@ -218,6 +312,7 @@ def create_gateway_app(
                 verbose=verbose,
                 workspace=workspace,
                 config=config,
+                loaded_config=cfg,
             ),
             timeout_s=timeout,
         )
@@ -225,12 +320,30 @@ def create_gateway_app(
             console.print("[green]Gateway restarted in the background.[/green]")
             print_status(result.status)
             return
+        if result.message == "gateway_not_running":
+            console.print("[yellow]Gateway is not running; there is nothing to restart.[/yellow]")
+            console.print(
+                "[dim]Start a persistent gateway with `nanobot gateway --background`.[/dim]"
+            )
+            print_status(result.status)
+            raise typer.Exit(1)
+        if result.message == "gateway_foreground_restart_required":
+            console.print(
+                "[yellow]Gateway is running in the foreground and cannot "
+                "be restarted as a background process.[/yellow]"
+            )
+            console.print(
+                "[dim]Restart it with its service manager if supervised, or stop it "
+                "and run `nanobot gateway --background`.[/dim]"
+            )
+            print_status(result.status)
+            raise typer.Exit(1)
         console.print(f"[red]Gateway restart failed: {result.message}[/red]")
         print_status(result.status)
         raise typer.Exit(1)
 
     @gateway_app.command("install-service")
-    def gateway_install_service(
+    def gateway_install_service(  # pyright: ignore[reportUnusedFunction]
         port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
         workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -266,7 +379,7 @@ def create_gateway_app(
         raise typer.Exit(1)
 
     @gateway_app.command("uninstall-service")
-    def gateway_uninstall_service(
+    def gateway_uninstall_service(  # pyright: ignore[reportUnusedFunction]
         name: str = typer.Option("nanobot-gateway", "--name", help="Service name"),
         manager: ServiceManagerKind = typer.Option("auto", "--manager", help="auto, systemd, or launchd"),
         dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without uninstalling"),

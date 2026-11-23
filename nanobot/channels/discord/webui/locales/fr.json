@@ -1,0 +1,57 @@
+{
+  "setup": {
+    "docsLabel": "Ouvrir le guide Discord",
+    "officialLabel": "Ouvrir le portail Discord",
+    "fields": {
+      "token": {
+        "label": "Jeton du bot",
+        "placeholder": "Jeton du bot Discord"
+      },
+      "allowChannels": {
+        "label": "Canaux autorisés",
+        "placeholder": "ID de salon séparés par des virgules"
+      },
+      "groupPolicy": {
+        "label": "Règles des groupes",
+        "choices": {
+          "mention": "Mentions uniquement",
+          "open": "Tous les messages",
+          "allowlist": "Liste d’autorisation"
+        }
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés",
+        "placeholder": "ID utilisateur séparés par des virgules"
+      },
+      "useProxy": {
+        "label": "Utiliser le proxy"
+      },
+      "intents": {
+        "label": "Intentions de passerelle"
+      },
+      "readReceiptEmoji": {
+        "label": "Lire les emoji"
+      },
+      "workingEmoji": {
+        "label": "Emoji d’activité"
+      },
+      "workingEmojiDelay": {
+        "label": "Délai de l’emoji (secondes)"
+      },
+      "streaming": {
+        "label": "Diffusion en continu",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "replyToMessage": {
+        "label": "Répondre au message",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      }
+    }
+  }
+}

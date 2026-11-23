@@ -1,0 +1,57 @@
+{
+  "setup": {
+    "docsLabel": "Abrir guia do Discord",
+    "officialLabel": "Abrir portal do Discord",
+    "fields": {
+      "token": {
+        "label": "Token do bot",
+        "placeholder": "Token do bot Discord"
+      },
+      "allowChannels": {
+        "label": "Canais permitidos",
+        "placeholder": "IDs de canal separados por vírgulas"
+      },
+      "groupPolicy": {
+        "label": "Regras de grupo",
+        "choices": {
+          "mention": "Somente menções",
+          "open": "Todas as mensagens",
+          "allowlist": "Lista de permissão"
+        }
+      },
+      "allowFrom": {
+        "label": "Usuários permitidos",
+        "placeholder": "IDs de usuário separados por vírgulas"
+      },
+      "useProxy": {
+        "label": "Usar proxy"
+      },
+      "intents": {
+        "label": "Intenções de gateway"
+      },
+      "readReceiptEmoji": {
+        "label": "Ler emoticons"
+      },
+      "workingEmoji": {
+        "label": "Emoji de atividade"
+      },
+      "workingEmojiDelay": {
+        "label": "Atraso do emoji (segundos)"
+      },
+      "streaming": {
+        "label": "Transmissão",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "replyToMessage": {
+        "label": "Responder à mensagem",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      }
+    }
+  }
+}

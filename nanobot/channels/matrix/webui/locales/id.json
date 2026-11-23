@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan Matrix",
+    "officialLabel": "Buka daftar klien Matrix",
+    "fields": {
+      "homeserver": {
+        "label": "Homeserver",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "ID pengguna",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "Kata sandi",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "Token akses",
+        "placeholder": "Masukkan token akses"
+      },
+      "deviceId": {
+        "label": "ID perangkat",
+        "placeholder": "Wajib dengan token akses"
+      },
+      "groupPolicy": {
+        "label": "Aturan grup",
+        "choices": {
+          "mention": "Hanya mention",
+          "open": "Semua pesan",
+          "allowlist": "Daftar izin",
+          "listen": "Dengar (balas saat disebut)"
+        }
+      },
+      "groupPolicyOverrides": {
+        "label": "Pengecualian aturan per ruang (JSON)"
+      },
+      "allowFrom": {
+        "label": "Pengguna diizinkan"
+      },
+      "e2eeEnabled": {
+        "label": "Enkripsi ujung ke ujung",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "sasVerification": {
+        "label": "verifikasi SAS",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Tunggu henti sync (detik)"
+      },
+      "maxMediaBytes": {
+        "label": "Batas media (byte)"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Unduhan bersamaan"
+      },
+      "groupAllowFrom": {
+        "label": "Grup diizinkan"
+      },
+      "allowRoomMentions": {
+        "label": "Mention ruang",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "replyToMessage": {
+        "label": "Kutip pesan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "useProxy": {
+        "label": "Gunakan proxy"
+      }
+    }
+  }
+}

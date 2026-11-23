@@ -1,0 +1,112 @@
+{
+  "setup": {
+    "docsLabel": "Abrir guia do Mattermost",
+    "officialLabel": "Abrir guia de bots do Mattermost",
+    "fields": {
+      "serverUrl": {
+        "label": "URL do servidor",
+        "placeholder": "https://mattermost.example.com"
+      },
+      "token": {
+        "label": "Token do bot",
+        "placeholder": "Token do bot Mattermost"
+      },
+      "teamId": {
+        "label": "ID da equipe",
+        "placeholder": "ID de equipe opcional"
+      },
+      "groupPolicy": {
+        "label": "Regras do canal",
+        "choices": {
+          "mention": "Somente menções",
+          "open": "Todas as mensagens",
+          "allowlist": "Lista de permissão"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "Regras da thread",
+        "choices": {
+          "mention": "Somente menções",
+          "open": "Todas as mensagens (sem menção)",
+          "allowlist": "Lista de permissão"
+        }
+      },
+      "allowFrom": {
+        "label": "Usuários permitidos",
+        "placeholder": "IDs de usuário separados por vírgulas"
+      },
+      "allowFromMatchMode": {
+        "label": "Correspondência de usuários",
+        "choices": {
+          "email": "E-mail",
+          "id": "ID do usuário",
+          "username": "Nome de usuário"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Canais permitidos"
+      },
+      "replyInThread": {
+        "label": "Respostas na thread",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Contexto da thread",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Limite de contexto"
+      },
+      "streaming": {
+        "label": "Transmissão",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "reactEmoji": {
+        "label": "Ler emoticons"
+      },
+      "doneEmoji": {
+        "label": "Emoji pronto"
+      },
+      "sendProgress": {
+        "label": "Enviar progresso",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "sendToolHints": {
+        "label": "Dicas de ferramentas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "dm_enabled": {
+        "label": "Habilitar mensagens diretas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "dm_policy": {
+        "label": "Acesso direto a mensagens",
+        "choices": {
+          "allowlist": "Lista de permissões",
+          "open": "Abrir"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Usuários de DM permitidos"
+      }
+    }
+  }
+}

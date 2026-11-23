@@ -1,0 +1,41 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan NapCat",
+    "officialLabel": "Buka dokumentasi NapCat",
+    "fields": {
+      "wsUrl": {
+        "label": "URL WebSocket",
+        "placeholder": "ws://127.0.0.1:3001"
+      },
+      "accessToken": {
+        "label": "Token akses",
+        "placeholder": "Token opsional"
+      },
+      "groupPolicy": {
+        "label": "Aturan grup",
+        "choices": {
+          "mention": "Hanya mention",
+          "open": "Semua pesan",
+          "allowlist": "Daftar izin"
+        }
+      },
+      "allowFrom": {
+        "label": "Pengguna diizinkan",
+        "placeholder": "ID QQ, dipisahkan koma"
+      },
+      "groupPolicyOverrides": {
+        "label": "Pengecualian grup (JSON)"
+      },
+      "welcomeNewMembers": {
+        "label": "Sambut anggota baru",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "maxImageBytes": {
+        "label": "Batas ukuran gambar (byte)"
+      }
+    }
+  }
+}

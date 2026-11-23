@@ -8,6 +8,7 @@ jobs.json + don't silently overwrite corrupt store``.
 
 from __future__ import annotations
 
+import errno
 import json
 from pathlib import Path
 from typing import Callable
@@ -31,8 +32,6 @@ def _seeded_store(tmp_path: Path) -> tuple[CronService, Path]:
         schedule=CronSchedule(kind="cron", expr="0 10 * * *", tz="Asia/Kuwait"),
         message="hello",
     )
-    # add_job appended to action.jsonl; flush to jobs.json by toggling
-    # ``_running`` long enough for ``_merge_action`` to do its rewrite.
     service._running = True
     try:
         service._load_store()
@@ -70,8 +69,6 @@ def test_save_store_is_atomic(tmp_path: Path) -> None:
     cannot leave the destination truncated or invalid."""
     service, store_path = _seeded_store(tmp_path)
 
-    # Simulate an arbitrary save and confirm the result parses cleanly and
-    # no orphan ``.tmp`` is left behind.
     service._save_store()
     data = json.loads(store_path.read_text(encoding="utf-8"))
     assert len(data["jobs"]) == 1
@@ -90,8 +87,6 @@ def test_save_store_failure_does_not_corrupt_existing_file(
     service, store_path = _seeded_store(tmp_path)
     original = store_path.read_bytes()
 
-    # Inject a failure inside the temp-file write.  ``os.replace`` should
-    # never run; the destination must keep its previous content.
     real_open = open
 
     def boom(path, *args, **kwargs):  # type: ignore[no-untyped-def]
@@ -107,6 +102,119 @@ def test_save_store_failure_does_not_corrupt_existing_file(
     assert store_path.read_bytes() == original
 
 
+@pytest.mark.parametrize("operation", ["add", "update", "delete"])
+def test_action_log_survives_failed_store_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    writer, store_path = _seeded_store(tmp_path)
+    job = writer.list_jobs(include_disabled=True)[0]
+    if operation == "add":
+        writer.add_job(
+            name="New reminder",
+            schedule=CronSchedule(kind="every", every_ms=60_000),
+            message="hello",
+            channel="cli",
+            to="test",
+        )
+    elif operation == "update":
+        writer.update_job(job.id, name="Updated reminder")
+    else:
+        assert writer.remove_job(job.id) == "removed"
+    expected = [(j.id, j.name) for j in writer.list_jobs(include_disabled=True)]
+    action_path = store_path.parent / "action.jsonl"
+    pending_actions = action_path.read_bytes()
+    original_store = store_path.read_bytes()
+    assert pending_actions
+
+    gateway = CronService(store_path)
+    gateway._running = True
+
+    def fail_write(path: Path, content: str) -> None:
+        raise OSError(errno.ENOSPC, "simulated disk full")
+
+    monkeypatch.setattr(gateway, "_atomic_write", fail_write)
+    with pytest.raises(OSError, match="simulated disk full"):
+        gateway._load_store()
+
+    assert store_path.read_bytes() == original_store
+    assert action_path.read_bytes() == pending_actions
+
+    restarted = CronService(store_path)
+    restarted._running = True
+    assert [(j.id, j.name) for j in restarted.list_jobs(include_disabled=True)] == expected
+    assert action_path.read_bytes() == b""
+    assert [(j.id, j.name) for j in CronService(store_path).list_jobs(include_disabled=True)] == expected
+
+
+def test_saved_actions_can_be_replayed_if_log_cleanup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer, store_path = _seeded_store(tmp_path)
+    job = writer.add_job(
+        name="New reminder",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        channel="cli",
+        to="test",
+    )
+    action_path = store_path.parent / "action.jsonl"
+    pending_actions = action_path.read_bytes()
+    real_write_text = Path.write_text
+
+    def fail_cleanup(path: Path, *args, **kwargs):
+        if path == action_path:
+            raise OSError("simulated action log cleanup failure")
+        return real_write_text(path, *args, **kwargs)
+
+    gateway = CronService(store_path)
+    gateway._running = True
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "write_text", fail_cleanup)
+        with pytest.raises(OSError, match="simulated action log cleanup failure"):
+            gateway._load_store()
+
+    saved_ids = [entry["id"] for entry in json.loads(store_path.read_text())["jobs"]]
+    assert saved_ids.count(job.id) == 1
+    assert action_path.read_bytes() == pending_actions
+
+    restarted = CronService(store_path)
+    restarted._running = True
+    assert {j.id for j in restarted.list_jobs(include_disabled=True)} == set(saved_ids)
+    assert action_path.read_bytes() == b""
+    persisted = CronService(store_path).list_jobs(include_disabled=True)
+    assert len(persisted) == len(saved_ids)
+    assert {j.id for j in persisted} == set(saved_ids)
+
+
+def test_atomic_write_ignores_unsupported_directory_fsync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    dir_fd = 987654
+
+    def fake_open(path: str, flags: int) -> int:
+        # Windows I/O uses an extended path to this same directory.
+        assert Path(path).samefile(store_path.parent)
+        return dir_fd
+
+    def fake_fsync(fd: int) -> None:
+        if fd == dir_fd:
+            raise OSError(errno.EINVAL, "Invalid argument")
+
+    def fake_close(fd: int) -> None:
+        assert fd == dir_fd
+
+    with monkeypatch.context() as patch:
+        patch.setattr("os.open", fake_open)
+        patch.setattr("os.fsync", fake_fsync)
+        patch.setattr("os.close", fake_close)
+
+        CronService._atomic_write(store_path, '{"version": 1, "jobs": []}')
+
+    assert store_path.read_text(encoding="utf-8") == '{"version": 1, "jobs": []}'
+    assert list(store_path.parent.glob("*.tmp")) == []
+
+
 def test_load_jobs_preserves_corrupt_store_and_returns_none(
     tmp_path: Path,
 ) -> None:
@@ -120,7 +228,6 @@ def test_load_jobs_preserves_corrupt_store_and_returns_none(
     service = CronService(store_path)
     assert service._load_jobs() is None
 
-    # Original path is gone; a ``.corrupt-<ts>`` backup exists alongside it.
     assert not store_path.exists()
     backups = list(store_path.parent.glob("jobs.json.corrupt-*"))
     assert len(backups) == 1
@@ -142,10 +249,8 @@ def test_start_refuses_to_overwrite_corrupt_store(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="corrupt"):
         asyncio.run(service.start())
 
-    # Service is left in a stopped state so the operator notices.
     assert service._running is False
 
-    # And the corrupt file is still recoverable from the .corrupt-<ts> copy.
     backups = list(store_path.parent.glob("jobs.json.corrupt-*"))
     assert len(backups) == 1
 
@@ -157,15 +262,12 @@ def test_load_store_falls_back_to_in_memory_on_corruption_after_start(
     rclone-mounted Drive returns a partial read), the service must keep
     using its existing in-memory snapshot instead of dropping every job."""
     service, store_path = _seeded_store(tmp_path)
-    # Force load so ``self._store`` is populated.
     service._load_store()
     snapshot = service._store
     assert snapshot is not None and len(snapshot.jobs) == 1
 
-    # Now corrupt the file on disk.
     store_path.write_text("\x00garbage\x00", encoding="utf-8")
 
-    # Subsequent reload returns the in-memory snapshot, not None or empty.
     result = service._load_store()
     assert result is snapshot
     assert len(result.jobs) == 1
@@ -182,6 +284,7 @@ def test_load_store_falls_back_to_in_memory_on_corruption_after_start(
         ("enable_job", lambda service: service.enable_job("missing", enabled=False)),
         ("update_job", lambda service: service.update_job("missing", name="new name")),
         ("register_system_job", lambda service: service.register_system_job(_system_job())),
+        ("remove_system_job", lambda service: service.remove_system_job("heartbeat")),
     ],
 )
 def test_public_apis_raise_clear_error_for_unavailable_corrupt_store(

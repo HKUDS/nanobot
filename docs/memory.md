@@ -1,153 +1,113 @@
-# Memory in nanobot
+# AI Agent Memory in nanobot
 
-nanobot's memory is built on a simple belief: memory should feel alive, but it should not feel chaotic.
+nanobot keeps recent chat history separate from long-term memory like your preferences, background, and ongoing project knowledge. You can inspect, edit, and restore long-term memory at any time.
 
-Good memory is not a pile of notes. It is a quiet system of attention. It notices what is worth keeping, lets go of what no longer needs the spotlight, and turns lived experience into something calm, durable, and useful.
+> [!NOTE]
+> An agent replying "Got it, I'll remember that" does not automatically guarantee a preference was written to long-term memory. You can verify or update it directly using the steps below.
 
-That is the shape of memory in nanobot.
+## How Memory Works
 
-## The Design
-
-nanobot does not treat memory as one giant file.
-
-It separates memory into layers, because different kinds of remembering deserve different tools:
-
-- `session.messages` holds the living short-term conversation.
-- `memory/history.jsonl` is the running archive of compressed past turns.
-- `SOUL.md`, `USER.md`, and `memory/MEMORY.md` are the durable knowledge files.
-- `GitStore` records how those durable files change over time.
-
-This keeps the system light in the moment, but reflective over time.
-
-## The Flow
-
-Memory moves through nanobot in two stages.
-
-### Stage 1: Consolidator
-
-When a conversation grows large enough to pressure the context window, nanobot does not try to carry every old message forever.
-
-Instead, the `Consolidator` summarizes the oldest safe slice of the conversation and appends that summary to `memory/history.jsonl`.
-
-This file is:
-
-- append-only
-- cursor-based
-- optimized for machine consumption first, human inspection second
-
-Each line is a JSON object:
-
-```json
-{"cursor": 42, "timestamp": "2026-04-03 00:02", "content": "- User prefers dark mode\n- Decided to use PostgreSQL"}
+```mermaid
+flowchart LR
+    C["Active Chat"] -->|"/compact or auto-summarize"| H["Summaries (history.jsonl)"]
+    H -->|"/dream or periodic schedule"| R["Long-Term Memory (SOUL, USER, MEMORY, wiki/)"]
+    C -->|"Direct 'Remember...' request"| R
 ```
 
-It is not the final memory. It is the material from which final memory is shaped.
+nanobot organizes memory into four layers so conversations stay fast while useful knowledge builds up over time:
 
-### Stage 2: Dream
+| Layer | Where it lives | What it holds |
+|---|---|---|
+| Active conversation | Session history | Recent messages in the current topic or chat |
+| Conversation summaries | `memory/history.jsonl` | Compact summaries of older turns created when a chat grows long or when you run `/compact` |
+| Resident memory | `SOUL.md`, `USER.md`, `memory/MEMORY.md` | Core personality, user preferences, and key facts loaded into every conversation |
+| Knowledge wiki | `memory/wiki/` | Detailed Markdown notes read on demand when relevant to a task |
 
-`Dream` is the slower, more thoughtful layer. It runs on a cron schedule by default and can also be triggered manually.
+Long-term memory updates in two ways:
 
-Dream reads:
+1. **Direct updates:** When you ask nanobot to remember something (or share a lasting preference) in a chat with write access, it can update the relevant memory file right away.
+2. **Compaction + Dream:** As conversations grow long (or after idle time, or when you run `/compact`), nanobot summarizes older messages and saves the summary to `memory/history.jsonl`. Periodically (or when you run `/dream`), **Dream** reviews new summaries and makes focused edits to your resident memory files and `memory/wiki/`.
 
-- new entries from `memory/history.jsonl`
-- the current `SOUL.md`
-- the current `USER.md`
-- the current `memory/MEMORY.md`
+Every Dream update is versioned with Git in your agent workspace, so you can inspect what changed and roll back if needed.
 
-Then it edits the long-term files surgically in a single pass — not by rewriting everything, but by making the smallest honest change that keeps memory coherent.
+## Where Memory Files Live
 
-This is why nanobot's memory is not just archival. It is interpretive.
-
-## The Files
+All memory files belong to your **agent workspace** (`~/.nanobot/workspace/` by default):
 
 ```text
 workspace/
-├── SOUL.md              # The bot's long-term voice and communication style
-├── USER.md              # Stable knowledge about the user
+├── SOUL.md              # Agent voice and communication style
+├── USER.md              # Stable preferences and facts about you
+├── prompts/
+│   └── dream.md         # Optional custom instructions for Dream
 └── memory/
-    ├── MEMORY.md        # Project facts, decisions, and durable context
-    ├── history.jsonl    # Append-only history summaries
-    ├── .cursor          # Consolidator write cursor
-    ├── .dream_cursor    # Dream consumption cursor
-    └── .git/            # Version history for long-term memory files
+    ├── MEMORY.md        # Core facts and links to wiki pages
+    ├── wiki/            # Optional detailed Markdown notes
+    │   └── index.md     # Topic index read on demand
+    └── history.jsonl    # Recent conversation summaries
 ```
 
-These files play different roles:
+Picking a different **project workspace** in the WebUI changes where the agent works on files, not where its memory lives. That means one agent keeps continuous memory across projects and topics.
 
-- `SOUL.md` remembers how nanobot should sound.
-- `USER.md` remembers who the user is and what they prefer.
-- `MEMORY.md` remembers what remains true about the work itself.
-- `history.jsonl` remembers what happened on the way there.
+> [!IMPORTANT]
+> Starting a new topic or choosing a different project does **not** isolate long-term memory. If you need separate memory for different clients or users, run [Multiple Instances](./multiple-instances.md).
 
-## Why `history.jsonl`
+## Save and Check a Preference
 
-The old `HISTORY.md` format was pleasant for casual reading, but it was too fragile as an operational substrate.
+In any WebUI or terminal chat, state a clear preference:
 
-`history.jsonl` gives nanobot:
-
-- stable incremental cursors
-- safer machine parsing
-- easier batching
-- cleaner migration and compaction
-- a better boundary between raw history and curated knowledge
-
-You can still search it with familiar tools:
-
-```bash
-# grep
-grep -i "keyword" memory/history.jsonl
-
-# jq
-cat memory/history.jsonl | jq -r 'select(.content | test("keyword"; "i")) | .content' | tail -20
-
-# Python
-python -c "import json; [print(json.loads(l).get('content','')) for l in open('memory/history.jsonl','r',encoding='utf-8') if l.strip() and 'keyword' in l.lower()][-20:]"
+```text
+Remember that for Acme release notes I prefer concise bullet points and British spelling.
 ```
 
-The difference is philosophical as much as technical:
+- If the chat has write access to your agent workspace, nanobot can save it right away. Ask which file it updated, then verify in a new topic.
+- If you are in a **Restricted** chat inside a different project folder, nanobot can read `memory/wiki/` but cannot write to your agent memory files. Switch to the agent workspace, edit the file yourself, or run `/compact` followed by `/dream` to consolidate recent chats.
 
-- `history.jsonl` is for structure
-- `SOUL.md`, `USER.md`, and `MEMORY.md` are for meaning
+## Memory Commands
 
-## Commands
-
-Memory is not hidden behind the curtain. Users can inspect and guide it.
+Use these slash commands in chat to inspect, run, or restore memory:
 
 | Command | What it does |
-|---------|--------------|
-| `/dream` | Run Dream immediately |
+|---|---|
+| `/compact` | Summarize the current conversation now (full chat history remains visible) |
+| `/dream` | Run Dream consolidation now |
 | `/dream-log` | Show the latest Dream memory change |
-| `/dream-log <sha>` | Show a specific Dream change |
+| `/dream-log <sha>` | Show a specific Dream memory change |
 | `/dream-restore` | List recent Dream memory versions |
-| `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/dream-restore <sha>` | Restore memory files and wiki pages to the state before that change |
+| `/dream-prompt` | Show the current instructions guiding Dream |
+| `/dream-prompt init` | Create an editable `prompts/dream.md` guide for this workspace |
 
-These commands exist for a reason: automatic memory is powerful, but users should always retain the right to inspect, understand, and restore it.
+> [!NOTE]
+> `/dream-restore <sha>` restores all managed memory files and wiki pages together (not a single page). If you have uncommitted manual edits in memory files, commit or revert them before restoring.
 
-## Versioned Memory
+## Guiding Dream
 
-After Dream changes long-term memory files, nanobot can record that change with `GitStore`.
+Most users can leave Dream's built-in instructions as they are. To customize how Dream organizes memory for one workspace, run:
 
-This gives memory a history of its own:
+```text
+/dream-prompt init
+```
 
-- you can inspect what changed
-- you can compare versions
-- you can restore a previous state
-
-That turns memory from a silent mutation into an auditable process.
+Edit `workspace/prompts/dream.md` in plain Markdown. Dream follows your guide automatically before reviewing new summaries. Delete or empty the file to return to nanobot's defaults.
 
 ## Configuration
 
-Dream is configured under `agents.defaults.dream`:
+Turn Dream on or off in **Settings → Capabilities → Memory consolidation**. Dream runs automatically while `nanobot gateway` is running.
+
+To change how often Dream runs or pick a dedicated model preset for it, configure `agents.defaults.dream` in `~/.nanobot/config.json`:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
   "agents": {
     "defaults": {
       "dream": {
+        "enabled": true,
         "intervalH": 2,
-        "modelOverride": null,
-        "maxBatchSize": 20,
-        "maxIterations": 10
+        "modelOverride": null
       }
     }
   }
@@ -155,28 +115,12 @@ Dream is configured under `agents.defaults.dream`:
 ```
 
 | Field | Meaning |
-|-------|---------|
+|---|---|
+| `enabled` | Turn periodic Dream consolidation on or off |
 | `intervalH` | How often Dream runs, in hours |
-| `cron` | Cron expression override (takes precedence over `intervalH`) |
-| `modelOverride` | Optional Dream-specific model override *(pending implementation)* |
-| `maxBatchSize` | *(Deprecated — not used)* |
-| `maxIterations` | *(Deprecated — not used)* |
+| `cron` | Optional cron expression override (takes precedence over `intervalH`, e.g. `"0 */4 * * *"`) |
+| `modelOverride` | Optional named model preset from `modelPresets` to use for Dream |
 
-In practical terms:
+To adjust automatic idle compaction, see [Auto Compact](./configuration.md#auto-compact). To show automatic compaction notices in chat apps (hidden by default; manual `/compact` always shows feedback), set `channels.showCompactionNotices: true`.
 
-- `intervalH` is the normal way to configure Dream frequency. Internally it runs as an `every` schedule.
-- `cron` overrides `intervalH` when set, allowing precise cron expressions (e.g. `0 */4 * * *`).
-- `modelOverride` is reserved for a future release. Currently Dream uses the same model as the main agent.
-- `maxBatchSize` and `maxIterations` are preserved for config compatibility but no longer affect behavior.
-
-## In Practice
-
-What this means in daily use is simple:
-
-- conversations can stay fast without carrying infinite context
-- durable facts can become clearer over time instead of noisier
-- the user can inspect and restore memory when needed
-
-Memory should not feel like a dump. It should feel like continuity.
-
-That is what this design is trying to protect.
+</details>

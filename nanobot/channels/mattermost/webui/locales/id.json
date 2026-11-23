@@ -1,0 +1,112 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan Mattermost",
+    "officialLabel": "Buka panduan bot Mattermost",
+    "fields": {
+      "serverUrl": {
+        "label": "URL server",
+        "placeholder": "https://mattermost.example.com"
+      },
+      "token": {
+        "label": "Token bot",
+        "placeholder": "Token bot Mattermost"
+      },
+      "teamId": {
+        "label": "ID tim",
+        "placeholder": "ID tim opsional"
+      },
+      "groupPolicy": {
+        "label": "Aturan kanal",
+        "choices": {
+          "mention": "Hanya mention",
+          "open": "Semua pesan",
+          "allowlist": "Daftar izin"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "Aturan thread",
+        "choices": {
+          "mention": "Hanya mention",
+          "open": "Semua pesan (tanpa sebutan)",
+          "allowlist": "Daftar izin"
+        }
+      },
+      "allowFrom": {
+        "label": "Pengguna diizinkan",
+        "placeholder": "ID pengguna, dipisahkan koma"
+      },
+      "allowFromMatchMode": {
+        "label": "Pencocokan pengguna",
+        "choices": {
+          "email": "Surel",
+          "id": "ID Pengguna",
+          "username": "Nama pengguna"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Kanal diizinkan"
+      },
+      "replyInThread": {
+        "label": "Balasan thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Konteks thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Batas konteks"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "reactEmoji": {
+        "label": "Baca emoji"
+      },
+      "doneEmoji": {
+        "label": "Selesai emoji"
+      },
+      "sendProgress": {
+        "label": "Kirim progres",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "sendToolHints": {
+        "label": "Petunjuk alat",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "dm_enabled": {
+        "label": "Aktifkan pesan langsung",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "dm_policy": {
+        "label": "Akses pesan langsung",
+        "choices": {
+          "allowlist": "Daftar yang diizinkan",
+          "open": "Buka"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Pengguna DM diizinkan"
+      }
+    }
+  }
+}

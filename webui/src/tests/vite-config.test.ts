@@ -1,0 +1,135 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { gunzipSync } from "node:zlib";
+import { describe, expect, it } from "vitest";
+import { rollup } from "rollup";
+
+import webuiConfig, {
+  entryLazyFeatureImports,
+  gzipWebuiAssets,
+  webuiManualChunk,
+} from "../../vite.config";
+
+describe("development overlay dependencies", () => {
+  it("pre-bundles Dialog so sheets share layer and focus state with popovers", () => {
+    const config = webuiConfig({ command: "serve", mode: "test" });
+    expect(config.optimizeDeps?.include).toContain("@radix-ui/react-dialog");
+    expect(config.optimizeDeps?.exclude ?? []).not.toContain("@radix-ui/react-dialog");
+  });
+});
+
+describe("development diagram Worker dependencies", () => {
+  it("pre-bundles Worker-only imports without a first-use page reload", () => {
+    const config = webuiConfig({ command: "serve", mode: "test" });
+    expect(config.optimizeDeps?.include).toEqual(expect.arrayContaining([
+      "pele/lazy", "saxes", "css-tree/parser", "css-tree/walker", "css-tree/generator",
+    ]));
+  });
+});
+
+describe("gzipWebuiAssets", () => {
+  it("compresses finalized files after Rollup writes the bundle", async () => {
+    const plugin = gzipWebuiAssets();
+    expect(plugin.generateBundle).toBeUndefined();
+    const outputDir = mkdtempSync(path.join(tmpdir(), "nanobot-vite-gzip-"));
+    const assetPath = path.join(outputDir, "assets", "index-final.js");
+    const finalized = Buffer.from(
+      "const __vite__mapDeps = ['assets/lazy-feature.js'];\n".repeat(200),
+    );
+    const build = await rollup({
+      input: "virtual-entry",
+      plugins: [
+        {
+          name: "fixture-entry",
+          resolveId: (id) => id === "virtual-entry" ? id : null,
+          load: (id) => id === "virtual-entry" ? 'console.log("stale in-memory bytes");' : null,
+        },
+        {
+          name: "finalize-on-disk",
+          writeBundle: {
+            sequential: true,
+            handler() { writeFileSync(assetPath, finalized); },
+          },
+        },
+        plugin,
+      ],
+    });
+    try {
+      await build.write({ dir: outputDir, format: "es", entryFileNames: "assets/index-final.js" });
+      expect(gunzipSync(readFileSync(`${assetPath}.gz`))).toEqual(finalized);
+    } finally {
+      await build.close();
+      rmSync(outputDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("entryLazyFeatureImports", () => {
+  it("allows the core runtime but rejects heavy lazy feature chunks", () => {
+    expect(entryLazyFeatureImports(["assets/react-vendor-abc.js"])).toEqual([]);
+    expect(entryLazyFeatureImports([
+      "assets/markdown-vendor-abc.js",
+      "assets/HighlightedCode-def.js",
+      "assets/code-highlighter-ghi.js",
+      "assets/PierreFileDiff-jkl.js",
+      "assets/katex-mno.js",
+      "assets/MermaidBlock-pqr.js",
+    ])).toEqual([
+      "assets/markdown-vendor-abc.js",
+      "assets/HighlightedCode-def.js",
+      "assets/code-highlighter-ghi.js",
+      "assets/PierreFileDiff-jkl.js",
+      "assets/katex-mno.js",
+      "assets/MermaidBlock-pqr.js",
+    ]);
+  });
+});
+
+describe("webuiManualChunk", () => {
+  it("groups common and channel translations into one request per locale", () => {
+    expect(webuiManualChunk("/repo/webui/src/i18n/locales/en/common.json")).toBe("locale-en");
+    expect(webuiManualChunk("/repo/nanobot/channels/slack/webui/locales/en.json")).toBe("locale-en");
+    expect(webuiManualChunk("/repo/nanobot/channels/slack/webui/locales/zh-CN.json")).toBe("locale-zh-CN");
+    expect(webuiManualChunk("/repo/node_modules/rehype-katex/index.js")).toBe("markdown-math");
+    expect(webuiManualChunk("/repo/webui/src/lib/markdown-math.ts")).toBe("markdown-math");
+    expect(webuiManualChunk("/repo/node_modules/micromark-extension-math/lib/html.js")).toBe("markdown-math");
+    expect(webuiManualChunk("/repo/webui/src/lib/clipboard.ts")).toBe("clipboard");
+  });
+  it("keeps the React runtime outside lazy feature chunks", () => {
+    expect(webuiManualChunk("/repo/node_modules/react/index.js")).toBe("react-vendor");
+    expect(webuiManualChunk("/repo/node_modules/react-dom/client.js")).toBe("react-vendor");
+    expect(webuiManualChunk("/repo/node_modules/scheduler/index.js")).toBe("react-vendor");
+    expect(webuiManualChunk("/repo/node_modules/clsx/dist/clsx.mjs")).toBe("react-vendor");
+    expect(webuiManualChunk("\0vite/preload-helper.js")).toBe("react-vendor");
+  });
+
+  it("keeps markdown-only hast utilities in the markdown chunk", () => {
+    expect(
+      webuiManualChunk("/repo/node_modules/hast-util-to-jsx-runtime/lib/index.js"),
+    ).toBe("markdown-vendor");
+  });
+
+  it("keeps Streamdown and its repair helper in the markdown chunk", () => {
+    expect(webuiManualChunk("/repo/webui/src/components/markdown-diagrams/context.tsx")).toBeUndefined();
+    expect(webuiManualChunk("/repo/node_modules/streamdown/dist/index.js")).toBe(
+      "markdown-vendor",
+    );
+    expect(webuiManualChunk("/repo/node_modules/remend/dist/index.js")).toBe(
+      "markdown-vendor",
+    );
+  });
+
+  it("leaves Streamdown's optional renderers as lazy chunks", () => {
+    expect(
+      webuiManualChunk("/repo/node_modules/streamdown/dist/mermaid-ABC.js"),
+    ).toBe("markdown-diagrams");
+    expect(
+      webuiManualChunk("/repo/node_modules/streamdown/dist/highlighted-body-ABC.js"),
+    ).toBe("markdown-code");
+  });
+
+  it("leaves language grammars as independently loaded chunks", () => {
+    expect(webuiManualChunk("/repo/node_modules/@shikijs/langs/dist/ini.mjs")).toBeUndefined();
+  });
+});

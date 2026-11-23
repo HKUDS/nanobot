@@ -1,0 +1,2286 @@
+import imaplib
+from datetime import date
+from email.message import EmailMessage
+from pathlib import Path
+
+import pytest
+
+from nanobot.bus.delivery import DeliveryRejectedError
+from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.base import BaseChannel
+from nanobot.channels.email.runtime import EmailChannel, EmailConfig
+from nanobot.channels.manager import ChannelManager
+from nanobot.config.schema import Config
+
+
+def _make_config(**overrides) -> EmailConfig:
+    defaults = dict(
+        enabled=True,
+        consent_granted=True,
+        imap_host="imap.example.com",
+        imap_port=993,
+        imap_username="bot@example.com",
+        imap_password="secret",
+        smtp_host="smtp.example.com",
+        smtp_port=587,
+        smtp_username="bot@example.com",
+        smtp_password="secret",
+        mark_seen=True,
+        allow_from=["*"],
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    defaults.update(overrides)
+    return EmailConfig(**defaults)
+
+
+def _make_raw_email(
+    from_addr: str = "alice@example.com",
+    subject: str = "Hello",
+    body: str = "This is the body.",
+    auth_results: str | list[str] | None = None,
+) -> bytes:
+    msg = EmailMessage()
+    msg["From"] = from_addr
+    msg["To"] = "bot@example.com"
+    msg["Subject"] = subject
+    msg["Message-ID"] = "<m1@example.com>"
+    if isinstance(auth_results, str):
+        msg["Authentication-Results"] = auth_results
+    elif auth_results:
+        for auth_result in auth_results:
+            msg["Authentication-Results"] = auth_result
+    msg.set_content(body)
+    return msg.as_bytes()
+
+
+def test_email_only_enables_final_reply_delivery() -> None:
+    manager = ChannelManager.__new__(ChannelManager)
+    manager.config = Config.model_validate({"channels": {"email": {"enabled": True}}})
+    manager.bus = MessageBus()
+
+    channel = manager._build_channel(EmailChannel, {"enabled": True})
+
+    assert channel.send_progress is False
+    assert channel.send_tool_hints is False
+    assert channel.supports_streaming is False
+    assert type(channel).send_reasoning_delta is BaseChannel.send_reasoning_delta
+
+
+@pytest.mark.parametrize("multipart", [False, True])
+@pytest.mark.parametrize("subtype", ["plain", "html"])
+def test_fetch_unknown_charset_falls_back_to_utf8(monkeypatch, multipart, subtype) -> None:
+    msg = EmailMessage()
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bot@example.com"
+    msg["Subject"] = "Charset fallback"
+    body = "Hello 世界" if subtype == "plain" else "<p>Hello 世界</p>"
+    msg.set_content(body, subtype=subtype, charset="utf-8")
+    msg.set_param("charset", "unknown-charset", header="Content-Type")
+    if multipart:
+        msg.add_attachment(b"attachment", maintype="application", subtype="octet-stream")
+    fake = _make_fake_imap(msg.as_bytes(), uid=b"123")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items, skipped_uids = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert "Hello 世界" in items[0]["content"]
+    assert "<p>" not in items[0]["content"]
+    assert skipped_uids == set()
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") not in fake.uid_calls
+
+
+def test_fetch_new_messages_parses_unseen_without_acknowledging(monkeypatch) -> None:
+    raw = _make_raw_email(subject="Invoice", body="Please pay")
+
+    fake = _make_fake_imap(raw, uid=b"123")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items, skipped_uids = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["sender"] == "alice@example.com"
+    assert items[0]["subject"] == "Invoice"
+    assert "Please pay" in items[0]["content"]
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") not in fake.uid_calls
+    assert [call for call in fake.uid_calls if call[0] == "FETCH"] == [
+        ("FETCH", "123", "(BODY.PEEK[HEADER])"),
+        ("FETCH", "123", "(BODY.PEEK[])"),
+    ]
+    assert skipped_uids == set()
+
+    items_again, skipped_again = channel._fetch_new_messages()
+    assert len(items_again) == 1
+    assert skipped_again == set()
+    assert len([call for call in fake.uid_calls if call[0] == "FETCH"]) == 4
+
+
+def test_fetch_new_messages_returns_accepted_and_skipped_uids(monkeypatch) -> None:
+    raw = _make_raw_email(subject="Invoice", body="Please pay")
+
+    fake = _make_fake_imap(raw, uid=b"123")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
+    items, skipped_uids = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["metadata"]["uid"] == "123"
+    assert skipped_uids == set()
+
+
+def test_fetch_new_messages_rejected_returns_skipped_uid(monkeypatch) -> None:
+    raw = _make_raw_email(from_addr="Nanobot <bot@example.com>", subject="Loop test")
+
+    monkeypatch.setattr(
+        "nanobot.channels.email.runtime.imaplib.IMAP4_SSL",
+        lambda _h, _p: _make_fake_imap(raw, uid=b"123"),
+    )
+
+    channel_skip = EmailChannel(
+        _make_config(from_address="bot@example.com", post_action="delete", post_action_ignore_skipped=True),
+        MessageBus(),
+    )
+    assert channel_skip._fetch_new_messages() == ([], {"123"})
+
+    channel_apply = EmailChannel(
+        _make_config(from_address="bot@example.com", post_action="delete", post_action_ignore_skipped=False),
+        MessageBus(),
+    )
+    items, skipped_uids = channel_apply._fetch_new_messages()
+    assert items == []
+    assert skipped_uids == {"123"}
+
+
+def test_apply_post_actions_batch_delete_uses_one_connection(monkeypatch) -> None:
+    raw = _make_raw_email(subject="Invoice", body="Please pay")
+
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.search_calls: list[tuple] = []
+            self.uid_calls: list[tuple] = []
+            self.store_calls: list[tuple[bytes, str, str]] = []
+            self.expunge_calls = 0
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            self.search_calls.append(_args)
+            if len(_args) >= 3 and _args[1] == "UID":
+                return "OK", [b"1"]
+            return "OK", [b"1"]
+
+        def capability(self):
+            return "OK", [b"IMAP4rev1 UIDPLUS"]
+
+        def uid(self, command: str, *args):
+            self.uid_calls.append((command, *args))
+            if command == "STORE":
+                return "OK", [b""]
+            if command == "EXPUNGE":
+                return "OK", [b""]
+            return "BAD", [b""]
+
+        def fetch(self, _imap_id: bytes, _parts: str):
+            return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def expunge(self):
+            self.expunge_calls += 1
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
+    channel._uidvalidity = b"1"
+    channel._apply_post_actions_batch(["123", "124"])
+
+    assert fake.store_calls == []
+    assert fake.expunge_calls == 0
+    assert fake.search_calls == []
+    assert fake.uid_calls == [
+        ("STORE", "123", "+FLAGS", "(\\Deleted)"),
+        ("EXPUNGE", "123"),
+        ("STORE", "124", "+FLAGS", "(\\Deleted)"),
+        ("EXPUNGE", "124"),
+    ]
+
+
+def test_apply_post_actions_batch_move_copies_then_deletes(monkeypatch) -> None:
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.uid_calls: list[tuple] = []
+            self.store_calls: list[tuple[bytes, str, str]] = []
+            self.expunge_calls = 0
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"1"]
+
+        def capability(self):
+            return "OK", [b"IMAP4rev1 UIDPLUS"]
+
+        def uid(self, command: str, *args):
+            self.uid_calls.append((command, *args))
+            if command == "COPY":
+                return "OK", [b""]
+            if command == "STORE":
+                return "OK", [b""]
+            if command == "EXPUNGE":
+                return "OK", [b""]
+            return "BAD", [b""]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def expunge(self):
+            self.expunge_calls += 1
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(
+        _make_config(post_action="move", post_action_move_mailbox="Processed"),
+        MessageBus(),
+    )
+    channel._uidvalidity = b"1"
+    channel._apply_post_actions_batch(["123"])
+
+    assert fake.uid_calls == [
+        ("COPY", "123", "Processed"),
+        ("STORE", "123", "+FLAGS", "(\\Deleted)"),
+        ("EXPUNGE", "123"),
+    ]
+    assert fake.store_calls == []
+    assert fake.expunge_calls == 0
+
+
+def test_apply_post_actions_batch_move_prefers_uid_move_when_supported(monkeypatch) -> None:
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.uid_calls: list[tuple] = []
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def capability(self):
+            return "OK", [b"IMAP4rev1 UIDPLUS MOVE"]
+
+        def uid(self, command: str, *args):
+            self.uid_calls.append((command, *args))
+            if command == "MOVE":
+                return "OK", [b""]
+            return "BAD", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(
+        _make_config(post_action="move", post_action_move_mailbox="Processed"),
+        MessageBus(),
+    )
+    channel._uidvalidity = b"1"
+    channel._apply_post_actions_batch(["123"])
+
+    assert fake.uid_calls == [("MOVE", "123", "Processed")]
+
+
+def test_apply_post_actions_batch_fallback_caches_uid_store_failure(monkeypatch) -> None:
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.uid_calls: list[tuple] = []
+            self.search_calls: list[tuple] = []
+            self.store_calls: list[tuple[bytes, str, str]] = []
+            self.expunge_calls = 0
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"2"]
+
+        def capability(self):
+            return "OK", [b"IMAP4rev1"]
+
+        def uid(self, command: str, *args):
+            self.uid_calls.append((command, *args))
+            if command == "STORE":
+                return "NO", [b"unsupported"]
+            return "BAD", [b""]
+
+        def search(self, *_args):
+            self.search_calls.append(_args)
+            if _args == (None, "UID", "123"):
+                return "OK", [b"1"]
+            if _args == (None, "UID", "124"):
+                return "OK", [b"2"]
+            return "NO", [b""]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def expunge(self):
+            self.expunge_calls += 1
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
+    channel._uidvalidity = b"1"
+    channel._apply_post_actions_batch(["123", "124"])
+
+    assert [call for call in fake.uid_calls if call[0] == "STORE"] == [("STORE", "123", "+FLAGS", "(\\Deleted)")]
+    assert fake.search_calls == [(None, "UID", "123"), (None, "UID", "124")]
+    assert fake.store_calls == [(b"1", "+FLAGS", "\\Deleted"), (b"2", "+FLAGS", "\\Deleted")]
+    assert fake.expunge_calls == 0
+
+
+def test_apply_post_actions_batch_delete_with_post_action_expunge_true_no_uidplus(monkeypatch) -> None:
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.uid_calls: list[tuple] = []
+            self.store_calls: list[tuple[bytes, str, str]] = []
+            self.expunge_calls = 0
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"2"]
+
+        def capability(self):
+            return "OK", [b"IMAP4rev1"]
+
+        def uid(self, command: str, *args):
+            self.uid_calls.append((command, *args))
+            if command == "STORE":
+                return "NO", [b"unsupported"]
+            return "BAD", [b""]
+
+        def search(self, *_args):
+            uid_to_seq = {"123": b"1", "124": b"2"}
+            uid = _args[-1]
+            seq = uid_to_seq.get(uid, b"")
+            return "OK", [seq]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def expunge(self):
+            self.expunge_calls += 1
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(post_action="delete", post_action_expunge=True), MessageBus())
+    channel._uidvalidity = b"1"
+    channel._apply_post_actions_batch(["123", "124"])
+
+    assert fake.store_calls == [(b"1", "+FLAGS", "\\Deleted"), (b"2", "+FLAGS", "\\Deleted")]
+    assert fake.expunge_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_start_applies_post_action_only_after_delivery(monkeypatch) -> None:
+    calls: list[str] = []
+
+    channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
+
+    fetched = ([
+        {
+            "sender": "alice@example.com",
+            "subject": "Hi",
+            "message_id": "<m1@example.com>",
+            "content": "hello",
+            "metadata": {"uid": "123"},
+        }
+    ], [])
+
+    def _fake_fetch():
+        channel._running = False
+        return fetched
+
+    async def _fake_handle_message(**_kwargs):
+        calls.append("delivered")
+        return True
+
+    def _fake_batch(actions):
+        assert calls == ["delivered"]
+        assert actions == ["123"]
+        calls.append("post_action")
+
+    monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
+    monkeypatch.setattr(channel, "_handle_message", _fake_handle_message)
+    monkeypatch.setattr(channel, "_mark_seen_batch", lambda _uids: None)
+    monkeypatch.setattr(channel, "_apply_post_actions_batch", _fake_batch)
+
+    await channel.start()
+    assert calls == ["delivered", "post_action"]
+
+
+@pytest.mark.asyncio
+async def test_start_skips_post_action_when_delivery_fails(monkeypatch) -> None:
+    called = {"post_action": False}
+
+    channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
+
+    fetched = ([
+        {
+            "sender": "alice@example.com",
+            "subject": "Hi",
+            "message_id": "<m1@example.com>",
+            "content": "hello",
+            "metadata": {"uid": "123"},
+        }
+    ], [])
+
+    def _fake_fetch():
+        channel._running = False
+        return fetched
+
+    async def _fake_handle_message(**_kwargs):
+        raise RuntimeError("delivery failed")
+
+    def _fake_batch(_actions):
+        called["post_action"] = True
+
+    monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
+    monkeypatch.setattr(channel, "_handle_message", _fake_handle_message)
+    monkeypatch.setattr(channel, "_mark_seen_batch", lambda _uids: None)
+    monkeypatch.setattr(channel, "_apply_post_actions_batch", _fake_batch)
+
+    await channel.start()
+    assert called["post_action"] is False
+
+
+@pytest.mark.asyncio
+async def test_start_keeps_post_actions_for_successful_emails_when_later_delivery_fails(monkeypatch) -> None:
+    called_actions: list[str] = []
+
+    channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
+
+    fetched = ([
+        {
+            "sender": "alice@example.com",
+            "subject": "First",
+            "message_id": "<m1@example.com>",
+            "content": "ok",
+            "metadata": {"uid": "123"},
+        },
+        {
+            "sender": "bob@example.com",
+            "subject": "Second",
+            "message_id": "<m2@example.com>",
+            "content": "fail",
+            "metadata": {"uid": "124"},
+        },
+    ], [])
+
+    def _fake_fetch():
+        channel._running = False
+        return fetched
+
+    async def _fake_handle_message(**kwargs):
+        if kwargs["chat_id"] == "bob@example.com":
+            raise RuntimeError("delivery failed")
+        return True
+
+    def _fake_batch(actions):
+        called_actions.extend(actions)
+
+    monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
+    monkeypatch.setattr(channel, "_handle_message", _fake_handle_message)
+    monkeypatch.setattr(channel, "_mark_seen_batch", lambda _uids: None)
+    monkeypatch.setattr(channel, "_apply_post_actions_batch", _fake_batch)
+
+    await channel.start()
+    assert called_actions == ["123"]
+
+
+def test_fetch_new_messages_skips_self_sent_email_and_marks_seen(monkeypatch) -> None:
+    raw = _make_raw_email(from_addr="Nanobot <bot@example.com>", subject="Loop test")
+
+    fake = _make_fake_imap(raw, uid=b"123")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(from_address="bot@example.com"), MessageBus())
+    items, skipped_uids = channel._fetch_new_messages()
+
+    assert items == []
+    assert skipped_uids == {"123"}
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
+
+    items_again, skipped_again = channel._fetch_new_messages()
+    assert items_again == []
+    assert skipped_again == set()
+
+
+@pytest.mark.parametrize(
+    "config_override,from_header",
+    [
+        # Only smtp_username matches — simulates an SMTP relay where
+        # outbound From gets rewritten to the SMTP login identity.
+        (
+            {"from_address": "", "smtp_username": "bot@example.com", "imap_username": "other@imap.com"},
+            "bot@example.com",
+        ),
+        # Only imap_username matches — simulates mailbox-based identity
+        # with no explicit from_address set.
+        (
+            {"from_address": "", "smtp_username": "other@smtp.com", "imap_username": "bot@example.com"},
+            "bot@example.com",
+        ),
+        (
+            {"from_address": "bot@example.com", "smtp_username": "other@smtp.com", "imap_username": "other@imap.com"},
+            "BOT@EXAMPLE.COM",
+        ),
+    ],
+    ids=["smtp_username_only", "imap_username_only", "case_insensitive"],
+)
+def test_fetch_new_messages_skips_self_sent_across_identity_sources(
+    monkeypatch, config_override, from_header
+) -> None:
+    """Self-address detection must fire when any of from_address / smtp_username /
+    imap_username matches, and must be case-insensitive."""
+    raw = _make_raw_email(from_addr=from_header, subject="Loop test")
+
+    fake = _make_fake_imap(raw, uid=b"123")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(**config_override), MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert items == []
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
+
+
+def test_fetch_new_messages_retries_once_when_imap_connection_goes_stale(monkeypatch) -> None:
+    raw = _make_raw_email(subject="Invoice", body="Please pay")
+    fail_once = {"pending": True}
+
+    class FlakyIMAP:
+        def __init__(self) -> None:
+            self.store_calls: list[tuple[bytes, str, str]] = []
+            self.search_calls = 0
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def uid(self, command: str, *args):
+            if command == "SEARCH":
+                self.search_calls += 1
+                if fail_once["pending"]:
+                    fail_once["pending"] = False
+                    raise imaplib.IMAP4.abort("socket error")
+                return "OK", [b"123"]
+            if command == "FETCH":
+                return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
+            return "OK", [b""]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake_instances: list[FlakyIMAP] = []
+
+    def _factory(_host: str, _port: int):
+        instance = FlakyIMAP()
+        fake_instances.append(instance)
+        return instance
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", _factory)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert len(fake_instances) == 2
+    assert fake_instances[0].search_calls == 1
+    assert fake_instances[1].search_calls == 1
+
+
+def test_fetch_new_messages_keeps_messages_collected_before_stale_retry(monkeypatch) -> None:
+    raw_first = _make_raw_email(subject="First", body="First body")
+    raw_second = _make_raw_email(subject="Second", body="Second body")
+    mailbox_state = {"123": raw_first, "124": raw_second}
+    fail_once = {"pending": True}
+
+    class FlakyIMAP:
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"2"]
+
+        def uid(self, command: str, *args):
+            if command == "SEARCH":
+                keys = " ".join(sorted(mailbox_state.keys(), key=int))
+                return "OK", [keys.encode()]
+            if command == "FETCH":
+                uid = args[0]
+                if uid == "124" and fail_once["pending"]:
+                    fail_once["pending"] = False
+                    raise imaplib.IMAP4.abort("socket error")
+                raw = mailbox_state[uid]
+                header = f"{uid} (UID {uid} BODY[] {{200}})".encode()
+                return "OK", [(header, raw), b")"]
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: FlakyIMAP())
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert [item["subject"] for item in items] == ["First", "Second"]
+
+
+def test_fetch_new_messages_skips_missing_mailbox(monkeypatch) -> None:
+    class MissingMailboxIMAP:
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
+        def select(self, _mailbox: str):
+            raise imaplib.IMAP4.error("Mailbox doesn't exist")
+
+        def logout(self):
+            return "BYE", [b""]
+
+    monkeypatch.setattr(
+        "nanobot.channels.email.runtime.imaplib.IMAP4_SSL",
+        lambda _h, _p: MissingMailboxIMAP(),
+    )
+
+    channel = EmailChannel(_make_config(), MessageBus())
+
+    assert channel._fetch_new_messages() == ([], set())
+
+
+def test_validate_config_requires_move_mailbox_for_move_post_action() -> None:
+    channel = EmailChannel(_make_config(post_action="move", post_action_move_mailbox=None), MessageBus())
+    assert channel._validate_config() is False
+
+
+def test_validate_config_requires_trusted_authserv_ids_when_verification_enabled() -> None:
+    channel = EmailChannel(
+        _make_config(verify_dkim=True, verify_spf=True, trusted_authserv_ids=[]),
+        MessageBus(),
+    )
+    assert channel._validate_config() is False
+
+
+def test_email_config_normalizes_trusted_authserv_ids() -> None:
+    config = _make_config(
+        trusted_authserv_ids=[" MX.Google.COM. ", "mx.google.com"],
+    )
+    assert config.trusted_authserv_ids == ["mx.google.com"]
+
+    with pytest.raises(ValueError, match="invalid trusted Authentication-Results authserv-id"):
+        _make_config(trusted_authserv_ids=["*"])
+
+
+def test_extract_text_body_falls_back_to_html() -> None:
+    msg = EmailMessage()
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bot@example.com"
+    msg["Subject"] = "HTML only"
+    msg.add_alternative("<p>Hello<br>world</p>", subtype="html")
+
+    text = EmailChannel._extract_text_body(msg)
+    assert "Hello" in text
+    assert "world" in text
+
+
+@pytest.mark.asyncio
+async def test_start_returns_immediately_without_consent(monkeypatch) -> None:
+    cfg = _make_config()
+    cfg.consent_granted = False
+    channel = EmailChannel(cfg, MessageBus())
+
+    called = {"fetch": False}
+
+    def _fake_fetch():
+        called["fetch"] = True
+        return []
+
+    monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
+    await channel.start()
+    assert channel.is_running is False
+    assert called["fetch"] is False
+
+
+@pytest.mark.asyncio
+async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.timeout = timeout
+            self.started_tls = False
+            self.logged_in = False
+            self.sent_messages: list[EmailMessage] = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            self.started_tls = True
+
+        def login(self, _user: str, _pw: str):
+            self.logged_in = True
+
+        def send_message(self, msg: EmailMessage):
+            self.sent_messages.append(msg)
+
+    fake_instances: list[FakeSMTP] = []
+
+    def _smtp_factory(host: str, port: int, timeout: int = 30):
+        instance = FakeSMTP(host, port, timeout=timeout)
+        fake_instances.append(instance)
+        return instance
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", _smtp_factory)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    channel._last_subject_by_chat["alice@example.com"] = "Invoice #42"
+    channel._last_message_id_by_chat["alice@example.com"] = "<m1@example.com>"
+
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="Acknowledged.",
+        )
+    )
+
+    assert len(fake_instances) == 1
+    smtp = fake_instances[0]
+    assert smtp.started_tls is True
+    assert smtp.logged_in is True
+    assert len(smtp.sent_messages) == 1
+    sent = smtp.sent_messages[0]
+    assert sent["Subject"] == "Re: Invoice #42"
+    assert sent["To"] == "alice@example.com"
+    assert sent["In-Reply-To"] == "<m1@example.com>"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event", [
+    ProgressEvent(tool_hint=True, tool_events=[{
+        "phase": "start", "call_id": "call-1", "name": "exec",
+        "arguments": {"command": "git status"},
+    }]),
+    ProgressEvent(tool_events=[{"phase": "end", "call_id": "call-1", "name": "exec"}]),
+], ids=["tool-start", "tool-end"])
+async def test_send_skips_progress_messages_before_smtp(monkeypatch, event) -> None:
+    called = {"smtp": False}
+
+    def _smtp_factory(*_args, **_kwargs):
+        called["smtp"] = True
+        raise AssertionError("progress messages must not open an SMTP connection")
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", _smtp_factory)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+
+    msg = outbound_message_for_event(
+        channel="email",
+        chat_id="alice@example.com",
+        event=event,
+    )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
+
+    assert called["smtp"] is False
+
+
+@pytest.mark.asyncio
+async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.sent_messages: list[EmailMessage] = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            self.sent_messages.append(msg)
+
+    fake_instances: list[FakeSMTP] = []
+
+    def _smtp_factory(host: str, port: int, timeout: int = 30):
+        instance = FakeSMTP(host, port, timeout=timeout)
+        fake_instances.append(instance)
+        return instance
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", _smtp_factory)
+
+    cfg = _make_config()
+    cfg.auto_reply_enabled = False
+    channel = EmailChannel(cfg, MessageBus())
+
+    channel._last_subject_by_chat["alice@example.com"] = "Previous email"
+
+    with pytest.raises(DeliveryRejectedError, match="auto_reply_enabled"):
+        await channel.send(
+            OutboundMessage(
+                channel="email",
+                chat_id="alice@example.com",
+                content="Should not send.",
+            )
+        )
+    assert fake_instances == []
+
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="Force send.",
+            metadata={"force_send": True},
+        )
+    )
+    assert len(fake_instances) == 1
+    assert len(fake_instances[0].sent_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_send_proactive_email_when_auto_reply_disabled(monkeypatch) -> None:
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.sent_messages: list[EmailMessage] = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            self.sent_messages.append(msg)
+
+    fake_instances: list[FakeSMTP] = []
+
+    def _smtp_factory(host: str, port: int, timeout: int = 30):
+        instance = FakeSMTP(host, port, timeout=timeout)
+        fake_instances.append(instance)
+        return instance
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", _smtp_factory)
+
+    cfg = _make_config()
+    cfg.auto_reply_enabled = False
+    channel = EmailChannel(cfg, MessageBus())
+
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="bob@example.com",
+            content="Hello, this is a proactive email.",
+        )
+    )
+    assert len(fake_instances) == 1
+    assert len(fake_instances[0].sent_messages) == 1
+    sent = fake_instances[0].sent_messages[0]
+    assert sent["To"] == "bob@example.com"
+
+
+@pytest.mark.asyncio
+async def test_send_skips_when_consent_not_granted(monkeypatch) -> None:
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.sent_messages: list[EmailMessage] = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            self.sent_messages.append(msg)
+
+    called = {"smtp": False}
+
+    def _smtp_factory(host: str, port: int, timeout: int = 30):
+        called["smtp"] = True
+        return FakeSMTP(host, port, timeout=timeout)
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", _smtp_factory)
+
+    cfg = _make_config()
+    cfg.consent_granted = False
+    channel = EmailChannel(cfg, MessageBus())
+    with pytest.raises(DeliveryRejectedError, match="consent_granted"):
+        await channel.send(
+            OutboundMessage(
+                channel="email",
+                chat_id="alice@example.com",
+                content="Should not send.",
+                metadata={"force_send": True},
+            )
+        )
+    assert called["smtp"] is False
+
+
+def test_fetch_messages_between_dates_uses_imap_since_before_without_mark_seen(monkeypatch) -> None:
+    raw = _make_raw_email(subject="Status", body="Yesterday update")
+
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.search_args = None
+            self.store_calls: list[tuple[bytes, str, str]] = []
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def uid(self, command: str, *args):
+            if command == "SEARCH":
+                self.search_args = args
+                return "OK", [b"999"]
+            if command == "FETCH":
+                return "OK", [(b"5 (UID 999 BODY[] {200})", raw), b")"]
+            return "OK", [b""]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items = channel.fetch_messages_between_dates(
+        start_date=date(2026, 2, 6),
+        end_date=date(2026, 2, 7),
+        limit=10,
+    )
+
+    assert len(items) == 1
+    assert items[0]["subject"] == "Status"
+    assert fake.search_args is not None
+    assert fake.search_args[1:] == ("SINCE", "06-Feb-2026", "BEFORE", "07-Feb-2026")
+    assert fake.store_calls == []
+
+
+def _make_fake_imap(raw: bytes, uid: bytes = b"500"):
+    """Return a FakeIMAP class pre-loaded with the given raw email."""
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.store_calls: list[tuple[bytes, str, str]] = []
+            self.uid_calls: list[tuple] = []
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def capability(self):
+            return "OK", [b"IMAP4rev1"]
+
+        def uid(self, command: str, *args):
+            self.uid_calls.append((command, *args))
+            if command == "SEARCH":
+                return "OK", [uid]
+            if command == "FETCH":
+                return "OK", [(b"1 (UID " + uid + b" BODY[] {200})", raw), b")"]
+            return "OK", [b""]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    return FakeIMAP()
+
+
+def test_spoofed_email_rejected_when_verify_enabled(monkeypatch) -> None:
+    raw = _make_raw_email(subject="Spoofed", body="Malicious payload")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.example.com"],
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 0, "Spoofed email without auth headers should be rejected"
+
+
+def test_email_with_valid_auth_results_accepted(monkeypatch) -> None:
+    raw = _make_raw_email(
+        subject="Legit",
+        body="Hello from verified sender",
+        auth_results="mx.example.com; spf=pass smtp.mailfrom=alice@example.com; dkim=pass header.d=example.com",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.example.com"],
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["sender"] == "alice@example.com"
+    assert items[0]["subject"] == "Legit"
+
+
+def test_email_with_partial_auth_rejected(monkeypatch) -> None:
+    raw = _make_raw_email(
+        subject="Partial",
+        body="Only SPF passes",
+        auth_results="mx.example.com; spf=pass smtp.mailfrom=alice@example.com; dkim=fail",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.example.com"],
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 0, "Email with dkim=fail should be rejected"
+
+
+@pytest.mark.parametrize(
+    "subject, forged_auth_results",
+    [
+        pytest.param(
+            "Forged authentication",
+            "mx.attacker.example; spf=pass smtp.mailfrom=owner@example.com; dkim=pass header.d=example.com",
+            id="forged_authentication_results_cannot_override_trusted_failure",
+        ),
+        pytest.param(
+            "Forged trusted producer",
+            "mx.receiver.example; spf=pass smtp.mailfrom=owner@example.com; dkim=pass header.d=example.com",
+            id="duplicate_header_with_trusted_id_is_rejected",
+        ),
+    ],
+)
+def test_forged_authentication_results_cannot_override_trusted_failure(
+    monkeypatch,
+    subject,
+    forged_auth_results,
+) -> None:
+    raw = _make_raw_email(
+        from_addr="owner@example.com",
+        subject=subject,
+        body="Malicious payload",
+        auth_results=[
+            "mx.receiver.example; spf=fail smtp.mailfrom=attacker.example; "
+            "dkim=fail header.d=attacker.example",
+            forged_auth_results,
+        ],
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allow_from=["owner@example.com"],
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.receiver.example"],
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert items == []
+
+
+def test_pass_text_in_authentication_result_comment_is_not_a_verdict() -> None:
+    from email import policy
+    from email.parser import BytesParser
+
+    msg = EmailMessage()
+    msg["From"] = "owner@example.com"
+    msg["Authentication-Results"] = (
+        "mx.receiver.example; spf=fail (spf=pass smtp.mailfrom=owner@example.com) "
+        "smtp.mailfrom=attacker.example; "
+        "dkim=fail reason=\"dkim=pass header.d=example.com\" header.d=attacker.example"
+    )
+    msg.set_content("malicious")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg.as_bytes())
+    channel = EmailChannel(
+        _make_config(trusted_authserv_ids=["mx.receiver.example"]),
+        MessageBus(),
+    )
+
+    assert channel._check_authentication_results(parsed, "owner@example.com") == (False, False)
+
+
+def test_trusted_pass_for_unrelated_domain_is_rejected(monkeypatch) -> None:
+    raw = _make_raw_email(
+        from_addr="owner@example.com",
+        subject="Unaligned authentication",
+        body="Malicious payload",
+        auth_results=(
+            "mx.receiver.example; spf=pass smtp.mailfrom=attacker.example; "
+            "dkim=pass header.d=attacker.example; "
+            "dmarc=fail header.from=example.com"
+        ),
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allow_from=["owner@example.com"],
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.receiver.example"],
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert items == []
+
+
+def test_trusted_relaxed_domain_alignment_accepts_legitimate_subdomain_auth(monkeypatch) -> None:
+    raw = _make_raw_email(
+        from_addr="alice@example.com",
+        subject="Aligned authentication",
+        body="Legitimate payload",
+        auth_results=(
+            "mx.receiver.example; spf=pass smtp.mailfrom=bounce.mail.example.com; "
+            "dkim=pass header.d=mail.example.com"
+        ),
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allow_from=["alice@example.com"],
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.receiver.example"],
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["sender"] == "alice@example.com"
+
+
+def test_backward_compat_verify_disabled(monkeypatch) -> None:
+    raw = _make_raw_email(subject="NoAuth", body="No auth headers present")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=False, verify_spf=False)
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1, "With verification disabled, emails should be accepted as before"
+
+
+def test_email_content_tagged_with_email_context(monkeypatch) -> None:
+    raw = _make_raw_email(subject="Tagged", body="Check the tag")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=False, verify_spf=False)
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["content"].startswith("[EMAIL-CONTEXT]"), (
+        "Email content must be tagged with [EMAIL-CONTEXT]"
+    )
+
+
+def test_check_authentication_results_method() -> None:
+    from email import policy
+    from email.parser import BytesParser
+
+    msg_no_auth = EmailMessage()
+    msg_no_auth["From"] = "alice@example.com"
+    msg_no_auth.set_content("test")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_no_auth.as_bytes())
+    channel = EmailChannel(
+        _make_config(trusted_authserv_ids=["mx.google.com"]),
+        MessageBus(),
+    )
+    spf, dkim = channel._check_authentication_results(parsed, "alice@example.com")
+    assert spf is False
+    assert dkim is False
+
+    msg_both = EmailMessage()
+    msg_both["From"] = "alice@example.com"
+    msg_both["Authentication-Results"] = (
+        "mx.google.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com"
+    )
+    msg_both.set_content("test")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_both.as_bytes())
+    spf, dkim = channel._check_authentication_results(parsed, "alice@example.com")
+    assert spf is True
+    assert dkim is True
+
+    msg_spf_only = EmailMessage()
+    msg_spf_only["From"] = "alice@example.com"
+    msg_spf_only["Authentication-Results"] = (
+        "mx.google.com; spf=pass smtp.mailfrom=example.com; dkim=fail"
+    )
+    msg_spf_only.set_content("test")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_spf_only.as_bytes())
+    spf, dkim = channel._check_authentication_results(parsed, "alice@example.com")
+    assert spf is True
+    assert dkim is False
+
+    msg_dkim_only = EmailMessage()
+    msg_dkim_only["From"] = "alice@example.com"
+    msg_dkim_only["Authentication-Results"] = (
+        "mx.google.com; spf=fail smtp.mailfrom=example.com; dkim=pass header.d=example.com"
+    )
+    msg_dkim_only.set_content("test")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_dkim_only.as_bytes())
+    spf, dkim = channel._check_authentication_results(parsed, "alice@example.com")
+    assert spf is False
+    assert dkim is True
+
+
+def _make_raw_email_with_attachment(
+    from_addr: str = "alice@example.com",
+    subject: str = "With attachment",
+    body: str = "See attached.",
+    attachment_name: str = "doc.pdf",
+    attachment_content: bytes = b"%PDF-1.4 fake pdf content",
+    attachment_mime: str = "application/pdf",
+    auth_results: str | None = None,
+) -> bytes:
+    msg = EmailMessage()
+    msg["From"] = from_addr
+    msg["To"] = "bot@example.com"
+    msg["Subject"] = subject
+    msg["Message-ID"] = "<m1@example.com>"
+    if auth_results:
+        msg["Authentication-Results"] = auth_results
+    msg.set_content(body)
+    maintype, subtype = attachment_mime.split("/", 1)
+    msg.add_attachment(
+        attachment_content,
+        maintype=maintype,
+        subtype=subtype,
+        filename=attachment_name,
+    )
+    return msg.as_bytes()
+
+
+def test_fetch_new_messages_ignores_unauthorized_sender_before_attachments(monkeypatch) -> None:
+    raw = _make_raw_email_with_attachment(from_addr="blocked@example.com")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    called = {"attachments": False}
+
+    def _extract_attachments(*_args, **_kwargs):
+        called["attachments"] = True
+        return []
+
+    monkeypatch.setattr(EmailChannel, "_extract_attachments", _extract_attachments)
+
+    cfg = _make_config(
+        allow_from=["allowed@example.com"],
+        allowed_attachment_types=["application/pdf"],
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+
+    assert channel._fetch_new_messages() == ([], {"500"})
+    assert called["attachments"] is False
+    assert [call for call in fake.uid_calls if call[0] == "FETCH"] == [
+        ("FETCH", "500", "(BODY.PEEK[HEADER])")
+    ]
+    assert ("STORE", "500", "+FLAGS", "(\\Seen)") in fake.uid_calls
+
+
+def test_extract_attachments_saves_pdf(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
+
+    raw = _make_raw_email_with_attachment()
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(allowed_attachment_types=["application/pdf"], verify_dkim=False, verify_spf=False)
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert len(items[0]["media"]) == 1
+    saved_path = Path(items[0]["media"][0])
+    assert saved_path.exists()
+    assert saved_path.read_bytes() == b"%PDF-1.4 fake pdf content"
+    assert "500_doc.pdf" in saved_path.name
+    assert "[attachment:" in items[0]["content"]
+
+
+def test_extract_attachments_disabled_by_default(monkeypatch) -> None:
+    raw = _make_raw_email_with_attachment()
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=False, verify_spf=False)
+    assert cfg.allowed_attachment_types == []
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["media"] == []
+    assert "[attachment:" not in items[0]["content"]
+
+
+def test_extract_attachments_mime_type_filter(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
+
+    raw = _make_raw_email_with_attachment(
+        attachment_name="image.png",
+        attachment_content=b"\x89PNG fake",
+        attachment_mime="image/png",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allowed_attachment_types=["application/pdf"],
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["media"] == []
+
+
+def test_extract_attachments_empty_allowed_types_rejects_all(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
+
+    raw = _make_raw_email_with_attachment(
+        attachment_name="image.png",
+        attachment_content=b"\x89PNG fake",
+        attachment_mime="image/png",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allowed_attachment_types=[],
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["media"] == []
+
+
+def test_extract_attachments_wildcard_pattern(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
+
+    raw = _make_raw_email_with_attachment(
+        attachment_name="photo.jpg",
+        attachment_content=b"\xff\xd8\xff fake jpeg",
+        attachment_mime="image/jpeg",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allowed_attachment_types=["image/*"],
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert len(items[0]["media"]) == 1
+
+
+def test_extract_attachments_size_limit(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
+
+    raw = _make_raw_email_with_attachment(
+        attachment_content=b"x" * 1000,
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allowed_attachment_types=["*"],
+        max_attachment_size=500,
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["media"] == []
+
+
+def test_extract_attachments_max_count(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
+
+    msg = EmailMessage()
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bot@example.com"
+    msg["Subject"] = "Many attachments"
+    msg["Message-ID"] = "<m1@example.com>"
+    msg.set_content("See attached.")
+    for i in range(3):
+        msg.add_attachment(
+            f"content {i}".encode(),
+            maintype="application",
+            subtype="pdf",
+            filename=f"doc{i}.pdf",
+        )
+    raw = msg.as_bytes()
+
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allowed_attachment_types=["*"],
+        max_attachments_per_email=2,
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert len(items[0]["media"]) == 2
+
+
+def test_extract_attachments_sanitizes_filename(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
+
+    raw = _make_raw_email_with_attachment(
+        attachment_name="../../../etc/passwd",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(allowed_attachment_types=["*"], verify_dkim=False, verify_spf=False)
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert len(items[0]["media"]) == 1
+    saved_path = Path(items[0]["media"][0])
+    assert saved_path.parent == tmp_path
+
+
+@pytest.mark.asyncio
+async def test_send_with_single_file_attachment(tmp_path, monkeypatch) -> None:
+    sent_messages: list[EmailMessage] = []
+
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            sent_messages.append(msg)
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", lambda h, p, timeout=30: FakeSMTP(h, p, timeout=timeout))
+
+    attachment = tmp_path / "report.pdf"
+    attachment.write_bytes(b"%PDF-1.4 fake pdf content")
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="Please find the report attached.",
+            media=[str(attachment)],
+        )
+    )
+
+    assert len(sent_messages) == 1
+    sent = sent_messages[0]
+    assert sent["To"] == "alice@example.com"
+    assert sent.is_multipart(), "Email with attachment should be multipart"
+
+    attachment_parts = []
+    for part in sent.walk():
+        if part.get_content_disposition() == "attachment":
+            attachment_parts.append(part)
+    assert len(attachment_parts) == 1
+    att = attachment_parts[0]
+    assert att.get_filename() == "report.pdf"
+    assert att.get_content_type() == "application/pdf"
+    assert att.get_payload(decode=True) == b"%PDF-1.4 fake pdf content"
+
+
+@pytest.mark.asyncio
+async def test_send_with_multiple_file_attachments(tmp_path, monkeypatch) -> None:
+    sent_messages: list[EmailMessage] = []
+
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            sent_messages.append(msg)
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", lambda h, p, timeout=30: FakeSMTP(h, p, timeout=timeout))
+
+    file1 = tmp_path / "doc.pdf"
+    file1.write_bytes(b"%PDF-1.4 doc")
+    file2 = tmp_path / "image.png"
+    file2.write_bytes(b"\x89PNG fake image")
+    file3 = tmp_path / "notes.txt"
+    file3.write_bytes(b"Hello, this is a text note.")
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="bob@example.com",
+            content="Multiple files attached.",
+            media=[str(file1), str(file2), str(file3)],
+        )
+    )
+
+    assert len(sent_messages) == 1
+    sent = sent_messages[0]
+    assert sent.is_multipart()
+
+    attachment_parts = []
+    for part in sent.walk():
+        if part.get_content_disposition() == "attachment":
+            attachment_parts.append(part)
+    assert len(attachment_parts) == 3
+
+    filenames = {p.get_filename() for p in attachment_parts}
+    assert filenames == {"doc.pdf", "image.png", "notes.txt"}
+
+
+@pytest.mark.asyncio
+async def test_send_skips_missing_attachment_file(tmp_path, monkeypatch) -> None:
+    sent_messages: list[EmailMessage] = []
+
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            sent_messages.append(msg)
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", lambda h, p, timeout=30: FakeSMTP(h, p, timeout=timeout))
+
+    existing = tmp_path / "real.txt"
+    existing.write_text("I exist")
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="One attachment is missing.",
+            media=[
+                str(existing),
+                str(tmp_path / "nonexistent.pdf"),
+            ],
+        )
+    )
+
+    assert len(sent_messages) == 1
+    sent = sent_messages[0]
+    assert sent.is_multipart()
+
+    attachment_parts = []
+    for part in sent.walk():
+        if part.get_content_disposition() == "attachment":
+            attachment_parts.append(part)
+    assert len(attachment_parts) == 1
+    assert attachment_parts[0].get_filename() == "real.txt"
+    body = sent.get_body(preferencelist=("plain",))
+    assert body is not None
+    assert "[attachment: nonexistent.pdf - send failed]" in body.get_content()
+
+
+@pytest.mark.asyncio
+async def test_send_skips_oversized_attachment_file(tmp_path, monkeypatch) -> None:
+    sent_messages: list[EmailMessage] = []
+
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            sent_messages.append(msg)
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", lambda h, p, timeout=30: FakeSMTP(h, p, timeout=timeout))
+
+    attachment = tmp_path / "too-large.bin"
+    attachment.write_bytes(b"1234")
+
+    channel = EmailChannel(_make_config(max_attachment_size=3), MessageBus())
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="Attachment should be skipped.",
+            media=[str(attachment)],
+        )
+    )
+
+    assert len(sent_messages) == 1
+    sent = sent_messages[0]
+    assert not sent.is_multipart()
+    assert "[attachment: too-large.bin - too large]" in sent.get_content()
+
+
+@pytest.mark.asyncio
+async def test_send_limits_outbound_attachment_count(tmp_path, monkeypatch) -> None:
+    sent_messages: list[EmailMessage] = []
+
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            sent_messages.append(msg)
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", lambda h, p, timeout=30: FakeSMTP(h, p, timeout=timeout))
+
+    file1 = tmp_path / "first.txt"
+    file1.write_text("first")
+    file2 = tmp_path / "second.txt"
+    file2.write_text("second")
+
+    channel = EmailChannel(_make_config(max_attachments_per_email=1), MessageBus())
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="Only one attachment should be sent.",
+            media=[str(file1), str(file2)],
+        )
+    )
+
+    assert len(sent_messages) == 1
+    sent = sent_messages[0]
+    attachment_parts = []
+    for part in sent.walk():
+        if part.get_content_disposition() == "attachment":
+            attachment_parts.append(part)
+    assert len(attachment_parts) == 1
+    assert attachment_parts[0].get_filename() == "first.txt"
+    body = sent.get_body(preferencelist=("plain",))
+    assert body is not None
+    assert "[attachment: second.txt - too many attachments]" in body.get_content()
+
+
+@pytest.mark.asyncio
+async def test_send_with_unknown_mime_type_attachment(tmp_path, monkeypatch) -> None:
+    sent_messages: list[EmailMessage] = []
+
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            sent_messages.append(msg)
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", lambda h, p, timeout=30: FakeSMTP(h, p, timeout=timeout))
+
+    attachment = tmp_path / "data.unknown_ext_xyz"
+    attachment.write_bytes(b"some binary data")
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="Unknown MIME type.",
+            media=[str(attachment)],
+        )
+    )
+
+    assert len(sent_messages) == 1
+    sent = sent_messages[0]
+    assert sent.is_multipart()
+
+    attachment_parts = []
+    for part in sent.walk():
+        if part.get_content_disposition() == "attachment":
+            attachment_parts.append(part)
+    assert len(attachment_parts) == 1
+    att = attachment_parts[0]
+    assert att.get_content_type() == "application/octet-stream"
+    assert att.get_filename() == "data.unknown_ext_xyz"
+
+
+@pytest.mark.asyncio
+async def test_send_with_media_and_reply_subject_and_in_reply_to(tmp_path, monkeypatch) -> None:
+    sent_messages: list[EmailMessage] = []
+
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            sent_messages.append(msg)
+
+    monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", lambda h, p, timeout=30: FakeSMTP(h, p, timeout=timeout))
+
+    attachment = tmp_path / "summary.pdf"
+    attachment.write_bytes(b"%PDF-1.4 summary")
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    channel._last_subject_by_chat["alice@example.com"] = "Original subject"
+    channel._last_message_id_by_chat["alice@example.com"] = "<orig@example.com>"
+
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="Reply with attachment.",
+            media=[str(attachment)],
+        )
+    )
+
+    assert len(sent_messages) == 1
+    sent = sent_messages[0]
+    assert sent["Subject"] == "Re: Original subject"
+    assert sent["In-Reply-To"] == "<orig@example.com>"
+    assert sent["References"] == "<orig@example.com>"
+
+    attachment_parts = []
+    for part in sent.walk():
+        if part.get_content_disposition() == "attachment":
+            attachment_parts.append(part)
+    assert len(attachment_parts) == 1
+    assert attachment_parts[0].get_filename() == "summary.pdf"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mark_seen", [False, True])
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_real_poll_retries_after_bus_failure_or_cancellation(monkeypatch, mark_seen, cancel):
+    import asyncio
+
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(mark_seen=mark_seen, post_action="delete"), bus)
+    post_actions = []
+    monkeypatch.setattr(channel, "_apply_post_actions_batch", lambda uids: post_actions.extend(uids))
+    publish = bus.publish_inbound
+    attempts = 0
+
+    async def flaky_publish(msg):
+        nonlocal attempts
+        attempts += 1
+        channel._running = False
+        if attempts == 1:
+            if cancel:
+                raise asyncio.CancelledError()
+            raise RuntimeError("bus unavailable")
+        await publish(msg)
+
+    monkeypatch.setattr(bus, "publish_inbound", flaky_publish)
+    if cancel:
+        with pytest.raises(asyncio.CancelledError):
+            await channel.start()
+    else:
+        await channel.start()
+    assert bus.inbound_size == 0
+    assert "123" not in channel._processed_uids
+    assert not post_actions
+    assert not any(call[0] == "STORE" for call in fake.uid_calls)
+
+    await channel.start()
+    assert bus.inbound_size == 1
+    assert "123" in channel._processed_uids
+    assert post_actions == ["123"]
+    assert any(call[0] == "STORE" for call in fake.uid_calls) == mark_seen
+    assert channel._fetch_new_messages() == ([], set())
+
+@pytest.mark.asyncio
+async def test_poll_retries_seen_without_redelivery(monkeypatch):
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    original_uid = fake.uid
+    failures = 0
+
+    def uid(command, *args):
+        nonlocal failures
+        if command == "STORE" and failures == 0:
+            failures += 1
+            raise OSError("connection lost")
+        return original_uid(command, *args)
+
+    fake.uid = uid
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(), bus)
+    publish = bus.publish_inbound
+
+    async def stop_after_delivery(message):
+        await publish(message)
+        channel._running = False
+
+    monkeypatch.setattr(bus, "publish_inbound", stop_after_delivery)
+    await channel.start()
+    assert bus.inbound_size == 1
+    assert channel._pending_seen == {"123"}
+    # Stop after the next fetch, allowing the pending acknowledgement to run.
+    fetch = channel._fetch_new_messages
+    def stop_after_fetch():
+        result = fetch()
+        channel._running = False
+        return result
+    monkeypatch.setattr(channel, "_fetch_new_messages", stop_after_fetch)
+    await channel.start()
+    assert bus.inbound_size == 1
+    assert not channel._pending_seen
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("validity", [b"2", None])
+async def test_poll_refuses_ack_and_post_action_on_unverified_mailbox(monkeypatch, validity):
+    first = _make_fake_imap(_make_raw_email(), uid=b"123")
+    second = _make_fake_imap(_make_raw_email(), uid=b"123")
+    second.response = lambda _: ("UIDVALIDITY", [validity])
+    clients = iter([first, second, second])
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: next(clients))
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(post_action="delete"), bus)
+    publish = bus.publish_inbound
+    async def stop_after_delivery(message):
+        await publish(message)
+        channel._running = False
+    monkeypatch.setattr(bus, "publish_inbound", stop_after_delivery)
+    await channel.start()
+    assert bus.inbound_size == 1
+    assert channel._pending_seen == {"123"}
+    assert not second.uid_calls
+
+
+@pytest.mark.asyncio
+async def test_uncertain_move_is_not_retried_after_disconnect(monkeypatch):
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    fake.capability = lambda: ("OK", [b"IMAP4rev1 MOVE"])
+    original_uid = fake.uid
+    moves = []
+    def uid(command, *args):
+        if command == "MOVE":
+            moves.append(args)
+            raise OSError("connection lost after MOVE")
+        return original_uid(command, *args)
+    fake.uid = uid
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(post_action="move", post_action_move_mailbox="Archive"), bus)
+    publish = bus.publish_inbound
+    async def stop_after_delivery(message):
+        await publish(message)
+        channel._running = False
+    monkeypatch.setattr(bus, "publish_inbound", stop_after_delivery)
+    await channel.start()
+    fetch = channel._fetch_new_messages
+    def stop_after_fetch():
+        result = fetch()
+        channel._running = False
+        return result
+    monkeypatch.setattr(channel, "_fetch_new_messages", stop_after_fetch)
+    await channel.start()
+    assert bus.inbound_size == 1
+    assert moves == [("123", "Archive")]
+
+
+def test_reconnect_rejects_changed_uidvalidity_before_mixing_results(monkeypatch):
+    first = _make_fake_imap(_make_raw_email(), uid=b"123")
+    second = _make_fake_imap(_make_raw_email(), uid=b"123")
+    original = first.uid
+    def broken(command, *args):
+        if command == "SEARCH":
+            return "OK", [b"123 124"]
+        if command == "FETCH" and args[0] == "124":
+            raise imaplib.IMAP4.abort("socket error")
+        return original(command, *args)
+    first.uid = broken
+    second.response = lambda _: ("UIDVALIDITY", [b"2"])
+    clients = iter([first, second])
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: next(clients))
+    channel = EmailChannel(_make_config(), MessageBus())
+    with pytest.raises(RuntimeError, match="UIDVALIDITY changed"):
+        channel._fetch_new_messages()
+    assert not second.uid_calls
+    assert not channel._processed_uids
+
+
+@pytest.mark.asyncio
+async def test_seen_failure_defers_move_until_acknowledged(monkeypatch):
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    fake.capability = lambda: ("OK", [b"IMAP4rev1 MOVE"])
+    original = fake.uid
+    failed = False
+    def uid(command, *args):
+        nonlocal failed
+        if command == "STORE" and not failed:
+            failed = True
+            raise OSError("connection lost")
+        return original(command, *args)
+    fake.uid = uid
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(post_action="move", post_action_move_mailbox="Archive"), bus)
+    publish = bus.publish_inbound
+    async def stop_after_delivery(message):
+        await publish(message)
+        channel._running = False
+    monkeypatch.setattr(bus, "publish_inbound", stop_after_delivery)
+    await channel.start()
+    assert not any(call[0] == "MOVE" for call in fake.uid_calls)
+    assert channel._deferred_post_actions == {"123"}
+    fetch = channel._fetch_new_messages
+    def stop_after_fetch():
+        result = fetch()
+        channel._running = False
+        return result
+    monkeypatch.setattr(channel, "_fetch_new_messages", stop_after_fetch)
+    await channel.start()
+    assert not channel._pending_seen
+    assert not channel._deferred_post_actions
+    assert sum(call[0] == "MOVE" for call in fake.uid_calls) == 1
+    assert bus.inbound_size == 1
+
+
+def test_fresh_poll_switches_uidvalidity_and_discards_old_epoch(monkeypatch):
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    fake.response = lambda _: ("UIDVALIDITY", [b"2"])
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    channel = EmailChannel(_make_config(), MessageBus())
+    channel._uidvalidity = b"1"
+    channel._processed_uids.add("123")
+    channel._pending_seen.add("123")
+    channel._deferred_post_actions.add("123")
+    messages, _ = channel._fetch_new_messages()
+    assert len(messages) == 1
+    assert channel._uidvalidity == b"2"
+    assert not channel._processed_uids and not channel._pending_seen and not channel._deferred_post_actions
+    assert not any(call[0] in {"STORE", "MOVE", "COPY"} for call in fake.uid_calls)
+
+
+@pytest.mark.asyncio
+async def test_cancel_later_delivery_preserves_earlier_post_action(monkeypatch):
+    import asyncio
+
+    fake = _make_fake_imap(_make_raw_email(), uid=b"1 2")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(mark_seen=False, post_action="move", post_action_move_mailbox="Archive"), bus)
+    publish = bus.publish_inbound
+    calls = 0
+    async def deliver(message):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise asyncio.CancelledError()
+        await publish(message)
+    monkeypatch.setattr(bus, "publish_inbound", deliver)
+    with pytest.raises(asyncio.CancelledError):
+        await channel.start()
+    assert bus.inbound_size == 1
+    assert channel._deferred_post_actions == {"1"}
+    actions = []
+    monkeypatch.setattr(channel, "_apply_post_actions_batch", lambda uids: actions.extend(uids))
+    def finish_fetch():
+        channel._running = False
+        return [], set()
+    monkeypatch.setattr(channel, "_fetch_new_messages", finish_fetch)
+    await channel.start()
+    assert actions == ["1"]
+    assert not channel._deferred_post_actions
+
+
+@pytest.mark.asyncio
+async def test_imap_thread_drains_after_repeated_cancellation():
+    import asyncio
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    def worker():
+        started.set()
+        release.wait(5)
+        finished.set()
+    task = asyncio.create_task(EmailChannel._imap_thread(worker))
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert finished.is_set()
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_poll_switches_epoch_without_writing_old_uids(monkeypatch):
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    fake.response = lambda _: ("UIDVALIDITY", [b"2"])
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(mark_seen=False, post_action="move", post_action_move_mailbox="Archive"), bus)
+    channel._uidvalidity = b"1"
+    channel._processed_uids.add("123")
+    channel._pending_seen.add("123")
+    channel._deferred_post_actions.add("123")
+    publish = bus.publish_inbound
+    async def deliver(message):
+        await publish(message)
+        channel._running = False
+    monkeypatch.setattr(bus, "publish_inbound", deliver)
+    await channel.start()
+    assert bus.inbound_size == 1
+    assert channel._uidvalidity == b"2"
+    # Only the newly delivered message can be moved, never the old pending UID.
+    assert sum(call[0] == "COPY" for call in fake.uid_calls) == 1
+    search_index = next(i for i, call in enumerate(fake.uid_calls) if call[0] == "SEARCH")
+    assert not any(call[0] in {"STORE", "MOVE", "COPY"} for call in fake.uid_calls[:search_index])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mark_seen", [False, True])
+async def test_revocation_between_fetch_and_delivery_does_not_acknowledge(monkeypatch, tmp_path, mark_seen):
+    from nanobot.pairing import store
+
+    monkeypatch.setattr(store, "_store_path", lambda: tmp_path / "pairing.json")
+    code = store.generate_code("email", "alice@example.com")
+    store.approve_code(code)
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(allow_from=[], mark_seen=mark_seen, post_action="delete"), bus)
+    fetch = channel._fetch_new_messages
+
+    def fetch_then_revoke():
+        result = fetch()
+        assert len(result[0]) == 1
+        assert store.revoke("email", "alice@example.com")
+        channel._running = False
+        return result
+
+    monkeypatch.setattr(channel, "_fetch_new_messages", fetch_then_revoke)
+    await channel.start()
+    assert bus.inbound_size == 0
+    assert "123" not in channel._processed_uids
+    assert not channel._pending_seen
+    assert not channel._deferred_post_actions
+    assert not any(call[0] in {"STORE", "MOVE", "COPY"} for call in fake.uid_calls)

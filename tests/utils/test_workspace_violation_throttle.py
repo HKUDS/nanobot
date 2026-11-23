@@ -1,5 +1,3 @@
-"""Tests for repeated_workspace_violation throttle and signature."""
-
 from __future__ import annotations
 
 from nanobot.utils.runtime import (
@@ -85,7 +83,6 @@ def test_repeated_workspace_violation_escalates_after_third_attempt():
 
 
 def test_repeated_workspace_violation_independent_per_target():
-    """Different outside paths must each get their own retry budget."""
     counts: dict[str, int] = {}
 
     repeated_workspace_violation_error(
@@ -94,7 +91,6 @@ def test_repeated_workspace_violation_independent_per_target():
     repeated_workspace_violation_error(
         "read_file", {"path": "/Users/x/Downloads/01.md"}, counts,
     )
-    # Different target, fresh budget.
     assert repeated_workspace_violation_error(
         "read_file", {"path": "/Users/x/Documents/notes.md"}, counts,
     ) is None

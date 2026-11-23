@@ -1,60 +1,133 @@
-"""Background process control for ``nanobot gateway``.
-
-This module intentionally stays small: the CLI owns command wording, while this
-runtime owns process state, log files, and platform-specific detach/stop details.
-"""
+# pyright: reportPrivateUsage=false
 
 from __future__ import annotations
 
-import ctypes
+import asyncio
+import hashlib
+import http.client
 import json
 import os
-import signal
 import subprocess
-import sys
 import tempfile
 import time
+import uuid
 from collections.abc import Callable
-from contextlib import suppress
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator, Literal, cast
 
+from filelock import FileLock, Timeout
+from loguru import logger
+
+from nanobot.config.home import get_selected_home_path
 from nanobot.config.paths import get_data_dir
+from nanobot.gateway.windows_shutdown import WindowsShutdownEvent, request_windows_shutdown
+from nanobot.process_runtime import (
+    ManagedProcessRuntime,
+    ProcessResult,
+    ProcessRuntimePaths,
+    ProcessStartOptions,
+    ProcessStatus,
+    process_identity_record,
+    process_is_running,
+)
+from nanobot.utils.atomic_file import read_atomic_bytes, replace_atomic
 
 
 @dataclass(frozen=True)
-class GatewayStartOptions:
-    """Options needed to start a background gateway instance."""
+class GatewayStartOptions(ProcessStartOptions):
+    """Gateway launch options, including the explicit instance root."""
 
-    port: int
-    verbose: bool = False
-    workspace: str | None = None
-    config_path: str | None = None
+    home: str | None = None
 
-
-@dataclass(frozen=True)
-class GatewayStatus:
-    """Current background gateway status."""
-
-    running: bool
-    pid: int | None
-    state_path: Path
-    log_path: Path
-    started_at: str | None = None
-    port: int | None = None
-    command: tuple[str, ...] = ()
-    reason: str = "not_started"
+GatewayLaunchMode = Literal["foreground", "background", "unknown"]
+GatewayLifetime = Literal["explicit", "on_demand"]
 
 
 @dataclass(frozen=True)
-class RuntimeResult:
-    """Result from a gateway runtime control operation."""
+class GatewayHealthIdentity:
+    """Opaque local instance/run identity; never configuration paths or credentials."""
 
-    ok: bool
-    message: str
+    instance_id: str
+    run_id: str
+    version: str
+
+
+def _gateway_health_ready(host: str, port: int, *, timeout_s: float = 0.4,
+                          expected: GatewayHealthIdentity | None = None,
+                          maintenance: bool | None = None) -> bool:
+    connect_host = "127.0.0.1" if host in {"", "0.0.0.0"} else "::1" if host == "::" else host
+    connection = http.client.HTTPConnection(connect_host, port, timeout=timeout_s)
+    try:
+        connection.request("GET", "/health")
+        response = connection.getresponse()
+        body = response.read(4097)
+    except (OSError, http.client.HTTPException, TimeoutError):
+        return False
+    finally:
+        connection.close()
+    if response.status != 200 or len(body) > 4096:
+        return False
+    try:
+        raw_payload = cast(object, json.loads(body.decode("utf-8")))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(raw_payload, dict):
+        return False
+    payload = cast(dict[str, object], raw_payload)
+    if maintenance is not None and payload.get("maintenance") is not maintenance:
+        return False
+    if expected is not None:
+        raw_identity = payload.get("runtime")
+        if payload.get("ready") is not True or not isinstance(raw_identity, dict):
+            return False
+        identity = cast(dict[str, object], raw_identity)
+        if any(identity.get(key) != value for key, value in asdict(expected).items()):
+            return False
+    return (
+        payload.get("status") == "ok"
+        and payload.get("ready") is not False
+    )
+
+
+def _default_config_path() -> Path:
+    return (Path.home() / ".nanobot" / "config.json").resolve(strict=False)
+
+
+@dataclass(frozen=True)
+class GatewayStatus(ProcessStatus):
+    """Observable lifecycle state for one shared local gateway."""
+
+    launch_mode: GatewayLaunchMode = "unknown"
+    lifetime: GatewayLifetime = "explicit"
+    clients: int = 0
+    ready: bool | None = None
+
+
+@dataclass(frozen=True)
+class GatewayLeaseSnapshot:
+    """Live local clients and the gateway lifetime they imply."""
+
+    auto_stop: bool
+    clients: int
+
+
+@dataclass(frozen=True)
+class RuntimeResult(ProcessResult):
+    """Result of a gateway lifecycle operation."""
+
     status: GatewayStatus
+    promoted: bool = False
+
+
+class GatewayAlreadyRunningError(RuntimeError):
+    """Raised when a foreground gateway tries to replace a live instance."""
+
+    def __init__(self, status: GatewayStatus) -> None:
+        super().__init__("gateway_already_running")
+        self.status = status
 
 
 def build_gateway_command(python_executable: str, options: GatewayStartOptions) -> list[str]:
@@ -63,11 +136,15 @@ def build_gateway_command(python_executable: str, options: GatewayStartOptions) 
         python_executable,
         "-m",
         "nanobot",
+    ]
+    if options.home is not None:
+        command.extend(["--home", options.home])
+    command.extend([
         "gateway",
         "--foreground",
         "--port",
         str(options.port),
-    ]
+    ])
     if options.verbose:
         command.append("--verbose")
     if options.workspace:
@@ -78,13 +155,8 @@ def build_gateway_command(python_executable: str, options: GatewayStartOptions) 
 
 
 @dataclass(frozen=True)
-class GatewayRuntimePaths:
+class GatewayRuntimePaths(ProcessRuntimePaths):
     """Filesystem layout for one gateway runtime instance."""
-
-    run_dir: Path
-    logs_dir: Path
-    state_path: Path
-    log_path: Path
 
     @classmethod
     def for_instance(
@@ -107,8 +179,63 @@ class GatewayRuntimePaths:
         )
 
 
-class GatewayRuntime:
+@dataclass(frozen=True)
+class GatewayInstance:
+    """One stable local gateway identity and its child-process selectors."""
+
+    config_path: Path
+    workspace: str | None
+    paths: GatewayRuntimePaths
+    home: Path | None = None
+
+    @classmethod
+    def resolve(
+        cls,
+        *,
+        config_path: str | Path,
+        workspace: str | None = None,
+    ) -> "GatewayInstance":
+        resolved_config = Path(config_path).expanduser().resolve(strict=False)
+        resolved_workspace = (
+            str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
+        )
+        # The released default instance used gateway.json. Keep that identity stable
+        # across upgrades while still namespacing explicit configs and workspaces.
+        config_selector = (
+            None if resolved_config == _default_config_path() else str(resolved_config)
+        )
+        return cls(
+            home=get_selected_home_path(),
+            config_path=resolved_config,
+            workspace=resolved_workspace,
+            paths=GatewayRuntimePaths.for_instance(
+                data_dir=resolved_config.parent,
+                workspace=resolved_workspace,
+                config_path=config_selector,
+            ),
+        )
+
+    def start_options(
+        self,
+        *,
+        port: int,
+        verbose: bool = False,
+    ) -> GatewayStartOptions:
+        return GatewayStartOptions(
+            home=str(self.home) if self.home is not None else None,
+            port=port,
+            verbose=verbose,
+            workspace=self.workspace,
+            config_path=(
+                None if self.config_path == _default_config_path() else str(self.config_path)
+            ),
+        )
+
+
+class GatewayRuntime(ManagedProcessRuntime[GatewayStartOptions]):
     """Manage a background ``nanobot gateway`` process."""
+
+    service_name = "gateway"
 
     def __init__(
         self,
@@ -120,329 +247,579 @@ class GatewayRuntime:
         subprocess_run: Callable[..., Any] = subprocess.run,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        self.paths = paths or GatewayRuntimePaths.for_instance()
-        self.platform_name = platform_name or _platform_name()
-        self.python_executable = python_executable or sys.executable
-        self._popen = popen
-        self._subprocess_run = subprocess_run
-        self._sleep = sleep
-
-    def start_background(self, options: GatewayStartOptions) -> RuntimeResult:
-        """Start gateway as a detached background process."""
-        current = self.status()
-        if current.running:
-            return RuntimeResult(False, "gateway_already_running", current)
-
-        command = self._build_child_command(options)
-        self.paths.run_dir.mkdir(parents=True, exist_ok=True)
-        self.paths.logs_dir.mkdir(parents=True, exist_ok=True)
-
-        with self.paths.log_path.open("a", encoding="utf-8") as log_handle:
-            process = self._popen(
-                command,
-                stdin=subprocess.DEVNULL,
-                stdout=log_handle,
-                stderr=subprocess.STDOUT,
-                **self._popen_platform_kwargs(),
-            )
-
-        pid = int(process.pid)
-        self._sleep(0.2)
-        if not self._is_pid_running(pid):
-            return RuntimeResult(False, "gateway_exited_during_startup", self.status())
-
-        identity = self._process_identity(pid)
-        self._write_state(
-            {
-                "pid": pid,
-                "identity": identity,
-                "started_at": _utc_now(),
-                "platform": self.platform_name,
-                "port": options.port,
-                "workspace": options.workspace,
-                "config_path": options.config_path,
-                "command": command,
-                "log_path": str(self.paths.log_path),
-            }
+        super().__init__(
+            paths=paths or GatewayRuntimePaths.for_instance(),
+            platform_name=platform_name,
+            python_executable=python_executable,
+            popen=popen,
+            subprocess_run=subprocess_run,
+            sleep=sleep,
         )
-        return RuntimeResult(True, "gateway_started_background", self.status())
-
-    def stop(self, *, timeout_s: int = 20) -> RuntimeResult:
-        """Stop the recorded background gateway process."""
-        status = self.status()
-        if not status.pid:
-            return RuntimeResult(False, "gateway_not_running", status)
-
-        state = self._read_state()
-        if not self._record_matches_process(state, status.pid):
-            self._clear_state()
-            return RuntimeResult(False, "gateway_state_stale", self.status(reason="stale_state"))
-
-        if not self._terminate(status.pid, timeout_s=timeout_s):
-            return RuntimeResult(False, "gateway_stop_timeout", self.status(reason="stop_timeout"))
-        self._clear_state()
-        return RuntimeResult(True, "gateway_stopped", self.status(reason="stopped"))
-
-    def restart(self, options: GatewayStartOptions, *, timeout_s: int = 20) -> RuntimeResult:
-        """Restart the background gateway."""
-        stop_result = self.stop(timeout_s=timeout_s)
-        if not stop_result.ok and stop_result.message not in {"gateway_not_running", "gateway_state_stale"}:
-            return stop_result
-        return self.start_background(options)
-
-    def status(self, *, reason: str | None = None) -> GatewayStatus:
-        """Return live status, clearing stale state when needed."""
-        state = self._read_state()
-        pid = _as_int(state.get("pid")) if state else None
-        if pid is None:
-            return GatewayStatus(
-                running=False,
-                pid=None,
-                state_path=self.paths.state_path,
-                log_path=self.paths.log_path,
-                reason=reason or "not_started",
-            )
-
-        if not self._is_pid_running(pid) or not self._record_matches_process(state, pid):
-            self._clear_state()
-            return GatewayStatus(
-                running=False,
-                pid=None,
-                state_path=self.paths.state_path,
-                log_path=self.paths.log_path,
-                reason=reason or "stale_state",
-            )
-
-        command = state.get("command")
-        return GatewayStatus(
-            running=True,
-            pid=pid,
-            state_path=self.paths.state_path,
-            log_path=self.paths.log_path,
-            started_at=_as_str(state.get("started_at")),
-            port=_as_int(state.get("port")),
-            command=tuple(command) if isinstance(command, list) else (),
-            reason=reason or "running",
-        )
-
-    def read_log_tail(self, *, tail: int = 200) -> list[str]:
-        """Return the last ``tail`` log lines."""
-        if tail <= 0 or not self.paths.log_path.exists():
-            return []
-        try:
-            lines = self.paths.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            return []
-        return lines[-tail:]
-
-    def follow_logs(self, *, tail: int = 200) -> int:
-        """Print existing log tail and follow new log lines."""
-        for line in self.read_log_tail(tail=tail):
-            print(line)
-        self.paths.logs_dir.mkdir(parents=True, exist_ok=True)
-        self.paths.log_path.touch(exist_ok=True)
-        try:
-            with self.paths.log_path.open("r", encoding="utf-8", errors="replace") as handle:
-                handle.seek(0, os.SEEK_END)
-                while True:
-                    line = handle.readline()
-                    if line:
-                        print(line.rstrip("\n"))
-                    else:
-                        self._sleep(0.5)
-        except KeyboardInterrupt:
-            return 130
+        self._shutdown_signal: WindowsShutdownEvent | None = None
 
     def _build_child_command(self, options: GatewayStartOptions) -> list[str]:
         return build_gateway_command(self.python_executable, options)
 
-    def _popen_platform_kwargs(self) -> dict[str, Any]:
-        if self.platform_name == "Windows":
-            flags = 0
-            flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            flags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            return {"creationflags": flags}
-        return {"start_new_session": True}
+    def _transition_lock(self) -> FileLock:
+        return FileLock(f"{self.paths.state_path}.transition.lock")
 
-    def _terminate(self, pid: int, *, timeout_s: int) -> bool:
-        if self.platform_name == "Windows":
-            return self._terminate_windows(pid, timeout_s=timeout_s)
-        return self._terminate_posix(pid, timeout_s=timeout_s)
+    def start_background(self, options: GatewayStartOptions) -> RuntimeResult:
+        """Start the gateway detached from the current terminal."""
+        lease = GatewayClientLease(self, kind="gateway-background")
+        while True:
+            lease.wait_for_shutdown()
+            with self._transition_lock(), self._lifecycle_lock():
+                promoted = lease._try_mark_persistent_locked()
+                if promoted is None:
+                    continue
+                result = self._start_background(options)
+                return RuntimeResult(result.ok, result.message, result.status, promoted)
 
-    def _terminate_posix(self, pid: int, *, timeout_s: int) -> bool:
-        try:
-            pgid = os.getpgid(pid)
-        except OSError:
-            pgid = None
-        try:
-            if pgid is not None:
-                os.killpg(pgid, signal.SIGTERM)
-            else:
-                os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return True
-        if self._wait_for_exit(pid, timeout_s):
-            return True
-        with suppress(ProcessLookupError):
-            if pgid is not None:
-                os.killpg(pgid, signal.SIGKILL)
-            else:
-                os.kill(pid, signal.SIGKILL)
-        return self._wait_for_exit(pid, 2)
+    def start_on_demand(self, options: GatewayStartOptions) -> RuntimeResult:
+        """Atomically reuse a gateway or start one owned by local client leases."""
+        lease = GatewayClientLease(self, kind="gateway-start")
+        while True:
+            lease.wait_for_shutdown()
+            with self._transition_lock(), self._lifecycle_lock():
+                if lease._shutdown_pending_locked():
+                    continue
+                status = self.status()
+                if status.running:
+                    return RuntimeResult(False, "gateway_already_running", status)
+                lease._mark_ephemeral_locked()
+                return self._start_background(options)
 
-    def _terminate_windows(self, pid: int, *, timeout_s: int) -> bool:
-        ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
-        if ctrl_break is not None:
-            with suppress(ProcessLookupError):
-                os.kill(pid, ctrl_break)
-            if self._wait_for_exit(pid, timeout_s):
-                return True
-        self._subprocess_run(["taskkill", "/PID", str(pid), "/T"], check=False)
-        if self._wait_for_exit(pid, 2):
-            return True
-        self._subprocess_run(["taskkill", "/PID", str(pid), "/T", "/F"], check=False)
-        return self._wait_for_exit(pid, 2)
+    def _start_background(self, options: GatewayStartOptions) -> RuntimeResult:
+        result = super()._start_background(options)
+        if not result.ok:
+            return self._result(result)
+        state = self._read_state()
+        if state and result.status.pid == state.get("pid"):
+            state["launch_mode"] = "background"
+            state["pending_pid_handoff"] = True
+            self._write_state(state)
+        return RuntimeResult(True, result.message, self.status())
 
-    def _wait_for_exit(self, pid: int, timeout_s: int | float) -> bool:
-        deadline = time.monotonic() + max(float(timeout_s), 0.0)
-        while time.monotonic() < deadline:
-            if not self._is_pid_running(pid):
-                return True
-            self._sleep(0.1)
-        return not self._is_pid_running(pid)
+    def stop(self, *, timeout_s: int = 20) -> RuntimeResult:
+        """Stop the gateway recorded by this runtime."""
+        with self._transition_lock():
+            result = self._stop(timeout_s=timeout_s)
+            with self._lifecycle_lock():
+                if result.ok or result.message in {
+                    "gateway_not_running",
+                    "gateway_state_stale",
+                }:
+                    GatewayClientLease(self, kind="gateway-stop")._clear_locked()
+            return self._result(result)
 
-    def _is_pid_running(self, pid: int) -> bool:
-        if pid <= 0:
-            return False
-        if self.platform_name == "Windows":
-            return _windows_process_identity(pid) is not None
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        except OSError:
-            return False
-        return True
+    def status(self, *, reason: str | None = None) -> GatewayStatus:
+        """Return process, launch, and client lifetime state in one snapshot."""
+        process = super().status(reason=reason)
+        state = self._read_state() if process.running else None
+        raw_mode = state.get("launch_mode") if state else None
+        launch_mode: GatewayLaunchMode = (
+            raw_mode if raw_mode in {"foreground", "background"} else "unknown"
+        )
+        lease = GatewayClientLease(self, kind="gateway-status").snapshot()
+        ready: bool | None = None
+        health_host = state.get("health_host") if state else None
+        if (
+            process.running
+            and process.pid != os.getpid()
+            and isinstance(health_host, str)
+            and process.port is not None
+        ):
+            ready = _gateway_health_ready(health_host, process.port)
+        status_reason = process.reason
+        if ready is False and reason is None and status_reason == "running":
+            status_reason = "websocket_unavailable"
+        return GatewayStatus(
+            running=process.running,
+            pid=process.pid,
+            state_path=process.state_path,
+            log_path=process.log_path,
+            started_at=process.started_at,
+            port=process.port,
+            command=process.command,
+            reason=status_reason,
+            launch_mode=launch_mode,
+            lifetime="on_demand" if lease.auto_stop else "explicit",
+            clients=lease.clients,
+            ready=ready,
+        )
 
-    def _process_identity(self, pid: int) -> str | int | None:
-        if self.platform_name == "Windows":
-            return _windows_process_identity(pid)
-        try:
-            return os.getpgid(pid)
-        except OSError:
-            return None
+    def publish_health_host(self, host: str) -> None:
+        """Record the management bind host for out-of-process readiness diagnostics."""
+        with self._lifecycle_lock():
+            state = self._read_state()
+            if not state or not self._record_matches_process(state, os.getpid()):
+                return
+            state["health_host"] = host
+            self._write_state(state)
 
-    def _record_matches_process(self, state: dict[str, Any] | None, pid: int) -> bool:
+    def verify_ready(self, expected: GatewayHealthIdentity, *, maintenance: bool | None = None) -> bool:
+        """Bind health to one live local process, not merely a responding port.
+
+        This is local lifecycle evidence, not remote authentication. Missing
+        identity metadata on an older host cannot confirm an update restart.
+        """
+        state = self._read_state()
         if not state:
             return False
-        recorded = state.get("identity")
-        if recorded is None:
-            return True
-        return recorded == self._process_identity(pid)
+        pid, host, port = state.get("pid"), state.get("health_host"), state.get("port")
+        if (type(pid) is not int or type(port) is not int or not 0 < port < 65536
+                or not isinstance(host, str) or not self._is_pid_running(pid)
+                or not self._record_matches_process(state, pid)):
+            return False
+        if not _gateway_health_ready(host, port, expected=expected, maintenance=maintenance):
+            return False
+        # The process may have exited or been replaced while the HTTP probe ran.
+        return (self._read_state() == state and self._is_pid_running(pid)
+                and self._record_matches_process(state, pid))
 
-    def _read_state(self) -> dict[str, Any] | None:
+    @contextmanager
+    def foreground_instance(self, options: GatewayStartOptions) -> Generator[None]:
+        """Publish this process and own its stop signal across asyncio.run()."""
+        shutdown_signal = None
+        if self.platform_name == "Windows" and os.name == "nt":
+            identity = self.process_identity(os.getpid())
+            if not isinstance(identity, str):
+                raise OSError("Cannot identify the gateway process for Windows shutdown")
+            shutdown_signal = WindowsShutdownEvent(os.getpid(), identity)
+        self._shutdown_signal = shutdown_signal
         try:
-            with self.paths.state_path.open(encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except (OSError, json.JSONDecodeError, ValueError):
-            return None
-        return payload if isinstance(payload, dict) else None
+            self._claim_current_process(options)
+            try:
+                yield
+            finally:
+                self._release_current_process()
+        finally:
+            self._shutdown_signal = None
+            if shutdown_signal is not None:
+                shutdown_signal.close()
 
-    def _write_state(self, payload: dict[str, Any]) -> None:
-        self.paths.run_dir.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(
-            prefix=f"{self.paths.state_path.name}.",
-            suffix=".tmp",
-            dir=self.paths.run_dir,
+    async def wait_for_shutdown_request(self, shutdown_event: asyncio.Event) -> None:
+        """Bridge the local Windows signal to the application's existing shutdown."""
+        signal = self._shutdown_signal
+        if signal is None:
+            return
+        waiter = asyncio.create_task(asyncio.to_thread(signal.wait))
+        try:
+            await asyncio.shield(waiter)
+            logger.info("Gateway shutdown requested by local CLI")
+            shutdown_event.set()
+        finally:
+            # Cancelling to_thread alone leaves its native wait alive. Wake it
+            # before asyncio.run drains the executor and the owner closes the handle.
+            signal.signal()
+            await waiter
+
+    def _terminate_windows(self, pid: int, *, timeout_s: int) -> bool:
+        state = self._read_state()
+        identity = self._process_identity(pid)
+        if identity is None:
+            return not self._is_pid_running(pid)
+        if self._process_identity_match(state, pid) != "match":
+            return False
+        requested = False
+        if isinstance(identity, str) and state is not None:
+            try:
+                requested = request_windows_shutdown(pid, identity, state.get("shutdown_token"))
+            except OSError as exc:
+                logger.warning("Could not request gateway shutdown: {}", exc)
+        if requested and self._wait_for_exit(pid, timeout_s):
+            return True
+        current_identity = self._process_identity(pid)
+        if current_identity is None:
+            return not self._is_pid_running(pid)
+        if current_identity != identity:
+            return False
+        if requested:
+            logger.warning("Gateway did not exit within {}s; forcing PID tree {}", timeout_s, pid)
+        else:
+            logger.warning("Gateway shutdown signal unavailable; forcing PID tree {}", pid)
+        return super()._terminate_windows(pid, timeout_s=timeout_s)
+
+    def _claim_current_process(self, options: GatewayStartOptions) -> GatewayLaunchMode:
+        lease = GatewayClientLease(self, kind="gateway-foreground")
+        pid = os.getpid()
+        while True:
+            lease.wait_for_shutdown()
+            with self._transition_lock(), self._lifecycle_lock():
+                current = self.status()
+                state = self._read_state() or {}
+                pid_handoff = (
+                    self.platform_name == "Windows"
+                    and current.running
+                    and current.pid != pid
+                    and current.pid == os.getppid()
+                    and state.get("pid") == current.pid
+                    and state.get("launch_mode") == "background"
+                    and state.get("pending_pid_handoff") is True
+                )
+                if current.running and current.pid != pid and not pid_handoff:
+                    raise GatewayAlreadyRunningError(current)
+                if lease._shutdown_pending_locked():
+                    continue
+                launch_mode: GatewayLaunchMode = (
+                    "background"
+                    if state.get("launch_mode") == "background"
+                    and (state.get("pid") == pid or pid_handoff)
+                    else "foreground"
+                )
+                state.update(
+                    {
+                        "pid": pid,
+                        "started_at": datetime.now(UTC).isoformat(),
+                        "platform": self.platform_name,
+                        "port": options.port,
+                        "workspace": options.workspace,
+                        "config_path": options.config_path,
+                        "command": self._build_child_command(options),
+                        "log_path": str(self.paths.log_path),
+                        "launch_mode": launch_mode,
+                    }
+                )
+                state.pop("pending_pid_handoff", None)
+                state.pop("stable_identity", None)
+                state.update(self.process_identity_record(pid))
+                state.pop("shutdown_token", None)
+                if self._shutdown_signal is not None:
+                    state["shutdown_token"] = self._shutdown_signal.token
+                self._write_state(state)
+                if launch_mode == "foreground":
+                    lease._try_mark_persistent_locked()
+                return launch_mode
+
+    def _release_current_process(self) -> None:
+        with self._lifecycle_lock():
+            state = self._read_state()
+            if state and self._record_matches_process(state, os.getpid()):
+                self._clear_state()
+            GatewayClientLease(
+                self,
+                kind="gateway-exit",
+            )._finish_shutdown_locked()
+
+    def restart(self, options: GatewayStartOptions, *, timeout_s: int = 20) -> RuntimeResult:
+        """Restart an existing gateway without creating a new persistent instance."""
+        with self._transition_lock():
+            with self._lifecycle_lock():
+                status = self.status()
+                if not status.running:
+                    return RuntimeResult(False, "gateway_not_running", status)
+                if status.launch_mode == "foreground":
+                    return RuntimeResult(
+                        False,
+                        "gateway_foreground_restart_required",
+                        status,
+                    )
+            stop_result = self._stop(timeout_s=timeout_s)
+            if not stop_result.ok:
+                return self._result(stop_result)
+            with self._lifecycle_lock():
+                return self._start_background(options)
+
+    def _result(self, result: ProcessResult) -> RuntimeResult:
+        status = result.status
+        gateway_status = status if isinstance(status, GatewayStatus) else self.status()
+        return RuntimeResult(result.ok, result.message, gateway_status)
+
+
+class GatewayClientLease:
+    """Reference-count an on-demand gateway shared by local interactive clients."""
+
+    def __init__(
+        self,
+        runtime: GatewayRuntime,
+        *,
+        kind: str,
+        pid: int | None = None,
+        token: str | None = None,
+    ) -> None:
+        self.runtime = runtime
+        self.kind = kind
+        self.pid = pid or os.getpid()
+        self.token = token or uuid.uuid4().hex
+        state_path = runtime.paths.state_path
+        self.state_path = state_path.with_name(
+            f"{state_path.stem}.clients{state_path.suffix}"
         )
-        tmp_path = Path(tmp_name)
+        self.transition_lock = FileLock(f"{state_path}.transition.lock")
+        self.lifecycle_lock = FileLock(f"{state_path}.lock")
+        self.lock = FileLock(f"{self.state_path}.lock")
+        self._acquired = False
+
+    def acquire(self) -> None:
+        """Register this client before it starts or attaches to the gateway."""
+        while True:
+            self.wait_for_shutdown()
+            with self.transition_lock, self.lifecycle_lock, self.lock:
+                state = self._live_state()
+                if state.get("stopping"):
+                    continue
+                self._register(state)
+                return
+
+    def ensure_on_demand_gateway(self, options: GatewayStartOptions) -> RuntimeResult:
+        """Atomically reuse a gateway or start one owned by local client leases."""
+        if not self._acquired:
+            raise RuntimeError("gateway client lease must be acquired before startup")
+        return self.runtime.start_on_demand(options)
+
+    def mark_ephemeral(self) -> None:
+        """Mark a gateway started by a client for last-client shutdown."""
+        with self.transition_lock, self.lifecycle_lock:
+            self._mark_ephemeral_locked()
+
+    def _mark_ephemeral_locked(self) -> None:
+        with self.lock:
+            state = self._live_state()
+            state["auto_stop"] = True
+            self._write_state(state)
+
+    def mark_persistent(self) -> bool:
+        """Keep an explicitly backgrounded gateway alive; return whether it was promoted."""
+        while True:
+            self.wait_for_shutdown()
+            with self.transition_lock, self.lifecycle_lock:
+                promoted = self._try_mark_persistent_locked()
+                if promoted is not None:
+                    return promoted
+
+    def _try_mark_persistent_locked(self) -> bool | None:
+        with self.lock:
+            state = self._live_state()
+            if state.get("stopping"):
+                return None
+            promoted = bool(state.get("auto_stop"))
+            state["auto_stop"] = False
+            self._write_or_clear(state)
+            return promoted
+
+    def clear(self) -> None:
+        """Forget leases after an explicit gateway stop."""
+        with self.transition_lock, self.lifecycle_lock:
+            self._clear_locked()
+
+    def _clear_locked(self) -> None:
+        with self.lock:
+            self.state_path.unlink(missing_ok=True)
+
+    def snapshot(self) -> GatewayLeaseSnapshot:
+        """Return current lifetime state without persisting client cleanup."""
+        with self.lock:
+            state = self._live_state()
+            return GatewayLeaseSnapshot(
+                auto_stop=bool(state.get("auto_stop")),
+                clients=len(self._clients(state)),
+            )
+
+    def begin_orphan_shutdown(self) -> bool:
+        """Commit shutdown only while an on-demand gateway still has no clients."""
+        # Explicit stop holds this lock while waiting for us to exit. Never
+        # block the gateway loop (or an executor being drained) behind it.
+        try:
+            transition = self.transition_lock.acquire(timeout=0)
+        except Timeout:
+            return False
+        with transition, self.lifecycle_lock, self.lock:
+            state = self._read_state()
+            changed = self._prune_clients(state)
+            if not bool(state.get("auto_stop")) or self._clients(state):
+                if changed:
+                    self._write_or_clear(state)
+                return False
+            state["stopping"] = True
+            self._write_state(state)
+            return True
+
+    def release(self, *, timeout_s: int = 20, wait_for_stop: bool = True) -> bool:
+        """Release this client, optionally leaving last-client shutdown to the monitor."""
+        if not self._acquired:
+            return False
+        while True:
+            self.wait_for_shutdown()
+            with self.transition_lock:
+                with self.lifecycle_lock, self.lock:
+                    state = self._live_state()
+                    if state.get("stopping"):
+                        continue
+                    clients = self._clients(state)
+                    clients.pop(self.token, None)
+                    self._acquired = False
+                    should_stop = not clients and bool(state.get("auto_stop"))
+                    self._write_or_clear(state)
+                if not should_stop or not wait_for_stop:
+                    return False
+                result = self.runtime._stop(timeout_s=timeout_s)
+                stopped = result.ok or result.message in {
+                    "gateway_not_running",
+                    "gateway_state_stale",
+                }
+                with self.lifecycle_lock:
+                    if stopped:
+                        self._clear_locked()
+                    else:
+                        self._mark_ephemeral_locked()
+                return stopped
+
+    def wait_for_shutdown(self, *, timeout_s: float = 20) -> None:
+        """Wait until a committed orphan shutdown can no longer accept clients."""
+        deadline = time.monotonic() + timeout_s
+        while True:
+            with self.lifecycle_lock:
+                with self.lock:
+                    state = self._live_state()
+                    if not state.get("stopping"):
+                        return
+                if not self.runtime.status().running:
+                    self._finish_shutdown_locked()
+                    return
+            if time.monotonic() >= deadline:
+                raise RuntimeError("gateway is still shutting down; try again shortly")
+            time.sleep(0.05)
+
+    def _shutdown_pending_locked(self) -> bool:
+        with self.lock:
+            return bool(self._live_state().get("stopping"))
+
+    def _finish_shutdown_locked(self) -> None:
+        with self.lock:
+            state = self._live_state()
+            state.pop("stopping", None)
+            if not self._clients(state):
+                self.state_path.unlink(missing_ok=True)
+            else:
+                self._write_state(state)
+
+    def _register(self, state: dict[str, object]) -> None:
+        clients = self._clients(state)
+        record: dict[str, object] = {
+            "pid": self.pid,
+            "kind": self.kind,
+        }
+        record.update(process_identity_record(self._process_identity(self.pid), lease=True))
+        clients[self.token] = record
+        self._write_state(state)
+        self._acquired = True
+
+    def _live_state(self) -> dict[str, object]:
+        state = self._read_state()
+        self._prune_clients(state)
+        return state
+
+    def _prune_clients(self, state: dict[str, object]) -> bool:
+        normalized = not isinstance(state.get("clients"), dict)
+        clients = self._clients(state)
+        stale: list[str] = []
+        for token, value in clients.items():
+            if not isinstance(value, dict):
+                stale.append(token)
+                continue
+            record = cast(dict[str, object], value)
+            pid = record.get("pid")
+            identity = record.get("stable_identity")
+            if identity is None:
+                identity = record.get("identity")
+            if not isinstance(pid, int) or not self._process_is_running(pid):
+                stale.append(token)
+                continue
+            if self._process_identity_match(identity, pid) == "mismatch":
+                stale.append(token)
+        for token in stale:
+            clients.pop(token, None)
+        return normalized or bool(stale)
+
+    def _process_identity(self, pid: int) -> str | int | None:
+        resolver = getattr(self.runtime, "process_identity", None)
+        value = resolver(pid) if callable(resolver) else None
+        return value if isinstance(value, (str, int)) else None
+
+    def _process_identity_match(
+        self,
+        recorded: object,
+        pid: int,
+    ) -> Literal["match", "mismatch", "unknown"]:
+        matcher = getattr(self.runtime, "process_identity_match", None)
+        if callable(matcher):
+            result = matcher(recorded, pid)
+            if result in {"match", "mismatch", "unknown"}:
+                return cast(Literal["match", "mismatch", "unknown"], result)
+        if recorded is None:
+            return "match"
+        current = self._process_identity(pid)
+        if current is None:
+            return "unknown"
+        return "match" if recorded == current else "mismatch"
+
+    def _process_is_running(self, pid: int) -> bool:
+        checker = getattr(self.runtime, "process_is_running", None)
+        return bool(checker(pid)) if callable(checker) else process_is_running(pid)
+
+    @staticmethod
+    def _clients(state: dict[str, object]) -> dict[str, object]:
+        value = state.get("clients")
+        if isinstance(value, dict):
+            return cast(dict[str, object], value)
+        clients: dict[str, object] = {}
+        state["clients"] = clients
+        return clients
+
+    def _read_state(self) -> dict[str, object]:
+        try:
+            payload: object = json.loads(read_atomic_bytes(self.state_path).decode("utf-8"))
+        except (OSError, json.JSONDecodeError, ValueError):
+            return {"auto_stop": False, "clients": {}}
+        if isinstance(payload, dict):
+            return cast(dict[str, object], payload)
+        return {"auto_stop": False, "clients": {}}
+
+    def _write_or_clear(self, state: dict[str, object]) -> None:
+        clients = state.get("clients")
+        if not clients and not bool(state.get("auto_stop")):
+            self.state_path.unlink(missing_ok=True)
+            return
+        self._write_state(state)
+
+    def _write_state(self, state: dict[str, object]) -> None:
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f"{self.state_path.name}.",
+            suffix=".tmp",
+            dir=self.state_path.parent,
+        )
+        temporary = Path(temporary_name)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2, ensure_ascii=False)
+                json.dump(state, handle, indent=2, ensure_ascii=False)
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            tmp_path.replace(self.paths.state_path)
+            replace_atomic(temporary, self.state_path)
         finally:
-            tmp_path.unlink(missing_ok=True)
+            temporary.unlink(missing_ok=True)
 
-    def _clear_state(self) -> None:
-        self.paths.state_path.unlink(missing_ok=True)
+
+async def monitor_gateway_clients(
+    lease: GatewayClientLease,
+    shutdown_event: asyncio.Event,
+    *,
+    poll_interval_s: float = 1.0,
+) -> bool:
+    """Stop waiting when an on-demand gateway loses every live client."""
+    while not shutdown_event.is_set():
+        try:
+            await asyncio.wait_for(shutdown_event.wait(), timeout=poll_interval_s)
+        except TimeoutError:
+            if lease.begin_orphan_shutdown():
+                shutdown_event.set()
+                return True
+    return False
 
 
 def _instance_suffix(*, workspace: str | None, config_path: str | None) -> str | None:
     raw = "|".join(value for value in (workspace, config_path) if value)
     if not raw:
         return None
-    import hashlib
-
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
-
-
-def _platform_name() -> str:
-    if sys.platform.startswith("win"):
-        return "Windows"
-    if sys.platform == "darwin":
-        return "Darwin"
-    return "Linux"
-
-
-def _utc_now() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _as_int(value: object) -> int | None:
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return None
-    return None
-
-
-def _as_str(value: object) -> str | None:
-    return value if isinstance(value, str) else None
-
-
-def _windows_process_identity(pid: int) -> str | None:
-    if os.name != "nt":
-        return None
-
-    class FileTime(ctypes.Structure):
-        _fields_ = [("low", ctypes.c_uint32), ("high", ctypes.c_uint32)]
-
-        @property
-        def value(self) -> int:
-            return (int(self.high) << 32) | int(self.low)
-
-    process_query_limited_information = 0x1000
-    kernel32 = ctypes.windll.kernel32
-    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
-    if not handle:
-        return None
-    try:
-        creation_time = FileTime()
-        exit_time = FileTime()
-        kernel_time = FileTime()
-        user_time = FileTime()
-        ok = kernel32.GetProcessTimes(
-            handle,
-            ctypes.byref(creation_time),
-            ctypes.byref(exit_time),
-            ctypes.byref(kernel_time),
-            ctypes.byref(user_time),
-        )
-        if not ok:
-            return None
-        exit_code = ctypes.c_uint32()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return None
-        if exit_code.value != 259:
-            return None
-        return str(creation_time.value)
-    finally:
-        kernel32.CloseHandle(handle)

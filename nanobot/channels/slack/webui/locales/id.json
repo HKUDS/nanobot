@@ -1,0 +1,92 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan Slack",
+    "officialLabel": "Buka aplikasi Slack",
+    "actions": {
+      "slack-manifest": "Salin manifes aplikasi"
+    },
+    "fields": {
+      "appToken": {
+        "label": "Token aplikasi",
+        "placeholder": "xapp-..."
+      },
+      "botToken": {
+        "label": "Token bot",
+        "placeholder": "xoxb-..."
+      },
+      "groupPolicy": {
+        "label": "Aturan grup",
+        "choices": {
+          "mention": "Hanya mention",
+          "open": "Semua pesan",
+          "allowlist": "Daftar izin"
+        }
+      },
+      "mode": {
+        "label": "Modus koneksi",
+        "choices": {
+          "socket": "Mode Soket"
+        }
+      },
+      "webhookPath": {
+        "label": "Jalur webhook"
+      },
+      "replyInThread": {
+        "label": "Balasan thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "reactEmoji": {
+        "label": "Baca emoji"
+      },
+      "doneEmoji": {
+        "label": "Selesai emoji"
+      },
+      "includeThreadContext": {
+        "label": "Konteks thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Batas konteks"
+      },
+      "allowFrom": {
+        "label": "Pengguna diizinkan"
+      },
+      "groupAllowFrom": {
+        "label": "Kanal diizinkan"
+      },
+      "groupRequireMention": {
+        "label": "Wajib mention di kanal",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "dm_enabled": {
+        "label": "Aktifkan pesan langsung",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "dm_policy": {
+        "label": "Akses pesan langsung",
+        "choices": {
+          "allowlist": "Daftar yang diizinkan",
+          "open": "Buka"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Pengguna DM diizinkan"
+      },
+      "useProxy": {
+        "label": "Gunakan proxy"
+      }
+    }
+  }
+}

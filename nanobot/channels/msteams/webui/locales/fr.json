@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "Ouvrir le guide Teams",
+    "officialLabel": "Ouvrir le portail développeur Teams",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID"
+      },
+      "appPassword": {
+        "label": "Secret client",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "ID du locataire",
+        "placeholder": "ID de locataire facultatif"
+      },
+      "path": {
+        "label": "Chemin de rappel",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés",
+        "placeholder": "ID utilisateur Teams séparés par des virgules"
+      },
+      "host": {
+        "label": "Écouter l'hôte"
+      },
+      "port": {
+        "label": "Port d'écoute"
+      },
+      "replyInThread": {
+        "label": "Réponses dans le fil",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "Réponse à une mention seule"
+      },
+      "validateInboundAuth": {
+        "label": "Vérifier les requêtes",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "refTtlDays": {
+        "label": "Durée des références (jours)"
+      },
+      "pruneWebChatRefs": {
+        "label": "Effacer les références Web Chat",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "Effacer les références de groupe",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "Intervalle d’actualisation (secondes)"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "Hôtes de confiance"
+      }
+    }
+  }
+}

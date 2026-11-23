@@ -1,14 +1,24 @@
-"""Create LLM providers from config."""
-
 from __future__ import annotations
 
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig, ProviderConfig
-from nanobot.providers.base import LLMProvider
+from nanobot.config.schema import (
+    Config,
+    InlineFallbackConfig,
+    ModelPresetConfig,
+    ProviderConfig,
+    RequestOverrides,
+)
+from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
-from nanobot.providers.registry import ProviderSpec, create_dynamic_spec, find_by_name
+from nanobot.providers.registry import ProviderSpec, find_by_name
+from nanobot.providers.request_overrides import apply_request_overrides
+from nanobot.providers.routing import resolve_automatic_model_api as resolve_automatic_model_api
+from nanobot.providers.routing import resolve_model_api as resolve_model_api
+from nanobot.providers.routing import resolve_provider_route
+from nanobot.providers.routing import validate_provider_setup as validate_provider_setup
 
 
 @dataclass(frozen=True)
@@ -17,6 +27,8 @@ class ProviderSnapshot:
     model: str
     context_window_tokens: int
     signature: tuple[object, ...]
+    generation: GenerationSettings | None = None
+    model_preset: str | None = None
 
 
 def _resolve_model_preset(
@@ -34,6 +46,8 @@ def _provider_extra_headers(
 ) -> dict[str, str] | None:
     headers = dict(spec.default_extra_headers) if spec else {}
     if provider_config and provider_config.extra_headers:
+        names = {key.lower() for key in provider_config.extra_headers}
+        headers = {key: value for key, value in headers.items() if key.lower() not in names}
         headers.update(provider_config.extra_headers)
     return headers or None
 
@@ -41,73 +55,75 @@ def _provider_extra_headers(
 def _make_provider_core(
     config: Config,
     *,
-    preset_name: str | None = None,
-    preset: ModelPresetConfig | None = None,
+    preset: ModelPresetConfig,
     model: str | None = None,
 ) -> LLMProvider:
-    """Create a plain LLM provider without failover wrapping."""
-    resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
-    model = model or resolved.model
-    provider_name = config.get_provider_name(model, preset=resolved)
-    p = config.get_provider(model, preset=resolved)
-    spec = find_by_name(provider_name) if provider_name else None
-    if provider_name and not spec and p:
-        if not p.api_base:
-            raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
-        spec = create_dynamic_spec(provider_name, thinking_style=(p.thinking_style or "") if p else "")
-    if spec and spec.is_transcription_only:
-        raise ValueError(f"Provider '{provider_name}' only supports transcription.")
-    backend = spec.backend if spec else "openai_compat"
-    if p and p.proxy and backend not in {"openai_compat", "openai_codex"}:
-        raise ValueError(
-            f"providers.{provider_name}.proxy is only supported for "
-            "OpenAI-compatible providers and OpenAI Codex."
-        )
-
-    if backend == "azure_openai":
-        if not p or not p.api_base:
-            raise ValueError("Azure OpenAI requires api_base in config.")
-    elif (
-        backend == "openai_compat"
-        and spec
-        and spec.is_direct
-        and not spec.default_api_base
-        and not (p and p.api_base)
-    ):
-        raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
-    elif backend == "openai_compat" and not model.startswith("bedrock/"):
-        needs_key = not (p and p.api_key)
-        exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
-        if needs_key and not exempt:
-            raise ValueError(f"No API key configured for provider '{provider_name}'.")
+    setup = resolve_provider_route(
+        config,
+        preset=preset,
+        model=model,
+    )
+    model = setup.model
+    provider_name = setup.provider_name
+    p = setup.provider_config
+    spec = setup.spec
+    backend = setup.backend
+    proxy = config.network.resolve_proxy(p.use_proxy) if p else None
 
     if backend == "openai_codex":
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
         provider = OpenAICodexProvider(
             default_model=model,
-            proxy=getattr(p, "proxy", None) if p else None,
+            proxy=proxy,
+            extra_body=p.extra_body if p else None,
+            fast_mode=preset.codex_fast_mode,
+            provider_name=provider_name,
+        )
+    elif backend == "xai_grok":
+        from nanobot.providers.xai_grok_provider import XAIGrokProvider
+
+        provider = XAIGrokProvider(
+            default_model=model,
+            proxy=proxy,
+            extra_body=p.extra_body if p else None,
+            provider_name=provider_name,
         )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
+        if p is None or p.api_base is None:
+            raise RuntimeError("validated Azure provider setup is missing api_base")
         provider = AzureOpenAIProvider(
             api_key=p.api_key or "",
             api_base=p.api_base,
             default_model=model,
+            provider_name=provider_name,
         )
     elif backend == "github_copilot":
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
-        provider = GitHubCopilotProvider(default_model=model)
+        provider = GitHubCopilotProvider(
+            default_model=model, provider_name=provider_name,
+            model_api=setup.model_api,
+        )
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
+        custom_spec = spec if spec and spec.backend == "openai_compat" else None
+        api_key = p.api_key if p else None
+        if custom_spec is not None:
+            api_key = api_key or "no-key"
         provider = AnthropicProvider(
-            api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model, preset=resolved),
+            api_key=api_key,
+            api_base=config.get_api_base(model, preset=preset),
             default_model=model,
             extra_headers=_provider_extra_headers(spec, p),
+            extra_body=p.extra_body if p else None,
+            extra_query=p.extra_query if p else None,
+            proxy=proxy,
+            spec=custom_spec,
+            provider_name=provider_name,
         )
     elif backend == "bedrock":
         from nanobot.providers.bedrock_provider import BedrockProvider
@@ -119,23 +135,26 @@ def _make_provider_core(
             region=getattr(p, "region", None) if p else None,
             profile=getattr(p, "profile", None) if p else None,
             extra_body=p.extra_body if p else None,
+            provider_name=provider_name,
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
         provider = OpenAICompatProvider(
             api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model, preset=resolved),
+            api_base=config.get_api_base(model, preset=preset),
             default_model=model,
             extra_headers=_provider_extra_headers(spec, p),
             spec=spec,
             extra_body=p.extra_body if p else None,
-            api_type=p.api_type if p and provider_name == "openai" else "auto",
+            model_api=setup.model_api,
             extra_query=p.extra_query if p else None,
-            proxy=p.proxy if p else None,
+            proxy=proxy,
+            provider_name=provider_name,
         )
 
-    provider.generation = resolved.to_generation_settings()
+    provider.generation = preset.to_generation_settings()
+    provider.supports_images = preset.supports_images
     return provider
 
 
@@ -146,6 +165,7 @@ def _inline_fallback_preset(
     return ModelPresetConfig(
         model=fallback.model,
         provider=fallback.provider,
+        supports_images=fallback.supports_images,
         max_tokens=fallback.max_tokens if fallback.max_tokens is not None else primary.max_tokens,
         context_window_tokens=(
             fallback.context_window_tokens
@@ -156,6 +176,10 @@ def _inline_fallback_preset(
             fallback.temperature if fallback.temperature is not None else primary.temperature
         ),
         reasoning_effort=fallback.reasoning_effort,
+        api=fallback.api,
+        extra_headers=fallback.extra_headers,
+        extra_query=fallback.extra_query,
+        extra_body=fallback.extra_body,
     )
 
 
@@ -182,19 +206,69 @@ def make_provider(
     the failover path to create providers for fallback models.
     """
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
-    provider = _make_provider_core(config, preset_name=preset_name, preset=preset, model=model)
+    provider = _make_provider_core(config, preset=resolved, model=model)
     fallback_presets = _resolve_fallback_presets(config, resolved)
 
     if fallback_presets:
         provider = FallbackProvider(
             primary=provider,
             fallback_presets=fallback_presets,
-            provider_factory=lambda fb: _make_provider_core(
-                config, preset_name=preset_name, preset=fb
-            ),
+            provider_factory=lambda fb: _make_provider_core(config, preset=fb),
+            primary_context_window_tokens=resolved.context_window_tokens,
+            fallback_preset_names=[
+                fallback if isinstance(fallback, str) else None
+                for fallback in config.agents.defaults.fallback_models
+            ],
         )
 
     return provider
+
+
+def build_unconfigured_provider_snapshot(config: Config, setup_error: str) -> ProviderSnapshot:
+    """Build a non-networking runtime while provider/model setup is incomplete."""
+    from nanobot.providers.unconfigured_provider import UnconfiguredProvider
+
+    preset = config.resolve_preset()
+    provider = UnconfiguredProvider(preset.model)
+    provider.generation = preset.to_generation_settings()
+    return ProviderSnapshot(
+        provider=provider,
+        model=preset.model,
+        context_window_tokens=preset.context_window_tokens,
+        signature=("unconfigured", setup_error, preset.model),
+        generation=provider.generation,
+    )
+
+
+def _preset_provider_signature(
+    config: Config, preset: ModelPresetConfig,
+) -> tuple[object, ...]:
+    provider_config = apply_request_overrides(
+        config.get_provider(preset.model, preset=preset), preset,
+    )
+    provider_name = config.get_provider_name(preset.model, preset=preset)
+    return (
+        preset.model,
+        preset.provider,
+        preset.supports_images,
+        provider_name,
+        config.get_api_key(preset.model, preset=preset),
+        config.get_api_base(preset.model, preset=preset),
+        _provider_extra_headers(find_by_name(provider_name) if provider_name else None, provider_config),
+        provider_config.extra_body if provider_config else None,
+        provider_config.api.model_dump_json() if provider_config and provider_config.api is not None else None,
+        provider_config.extra_query if provider_config else None,
+        getattr(provider_config, "region", None) if provider_config else None,
+        getattr(provider_config, "profile", None) if provider_config else None,
+        preset.max_tokens,
+        preset.temperature,
+        preset.reasoning_effort,
+        preset.codex_fast_mode,
+        preset.context_window_tokens,
+        preset.api.model_dump_json() if preset.api is not None else None,
+        config.network.resolve_proxy(provider_config.use_proxy) if provider_config else None,
+        provider_config.thinking_style if provider_config else None,
+    )
 
 
 def provider_signature(
@@ -205,50 +279,14 @@ def provider_signature(
 ) -> tuple[object, ...]:
     """Return the config fields that affect the active provider chain."""
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
-    p = config.get_provider(resolved.model, preset=resolved)
     fallback_presets = _resolve_fallback_presets(config, resolved)
-
-    def _fallback_signature(fallback: ModelPresetConfig) -> tuple[object, ...]:
-        fp = config.get_provider(fallback.model, preset=fallback)
-        provider_name = config.get_provider_name(fallback.model, preset=fallback)
-        return (
-            fallback.model,
-            fallback.provider,
-            provider_name,
-            config.get_api_key(fallback.model, preset=fallback),
-            config.get_api_base(fallback.model, preset=fallback),
-            _provider_extra_headers(find_by_name(provider_name) if provider_name else None, fp),
-            fp.extra_body if fp else None,
-            fp.api_type if fp else "auto",
-            fp.extra_query if fp else None,
-            getattr(fp, "region", None) if fp else None,
-            getattr(fp, "profile", None) if fp else None,
-            fallback.max_tokens,
-            fallback.temperature,
-            fallback.reasoning_effort,
-            fallback.context_window_tokens,
-            getattr(fp, "proxy", None) if fp else None,
-        )
-
-    provider_name = config.get_provider_name(resolved.model, preset=resolved)
     return (
-        resolved.model,
-        resolved.provider,
-        provider_name,
-        config.get_api_key(resolved.model, preset=resolved),
-        config.get_api_base(resolved.model, preset=resolved),
-        _provider_extra_headers(find_by_name(provider_name) if provider_name else None, p),
-        p.extra_body if p else None,
-        p.api_type if p else "auto",
-        p.extra_query if p else None,
-        getattr(p, "region", None) if p else None,
-        getattr(p, "profile", None) if p else None,
-        resolved.max_tokens,
-        resolved.temperature,
-        resolved.reasoning_effort,
-        resolved.context_window_tokens,
-        getattr(p, "proxy", None) if p else None,
-        tuple(_fallback_signature(fallback) for fallback in fallback_presets),
+        *_preset_provider_signature(config, resolved),
+        tuple(
+            fallback if isinstance(fallback, str) else None
+            for fallback in config.agents.defaults.fallback_models
+        ),
+        tuple(_preset_provider_signature(config, fallback) for fallback in fallback_presets),
     )
 
 
@@ -259,6 +297,11 @@ def build_provider_snapshot(
     preset: ModelPresetConfig | None = None,
 ) -> ProviderSnapshot:
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
+    selected_preset = (
+        config.agents.defaults.model_preset
+        if preset_name is None and preset is None
+        else preset_name
+    )
     fallback_windows = [
         fallback.context_window_tokens
         for fallback in _resolve_fallback_presets(config, resolved)
@@ -268,7 +311,33 @@ def build_provider_snapshot(
         model=resolved.model,
         context_window_tokens=min([resolved.context_window_tokens, *fallback_windows]),
         signature=provider_signature(config, preset=resolved),
+        generation=resolved.to_generation_settings(),
+        model_preset=selected_preset,
     )
+
+
+def provider_override_declarations(
+    config: Config, *, preset: ModelPresetConfig,
+) -> tuple[tuple[bool, ...], ...]:
+    """Distinguish input restrictions hidden by merged wire settings, including lazy fallbacks."""
+    return tuple(
+        tuple(bool(getattr(item, field)) for field in RequestOverrides.model_fields)
+        for item in [preset, *_resolve_fallback_presets(config, preset)]
+    )
+
+
+def build_isolated_provider_snapshot(
+    config: Config, *, preset: ModelPresetConfig,
+) -> ProviderSnapshot:
+    """Capture SDK override inputs, including credentials used by lazy fallback clients."""
+    owned = config.model_copy(deep=True)
+    resolved = preset.model_copy(deep=True)
+    chain = [resolved, *_resolve_fallback_presets(owned, resolved)]
+    if any((provider := owned.get_provider(preset=item)) and provider.use_proxy for item in chain):
+        owned.network.proxy = owned.network.resolve_proxy(True)
+    snapshot = build_provider_snapshot(owned, preset=resolved)
+    # Runtime metadata must not alias the inputs captured by the fallback factory.
+    return replace(snapshot, signature=deepcopy(snapshot.signature))
 
 
 def load_provider_snapshot(
@@ -279,6 +348,9 @@ def load_provider_snapshot(
     from nanobot.config.loader import load_config, resolve_config_env_vars
 
     return build_provider_snapshot(
-        resolve_config_env_vars(load_config(config_path)),
+        resolve_config_env_vars(
+            load_config(config_path),
+            config_path=config_path,
+        ),
         preset_name=preset_name,
     )

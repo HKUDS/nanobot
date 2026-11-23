@@ -1,48 +1,94 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  changeAutomationChat,
+  parseWebuiThreadPayload,
+  cancelMcpOAuth,
+  configureChannel,
+  completeMcpOAuth,
+  completeProviderOAuth,
   createModelConfiguration,
+  createProviderSettings,
+  deleteSkill,
+  deleteModelConfiguration,
   deleteSession,
   fetchFilePreview,
+  fetchFilePreviewAvailability,
   fetchAutomations,
+  fetchAutomationChats,
+  fetchAutomationRunResult,
   fetchCliApps,
   fetchInstalledCliApps,
+  fetchMcpOAuthStatus,
   fetchMcpPresets,
+  fetchMarketplaceSkillTrends,
+  fetchNanobotFeatures,
   fetchProviderModels,
+  fetchPromptIndex,
   fetchSessionAutomations,
+  fetchSettings,
   fetchSettingsUsage,
   fetchSidebarState,
   fetchSkillDetail,
   fetchSkills,
+  fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
+  fetchSubagentThread,
+  fetchSubagentTasks,
+  fetchWebuiThreadTraceDetail,
   fetchWorkspaces,
   importMcpConfig,
+  installMarketplaceSkill,
   listSessions,
   listSlashCommands,
   loginProviderOAuth,
   logoutProviderOAuth,
+  migrateModelConfigurations,
+  disableNanobotFeature,
+  enableNanobotFeature,
   runAutomationAction,
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  searchMarketplaceSkills,
+  startMcpOAuth,
+  cancelChannelConnect,
+  pollChannelConnect,
+  startChannelConnect,
   updateAutomation,
-  updateSidebarState,
   updateImageGenerationSettings,
+  updateModelCallOrder,
   updateModelConfiguration,
   updateMcpServerTools,
   updateNetworkSafetySettings,
   updateProviderSettings,
-  updateSettings,
+  updateSkillEnabled,
   updateWebSearchSettings,
+  validateChannel,
 } from "@/lib/api";
+
+const requestMutation = vi.fn();
+const mutationTransport = {
+  requestMutation: <T>(
+    action: string,
+    payload?: Record<string, unknown>,
+    timeoutMs?: number,
+  ) => requestMutation(action, payload, timeoutMs) as Promise<T>,
+};
 
 describe("webui API helpers", () => {
   beforeEach(() => {
+    requestMutation.mockReset();
+    requestMutation.mockResolvedValue({});
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ deleted: true, key: "websocket:chat-1", messages: [] }),
+        json: async () => ({
+          schemaVersion: 3,
+          projection: "events",
+          events: [],
+        }),
       }),
     );
   });
@@ -52,14 +98,37 @@ describe("webui API helpers", () => {
     vi.unstubAllGlobals();
   });
 
+  it("fetches a subagent thread from its parent session", async () => {
+    await fetchSubagentThread("tok", "websocket:chat-1", "task-1");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/subagents/task-1/webui-thread",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+  });
+
+  it("splits a large subagent window into bounded reads", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ tasks: [] }) } as Response);
+    const turnIds = Array.from({ length: 400 }, (_, index) => `turn-${index}-${"x".repeat(32)}`);
+    await expect(fetchSubagentTasks("tok", "websocket:chat-1", {
+      turnIds, trackedIds: ["task-1"],
+    })).resolves.toEqual({ tasks: [] });
+    const urls = vi.mocked(fetch).mock.calls.map(([url]) => new URL(String(url), "http://localhost"));
+    expect(urls.length).toBeGreaterThan(1);
+    expect(urls.every((url) => url.search.length <= 5001)).toBe(true);
+    expect(urls.every((url) => url.searchParams.get("scope") === "window")).toBe(true);
+    expect(urls.flatMap((url) => url.searchParams.getAll("turn_id"))).toEqual(turnIds);
+    expect(urls.flatMap((url) => url.searchParams.getAll("track"))).toEqual(["task-1"]);
+  });
+
   it("percent-encodes websocket keys when fetching webui-thread snapshot", async () => {
     await fetchWebuiThread("tok", "websocket:chat-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread",
+      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1&context_graph_encoding=references-v1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
+        cache: "no-store",
       }),
     );
   });
@@ -71,12 +140,273 @@ describe("webui API helpers", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D",
+      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D&include_model_requests=1&context_graph_encoding=references-v1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
       }),
     );
+  });
+
+  it("revalidates prompt summaries and replaces only the changed suffix", async () => {
+    const prompt = { id: "u1", inputId: "user:t1", preview: "question", answerPreview: "", cursor: "cursor", turnId: "t1", createdAt: 1 };
+    const cached = { revision: "first", prompts: [prompt] };
+    const signal = new AbortController().signal;
+    vi.mocked(fetch).mockResolvedValueOnce({ status: 304 } as Response);
+    await expect(fetchPromptIndex("tok", "websocket:chat-1", signal, cached)).resolves.toBe(cached);
+    expect(fetch).toHaveBeenLastCalledWith("/api/sessions/websocket%3Achat-1/webui-thread/prompts?since=first",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok", "If-None-Match": '"first"' }, cache: "no-store" }));
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({
+      revision: "second", replaceFrom: 1, prompts: [{ ...prompt, id: "u2" }],
+    }) } as Response);
+    const appended = await fetchPromptIndex("tok", "websocket:chat-1", signal, cached);
+    expect(appended.prompts.map((item) => item.id)).toEqual(["u1", "u2"]);
+    expect(appended.prompts[1].inputId).toBe("user:t1");
+    expect(appended.prompts[0]).toBe(prompt);
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ revision: "third", replaceFrom: 1, prompts: [] }) } as Response);
+    expect((await fetchPromptIndex("tok", "websocket:chat-1", signal, appended)).prompts).toEqual([prompt]);
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ replaceFrom: 2, prompts: [] }) } as Response);
+    await expect(fetchPromptIndex("tok", "websocket:chat-1", signal, cached)).rejects.toThrow("Invalid prompt index revision");
+  });
+
+  it("revalidates a cached WebUI thread and reuses it on 304", async () => {
+    const cached = {
+      schemaVersion: 3,
+      revision: "rev-1",
+      projection: "events" as const,
+      events: [],
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 304,
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1", {
+      revision: cached.revision,
+      cached,
+    })).resolves.toBe(cached);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1&context_graph_encoding=references-v1",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "If-None-Match": '"rev-1"',
+        },
+        cache: "no-store",
+      }),
+    );
+  });
+
+  it("rejects malformed canonical thread events at the HTTP boundary", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{ event: "file_edit", chat_id: "chat-1", edits: [{ tool: "edit_file" }] }],
+      }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread projection event: file_edit",
+    );
+  });
+
+  it.each([
+    {},
+    { stream_id: "answer-1" },
+    { stream_id: "answer-1", text_from_seq: 2 },
+    { projection_receipts: [] },
+    { stream_id: "answer-1", projection_receipts: [{ turn_id: "turn-1", ranges: [[1, 3], [5, 5]] }] },
+  ])("accepts optional stream identity and projection receipts: %j", async (metadata) => {
+    const event = { event: "stream_end", chat_id: "chat-1", text: "Reply", turn_id: "turn-1", turn_seq: 6, ...metadata };
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      schemaVersion: 3, projection: "events", events: [event],
+    })));
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({ events: [event] });
+  });
+
+  it.each([
+    { stream_id: 123 },
+    { projection_receipts: null },
+    { projection_receipts: [{ turn_id: "", ranges: [[1, 2]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[2, 1]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[1]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[-1, 2]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[1, 2.5]] }] },
+  ])("rejects malformed stream identity or projection receipts at the HTTP boundary: %j", async (metadata) => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      schemaVersion: 3,
+      projection: "events",
+      events: [{ event: "stream_end", chat_id: "chat-1", text: "Reply", ...metadata }],
+    })));
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread event metadata",
+    );
+  });
+
+  it("preserves the fragment answer-recovery declaration at the HTTP boundary", () => {
+    const payload = { schemaVersion: 3, projection: "events", events: [],
+      page: { record_range: { turn: 0, start: 2, end: 4002 }, recovered_answers: true } };
+    expect(parseWebuiThreadPayload(payload).page).toEqual(payload.page);
+    expect(() => parseWebuiThreadPayload({ ...payload, page: { ...payload.page, recovered_answers: "true" } }))
+      .toThrow("Invalid WebUI thread answer recovery");
+  });
+
+  it.each(["stream_end", "reasoning_end"])("validates %s text snapshot coverage", (event) => {
+    const payload = (fields: Record<string, unknown>) => ({ schemaVersion: 3, projection: "events",
+      events: [{ event, chat_id: "chat-1", turn_id: "turn-1", turn_seq: 6, text: "Reply", ...fields }] });
+    expect(parseWebuiThreadPayload(payload({ text_from_seq: 2 })).events[0])
+      .toMatchObject({ text_from_seq: 2, turn_seq: 6 });
+    for (const fields of [{ text_from_seq: -1 }, { text_from_seq: 7 }, { text_from_seq: 2.5 },
+      { text_from_seq: 2, turn_seq: undefined }]) {
+      expect(() => parseWebuiThreadPayload(payload(fields))).toThrow(`Invalid WebUI thread projection event: ${event}`);
+    }
+  });
+
+  it.each([
+    null,
+    "backup",
+    [null],
+    [{ provider: "xai", model: "grok" }],
+    [{ provider: "xai", model: "grok", preset: "backup", fallback: "true" }],
+  ])("rejects malformed response sources: %j", async (response_sources) => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{ event: "message", chat_id: "chat-1", text: "Reply", response_sources }],
+      }),
+    } as Response);
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread event metadata",
+    );
+  });
+
+  it.each([
+    undefined,
+    [],
+    [{ provider: "xai", model: "grok", preset: "snapshot", fallback: true }],
+    [{ provider: "xai", model: "grok", preset: "legacy snapshot" }],
+  ])("accepts optional recorded response sources: %j", async (response_sources) => {
+    const event = { event: "stream_end", chat_id: "chat-1", text: "Reply", response_sources, response_input_ids: ["session-message:received"] };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ schemaVersion: 3, projection: "events", events: [event] }),
+    } as Response);
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({ events: [event] });
+  });
+
+  it("rejects legacy message-projected thread payloads", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ schemaVersion: 3, messages: [] }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread events",
+    );
+  });
+
+  it("accepts validated deferred trace metadata on canonical thread events", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{
+          event: "message",
+          chat_id: "chat-1",
+          text: "exec(…)",
+          kind: "progress",
+          trace_detail: {
+            ref: "2.history-aaaaaaaaaaaaaaaaaaaa",
+            bytes: 40_000,
+            traceCount: 1,
+          },
+        }],
+      }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({
+      events: [{ trace_detail: { bytes: 40_000, traceCount: 1 } }],
+    });
+  });
+
+  it("rejects malformed deferred trace metadata at the HTTP boundary", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{
+          event: "message",
+          chat_id: "chat-1",
+          text: "exec(…)",
+          kind: "progress",
+          trace_detail: { ref: "bad", bytes: "many", traceCount: 1 },
+        }],
+      }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread projection event: message",
+    );
+  });
+
+  it("fetches deferred trace details with encoded session and ref", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        message_id: "history-aaaaaaaaaaaaaaaaaaaa",
+        events: [],
+      }),
+    } as Response);
+
+    await fetchWebuiThreadTraceDetail(
+      "tok",
+      "websocket:chat-1",
+      "9.history-aaaaaaaaaaaaaaaaaaaa",
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/webui-thread/trace-detail?ref=9.history-aaaaaaaaaaaaaaaaaaaa",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+        cache: "no-store",
+      }),
+    );
+  });
+
+  it("aborts a WebUI thread request when its caller signal is aborted", async () => {
+    const request: { signal?: AbortSignal | null } = {};
+    vi.mocked(fetch).mockImplementation((_input, init) => new Promise((_resolve, reject) => {
+      request.signal = init?.signal;
+      request.signal?.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    }));
+    const controller = new AbortController();
+
+    const pending = fetchWebuiThread("tok", "websocket:chat-1", {
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(request.signal?.aborted).toBe(true);
   });
 
   it("percent-encodes websocket keys and paths when fetching file previews", async () => {
@@ -89,6 +419,32 @@ describe("webui API helpers", () => {
         credentials: "same-origin",
       }),
     );
+  });
+
+  it("probes file preview availability without requesting contents", async () => {
+    await expect(
+      fetchFilePreviewAvailability("tok", "websocket:chat-1", "notes/ready.md"),
+    ).resolves.toBe(true);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/file-preview?path=notes%2Fready.md&probe=1",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+      }),
+    );
+  });
+
+  it("returns false when a file preview probe is unavailable", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ available: false }),
+    } as Response);
+
+    await expect(
+      fetchFilePreviewAvailability("tok", "websocket:chat-1", "notes/missing.md"),
+    ).resolves.toBe(false);
   });
 
   it("percent-encodes websocket keys when fetching session automations", async () => {
@@ -113,14 +469,113 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("serializes workspace automation actions", async () => {
-    await runAutomationAction("tok", "disable", "job 1/2");
-
+  it("fetches the selected run response with authentication and an encoded identity", async () => {
+    const controller = new AbortController();
+    await fetchAutomationRunResult("tok", "task/id", 1234, "cron", controller.signal);
     expect(fetch).toHaveBeenCalledWith(
-      "/api/webui/automations/disable?id=job+1%2F2",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+      "/api/webui/automations/result?id=task%2Fid&run_at_ms=1234&kind=cron",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" }, signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("reads chat choices over HTTP and commits the opaque choice over WebSocket", async () => {
+    const controller = new AbortController();
+    await fetchAutomationChats("tok", "task/id", controller.signal);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations/chats?id=task%2Fid",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" }, signal: expect.any(AbortSignal) }),
+    );
+    vi.mocked(fetch).mockClear();
+    const values = { target_id: "opaque-id", revision: "reviewed-version", message: "Reviewed prompt" };
+    await changeAutomationChat(mutationTransport, "task/id", values);
+    expect(requestMutation).toHaveBeenCalledWith("automation.change_chat", { id: "task/id", values }, 20_000);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("validates channel settings with form values", async () => {
+    await validateChannel(
+      mutationTransport,
+      "slack",
+      { "channels.slack.botToken": "xoxb-test" },
+      { instanceId: "default" },
+    );
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.channel.validate",
+      {
+        name: "slack",
+        instance_id: "default",
+        values: { "channels.slack.botToken": "xoxb-test" },
+      },
+      20_000,
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("configures channels through the authenticated WebSocket", async () => {
+    await configureChannel(
+      mutationTransport,
+      "discord",
+      { "channels.discord.token": "saved-secret" },
+      { enable: true },
+    );
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.channel.configure",
+      {
+        name: "discord",
+        enable: true,
+        values: { "channels.discord.token": "saved-secret" },
+      },
+      150_000,
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("serializes channel QR connect request envelopes", async () => {
+    await startChannelConnect(mutationTransport, "weixin", { force: true });
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.channel.connect.start",
+      { channel: "weixin", force: true },
+      150_000,
+    );
+
+    await pollChannelConnect(mutationTransport, "weixin", "session+/=");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.channel.connect.poll",
+      { channel: "weixin", session_id: "session+/=" },
+      150_000,
+    );
+
+    await cancelChannelConnect(mutationTransport, "weixin", "session+/=");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.channel.connect.cancel",
+      { channel: "weixin", session_id: "session+/=" },
+      20_000,
+    );
+  });
+
+  it("forwards channel-owned connect parameters without overriding the channel", async () => {
+    await startChannelConnect(mutationTransport, "plugin-chat", {
+      region: "eu",
+      interactive: false,
+      channel: "another-channel",
+    });
+
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.channel.connect.start",
+      { channel: "plugin-chat", region: "eu", interactive: false },
+      150_000,
+    );
+  });
+
+  it("serializes workspace automation actions", async () => {
+    await runAutomationAction(mutationTransport, "disable", "job 1/2");
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "automation.disable",
+      { id: "job 1/2" },
+      20_000,
     );
   });
 
@@ -130,19 +585,14 @@ describe("webui API helpers", () => {
       message: "Ask 今日 quiz",
       schedule: { kind: "cron", expr: "0 9 * * *", tz: "Asia/Shanghai" },
     } as const;
-    await updateAutomation("tok", "job 1/2", values);
+    await updateAutomation(mutationTransport, "job 1/2", values);
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/webui/automations/update?id=job+1%2F2",
-      expect.objectContaining({
-        headers: {
-          Authorization: "Bearer tok",
-          "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)),
-        },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "automation.update",
+      { id: "job 1/2", values },
+      20_000,
     );
-    const header = vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>;
-    expect(header["X-Nanobot-Automation-Values"]).not.toContain("每日");
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("fetches the WebUI skill summary", async () => {
@@ -167,45 +617,97 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("percent-encodes websocket keys when deleting a session", async () => {
-    await deleteSession("tok", "websocket:chat-1");
+  it("encodes marketplace search queries and provider", async () => {
+    await searchMarketplaceSkills("tok", "React & testing");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/delete",
+      "/api/webui/skills/search?q=React+%26+testing&provider=all",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
+    );
+  });
+
+  it("fetches a provider marketplace leaderboard", async () => {
+    await fetchTrendingMarketplaceSkills("tok", "skillhub");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/trending?provider=skillhub",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches skills.sh trend history independently", async () => {
+    await fetchMarketplaceSkillTrends("tok", [
+      "vercel-labs/skills/find-skills",
+      "acme/skills/react",
+    ]);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/trends?id=vercel-labs%2Fskills%2Ffind-skills&id=acme%2Fskills%2Freact",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("sends provider install coordinates without placing them in a URL", async () => {
+    await installMarketplaceSkill(
+      mutationTransport,
+      "skillhub",
+      "@tencent/skills",
+      "ima-skills",
+      "1.1.8",
+    );
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "skill.install",
+      {
+        provider: "skillhub",
+        source: "@tencent/skills",
+        skill: "ima-skills",
+        version: "1.1.8",
+      },
+      150_000,
+    );
+  });
+
+  it("updates and deletes installed skills over the WebSocket", async () => {
+    await updateSkillEnabled(mutationTransport, "custom skill", false);
+
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "skill.update",
+      { name: "custom skill", enabled: false },
+      20_000,
+    );
+
+    await deleteSkill(mutationTransport, "custom skill");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "skill.delete",
+      { name: "custom skill" },
+      20_000,
+    );
+  });
+
+  it("sends the session key in a mutation payload", async () => {
+    await deleteSession(mutationTransport, "websocket:chat-1");
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "session.delete",
+      { key: "websocket:chat-1" },
+      20_000,
     );
   });
 
   it("passes the automation cascade flag when deleting a session", async () => {
-    await deleteSession("tok", "websocket:chat-1", { deleteAutomations: true });
+    await deleteSession(mutationTransport, "websocket:chat-1", { deleteAutomations: true });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/delete?delete_automations=true",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
-    );
-  });
-
-  it("serializes settings updates as a narrow query string", async () => {
-    await updateSettings("tok", {
-      modelPreset: "default",
-      model: "openrouter/test",
-      provider: "openrouter",
-      contextWindowTokens: 262144,
-      timezone: "Asia/Shanghai",
-      botName: "nanobot",
-      botIcon: "nb",
-      toolHintMaxLength: 120,
-    });
-
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "session.delete",
+      { key: "websocket:chat-1", delete_automations: true },
+      20_000,
     );
   });
 
@@ -220,35 +722,116 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("shares only pending settings reads within the same client", async () => {
+    const pending: ((response: Response) => void)[] = [];
+    vi.mocked(fetch).mockImplementation(() => new Promise<Response>((resolve) => pending.push(resolve)));
+    const first = fetchSettings("tok", "", mutationTransport);
+    expect(fetchSettings("tok", "", mutationTransport)).toBe(first);
+    const other = fetchSettings("tok", "", { requestMutation });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    pending[0]({ ok: true, json: async () => ({ version: { current: "first" } }) } as Response);
+    pending[1]({ ok: true, json: async () => ({ version: { current: "other" } }) } as Response);
+    expect((await first).version?.current).toBe("first");
+    expect((await other).version?.current).toBe("other");
+    const refreshed = fetchSettings("tok", "", mutationTransport);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    pending[2]({ ok: true, json: async () => ({ version: { current: "refreshed" } }) } as Response);
+    expect((await refreshed).version?.current).toBe("refreshed");
+  });
+
+  it("reuses unchanged usage and requests model details explicitly", async () => {
+    const cached = { days: [], revision: "models" };
+    const json = vi.fn();
+    vi.mocked(fetch).mockResolvedValue({ status: 304, json } as unknown as Response);
+    expect(await fetchSettingsUsage("tok", { details: true, cached })).toBe(cached);
+    expect(fetch).toHaveBeenCalledWith("/api/settings/usage?details=true", expect.objectContaining({
+      headers: { Authorization: "Bearer tok", "If-None-Match": 'W/"models"' },
+    }));
+    expect(json).not.toHaveBeenCalled();
+  });
+
   it("serializes model configuration creation", async () => {
-    await createModelConfiguration("tok", {
-      label: "Fast writing",
+    await createModelConfiguration(mutationTransport, {
+      name: "Fast writing",
       provider: "openai",
       model: "openai/gpt-4.1-mini",
-    });
+      maxTokens: 4096,
+      contextWindowTokens: 128000,
+      temperature: 0.4,
+      reasoningEffort: "high",
+    }, true);
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/model-configurations/create?label=Fast+writing&provider=openai&model=openai%2Fgpt-4.1-mini",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.model_configuration.create",
+      {
+        name: "Fast writing",
+        provider: "openai",
+        model: "openai/gpt-4.1-mini",
+        append_to_order: true,
+        include_usage: false,
+        max_tokens: 4096,
+        context_window_tokens: 128000,
+        temperature: 0.4,
+        reasoning_effort: "high",
+      },
+      20_000,
     );
   });
 
   it("serializes model configuration updates", async () => {
-    await updateModelConfiguration("tok", {
+    await updateModelConfiguration(mutationTransport, {
       name: "codex",
-      label: "Codex",
+      newName: "Codex",
       provider: "openai_codex",
       model: "openai-codex/gpt-5.5",
+      maxTokens: 8192,
       contextWindowTokens: 65536,
-    });
+      temperature: 0,
+      reasoningEffort: null,
+    }, true);
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/model-configurations/update?name=codex&label=Codex&provider=openai_codex&model=openai-codex%2Fgpt-5.5&context_window_tokens=65536",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.model_configuration.update",
+      {
+        name: "codex",
+        include_usage: false,
+        new_name: "Codex",
+        provider: "openai_codex",
+        model: "openai-codex/gpt-5.5",
+        max_tokens: 8192,
+        context_window_tokens: 65536,
+        temperature: 0,
+        reasoning_effort: "",
+      },
+      20_000,
+    );
+  });
+
+  it("serializes model preset deletion and migration", async () => {
+    await deleteModelConfiguration(mutationTransport, "spare");
+    await migrateModelConfigurations(mutationTransport);
+
+    expect(requestMutation).toHaveBeenNthCalledWith(
+      1,
+      "settings.model_configuration.delete",
+      { name: "spare" },
+      20_000,
+    );
+    expect(requestMutation).toHaveBeenNthCalledWith(
+      2,
+      "settings.model_configuration.migrate",
+      {},
+      20_000,
+    );
+  });
+
+  it("serializes model call order as an ordered JSON array", async () => {
+    await updateModelCallOrder(mutationTransport, ["backup", "primary"]);
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.model_call_order.update",
+      { order: ["backup", "primary"] },
+      20_000,
     );
   });
 
@@ -263,30 +846,39 @@ describe("webui API helpers", () => {
       }),
     );
 
-    await expect(
-      updateModelConfiguration("tok", {
-        name: "codex",
-        model: "openai-codex/gpt-5.5",
-      }),
-    ).rejects.toMatchObject({
+    await expect(fetchSettings("tok")).rejects.toMatchObject({
       status: 200,
       message: "Gateway returned WebUI HTML instead of JSON. Restart nanobot gateway and try again.",
     });
   });
 
-  it("surfaces API error response bodies", async () => {
+  it("surfaces correlated WebSocket mutation errors", async () => {
+    requestMutation.mockRejectedValueOnce(
+      Object.assign(new Error("npm error ENOTEMPTY"), { status: 500 }),
+    );
+
+    await expect(
+      runCliAppAction(mutationTransport, "install", "hyperframes"),
+    ).rejects.toMatchObject({
+      status: 500,
+      message: "npm error ENOTEMPTY",
+    });
+  });
+
+  it("extracts user-facing messages from JSON API errors", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
         ok: false,
-        status: 500,
-        text: async () => "npm error ENOTEMPTY",
+        status: 400,
+        headers: new Headers({ "content-type": "application/json" }),
+        text: async () => JSON.stringify({ error: "Paste the complete callback URL." }),
       }),
     );
 
-    await expect(runCliAppAction("tok", "install", "hyperframes")).rejects.toMatchObject({
-      status: 500,
-      message: "npm error ENOTEMPTY",
+    await expect(fetchMcpOAuthStatus("tok", "flow-123")).rejects.toMatchObject({
+      status: 400,
+      message: "Paste the complete callback URL.",
     });
   });
 
@@ -302,18 +894,60 @@ describe("webui API helpers", () => {
     await pending;
   });
 
-  it("serializes provider settings updates without returning secrets", async () => {
-    await updateProviderSettings("tok", {
+  it("keeps provider secrets in the WebSocket payload", async () => {
+    await updateProviderSettings(mutationTransport, {
       provider: "openrouter",
       apiKey: "sk-or-test",
       apiBase: "https://openrouter.ai/api/v1",
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/update?provider=openrouter&api_key=sk-or-test&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.provider.update",
+      {
+        provider: "openrouter",
+        apiKey: "sk-or-test",
+        apiBase: "https://openrouter.ai/api/v1",
+      },
+      20_000,
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("serializes OAuth provider advanced settings", async () => {
+    await updateProviderSettings(mutationTransport, {
+      provider: "xai_grok",
+      use_proxy: true,
+      extraBody: '{"tools":[]}',
+    });
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.provider.update",
+      {
+        provider: "xai_grok",
+        use_proxy: true,
+        extraBody: '{"tools":[]}',
+      },
+      20_000,
+    );
+  });
+
+  it("serializes custom provider creation with advanced settings", async () => {
+    const update = {
+      name: "Company Gateway",
+      apiKey: "sk-company",
+      apiBase: "https://gateway.example/v1",
+      extraHeaders: '{"X-Tenant":"engineering"}',
+      extraBody: '{"service_tier":"priority"}',
+      extraQuery: '{"api-version":"2026-01-01"}',
+      use_proxy: true,
+      thinkingStyle: "enable_thinking",
+    };
+    await createProviderSettings(mutationTransport, update);
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.provider.create",
+      update,
+      20_000,
     );
   });
 
@@ -329,25 +963,65 @@ describe("webui API helpers", () => {
   });
 
   it("serializes provider OAuth login and logout actions", async () => {
-    await loginProviderOAuth("tok", "openai_codex");
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/oauth-login?provider=openai_codex",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await loginProviderOAuth(mutationTransport, "openai_codex");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.provider.oauth_login",
+      { provider: "openai_codex" },
+      20_000,
     );
 
-    await logoutProviderOAuth("tok", "openai_codex");
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/oauth-logout?provider=openai_codex",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await loginProviderOAuth(mutationTransport, "openai_codex", true);
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.provider.oauth_login",
+      { provider: "openai_codex", remote_browser: true },
+      20_000,
+    );
+
+    await completeProviderOAuth(mutationTransport, "xai_grok", "flow-123");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.provider.oauth_complete",
+      { provider: "xai_grok", flow_id: "flow-123" },
+      20_000,
+    );
+
+    await completeProviderOAuth(
+      mutationTransport,
+      "xai_grok",
+      "flow-123",
+      "secret",
+    );
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.provider.oauth_complete",
+      { provider: "xai_grok", flow_id: "flow-123", authorization_response: "secret" },
+      20_000,
+    );
+
+    await completeProviderOAuth(
+      mutationTransport,
+      "openai_codex",
+      "flow-codex",
+      "http://localhost:1455/auth/callback?code=secret&state=test",
+    );
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.provider.oauth_complete",
+      {
+        provider: "openai_codex",
+        flow_id: "flow-codex",
+        authorization_response: "http://localhost:1455/auth/callback?code=secret&state=test",
+      },
+      20_000,
+    );
+
+    await logoutProviderOAuth(mutationTransport, "openai_codex");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.provider.oauth_logout",
+      { provider: "openai_codex" },
+      20_000,
     );
   });
 
   it("serializes web search settings updates", async () => {
-    await updateWebSearchSettings("tok", {
+    await updateWebSearchSettings(mutationTransport, {
       provider: "searxng",
       baseUrl: "https://search.example.com",
       maxResults: 8,
@@ -355,30 +1029,37 @@ describe("webui API helpers", () => {
       useJinaReader: false,
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/web-search/update?provider=searxng&base_url=https%3A%2F%2Fsearch.example.com&max_results=8&timeout=45&use_jina_reader=false",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.web_search.update",
+      {
+        provider: "searxng",
+        base_url: "https://search.example.com",
+        max_results: 8,
+        timeout: 45,
+        use_jina_reader: false,
+      },
+      20_000,
     );
   });
 
   it("serializes network safety settings updates", async () => {
-    await updateNetworkSafetySettings("tok", {
+    await updateNetworkSafetySettings(mutationTransport, {
       webuiAllowLocalServiceAccess: false,
       webuiDefaultAccessMode: "full",
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=full",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.network_safety.update",
+      {
+        webui_allow_local_service_access: false,
+        webui_default_access_mode: "full",
+      },
+      20_000,
     );
   });
 
   it("serializes image generation settings updates", async () => {
-    await updateImageGenerationSettings("tok", {
+    await updateImageGenerationSettings(mutationTransport, {
       enabled: true,
       provider: "openrouter",
       model: "openai/gpt-5.4-image-2",
@@ -387,11 +1068,17 @@ describe("webui API helpers", () => {
       maxImagesPerTurn: 3,
     });
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/image-generation/update?enabled=true&provider=openrouter&model=openai%2Fgpt-5.4-image-2&default_aspect_ratio=16%3A9&default_image_size=2K&max_images_per_turn=3",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.image_generation.update",
+      {
+        enabled: true,
+        provider: "openrouter",
+        model: "openai/gpt-5.4-image-2",
+        default_aspect_ratio: "16:9",
+        default_image_size: "2K",
+        max_images_per_turn: 3,
+      },
+      20_000,
     );
   });
 
@@ -413,12 +1100,11 @@ describe("webui API helpers", () => {
       }),
     );
 
-    await runCliAppAction("tok", "install", "gimp");
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/cli-apps/install?name=gimp",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+    await runCliAppAction(mutationTransport, "install", "gimp");
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.cli_app.install",
+      { name: "gimp" },
+      150_000,
     );
   });
 
@@ -441,6 +1127,45 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("reads and toggles nanobot optional features", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        features: [],
+        enabled_count: 0,
+      }),
+    } as Response);
+
+    await expect(fetchNanobotFeatures("tok")).resolves.toMatchObject({ features: [] });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/nanobot-features",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await enableNanobotFeature(mutationTransport, "matrix");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.feature.enable",
+      { name: "matrix" },
+      150_000,
+    );
+
+    await enableNanobotFeature(mutationTransport, "whatsapp", { installOnly: true });
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.feature.enable",
+      { name: "whatsapp", install_only: true },
+      150_000,
+    );
+
+    await disableNanobotFeature(mutationTransport, "matrix");
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.feature.disable",
+      { name: "matrix" },
+      20_000,
+    );
+  });
+
   it("reads MCP presets and serializes actions", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
@@ -458,87 +1183,115 @@ describe("webui API helpers", () => {
       }),
     );
 
-    await runMcpPresetAction("tok", "enable", "browserbase", {
+    await runMcpPresetAction(mutationTransport, "enable", "browserbase", {
       browserbase_api_key: "bb_live_test",
     });
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.enable",
+      { name: "browserbase", browserbase_api_key: "bb_live_test" },
+      20_000,
+    );
+
+    await startMcpOAuth(mutationTransport, "notion", true);
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.oauth_start",
+      { name: "notion", reset: true },
+      30_000,
+    );
+
+    await fetchMcpOAuthStatus("tok", "flow-123");
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/mcp-presets/enable?name=browserbase",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer tok",
-          "X-Nanobot-MCP-Values": JSON.stringify({
-            browserbase_api_key: "bb_live_test",
-          }),
-        }),
-      }),
+      "/api/settings/mcp-oauth/status?flow_id=flow-123",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+
+    const callbackUrl =
+      "http://127.0.0.1:8765/auth/mcp/callback?code=secret&state=state-123";
+    await completeMcpOAuth(mutationTransport, "flow-123", callbackUrl);
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.oauth_complete",
+      { flow_id: "flow-123", callback_url: callbackUrl },
+      20_000,
+    );
+
+    await cancelMcpOAuth(mutationTransport, "flow-123");
+    expect(requestMutation).toHaveBeenCalledWith(
+      "settings.mcp.oauth_cancel",
+      { flow_id: "flow-123" },
+      20_000,
     );
   });
 
+  it.each(["true", "false"])("preserves explicit MCP proxy flag %s across setup and edits", async (use_proxy) => {
+    await runMcpPresetAction(mutationTransport, "enable", "notion", { use_proxy });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.enable", { name: "notion", use_proxy }, 20_000);
+    await startMcpOAuth(mutationTransport, "notion", false, { use_proxy });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.oauth_start", { name: "notion", use_proxy }, 30_000);
+    await runMcpPresetAction(mutationTransport, "proxy", "notion", { use_proxy });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.proxy", { name: "notion", use_proxy }, 20_000);
+    const custom = { name: "docs", transport: "sse", url: "https://example.com/sse", use_proxy };
+    await saveCustomMcpServer(mutationTransport, custom);
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.custom", custom, 20_000);
+  });
+
   it("serializes custom MCP, mcp.json import, and tool allowlist actions", async () => {
-    await saveCustomMcpServer("tok", {
+    const custom = {
       name: "docs",
       transport: "stdio",
       command: "npx",
       args: '["-y","docs-mcp"]',
       env: '{"API_KEY":"secret"}',
-    });
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/mcp-presets/custom",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer tok",
-          "X-Nanobot-MCP-Values": JSON.stringify({
-            name: "docs",
-            transport: "stdio",
-            command: "npx",
-            args: '["-y","docs-mcp"]',
-            env: '{"API_KEY":"secret"}',
-          }),
-        }),
-      }),
+    };
+    await saveCustomMcpServer(mutationTransport, custom);
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.mcp.custom",
+      custom,
+      20_000,
     );
 
-    await importMcpConfig("tok", '{"mcpServers":{"docs":{"command":"npx"}}}');
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/mcp-presets/import",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer tok",
-          "X-Nanobot-MCP-Values": JSON.stringify({
-            config: '{"mcpServers":{"docs":{"command":"npx"}}}',
-          }),
-        }),
-      }),
+    const oauthCustom = {
+      name: "company-mcp",
+      transport: "streamableHttp",
+      url: "https://mcp.example.com/mcp",
+      auth: "oauth",
+    };
+    await saveCustomMcpServer(mutationTransport, oauthCustom);
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.mcp.custom",
+      oauthCustom,
+      20_000,
     );
 
-    await updateMcpServerTools("tok", "docs", ["search", "fetch"]);
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/mcp-presets/tools",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer tok",
-          "X-Nanobot-MCP-Values": JSON.stringify({
-            name: "docs",
-            enabled_tools: ["search", "fetch"],
-          }),
-        }),
-      }),
+    await importMcpConfig(
+      mutationTransport,
+      '{"mcpServers":{"docs":{"command":"npx"}}}',
+    );
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.mcp.import",
+      { config: '{"mcpServers":{"docs":{"command":"npx"}}}' },
+      20_000,
+    );
+
+    await updateMcpServerTools(mutationTransport, "docs", ["search", "fetch"]);
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.mcp.tools",
+      { name: "docs", enabled_tools: ["search", "fetch"] },
+      20_000,
     );
   });
 
-  it("reads and writes persisted sidebar state", async () => {
+  it("reads persisted sidebar state", async () => {
     const state = {
       schema_version: 1,
       pinned_keys: ["websocket:chat-1"],
       archived_keys: ["websocket:old"],
+      session_order: ["websocket:chat-1", "websocket:old"],
       title_overrides: { "websocket:chat-1": "Release" },
       project_name_overrides: { "/Users/me/nanobot": "Core" },
       tags_by_key: {},
       collapsed_groups: {},
       view: {
         density: "compact" as const,
-        show_previews: false,
-        show_timestamps: false,
         show_archived: true,
         sort: "updated_desc" as const,
       },
@@ -556,20 +1309,6 @@ describe("webui API helpers", () => {
         headers: { Authorization: "Bearer tok" },
       }),
     );
-
-    await updateSidebarState("tok", state);
-    const [url, init] = vi.mocked(fetch).mock.calls.at(-1)!;
-    expect(String(url).startsWith("/api/webui/sidebar-state/update?")).toBe(true);
-    expect(init).toEqual(expect.objectContaining({
-      headers: { Authorization: "Bearer tok" },
-    }));
-    const encodedState = new URLSearchParams(String(url).split("?", 2)[1]).get("state");
-    expect(encodedState).toBeTruthy();
-    expect(JSON.parse(encodedState ?? "{}")).toMatchObject({
-      pinned_keys: ["websocket:chat-1"],
-      title_overrides: { "websocket:chat-1": "Release" },
-      project_name_overrides: { "/Users/me/nanobot": "Core" },
-    });
   });
 
   it("fetches workspace project state", async () => {
@@ -584,7 +1323,6 @@ describe("webui API helpers", () => {
       },
       controls: {
         can_change_project: true,
-        can_use_full_access: true,
       },
     };
     vi.mocked(fetch).mockResolvedValueOnce({
@@ -601,7 +1339,7 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("maps generated session titles from the sessions list", async () => {
+  it.each([true, undefined])("maps saved sessions with project_locked=%s", async (projectLocked) => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -611,7 +1349,14 @@ describe("webui API helpers", () => {
             created_at: "2026-05-01T10:00:00",
             updated_at: "2026-05-01T10:01:00",
             title: "优化 WebUI 标题",
+            project_locked: projectLocked,
+            model_preset: "fast",
+            model_options: projectLocked ? { reasoning_effort: "high", codex_fast_mode: false } : undefined,
             run_started_at: 1_700_000_000,
+            handle: {
+              id: "handle_0123456789abcdef0123456789abcdef",
+              name: "mira-0123456789",
+            },
           },
         ],
       }),
@@ -621,8 +1366,16 @@ describe("webui API helpers", () => {
       {
         key: "websocket:chat-1",
         title: "优化 WebUI 标题",
+        projectLocked: true,
         preview: "",
+        modelPreset: "fast",
+        modelOptions: projectLocked ? { reasoning_effort: "high", codex_fast_mode: false }
+          : { reasoning_effort: null, codex_fast_mode: null },
         runStartedAt: 1_700_000_000,
+        handle: {
+          id: "handle_0123456789abcdef0123456789abcdef",
+          name: "mira-0123456789",
+        },
       },
     ]);
   });
@@ -637,19 +1390,31 @@ describe("webui API helpers", () => {
             title: "Stop current task",
             description: "Cancel the active task.",
             icon: "square",
+            lifecycle: "stop_active_turn",
+            accepts_args: false,
           },
           {
             command: "/restart",
             title: "Restart nanobot",
             description: "Restart the bot process.",
             icon: "rotate-cw",
+            lifecycle: "side_channel",
+            accepts_args: false,
           },
           {
-            command: "/history",
-            title: "Show conversation history",
-            description: "Print the last N messages.",
+            command: "/inspect",
+            title: "Inspect session",
+            description: "Inspect a session.",
             icon: "history",
             arg_hint: "[n]",
+            lifecycle: "side_channel",
+            accepts_args: true,
+          },
+          {
+            command: "/legacy",
+            title: "Legacy row",
+            description: "Old metadata should not be guessed.",
+            icon: "circle-help",
           },
         ],
       }),
@@ -657,11 +1422,31 @@ describe("webui API helpers", () => {
 
     await expect(listSlashCommands("tok")).resolves.toEqual([
       {
-        command: "/history",
-        title: "Show conversation history",
-        description: "Print the last N messages.",
+        command: "/stop",
+        title: "Stop current task",
+        description: "Cancel the active task.",
+        icon: "square",
+        argHint: "",
+        lifecycle: "stop_active_turn",
+        acceptsArgs: false,
+      },
+      {
+        command: "/restart",
+        title: "Restart nanobot",
+        description: "Restart the bot process.",
+        icon: "rotate-cw",
+        argHint: "",
+        lifecycle: "side_channel",
+        acceptsArgs: false,
+      },
+      {
+        command: "/inspect",
+        title: "Inspect session",
+        description: "Inspect a session.",
         icon: "history",
         argHint: "[n]",
+        lifecycle: "side_channel",
+        acceptsArgs: true,
       },
     ]);
     expect(fetch).toHaveBeenCalledWith(
@@ -670,5 +1455,58 @@ describe("webui API helpers", () => {
         headers: { Authorization: "Bearer tok" },
       }),
     );
+  });
+});
+
+describe("context graph response dictionaries", () => {
+  const graph = { nodes: [{ path: "/guide.md", name: "guide.md", tokens: 10, state: "loaded" }], edges: [] };
+  const request = (id: string, fields: Record<string, unknown>) => ({
+    event: "model_request", chat_id: "chat", request_id: id, run_id: "run", sequence: 2,
+    phase: "completed", ...fields,
+  });
+  const payload = (events: unknown[], fields: Record<string, unknown> = {}) => ({ schemaVersion: 3, projection: "events", events, ...fields });
+
+  it("resolves repeated graphs and checkpoint graphs into shared domain objects", () => {
+    const result = parseWebuiThreadPayload(payload([
+      request("one", { context_graph_ref: "0", request_usage: { context_tokens: 20 } }),
+      request("two", { context_graph_ref: "0", request_usage: null }),
+      { event: "context_compaction", chat_id: "chat", compaction_id: "compact", phase: "succeeded",
+        context_snapshot: { graph_ref: "0", estimated_tokens: 10, context_window_tokens: 100 } },
+    ], { context_graphs: { "0": { nodes: [0], edges: [] } }, context_graph_nodes: graph.nodes, context_graph_edges: graph.edges }));
+    const requests = result.events.filter((event) => event.event === "model_request");
+    expect(requests[0].context_graph).toBe(requests[1].context_graph);
+    expect(requests[0].context_graph).toEqual(graph);
+    expect(requests[1].request_usage).toBeNull();
+    expect(result.events[2]).toMatchObject({ context_snapshot: { graph } });
+  });
+
+  it("preserves a growing timeline while sharing unchanged node and edge entities", () => {
+    const nodes = Array.from({ length: 300 }, (_, index) => ({ path: `/${index}.md`, name: `${index}.md`, tokens: 10, state: "loaded" }));
+    const edges = nodes.slice(1).map((node, index) => ({ source: nodes[index].path, target: node.path }));
+    const descriptors = Object.fromEntries(Array.from({ length: 50 }, (_, index) => [String(index), {
+      nodes: Array.from({ length: 251 + index }, (_, n) => n),
+      edges: Array.from({ length: 250 + index }, (_, n) => n),
+    }]));
+    const result = parseWebuiThreadPayload(payload(Array.from({ length: 50 }, (_, index) => request(String(index), { context_graph_ref: String(index) })), {
+      context_graphs: descriptors, context_graph_nodes: nodes, context_graph_edges: edges,
+    }));
+    const requests = result.events.filter((event) => event.event === "model_request");
+    for (let index = 0; index < requests.length; index += 1) {
+      expect(requests[index].context_graph?.nodes).toEqual(nodes.slice(0, 251 + index));
+      expect(requests[index].context_graph?.edges).toEqual(edges.slice(0, 250 + index));
+    }
+    expect(requests[0].context_graph).not.toBe(requests[1].context_graph);
+    expect(requests[0].context_graph?.nodes[0]).toBe(requests[49].context_graph?.nodes[0]);
+    expect(requests[0].context_graph?.edges[0]).toBe(requests[49].context_graph?.edges[0]);
+  });
+
+  it("continues to accept inline graphs from older hosts", () => {
+    const result = parseWebuiThreadPayload(payload([request("one", { context_graph: graph })]));
+    expect(result.events[0]).toMatchObject({ context_graph: graph });
+  });
+
+  it("rejects unknown references and invalid dictionary entries", () => {
+    expect(() => parseWebuiThreadPayload(payload([request("one", { context_graph_ref: "missing" })], { context_graphs: {}, context_graph_nodes: [], context_graph_edges: [] }))).toThrow("Unknown context graph reference");
+    expect(() => parseWebuiThreadPayload(payload([], { context_graphs: { "0": { nodes: [], edges: [0] } }, context_graph_nodes: [], context_graph_edges: [{ source: "missing", target: "missing" }] }))).toThrow("Invalid context graph entity table");
   });
 });

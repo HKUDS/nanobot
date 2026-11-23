@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "Ouvrir le guide QQ",
+    "officialLabel": "Ouvrir la console du bot QQ",
+    "sections": {
+      "credentials": "Identifiants (saisie manuelle)",
+      "advanced": "Avancé"
+    },
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "App ID du bot QQ"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés",
+        "placeholder": "Open ID séparés par des virgules"
+      },
+      "msgFormat": {
+        "label": "Format des messages",
+        "choices": {
+          "plain": "Texte brut",
+          "markdown": "Markdown"
+        }
+      },
+      "ackMessage": {
+        "label": "Message de réception"
+      },
+      "mediaDir": {
+        "label": "Répertoire des médias"
+      },
+      "downloadChunkSize": {
+        "label": "Taille des blocs (octets)"
+      },
+      "downloadMaxBytes": {
+        "label": "Limite de téléchargement (octets)"
+      },
+      "showCompactionNotices": {
+        "label": "Avis de compactage",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      }
+    }
+  },
+  "custom": {
+    "scanTitle": "Scannez avec QQ sur mobile",
+    "waiting": "En attente du scan…",
+    "connected": "Association terminée",
+    "stopped": "Annulé",
+    "connecting": "Préparation du QR code…",
+    "qrAlt": "QR code d'association QQ",
+    "scanAgainWarning": "Une nouvelle association peut interrompre les autres applications utilisant ce bot QQ. Si son App Secret est réinitialisé, l’ancien secret devient invalide et ces applications doivent utiliser le nouveau.",
+    "configured": "Configuré",
+    "bind": "Associer le bot QQ",
+    "rebind": "Réassocier le bot",
+    "refresh": "Actualiser le QR code",
+    "retry": "Réessayer",
+    "expired": "QR code expiré",
+    "failed": "Échec de l'association",
+    "cancelFailed": "Annulation impossible",
+    "retrying": "Nouvelle tentative…",
+    "manualSetup": "Saisir les identifiants manuellement"
+  }
+}

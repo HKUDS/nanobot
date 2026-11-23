@@ -1,64 +1,86 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  AlertCircle,
-  CheckCircle2,
-  ChevronRight,
-  FileImage,
-  Layers,
-  Search,
-  Server,
-  Terminal,
-  Wrench,
-  type LucideIcon,
-} from "lucide-react";
+  CompletedTaskIcon,
+  WebSearchIcon,
+  McpIcon,
+  ToolRunIcon,
+} from "@/components/icons/product-icons";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import { Clock3, Layers, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { MarkdownText } from "@/components/MarkdownText";
 import { cliAppInitials, mcpPresetInitials } from "@/components/CliAppMentionText";
-import { FileReferenceChip } from "@/components/FileReferenceChip";
-import { StreamingLabelSheen } from "@/components/MessageBubble";
-import { ActivityEvidencePreview } from "@/components/thread/activity/ActivityEvidencePreview";
-import { ActivityGroup } from "@/components/thread/activity/ActivityGroup";
 import { ActivityStep } from "@/components/thread/activity/ActivityStep";
-import { DiffPair } from "@/components/thread/activity/DiffPair";
-import { FileEditGroup, hasVisibleDiffStats, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
-import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
+import { coalesceActivityMessages } from "@/components/thread/activity/activity-message-model";
 import {
-  activityEvidenceFromMessageMedia,
-  activityEvidenceFromToolEvent,
-  isAgentActivityMember,
+  compactActivityPath,
+  formatActivityTarget,
+  redactShellCommand,
+  safeActivityDetail,
+} from "@/components/thread/activity/activity-text";
+import { FileEditGroup, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
+import { GenericToolRun } from "@/components/thread/activity/GenericToolRun";
+import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
+import { describeExecSession, passiveRunningCheckSessionId, toolEventArguments, toolEventName } from "@/components/thread/activity/exec-session-model";
+import {
+  canGroupGenericToolRuns,
+  type GenericToolRunItem,
+  type GenericToolStatus,
+  parseGenericToolTrace,
+} from "@/components/thread/activity/generic-tool-model";
+import { LatestActivityWheel } from "@/components/thread/activity/LatestActivityWheel";
+import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
+import { compactReasoningPreview } from "@/components/thread/activity/reasoning-preview";
+import { describeMcpActivity } from "@/components/thread/activity/mcp-activity-model";
+import { ThinkingReasoningShell } from "@/components/thread/activity/ThinkingReasoningShell";
+import { WebActivityRow } from "@/components/thread/activity/WebActivityRow";
+import {
+  describeTraceLine,
+} from "@/components/thread/activity/trace-activity-model";
+import { WebSearchActionRow, WebSearchRun } from "@/components/thread/activity/WebSearchRun";
+import { webSearchRunsByTraceLine } from "@/components/thread/activity/web-search-model";
+import {
   isReasoningOnlyAssistant,
-  type ActivityEvidence,
 } from "@/lib/activity-timeline";
-import { faviconUrls, logoFallbackUrls } from "@/lib/provider-brand";
-import { formatToolCallTrace } from "@/lib/tool-traces";
+import { formControlFocusClassName } from "@/components/ui/form-control";
+import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
+import { useLocalPreferences } from "@/hooks/useLocalPreferences";
+import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
+import { useThreadVisibility } from "@/hooks/useThreadVisibility";
+import type { FileEditDisplayMode } from "@/lib/local-preferences";
+import { logoFallbackUrls } from "@/lib/provider-brand";
+import { canonicalToolTrace, formatToolCallTrace } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
-import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
+import type {
+  CliAppInfo,
+  McpPresetInfo,
+  RetryStatus,
+  ToolProgressEvent,
+  UIFileEdit,
+  UIMessage,
+} from "@/lib/types";
 
-/** Scrollport height for the Cursor-style “live trace” strip (tailwind spacing). */
-const CLUSTER_SCROLL_MAX_CLASS = "max-h-52";
-const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
-
-export { isAgentActivityMember, isReasoningOnlyAssistant };
+const EMPTY_CLI_APPS: CliAppInfo[] = [];
+const EMPTY_MCP_PRESETS: McpPresetInfo[] = [];
 
 interface ActivityCounts {
   reasoningSteps: number;
   toolCalls: number;
+  modelSegments: number;
   cliCount: number;
   mcpCount: number;
   fileCount: number;
-  added: number;
-  deleted: number;
-  hasDiffStats: boolean;
-  hasEditingFiles: boolean;
-  hasFailedFiles: boolean;
-  hasDeletedFiles: boolean;
-  primaryFilePath?: string;
-  primaryFileTooltipPath?: string;
-  primaryCliName?: string;
-  primaryCliStatus?: CliRunStatus;
-  primaryMcpName?: string;
-  primaryMcpDisplayName?: string;
-  primaryMcpStatus?: McpRunStatus;
 }
 
 interface CliRunSummary {
@@ -79,7 +101,7 @@ interface McpRunSummary {
   presetName: string;
   displayName: string;
   toolName: string;
-  argsPreview: string;
+  args: unknown;
   status: McpRunStatus;
   error?: string;
 }
@@ -92,18 +114,23 @@ function countActivity(
 ): ActivityCounts {
   let reasoningSteps = 0;
   let toolCalls = 0;
+  let modelSegments = 0;
   const cliCount = cliRuns.length;
   const mcpCount = mcpRuns.length;
-  const primaryCli = cliRuns[cliRuns.length - 1];
-  const primaryCliName = primaryCli?.name;
-  const primaryCliStatus = primaryCli?.status;
-  const primaryMcp = mcpRuns[mcpRuns.length - 1];
   for (const m of messages) {
+    if (m.activityKind === "model") {
+      modelSegments += 1;
+      continue;
+    }
     if (isReasoningOnlyAssistant(m)) {
       reasoningSteps += 1;
       continue;
     }
     if (m.kind === "trace") {
+      if (m.traceDetail) {
+        toolCalls += m.traceDetail.traceCount;
+        continue;
+      }
       const lines = traceLines(m);
       for (const line of lines) {
         if (!isCliRunTraceLine(line) && !isMcpRunTraceLine(line)) {
@@ -112,55 +139,13 @@ function countActivity(
       }
     }
   }
-  let added = 0;
-  let deleted = 0;
-  let hasDiffStats = false;
-  let hasEditingFiles = false;
-  let failedFileCount = 0;
-  let deletedFileCount = 0;
-  let primaryFilePath: string | undefined;
-  let primaryFileTooltipPath: string | undefined;
-  for (const edit of fileEdits) {
-    primaryFilePath = edit.path;
-    primaryFileTooltipPath = edit.absolute_path || edit.path;
-    if (edit.status === "editing") {
-      hasEditingFiles = true;
-    }
-    if (edit.status === "error") {
-      failedFileCount += 1;
-    }
-    if (edit.operation === "delete") {
-      deletedFileCount += 1;
-    }
-    if (edit.status === "error" || edit.binary) {
-      continue;
-    }
-    if (!hasVisibleDiffStats(edit)) {
-      continue;
-    }
-    hasDiffStats = true;
-    added += edit.added;
-    deleted += edit.deleted;
-  }
   return {
     reasoningSteps,
     toolCalls,
+    modelSegments,
     cliCount,
     mcpCount,
     fileCount: fileEdits.length,
-    added,
-    deleted,
-    hasDiffStats,
-    hasEditingFiles,
-    hasFailedFiles: fileEdits.length > 0 && failedFileCount === fileEdits.length,
-    hasDeletedFiles: fileEdits.length > 0 && deletedFileCount === fileEdits.length,
-    primaryFilePath,
-    primaryFileTooltipPath,
-    primaryCliName,
-    primaryCliStatus,
-    primaryMcpName: primaryMcp?.presetName,
-    primaryMcpDisplayName: primaryMcp?.displayName,
-    primaryMcpStatus: primaryMcp?.status,
   };
 }
 
@@ -171,31 +156,116 @@ interface AgentActivityClusterProps {
   hasBodyBelow: boolean;
   /** Persisted end-to-end turn latency from the assistant answer, used for history replay. */
   turnLatencyMs?: number;
+  /** User turn start timestamp for live activity before the first trace/reasoning row. */
+  startedAtMs?: number;
+  retryStatus?: RetryStatus | null;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  traceDetailScope?: string | null;
+  onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
+  /** Optional controlled expansion state for a completed inline activity block. */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+  /** Render only the controlled details; another control owns the disclosure label. */
+  hideHeader?: boolean;
+  /** Stable id used by an external disclosure control. */
+  detailsId?: string;
 }
 
-/**
- * Outer fold wrapping interleaved reasoning-only assistant rows and tool-trace rows.
- * Fixed max height with inner scroll; each block keeps its own small collapsible (reasoning / tools).
- */
-export function AgentActivityCluster({
+export function AgentActivityCluster(props: AgentActivityClusterProps) {
+  const displayMode = useFileEditDisplayMode();
+  const messages = useMemo(() => coalesceActivityMessages(props.messages), [props.messages]);
+  const editsByMessage = useMemo(
+    () => summarizeFileEditsByMessage(messages, props.isTurnStreaming),
+    [messages, props.isTurnStreaming],
+  );
+  if (displayMode === "summary" || !editsByMessage.size) {
+    return <FoldedAgentActivity {...props} />;
+  }
+
+  // Diff rows break the fold so they stay visible in their original timeline position.
+  const items: ReactNode[] = [];
+  let pending: UIMessage[] = [];
+  const flush = (last: boolean) => {
+    // A live turn still needs its status header when the last row is a diff.
+    if (!pending.length && !(last && props.isTurnStreaming)) return;
+    items.push(
+      <FoldedAgentActivity
+        {...props}
+        detailsId={undefined}
+        key={pending[0]?.id ?? "tail-status"}
+        messages={pending}
+        isTurnStreaming={last && props.isTurnStreaming}
+        retryStatus={last ? props.retryStatus : null}
+        hasBodyBelow={false}
+      />,
+    );
+    pending = [];
+  };
+  for (const message of messages) {
+    const edits = editsByMessage.get(message.id);
+    if (message.fileEdits?.length) {
+      const traces = traceLines(message).filter((line) => !isFileEditTraceLine(line));
+      if (traces.some((line) => line.trim())) {
+        pending.push({ ...message, traces, content: traces.at(-1) ?? "", fileEdits: undefined });
+      }
+    } else {
+      pending.push(message);
+    }
+    if (edits?.length) {
+      flush(false);
+      items.push(
+        <FileEditGroup
+          key={`${message.id}:edits`}
+          edits={edits}
+          displayMode={displayMode}
+          onOpenFilePreview={props.onOpenFilePreview}
+        />,
+      );
+    }
+  }
+  flush(true);
+  return (
+    <div id={props.detailsId} className={cn("flex w-full flex-col gap-0.5", props.hasBodyBelow && "mb-2")}>
+      {items}
+    </div>
+  );
+}
+
+function FoldedAgentActivity({
   messages,
   isTurnStreaming,
   hasBodyBelow,
   turnLatencyMs,
-  cliApps = [],
-  mcpPresets = [],
+  startedAtMs,
+  retryStatus = null,
+  cliApps = EMPTY_CLI_APPS,
+  mcpPresets = EMPTY_MCP_PRESETS,
+  traceDetailScope = null,
+  onLoadTraceDetails,
   onOpenFilePreview,
+  expanded,
+  onExpandedChange,
+  hideHeader = false,
+  detailsId,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
-  const fileEdits = useMemo(
-    () => summarizeFileEdits(collectFileEdits(messages), isTurnStreaming),
-    [messages, isTurnStreaming],
+  const { activityMode, fileEditDisplayMode } = useLocalPreferences();
+  const mobile = useMediaQuery("(max-width: 639px)");
+  const pageVisible = usePageVisibility();
+  const threadVisible = useThreadVisibility();
+  const activityMessages = useMemo(() => coalesceActivityMessages(messages), [messages]);
+  const fileEditsByMessage = useMemo(
+    () => summarizeFileEditsByMessage(activityMessages, isTurnStreaming),
+    [activityMessages, isTurnStreaming],
   );
-  const cliRuns = useMemo(() => collectCliRuns(messages), [messages]);
-  const mcpRuns = useMemo(() => collectMcpRuns(messages), [messages]);
+  const fileEdits = useMemo(
+    () => [...fileEditsByMessage.values()].flat(),
+    [fileEditsByMessage],
+  );
+  const cliRuns = useMemo(() => collectCliRuns(activityMessages), [activityMessages]);
+  const mcpRuns = useMemo(() => collectMcpRuns(activityMessages), [activityMessages]);
   const cliAppsByName = useMemo(
     () => new Map(cliApps.map((app) => [app.name.toLowerCase(), app])),
     [cliApps],
@@ -207,338 +277,172 @@ export function AgentActivityCluster({
   const {
     reasoningSteps,
     toolCalls,
+    modelSegments,
     cliCount,
     mcpCount,
     fileCount,
-    added,
-    deleted,
-    hasDiffStats,
-    hasEditingFiles,
-    hasFailedFiles,
-    hasDeletedFiles,
-    primaryFilePath,
-    primaryFileTooltipPath,
-    primaryCliName,
-    primaryCliStatus,
-    primaryMcpDisplayName,
-    primaryMcpStatus,
-  } = countActivity(messages, fileEdits, cliRuns, mcpRuns);
-  const hasPendingFileEdit = fileEdits.some((edit) => edit.pending);
+  } = countActivity(activityMessages, fileEdits, cliRuns, mcpRuns);
 
-  const [userToggledOuter, setUserToggledOuter] = useState(false);
-  const [outerOpenLocal, setOuterOpenLocal] = useState(false);
-  const [completionHoldOpen, setCompletionHoldOpen] = useState(false);
+  const [outerOpenLocal, setOuterOpenLocal] = useState<boolean>();
+  const [failedTraceDetailKey, setFailedTraceDetailKey] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const activityScrollRef = useRef<HTMLDivElement>(null);
-  const activityContentRef = useRef<HTMLDivElement>(null);
-  const autoFollowActivityRef = useRef(true);
-  const scrollFrameRef = useRef<number | null>(null);
-  const wasTurnStreamingRef = useRef(isTurnStreaming);
-  const wasTurnStreaming = wasTurnStreamingRef.current;
-  /** Live work stays open; completed work briefly shows the done state, then tucks away. */
-  const outerExpanded = userToggledOuter
-    ? outerOpenLocal
-    : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming);
+  const outerExpanded = expanded ?? outerOpenLocal ?? (activityMode === "expanded");
+  useEffect(() => {
+    setOuterOpenLocal(undefined);
+  }, [activityMode]);
+  const deferredTraceRefs = useMemo(
+    () => Array.from(new Set(
+      messages
+        .map((message) => message.traceDetail?.ref)
+        .filter((ref): ref is string => typeof ref === "string" && ref.length > 0),
+    )),
+    [messages],
+  );
+  const traceDetailKey = useMemo(
+    () => `${traceDetailScope ?? ""}\u0000${deferredTraceRefs.join("\u0000")}`,
+    [deferredTraceRefs, traceDetailScope],
+  );
+  const traceDetailLoadFailed = failedTraceDetailKey === traceDetailKey;
+  const requestTraceDetails = useCallback(async (refs: string[]) => {
+    if (!onLoadTraceDetails) return;
+    setFailedTraceDetailKey(null);
+    try {
+      await onLoadTraceDetails(refs);
+    } catch {
+      setFailedTraceDetailKey(`${traceDetailScope ?? ""}\u0000${refs.join("\u0000")}`);
+    }
+  }, [onLoadTraceDetails, traceDetailScope]);
 
-  const hasLiveEditingFiles = isTurnStreaming && hasEditingFiles;
-  const singleFilePath = fileCount === 1 ? primaryFilePath : undefined;
-  const singleFileTooltipPath = fileCount === 1 ? primaryFileTooltipPath : undefined;
-  const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
-  const hasOnlyFileActivity = fileCount > 0 && messages.every(messageHasOnlyFileActivity);
-  const hasNonReasoningActivity = toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
-  const durationMs = activityDurationMs(messages, isTurnStreaming, now, turnLatencyMs);
+  const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || modelSegments > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
+  const hasOnlyFileActivity = fileCount > 0 && activityMessages.every(messageHasOnlyFileActivity);
+  const durationMs = activityDurationMs(
+    activityMessages,
+    isTurnStreaming,
+    now,
+    turnLatencyMs,
+    startedAtMs,
+  );
   const activityDuration = formatActivityDuration(durationMs);
-  const thoughtLabel = hasNonReasoningActivity
-    ? isTurnStreaming
-      ? t("message.activityWorkingFor", {
-          duration: activityDuration,
-          defaultValue: "Working for {{duration}}",
-        })
-      : durationMs <= 0
-        ? t("message.activityWorked", { defaultValue: "Worked" })
+  const showActivityPreview = isTurnStreaming && hasVisibleActivity && !outerExpanded && !hideHeader && !retryStatus;
+  const preview = useMemo(() => {
+    if (!showActivityPreview) return null;
+    const row = latestActivityRow(activityMessages, fileEditsByMessage, cliAppsByName, mcpPresetsByName);
+    return row ? <LatestActivityWheel row={row} visible={pageVisible && threadVisible} /> : null;
+  }, [showActivityPreview, activityMessages, fileEditsByMessage, cliAppsByName, mcpPresetsByName, pageVisible, threadVisible]);
+  const workingLabel = (duration: string) => t("message.activityWorkingFor", {
+    duration,
+    defaultValue: "Working for {{duration}}",
+  });
+  const isCompletedDisclosure = !isTurnStreaming && expanded !== undefined;
+  const retryError = retryStatus?.error_kind === "connection"
+    ? t("message.retryConnection", { defaultValue: "Connection failed" })
+    : retryStatus?.error_kind === "timeout"
+      ? t("message.retryTimeout", { defaultValue: "Model timed out" })
+      : retryStatus?.error_kind === "rate_limit"
+        ? t("message.retryRateLimit", { defaultValue: "Rate limited" })
+        : retryStatus?.error_kind === "server"
+          ? t("message.retryServer", { defaultValue: "Model unavailable" })
+          : t("message.retryUnknown", { defaultValue: "Model request failed" });
+  const retrySeconds = retryStatus?.next_retry_at === undefined
+    ? 0
+    : Math.max(0, Math.ceil(retryStatus.next_retry_at - now / 1000));
+  const activityLabel = retryStatus?.state === "exhausted"
+    ? t("message.retryExhausted", {
+        error: retryError,
+        defaultValue: "{{error}} Ending turn",
+      })
+    : retryStatus?.state === "waiting"
+      ? retrySeconds > 0
+        ? t("message.retryWaiting", {
+            error: retryError,
+            seconds: retrySeconds,
+            defaultValue: "{{error}} Retrying in {{seconds}}s",
+          })
+        : t("message.retrying", {
+            error: retryError,
+            defaultValue: "{{error}} Retrying",
+          })
+      : isTurnStreaming
+    ? mobile ? t("message.agentActivity.working") : workingLabel(activityDuration)
+    : durationMs <= 0
+      ? t("message.activityWorked", { defaultValue: "Worked" })
       : t("message.activityWorkedFor", {
           duration: activityDuration,
           defaultValue: "Worked for {{duration}}",
-        })
-    : isTurnStreaming
-      ? t("message.activityThinkingFor", {
-          duration: activityDuration,
-          defaultValue: "Thinking for {{duration}}",
-        })
-      : durationMs <= 0
-        ? t("message.activityThought", { defaultValue: "Thought" })
-      : t("message.activityThoughtFor", {
-          duration: activityDuration,
-          defaultValue: "Thought for {{duration}}",
         });
 
-  const fileActivitySummary = fileCount > 0
-    ? hasPendingFileEdit && !singleFilePath
-      ? t("message.fileActivityPreparing", { defaultValue: "Preparing edit…" })
-      : singleFilePath
-      ? t(fileActivitySummaryKey(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles), {
-          file: shortFileName(singleFilePath),
-          defaultValue: `${fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles)} {{file}}`,
-        })
-      : t(fileActivityManySummaryKey(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles), {
-          count: fileCount,
-          defaultValue: `${fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles)} {{count}} files`,
-        })
-    : "";
-
-  const cliActivitySummary = cliCount > 0
-    ? cliCount === 1 && primaryCliName
-      ? t(cliActivitySummaryKey(primaryCliStatus, isTurnStreaming), {
-          name: primaryCliName,
-          defaultValue: cliActivitySummaryDefault(primaryCliStatus, isTurnStreaming),
-        })
-      : t(cliActivityManySummaryKey(cliRuns, isTurnStreaming), {
-          count: cliCount,
-          defaultValue: cliActivityManySummaryDefault(cliRuns, isTurnStreaming),
-        })
-    : "";
-
-  const mcpActivitySummary = mcpCount > 0
-    ? mcpCount === 1 && primaryMcpDisplayName
-      ? t(mcpActivitySummaryKey(primaryMcpStatus, isTurnStreaming), {
-          name: primaryMcpDisplayName,
-          defaultValue: mcpActivitySummaryDefault(primaryMcpStatus, isTurnStreaming),
-        })
-      : t(mcpActivityManySummaryKey(mcpRuns, isTurnStreaming), {
-          count: mcpCount,
-          defaultValue: mcpActivityManySummaryDefault(mcpRuns, isTurnStreaming),
-        })
-    : "";
-
-  const summary = fileCount > 0
-    ? fileActivitySummary
-    : cliCount > 0
-      ? cliActivitySummary
-    : mcpCount > 0
-      ? mcpActivitySummary
-    : isTurnStreaming
-      ? reasoningSteps > 0
-        ? t("message.agentActivityLiveSummary", {
-            reasoning: reasoningSteps,
-            tools: toolCalls,
-            defaultValue: "Working… · {{reasoning}} steps · {{tools}} tool calls",
-          })
-        : toolCalls === 0 && fileCount > 0
-          ? t("message.agentActivityLiveFilesOnly", { defaultValue: "Working…" })
-        : t("message.agentActivityLiveToolsOnly", {
-            tools: toolCalls,
-            defaultValue: "Working… · {{tools}} tool calls",
-          })
-      : reasoningSteps > 0
-        ? t("message.agentActivitySummary", {
-            reasoning: reasoningSteps,
-            tools: toolCalls,
-            defaultValue: "{{reasoning}} steps · {{tools}} tool calls",
-          })
-        : toolCalls === 0 && fileCount > 0
-          ? t("message.agentActivityFilesOnly", { defaultValue: "File changes" })
-        : t("message.agentActivityToolsOnly", {
-            tools: toolCalls,
-            defaultValue: "{{tools}} tool calls",
-          });
-
-  const cancelActivityScrollFrame = useCallback(() => {
-    if (scrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(scrollFrameRef.current);
-      scrollFrameRef.current = null;
-    }
-  }, []);
-
-  const scrollActivityToBottom = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-  }, []);
-
-  const scheduleActivityScrollToBottom = useCallback(() => {
-    cancelActivityScrollFrame();
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
-      scrollFrameRef.current = null;
-      scrollActivityToBottom();
-    });
-  }, [cancelActivityScrollFrame, scrollActivityToBottom]);
-
   const toggleOuter = () => {
-    const nextOpen = userToggledOuter ? !outerOpenLocal : !outerExpanded;
-    if (nextOpen) {
-      autoFollowActivityRef.current = true;
-    }
-    setUserToggledOuter(true);
-    setOuterOpenLocal(nextOpen);
-  };
-
-  useLayoutEffect(() => {
-    if (!outerExpanded || !autoFollowActivityRef.current) return;
-    scheduleActivityScrollToBottom();
-  }, [outerExpanded, messages, isTurnStreaming, scheduleActivityScrollToBottom]);
-
-  useEffect(() => {
-    if (!outerExpanded) {
-      autoFollowActivityRef.current = true;
+    if (expanded !== undefined) {
+      onExpandedChange?.(!expanded);
       return;
     }
-    const target = activityContentRef.current;
-    if (!target || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (autoFollowActivityRef.current) {
-        scheduleActivityScrollToBottom();
-      }
-    });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [outerExpanded, scheduleActivityScrollToBottom]);
-
-  useEffect(() => cancelActivityScrollFrame, [cancelActivityScrollFrame]);
+    setOuterOpenLocal(!outerExpanded);
+  };
 
   useEffect(() => {
-    if (!isTurnStreaming) return undefined;
-    const interval = window.setInterval(() => setNow(Date.now()), 500);
-    return () => window.clearInterval(interval);
-  }, [isTurnStreaming]);
-
-  useEffect(() => {
-    const wasStreaming = wasTurnStreamingRef.current;
-    wasTurnStreamingRef.current = isTurnStreaming;
-    if (isTurnStreaming) {
-      setCompletionHoldOpen(false);
-      return undefined;
+    if (outerExpanded && deferredTraceRefs.length > 0) {
+      void requestTraceDetails(deferredTraceRefs);
     }
-    if (!wasStreaming || userToggledOuter) return undefined;
-    setCompletionHoldOpen(true);
-    const timeout = window.setTimeout(() => setCompletionHoldOpen(false), 900);
-    return () => window.clearTimeout(timeout);
-  }, [isTurnStreaming, userToggledOuter]);
+  }, [deferredTraceRefs, outerExpanded, requestTraceDetails]);
 
-  const onActivityScroll = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    autoFollowActivityRef.current = distance < ACTIVITY_SCROLL_NEAR_BOTTOM_PX;
-  }, []);
+  useEffect(() => {
+    if (!isTurnStreaming || !pageVisible || !threadVisible) return undefined;
+    setNow(Date.now());
+    const interval = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [isTurnStreaming, pageVisible, threadVisible]);
 
-  if (!hasVisibleActivity) return null;
+  if (!hasVisibleActivity && !isTurnStreaming) return null;
 
-  if (hasOnlyFileActivity) {
+  if (hasOnlyFileActivity && expanded === undefined) {
     return (
-      <FileEditFlatActivity
-        edits={fileEdits}
-        active={isTurnStreaming}
-        hasBodyBelow={hasBodyBelow}
-        summary={summary}
-        singleFilePath={singleFilePath}
-        singleFileTooltipPath={singleFileTooltipPath}
-        hasLiveEditingFiles={hasLiveEditingFiles}
-        hasFailedFiles={hasFailedFiles}
-        hasDeletedFiles={hasDeletedFiles}
-        added={added}
-        deleted={deleted}
-        hasDiffStats={hasDiffStats}
-        onOpenFilePreview={onOpenFilePreview}
-      />
+      <div className={cn("w-full", hasBodyBelow && "mb-2")}>
+        <FileEditGroup
+          edits={fileEdits}
+          displayMode={fileEditDisplayMode}
+          onOpenFilePreview={onOpenFilePreview}
+        />
+      </div>
     );
   }
 
   return (
-    <div className={cn("w-full", hasBodyBelow && "mb-2")}>
-      <button
-        type="button"
-        onClick={toggleOuter}
-        className={cn(
-          "group flex max-w-full items-center gap-1.5 rounded-md px-1 py-1",
-          "text-[12.5px] text-muted-foreground/72 transition-colors hover:text-muted-foreground",
-        )}
-        aria-expanded={outerExpanded}
-        aria-label={summary}
+    <div className={cn("w-full", hasBodyBelow && expanded !== false && "mb-2")}>
+      <ThinkingReasoningShell
+        active={isTurnStreaming}
+        expanded={outerExpanded}
+        contextual={isCompletedDisclosure}
+        showHeader={!hideHeader || outerExpanded}
+        collapseLabel={t("message.collapseActivity")}
+        contentId={detailsId}
+        label={activityLabel}
+        preview={preview}
+        compactPreview={mobile && preview !== null}
+        hasDetails={hasVisibleActivity}
+        onToggle={toggleOuter}
       >
-        <StreamingLabelSheen
-          active={isTurnStreaming}
-          className="min-w-0"
-        >
-          {singleFilePath ? fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles) : thoughtLabel}
-        </StreamingLabelSheen>
-        {singleFilePath ? (
-          <FileReferenceChip
-            path={singleFilePath}
-            tooltipPath={singleFileTooltipPath}
-            previewPath={singleFileTooltipPath || singleFilePath}
-            onOpen={onOpenFilePreview}
-            active={hasLiveEditingFiles}
-            className="-my-0.5 min-w-0"
-            textClassName="text-xs"
-            testId="activity-header-file-reference"
-          />
-        ) : null}
-        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-left">
-          {fileCount > 0 && hasDiffStats && (
-            <span className="inline-flex min-w-0 items-center gap-1 text-muted-foreground/85">
-              <DiffPair added={added} deleted={deleted} />
-            </span>
-          )}
-        </span>
-        <ChevronRight
-          aria-hidden
-          className={cn(
-            "h-3.5 w-3.5 shrink-0 transition-transform duration-200",
-            outerExpanded && "rotate-90",
-          )}
-        />
-      </button>
-
-      {outerExpanded && (
-        <div
-          className={cn(
-            "ml-1 mt-1 overflow-hidden pl-1",
-          )}
-        >
-          <div
-            ref={activityScrollRef}
-            data-testid="agent-activity-scroll"
-            onScroll={onActivityScroll}
-            className={cn(
-              CLUSTER_SCROLL_MAX_CLASS,
-              "overflow-y-auto py-1 pr-1 scrollbar-thin scrollbar-track-transparent",
-            )}
-          >
-            <div ref={activityContentRef} className="flex flex-col gap-0.5">
-              {messages.map((m) => {
-                if (isReasoningOnlyAssistant(m)) {
-                  return (
-                    <ReasoningRow
-                      key={m.id}
-                      text={m.reasoning ?? ""}
-                      streaming={isTurnStreaming && !!m.reasoningStreaming}
-                      onOpenFilePreview={onOpenFilePreview}
-                    />
-                  );
-                }
-                if (m.kind === "trace") {
-                  return (
-                    <ActivityTraceTimeline
-                      key={m.id}
-                      message={m}
-                      active={isTurnStreaming}
-                      cliAppsByName={cliAppsByName}
-                      mcpPresetsByName={mcpPresetsByName}
-                    />
-                  );
-                }
-                return null;
-              })}
-              {fileEdits.length ? (
-                <FileEditGroup
-                  edits={fileEdits}
-                  onOpenFilePreview={onOpenFilePreview}
-                />
-              ) : null}
-            </div>
+        {traceDetailLoadFailed ? (
+          <div role="alert" className="flex items-center gap-2 py-1 text-[12px] text-destructive">
+            <span>{t("message.traceDetailsLoadFailed", { defaultValue: "Full activity details could not be loaded." })}</span>
+            <button
+              type="button"
+              className="shrink-0 rounded-sm font-medium underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => void requestTraceDetails(deferredTraceRefs)}
+            >
+              {t("message.retryTraceDetails", { defaultValue: "Retry" })}
+            </button>
           </div>
-        </div>
-      )}
+        ) : null}
+        <ActivityMessageTimeline
+          messages={activityMessages}
+          active={isTurnStreaming}
+          cliAppsByName={cliAppsByName}
+          mcpPresetsByName={mcpPresetsByName}
+          fileEditsByMessage={fileEditsByMessage}
+          fileEditDisplayMode={fileEditDisplayMode}
+          onOpenFilePreview={onOpenFilePreview}
+        />
+      </ThinkingReasoningShell>
     </div>
   );
 }
@@ -548,85 +452,12 @@ function messageHasOnlyFileActivity(message: UIMessage): boolean {
   return traceLines(message).every((line) => !line.trim() || isFileEditTraceLine(line));
 }
 
-function FileEditFlatActivity({
-  edits,
-  active,
-  hasBodyBelow,
-  summary,
-  singleFilePath,
-  singleFileTooltipPath,
-  hasLiveEditingFiles,
-  hasFailedFiles,
-  hasDeletedFiles,
-  added,
-  deleted,
-  hasDiffStats,
-  onOpenFilePreview,
-}: {
-  edits: FileEditSummary[];
-  active: boolean;
-  hasBodyBelow: boolean;
-  summary: string;
-  singleFilePath?: string;
-  singleFileTooltipPath?: string;
-  hasLiveEditingFiles: boolean;
-  hasFailedFiles: boolean;
-  hasDeletedFiles: boolean;
-  added: number;
-  deleted: number;
-  hasDiffStats: boolean;
-  onOpenFilePreview?: (path: string) => void;
-}) {
-  const showRows = edits.length > 1 || edits.some((edit) => edit.status === "error" || edit.pending);
-  return (
-    <div className={cn("w-full", hasBodyBelow && "mb-2")} aria-label={summary}>
-      <div
-        className={cn(
-          "flex max-w-full items-center gap-1.5 px-1 py-1",
-          "text-[12.5px] text-muted-foreground/72",
-        )}
-      >
-        <StreamingLabelSheen active={active} className="min-w-0">
-          {singleFilePath
-            ? fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles)
-            : summary}
-        </StreamingLabelSheen>
-        {singleFilePath ? (
-          <FileReferenceChip
-            path={singleFilePath}
-            tooltipPath={singleFileTooltipPath}
-            previewPath={singleFileTooltipPath || singleFilePath}
-            onOpen={onOpenFilePreview}
-            active={hasLiveEditingFiles}
-            className="-my-0.5 min-w-0"
-            textClassName="text-xs"
-            testId="activity-header-file-reference"
-          />
-        ) : null}
-        {hasDiffStats ? (
-          <span className="inline-flex min-w-0 items-center gap-1 text-muted-foreground/85">
-            <DiffPair added={added} deleted={deleted} />
-          </span>
-        ) : null}
-      </div>
-      {showRows ? (
-        <div className="mt-0.5 pl-4">
-          <FileEditGroup edits={edits} onOpenFilePreview={onOpenFilePreview} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function shortFileName(path: string): string {
-  return path.split(/[\\/]/).pop() || path;
-}
-
 function activityDurationMs(
   messages: UIMessage[],
   active: boolean,
   now: number,
   completedLatencyMs?: number,
+  activeStartedAtMs?: number,
 ): number {
   if (!active && Number.isFinite(completedLatencyMs) && completedLatencyMs! >= 0) {
     return Math.round(completedLatencyMs!);
@@ -634,15 +465,30 @@ function activityDurationMs(
   const timestamps = messages
     .map((message) => message.createdAt)
     .filter((value) => Number.isFinite(value));
-  if (!timestamps.length) return 0;
-  const first = Math.min(...timestamps);
+  if (!timestamps.length) {
+    return active
+      && typeof activeStartedAtMs === "number"
+      && Number.isFinite(activeStartedAtMs)
+      ? Math.max(0, now - activeStartedAtMs)
+      : 0;
+  }
+  const first = active && Number.isFinite(activeStartedAtMs)
+    ? activeStartedAtMs!
+    : Math.min(...timestamps);
   const last = active && first > 1_000_000_000_000
     ? now
     : Math.max(...timestamps);
   return Math.max(0, last - first);
 }
 
-function formatActivityDuration(ms: number): string {
+export function completedActivityDurationMs(
+  messages: UIMessage[],
+  completedLatencyMs?: number,
+): number {
+  return activityDurationMs(messages, false, 0, completedLatencyMs);
+}
+
+export function formatActivityDuration(ms: number): string {
   const seconds = ms > 0 && ms < 1000 ? 1 : Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -655,45 +501,334 @@ function traceLines(message: UIMessage): string[] {
   return message.content.trim() ? [message.content] : [];
 }
 
+function latestActivityRow(
+  messages: UIMessage[],
+  fileEditsByMessage: Map<string, FileEditSummary[]>,
+  cliAppsByName: Map<string, CliAppInfo>,
+  mcpPresetsByName: Map<string, McpPresetInfo>,
+) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (isReasoningOnlyAssistant(message)) {
+      return <ReasoningRow key={message.id} text={message.reasoning ?? ""} streaming={!!message.reasoningStreaming} />;
+    }
+    if (message.activityKind === "model" && message.content.trim()) {
+      return <ActivityStep key={message.id} icon={Layers} label={safeActivityDetail(compactReasoningPreview(message.content))} />;
+    }
+    if (message.kind !== "trace") continue;
+    const edit = fileEditsByMessage.get(message.id)?.at(-1);
+    if (edit) return <FileEditGroup key={edit.key} edits={[edit]} displayMode="summary" />;
+    const entry = activityTraceEntries(message).at(-1);
+    const event = entry?.sessionEvent ?? message.toolEvents?.at(-1);
+    const line = entry?.line ?? formatToolCallTrace(event);
+    if (!line?.trim()) continue;
+    const traceKey = canonicalToolTrace(line);
+    const events = message.toolEvents ?? [];
+    const matchingEvent = entry?.sessionEvent ?? [...events].reverse().find((item) => {
+      const trace = formatToolCallTrace(item);
+      return trace !== null && canonicalToolTrace(trace) === traceKey;
+    });
+    const key = `${message.id}:${matchingEvent?.call_id ?? traceKey}`;
+    const search = webSearchRunsByTraceLine(events).get(traceKey);
+    if (search) {
+      const source = search.sources.at(-1);
+      if (source) return <WebActivityRow key={`${key}:${source.href}`} {...source} />;
+      return <WebSearchActionRow key={key} run={search} turnActive />;
+    }
+    if (matchingEvent && toolEventName(matchingEvent) === "exec_session") {
+      return <ExecSessionRow key={key} event={matchingEvent} turnActive />;
+    }
+    const state = genericToolStateByTraceLine(message).get(traceKey);
+    const cli = cliRunMapByTraceLine(message).get(traceKey) ?? parseCliRunTrace(line, state?.status);
+    if (cli) return <CliRunRow key={key} run={cli} active app={cliAppsByName.get(cli.name.toLowerCase())} />;
+    const mcp = mcpRunMapByTraceLine(message).get(traceKey) ?? parseMcpRunTrace(line, state?.status);
+    if (mcp) return <McpRunRow key={key} run={mcp} active preset={mcpPresetsByName.get(mcp.presetName.toLowerCase())} />;
+    const trace = parseGenericToolTrace(line);
+    if (trace) return <GenericToolRun key={key} items={[{ trace, status: state?.status ?? "running", error: state?.error }]} />;
+    return <ActivityTraceRow key={key} line={line} active state={state} />;
+  }
+  return null;
+}
+
+const ActivityMessageTimeline = memo(function ActivityMessageTimeline({
+  messages,
+  active,
+  cliAppsByName,
+  mcpPresetsByName,
+  fileEditsByMessage,
+  fileEditDisplayMode,
+  onOpenFilePreview,
+}: {
+  messages: UIMessage[];
+  active: boolean;
+  cliAppsByName: Map<string, CliAppInfo>;
+  mcpPresetsByName: Map<string, McpPresetInfo>;
+  fileEditsByMessage: Map<string, FileEditSummary[]>;
+  fileEditDisplayMode: FileEditDisplayMode;
+  onOpenFilePreview?: (path: string) => void;
+}) {
+  const items: ReactNode[] = [];
+
+  messages.forEach((message, index) => {
+    if (message.activityKind === "model") {
+      items.push(
+        <ActivityModelMessage
+          key={message.id}
+          message={message}
+          active={active}
+          onOpenFilePreview={onOpenFilePreview}
+        />,
+      );
+      return;
+    }
+    if (isReasoningOnlyAssistant(message)) {
+      items.push(
+        <ReasoningRow
+          key={message.id}
+          text={message.reasoning ?? ""}
+          streaming={active && !!message.reasoningStreaming}
+        />,
+      );
+      return;
+    }
+    if (message.kind === "trace") {
+      const fileEdits = fileEditsByMessage.get(message.id) ?? [];
+      items.push(
+        <Fragment key={message.id}>
+          <ActivityTraceTimeline
+            message={message}
+            active={active && index === messages.length - 1}
+            turnActive={active}
+            cliAppsByName={cliAppsByName}
+            mcpPresetsByName={mcpPresetsByName}
+          />
+          <FileEditGroup
+            edits={fileEdits}
+            displayMode={fileEditDisplayMode}
+            onOpenFilePreview={onOpenFilePreview}
+          />
+        </Fragment>,
+      );
+    }
+  });
+  return <>{items}</>;
+});
+
+/**
+ * Keep an intermediate assistant segment as normal Markdown. The activity
+ * surface owns ordering and lifecycle, not a reduced rendering mode: users
+ * should see the same prose, links, and code treatment before and after the
+ * surrounding turn is folded.
+ */
+function ActivityModelMessage({
+  message,
+  active,
+  onOpenFilePreview,
+}: {
+  message: UIMessage;
+  active: boolean;
+  onOpenFilePreview?: (path: string) => void;
+}) {
+  if (!message.content.trim()) return null;
+  return (
+    <div
+      data-testid="activity-model-message"
+      data-assistant-selectable={active && message.isStreaming ? undefined : "true"}
+      className="w-full min-w-0 py-1 text-reading"
+    >
+      <MarkdownText
+        streaming={active && !!message.isStreaming}
+        preserveStreamingLayout
+        onOpenFilePreview={onOpenFilePreview}
+      >
+        {message.content}
+      </MarkdownText>
+    </div>
+  );
+}
+
 function ActivityTraceList({
   lines,
   active,
-  evidenceByLine,
+  stateByLine,
 }: {
   lines: string[];
   active: boolean;
-  evidenceByLine?: Map<string, ActivityEvidence[]>;
+  stateByLine?: Map<string, GenericToolState>;
 }) {
+  const items: ReactNode[] = [];
+  let genericItems: GenericToolRunItem[] = [];
+
+  const flushGenericItems = (suffix: string) => {
+    if (!genericItems.length) return;
+    items.push(
+      <GenericToolRun
+        key={`generic-tool:${genericItems[0].trace.groupKey}:${suffix}`}
+        items={genericItems}
+      />,
+    );
+    genericItems = [];
+  };
+
+  lines.forEach((line, index) => {
+    const trace = parseGenericToolTrace(line);
+    if (trace) {
+      const key = canonicalToolTrace(line);
+      const explicitState = stateByLine?.get(key);
+      const fallbackStatus: GenericToolStatus = active && index === lines.length - 1 ? "running" : "done";
+      const item: GenericToolRunItem = {
+        trace,
+        status: explicitState?.status === "running" && !active ? "done" : explicitState?.status ?? fallbackStatus,
+        error: explicitState?.error,
+      };
+      const previous = genericItems[genericItems.length - 1];
+      if (previous && !canGroupGenericToolRuns(previous, item)) flushGenericItems(String(index));
+      genericItems.push(item);
+      return;
+    }
+
+    flushGenericItems(String(index));
+    items.push(
+      <ActivityTraceRow
+        key={`${line}-${index}`}
+        line={line}
+        active={active && index === lines.length - 1}
+        state={stateByLine?.get(canonicalToolTrace(line))}
+      />,
+    );
+  });
+  flushGenericItems("tail");
+
   return (
-    <ul className="space-y-1">
-      {lines.map((line, index) => (
-        <ActivityTraceRow
-          key={`${line}-${index}`}
-          line={line}
-          active={active && index === lines.length - 1}
-          evidence={evidenceByLine?.get(line) ?? []}
-        />
-      ))}
-    </ul>
+    <>
+      {items}
+    </>
   );
+}
+
+interface ActivityTraceEntry {
+  line: string;
+  sessionEvent?: ToolProgressEvent;
+  sessionChecks?: ToolProgressEvent[];
+}
+
+const SESSION_CHECK_FOLD_THRESHOLD = 5;
+
+/** Keep individual observations available without mounting hundreds of identical rows. */
+function foldSessionChecks(entries: ActivityTraceEntry[]): ActivityTraceEntry[] {
+  const result: ActivityTraceEntry[] = [];
+  let index = 0;
+  while (index < entries.length) {
+    const first = entries[index].sessionEvent;
+    const id = first && passiveRunningCheckSessionId(first);
+    let end = index + 1;
+    if (id) {
+      while (end < entries.length) {
+        const next = entries[end].sessionEvent;
+        if (!next || passiveRunningCheckSessionId(next) !== id) break;
+        end += 1;
+      }
+    }
+    if (id && end - index >= SESSION_CHECK_FOLD_THRESHOLD) {
+      result.push({ line: "", sessionChecks: entries.slice(index, end).map((entry) => entry.sessionEvent!) });
+    } else {
+      result.push(...entries.slice(index, end));
+    }
+    index = end;
+  }
+  return result;
+}
+
+/** Restore exec_session call identities lost by display-text deduplication. */
+function activityTraceEntries(message: UIMessage): ActivityTraceEntry[] {
+  const lines = traceLines(message);
+  const events = message.toolEvents ?? [];
+  if (!events.some((event) => toolEventName(event) === "exec_session")) return lines.map((line) => ({ line }));
+  const lineKeys = new Set(lines.map(canonicalToolTrace));
+  const eventEntries: ActivityTraceEntry[] = [];
+  const rendered = new Set<string>();
+  const sessionIndices = new Map<string, number>();
+  for (const event of events) {
+    const line = formatToolCallTrace(event);
+    if (!line) continue;
+    const key = canonicalToolTrace(line);
+    if (toolEventName(event) === "exec_session") {
+      const callKey = event.call_id ?? key;
+      const existing = sessionIndices.get(callKey);
+      if (existing !== undefined) {
+        const previous = eventEntries[existing].sessionEvent!;
+        if ((GENERIC_TOOL_STATUS_RANK[phaseStatus(event.phase)]) >= GENERIC_TOOL_STATUS_RANK[phaseStatus(previous.phase)]) {
+          eventEntries[existing] = { line, sessionEvent: { ...previous, ...event } };
+        }
+      } else {
+        sessionIndices.set(callKey, eventEntries.length);
+        eventEntries.push({ line, sessionEvent: event });
+      }
+    } else if (lineKeys.has(key) && !rendered.has(key)) {
+      rendered.add(key);
+      eventEntries.push({ line });
+    }
+  }
+
+  // Anchor text-only lines before the next matching structured call, or after
+  // all calls when they are at the end. Repeated calls keep their identities.
+  const positions = new Map<string, number[]>();
+  eventEntries.forEach((entry, index) => {
+    const key = canonicalToolTrace(entry.line);
+    const indices = positions.get(key) ?? [];
+    indices.push(index);
+    positions.set(key, indices);
+  });
+  const occurrences = new Map<string, number>();
+  const before = new Map<number, string[]>();
+  let pending: string[] = [];
+  for (const line of lines) {
+    const key = canonicalToolTrace(line);
+    const indices = positions.get(key);
+    if (!indices?.length) {
+      pending.push(line);
+      continue;
+    }
+    const count = occurrences.get(key) ?? 0;
+    occurrences.set(key, count + 1);
+    if (!pending.length) continue;
+    const index = indices[Math.min(count, indices.length - 1)];
+    const anchored = before.get(index) ?? [];
+    for (const preceding of pending) anchored.push(preceding);
+    before.set(index, anchored);
+    pending = [];
+  }
+  const result: ActivityTraceEntry[] = [];
+  eventEntries.forEach((entry, index) => {
+    for (const line of before.get(index) ?? []) result.push({ line });
+    result.push(entry);
+  });
+  for (const line of pending) result.push({ line });
+  return result;
+}
+
+function phaseStatus(phase: unknown): GenericToolStatus {
+  return phase === "error" ? "error" : phase === "end" ? "done" : "running";
 }
 
 function ActivityTraceTimeline({
   message,
   active,
+  turnActive,
   cliAppsByName,
   mcpPresetsByName,
 }: {
   message: UIMessage;
   active: boolean;
+  turnActive: boolean;
   cliAppsByName: Map<string, CliAppInfo>;
   mcpPresetsByName: Map<string, McpPresetInfo>;
 }) {
-  const lines = traceLines(message);
+  const entries = foldSessionChecks(activityTraceEntries(message));
   const cliRunsByLine = cliRunMapByTraceLine(message);
   const mcpRunsByLine = mcpRunMapByTraceLine(message);
-  const evidenceByLine = toolEvidenceByTraceLine(message);
-  const trailingEvidence = activityEvidenceFromMessageMedia(message);
+  const webSearchRunsByLine = webSearchRunsByTraceLine(message.toolEvents ?? []);
+  const genericStateByLine = genericToolStateByTraceLine(message);
   const renderedRunKeys = new Set<string>();
   const items: ReactNode[] = [];
   let normalLines: string[] = [];
@@ -705,14 +840,44 @@ function ActivityTraceTimeline({
         key={`${message.id}:trace:${suffix}`}
         lines={normalLines}
         active={active}
-        evidenceByLine={evidenceByLine}
+        stateByLine={genericStateByLine}
       />,
     );
     normalLines = [];
   };
 
-  lines.forEach((line, index) => {
-    const cliRun = cliRunsByLine.get(line) ?? parseCliRunTrace(line);
+  entries.forEach(({ line, sessionEvent, sessionChecks }, index) => {
+    if (sessionChecks) {
+      flushNormalLines(String(index));
+      items.push(<ExecSessionCheckGroup key={`${message.id}:checks:${sessionChecks[0].call_id ?? index}`} events={sessionChecks} turnActive={turnActive} />);
+      return;
+    }
+    if (sessionEvent || /^exec_session\(/.test(line.trim())) {
+      flushNormalLines(String(index));
+      let event = sessionEvent;
+      if (!event) {
+        const raw = /^exec_session\((.*)\)$/.exec(line.trim())?.[1] ?? "";
+        event = { name: "exec_session", arguments: raw, phase: active && index === entries.length - 1 ? "start" : "unknown" };
+      }
+      items.push(<ExecSessionRow key={`${message.id}:session:${event.call_id ?? index}`} event={event} turnActive={turnActive} />);
+      return;
+    }
+    const traceKey = canonicalToolTrace(line);
+    const webSearchRun = webSearchRunsByLine.get(traceKey);
+    if (webSearchRun) {
+      flushNormalLines(String(index));
+      renderedRunKeys.add(webSearchRun.key);
+      items.push(
+        <WebSearchRun
+          key={`${message.id}:web-search:${webSearchRun.key}:${index}`}
+          run={webSearchRun}
+          turnActive={active}
+        />,
+      );
+      return;
+    }
+
+    const cliRun = cliRunsByLine.get(traceKey) ?? parseCliRunTrace(line);
     if (cliRun) {
       flushNormalLines(String(index));
       renderedRunKeys.add(cliRun.key);
@@ -724,19 +889,10 @@ function ActivityTraceTimeline({
           cliAppsByName={cliAppsByName}
         />,
       );
-      const evidence = evidenceByLine.get(line) ?? [];
-      if (evidence.length) {
-        items.push(
-          <ActivityEvidenceList
-            key={`${message.id}:cli-evidence:${cliRun.key}:${index}`}
-            evidence={evidence}
-          />,
-        );
-      }
       return;
     }
 
-    const mcpRun = mcpRunsByLine.get(line) ?? parseMcpRunTrace(line);
+    const mcpRun = mcpRunsByLine.get(traceKey) ?? parseMcpRunTrace(line);
     if (mcpRun) {
       flushNormalLines(String(index));
       renderedRunKeys.add(mcpRun.key);
@@ -748,15 +904,6 @@ function ActivityTraceTimeline({
           mcpPresetsByName={mcpPresetsByName}
         />,
       );
-      const evidence = evidenceByLine.get(line) ?? [];
-      if (evidence.length) {
-        items.push(
-          <ActivityEvidenceList
-            key={`${message.id}:mcp-evidence:${mcpRun.key}:${index}`}
-            evidence={evidence}
-          />,
-        );
-      }
       return;
     }
 
@@ -765,6 +912,16 @@ function ActivityTraceTimeline({
 
   flushNormalLines("tail");
 
+  for (const run of webSearchRunsByLine.values()) {
+    if (renderedRunKeys.has(run.key)) continue;
+    items.push(
+      <WebSearchRun
+        key={`${message.id}:web-search:${run.key}:event`}
+        run={run}
+        turnActive={active}
+      />,
+    );
+  }
   for (const run of cliRunsByLine.values()) {
     if (renderedRunKeys.has(run.key)) continue;
     items.push(
@@ -788,377 +945,138 @@ function ActivityTraceTimeline({
     );
   }
 
-  if (trailingEvidence.length) {
-    items.push(
-      <ActivityEvidenceList
-        key={`${message.id}:media-evidence`}
-        evidence={trailingEvidence}
-      />,
-    );
-  }
-
   if (!items.length) return null;
-  const group = describeActivityGroup(message, evidenceByLine, trailingEvidence);
   return (
-    <ActivityGroup title={group.title} icon={group.icon}>
+    <>
       {items}
-    </ActivityGroup>
+    </>
   );
 }
 
-function ActivityTraceRow({ line, active, evidence = [] }: { line: string; active: boolean; evidence?: ActivityEvidence[] }) {
-  const trace = describeTraceLine(line);
-  const Icon = trace.kind === "search"
-    ? Search
-    : trace.kind === "done"
-      ? CheckCircle2
-      : trace.kind === "tool"
-        ? Wrench
-        : Layers;
+function ExecSessionCheckGroup({ events, turnActive }: { events: ToolProgressEvent[]; turnActive: boolean }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const earlier = events.slice(0, -1);
+  return (
+    <>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        className={cn("ml-[1.625rem] w-fit rounded-sm py-0.5 text-left text-[13px] text-muted-foreground hover:underline", formControlFocusClassName)}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        {t(`message.agentActivity.${expanded ? "hideEarlierCommandChecks" : "showEarlierCommandChecks"}`, { count: earlier.length })}
+      </button>
+      {expanded ? earlier.map((event, index) => (
+        <ExecSessionRow key={event.call_id ?? index} event={event} turnActive={turnActive} />
+      )) : null}
+      <ExecSessionRow event={events[events.length - 1]} turnActive={turnActive} />
+    </>
+  );
+}
+
+function ExecSessionRow({ event, turnActive }: { event: ToolProgressEvent; turnActive: boolean }) {
+  const { t } = useTranslation();
+  const commands = useContext(ExecSessionCommandsContext);
+  const id = toolEventArguments(event).session_id;
+  const model = describeExecSession(event, turnActive, typeof id === "string" ? commands.get(id) : undefined, t);
   return (
     <ActivityStep
-      as="li"
-      marker={<TraceIconMark trace={trace} fallbackIcon={Icon} active={active} />}
-      active={active && trace.kind !== "done"}
-      tone={trace.kind === "done" ? "success" : active ? "active" : "neutral"}
-      label={trace.label}
-      detail={trace.detail}
-      title={`${trace.label}${trace.detail ? ` ${trace.detail}` : ""}`}
-    >
-      <ActivityEvidencePreview evidence={evidence} />
-    </ActivityStep>
-  );
-}
-
-function ActivityEvidenceList({ evidence }: { evidence: ActivityEvidence[] }) {
-  return (
-    <ul className="space-y-1">
-      <ActivityStep
-        as="li"
-        icon={FileImage}
-        tone="success"
-        label={evidenceLabel(evidence)}
-      >
-        <ActivityEvidencePreview evidence={evidence} />
-      </ActivityStep>
-    </ul>
-  );
-}
-
-function evidenceLabel(evidence: ActivityEvidence[]): string {
-  const first = evidence[0]?.attachment.kind;
-  if (first === "image") return evidence.length > 1 ? "Found images" : "Found image";
-  if (first === "video") return evidence.length > 1 ? "Found videos" : "Found video";
-  return evidence.length > 1 ? "Found files" : "Found file";
-}
-
-function toolEvidenceByTraceLine(message: UIMessage): Map<string, ActivityEvidence[]> {
-  const map = new Map<string, ActivityEvidence[]>();
-  for (const event of message.toolEvents ?? []) {
-    const evidence = activityEvidenceFromToolEvent(event);
-    if (!evidence.length) continue;
-    const line = formatToolCallTrace(event);
-    if (!line) continue;
-    const existing = map.get(line) ?? [];
-    map.set(line, [...existing, ...evidence]);
-  }
-  return map;
-}
-
-function allToolEvidence(evidenceByLine: Map<string, ActivityEvidence[]>): ActivityEvidence[] {
-  return [...evidenceByLine.values()].flat();
-}
-
-function describeActivityGroup(
-  message: UIMessage,
-  evidenceByLine: Map<string, ActivityEvidence[]>,
-  mediaEvidence: ActivityEvidence[],
-): { title: string; icon: LucideIcon } {
-  const names = [
-    ...traceLines(message).map((line) => /^([a-zA-Z0-9_.-]+)\(/.exec(line.trim())?.[1] ?? line),
-    ...(message.toolEvents ?? []).map(toolEventDisplayName),
-  ].map((name) => name.toLowerCase());
-  const evidence = [...allToolEvidence(evidenceByLine), ...mediaEvidence];
-  const hasVisualEvidence = evidence.some((item) => item.attachment.kind === "image" || item.attachment.kind === "video");
-  if (hasVisualEvidence && names.some((name) => /browser|screenshot|vision|image|video/.test(name))) {
-    return { title: "Vision", icon: FileImage };
-  }
-  if (names.some((name) => /browser|screenshot/.test(name))) return { title: "Browser", icon: FileImage };
-  if (names.some((name) => /web|search|fetch|read|open/.test(name))) return { title: "Web", icon: Search };
-  if (names.some((name) => /exec|shell|terminal|bash|run_cli_app|cli_anything/.test(name))) return { title: "Shell", icon: Terminal };
-  if (names.some((name) => /^mcp_|mcp/.test(name))) return { title: "MCP", icon: Server };
-  if (message.fileEdits?.length) return { title: "Files", icon: Layers };
-  if (evidence.length) return { title: "Media", icon: FileImage };
-  return { title: "Working", icon: Layers };
-}
-
-function toolEventDisplayName(event: ToolProgressEvent): string {
-  return typeof (event as { function?: { name?: unknown } }).function?.name === "string"
-    ? String((event as { function?: { name?: unknown } }).function?.name)
-    : typeof event.name === "string"
-      ? event.name
-      : "";
-}
-
-interface TraceDescription {
-  kind: "search" | "tool" | "done" | "trace";
-  label: string;
-  detail: string;
-  url?: string;
-  host?: string;
-}
-
-function TraceIconMark({
-  trace,
-  fallbackIcon: FallbackIcon,
-  active,
-}: {
-  trace: TraceDescription;
-  fallbackIcon: LucideIcon;
-  active: boolean;
-}) {
-  const [faviconIndex, setFaviconIndex] = useState(0);
-  const faviconUrl = trace.host ? faviconUrls(trace.host)[faviconIndex] : undefined;
-
-  useEffect(() => setFaviconIndex(0), [trace.host]);
-
-  if (trace.url && trace.host && faviconUrl) {
-    return (
-      <span
-        data-testid={`activity-web-favicon-${trace.host}`}
-        className={cn(
-          "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border border-border/45 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.02)]",
-          active && "animate-pulse",
-        )}
-        aria-hidden
-      >
-        <img
-          src={faviconUrl}
-          alt=""
-          className="h-3.5 w-3.5 object-contain"
-          onError={() => setFaviconIndex((index) => index + 1)}
-        />
-      </span>
-    );
-  }
-
-  return (
-    <FallbackIcon
-      className={cn(
-        "h-3.5 w-3.5 shrink-0",
-        trace.kind === "done"
-          ? "text-emerald-500/75"
-          : active
-            ? "text-muted-foreground/75"
-            : "text-muted-foreground/45",
-      )}
-      aria-hidden
+      icon={Terminal}
+      active={model.active}
+      tone={model.tone}
+      label={formatActivityTarget(t, model.label, model.detail)}
+      detail={[model.observation, model.aside].filter(Boolean).join(" · ")}
     />
   );
 }
 
-function describeTraceLine(line: string): TraceDescription {
-  const trimmed = line.trim();
-  const functionMatch = /^([a-zA-Z0-9_.-]+)\((.*)\)$/.exec(trimmed);
-  const name = functionMatch?.[1] ?? "";
-  const args = functionMatch?.[2] ?? "";
-  const parsedUrl = traceUrlFromArgs(args, trimmed);
-  const webDetail = parsedUrl ? formatTraceUrl(parsedUrl) : "";
-  const plainWebReadTrace =
-    !!parsedUrl && /\b(fetch(?:ing|ed)?|read(?:ing)?|opened?|opening)\b/i.test(trimmed);
-  if (/search/i.test(name)) {
-    return { kind: "search", label: "Searching", detail: previewTraceDetail(args, trimmed) };
-  }
-  if (/fetch|read|open/i.test(name) || plainWebReadTrace) {
-    return {
-      kind: "tool",
-      label: "Reading",
-      detail: webDetail || previewTraceDetail(args, trimmed),
-      url: parsedUrl?.href,
-      host: parsedUrl ? displayHost(parsedUrl.hostname) : undefined,
-    };
-  }
-  if (isShellTraceName(name)) {
-    return {
-      kind: "tool",
-      label: "Command",
-      detail: previewShellTraceDetail(args, trimmed),
-    };
-  }
-  if (name) {
-    return { kind: "tool", label: "Using", detail: name };
-  }
-  if (/done|complete|success/i.test(trimmed)) {
-    return { kind: "done", label: "Done", detail: trimmed };
-  }
-  return { kind: "trace", label: "Working", detail: trimmed };
-}
-
-function isShellTraceName(name: string): boolean {
-  const compact = name.toLowerCase().split(".").pop() || name.toLowerCase();
-  return new Set([
-    "exec",
-    "exec_command",
-    "execute_command",
-    "run_command",
-    "run_shell",
-    "shell",
-    "terminal",
-    "bash",
-    "sh",
-  ]).has(compact);
-}
-
-function previewShellTraceDetail(args: string, fallback: string): string {
-  const command = shellCommandFromArgs(args) || fallback;
-  return summarizeShellCommand(command);
-}
-
-function shellCommandFromArgs(args: string): string {
-  const compactArgs = args.trim();
-  if (!compactArgs) return "";
-  try {
-    const parsed = JSON.parse(compactArgs) as unknown;
-    if (typeof parsed === "string") return parsed;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
-    const record = parsed as Record<string, unknown>;
-    for (const key of ["command", "cmd", "script", "input"]) {
-      const value = record[key];
-      if (typeof value === "string" && value.trim()) return value;
-    }
-  } catch {
-    return compactArgs.replace(/^["']|["']$/g, "");
-  }
-  return "";
-}
-
-function summarizeShellCommand(command: string): string {
-  const redacted = redactShellCommand(command.replace(/\r\n/g, "\n"));
-  const lines = redacted
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const firstLine = compactShellPath(lines[0] || "command");
-  const firstPreview = truncateMiddle(firstLine, 92);
-  if (lines.length <= 1) return firstPreview;
-  return `${firstPreview} · script, ${lines.length} lines`;
-}
-
-function redactShellCommand(command: string): string {
-  return command
-    .replace(/\b((?:[A-Z0-9_]*)(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH)(?:[A-Z0-9_]*))=(?:"[^"]*"|'[^']*'|[^\s]+)/gi, "$1=••••")
-    .replace(/\b(Bearer)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 ••••")
-    .replace(/(--(?:api-?key|token|secret|password)(?:=|\s+))(?:"[^"]*"|'[^']*'|[^\s]+)/gi, "$1••••")
-    .replace(/([?&](?:api_?key|token|secret|password)=)[^&\s]+/gi, "$1••••");
-}
-
-function compactShellPath(value: string): string {
-  return value
-    .replace(/\/Users\/[^/\s"']+/g, "~")
-    .replace(/\/private\/tmp\/[^\s"']+/g, "/tmp/…")
-    .replace(/\/var\/folders\/[^\s"']+/g, "/var/folders/…");
-}
-
-function truncateMiddle(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
-  const head = Math.ceil((maxLength - 1) * 0.62);
-  const tail = Math.floor((maxLength - 1) * 0.38);
-  return `${value.slice(0, head)}…${value.slice(-tail)}`;
-}
-
-function traceUrlFromArgs(args: string, fallback: string): URL | null {
-  const candidates: string[] = [];
-  const compactArgs = args.trim();
-  if (compactArgs) {
-    try {
-      collectUrlCandidates(JSON.parse(compactArgs), candidates);
-    } catch {
-      candidates.push(compactArgs.replace(/^["']|["']$/g, ""));
-    }
-  }
-  candidates.push(fallback);
-  for (const candidate of candidates) {
-    const url = parsePublicHttpUrl(candidate);
-    if (url) return url;
-    const embedded = candidate.match(/https?:\/\/[^\s"'<>),]+/i)?.[0];
-    if (embedded) {
-      const embeddedUrl = parsePublicHttpUrl(embedded);
-      if (embeddedUrl) return embeddedUrl;
-    }
-  }
-  return null;
-}
-
-function collectUrlCandidates(value: unknown, candidates: string[]) {
-  if (typeof value === "string") {
-    candidates.push(value);
-    return;
-  }
-  if (!value || typeof value !== "object") return;
-  if (Array.isArray(value)) {
-    for (const item of value.slice(0, 6)) collectUrlCandidates(item, candidates);
-    return;
-  }
-  const record = value as Record<string, unknown>;
-  for (const key of ["url", "uri", "href", "link"]) {
-    if (typeof record[key] === "string") candidates.push(record[key]);
-  }
-}
-
-function parsePublicHttpUrl(value: string): URL | null {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    if (isPrivateHostname(url.hostname)) return null;
-    return url;
-  } catch {
-    return null;
-  }
-}
-
-function isPrivateHostname(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (!host || host === "localhost" || host.endsWith(".local")) return true;
-  if (!host.includes(".") && !host.includes(":")) return true;
-  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (ipv4) {
-    const [, aText, bText] = ipv4;
-    const a = Number(aText);
-    const b = Number(bText);
+function ActivityTraceRow({
+  line,
+  active,
+  state,
+}: {
+  line: string;
+  active: boolean;
+  state?: GenericToolState;
+}) {
+  const { t } = useTranslation();
+  const status = state?.status ?? (active ? "running" : "done");
+  const trace = describeTraceLine(line, status, t, state?.result);
+  const rowActive = status === "running" && active;
+  const Icon = trace.icon === "clock" ? Clock3 : (trace.kind === "search"
+    ? WebSearchIcon
+    : trace.kind === "done"
+      ? CompletedTaskIcon
+      : trace.kind === "tool"
+        ? ToolRunIcon
+        : Layers);
+  if (trace.url && trace.host) {
     return (
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168)
+      <WebActivityRow
+        title={trace.label}
+        href={trace.url}
+        host={trace.host}
+        displayUrl={trace.detail}
+        active={rowActive}
+        tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
+      />
     );
   }
-  return host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:");
+  return (
+    <ActivityStep
+      icon={Icon}
+      active={rowActive && trace.kind !== "done"}
+      tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
+      label={trace.kind === "search" ? trace.label : formatActivityTarget(t, trace.label, trace.detail)}
+      detail={trace.kind === "search" ? trace.detail : trace.aside}
+      labelClassName={trace.kind === "search" && trace.detail ? "max-w-[50%]" : undefined}
+    />
+  );
 }
 
-function displayHost(hostname: string): string {
-  return hostname.replace(/^www\./i, "").toLowerCase();
+interface GenericToolState {
+  status: GenericToolStatus;
+  error?: string;
+  result?: unknown;
 }
 
-function formatTraceUrl(url: URL): string {
-  const host = displayHost(url.hostname);
-  const path = url.pathname && url.pathname !== "/" ? url.pathname : "";
-  return `${host}${path}`;
-}
+const GENERIC_TOOL_STATUS_RANK: Record<GenericToolStatus, number> = { running: 1, done: 2, error: 3 };
 
-function previewTraceDetail(args: string, fallback: string): string {
-  const compactArgs = args.trim();
-  if (!compactArgs) return fallback;
-  try {
-    const parsed = JSON.parse(compactArgs) as unknown;
-    const preview = previewMcpArgs(parsed);
-    if (preview) return preview;
-  } catch {
-    // Keep the original trace text for non-JSON progress hints.
+function genericToolStateByTraceLine(message: UIMessage): Map<string, GenericToolState> {
+  const map = new Map<string, GenericToolState>();
+  for (const event of message.toolEvents ?? []) {
+    const line = formatToolCallTrace(event);
+    if (!line) continue;
+    const key = canonicalToolTrace(line);
+    const status: GenericToolStatus = event.phase === "error"
+      ? "error"
+      : event.phase === "end"
+        ? "done"
+        : "running";
+    const next = {
+      status,
+      error: status === "error" ? toolProgressError(event.error) : undefined,
+      result: event.result,
+    };
+    const previous = map.get(key);
+    if (!previous || GENERIC_TOOL_STATUS_RANK[next.status] >= GENERIC_TOOL_STATUS_RANK[previous.status]) {
+      map.set(key, next);
+    }
   }
-  return compactArgs.replace(/^["']|["']$/g, "");
+  return map;
+}
+
+function toolProgressError(error: unknown): string | undefined {
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return "Tool call failed";
+    }
+  }
+  return undefined;
 }
 
 const CLI_RUN_TOOL_NAMES = new Set(["run_cli_app", "cli_anything_run"]);
@@ -1224,14 +1142,6 @@ function cliRunError(event: ToolProgressEvent): string | undefined {
   return undefined;
 }
 
-function toolEventName(event: ToolProgressEvent): string {
-  return typeof (event as { function?: { name?: unknown } }).function?.name === "string"
-    ? String((event as { function?: { name?: unknown } }).function?.name)
-    : typeof event.name === "string"
-      ? event.name
-      : "";
-}
-
 function cliRunFromArguments(
   argsObject: unknown,
   options: { key: string; status: CliRunStatus; error?: string },
@@ -1282,7 +1192,8 @@ function cliRunMapByTraceLine(message: UIMessage): Map<string, CliRunSummary> {
     if (!run) continue;
     const line = formatToolCallTrace(event);
     if (!line) continue;
-    runsByLine.set(line, mergeCliRun(runsByLine.get(line), run));
+    const key = canonicalToolTrace(line);
+    runsByLine.set(key, mergeCliRun(runsByLine.get(key), run));
   }
   return runsByLine;
 }
@@ -1316,6 +1227,8 @@ function collectCliRuns(messages: UIMessage[]): CliRunSummary[] {
 }
 
 function titleFromPresetName(name: string): string {
+  const productName = PRODUCT_NAME_OVERRIDES[name.toLowerCase()];
+  if (productName) return productName;
   return name
     .split(/[-_]/)
     .filter(Boolean)
@@ -1323,27 +1236,11 @@ function titleFromPresetName(name: string): string {
     .join(" ") || name;
 }
 
-function previewScalar(value: unknown): string | null {
-  if (typeof value === "string" && value.trim()) return value.trim();
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return null;
-}
-
-function previewMcpArgs(argsObject: unknown): string {
-  if (!argsObject || typeof argsObject !== "object" || Array.isArray(argsObject)) {
-    return previewScalar(argsObject) ?? "";
-  }
-  const record = argsObject as Record<string, unknown>;
-  for (const key of ["url", "query", "q", "path", "name", "id", "title", "message", "text"]) {
-    const preview = previewScalar(record[key]);
-    if (preview) return `${key}: ${preview}`;
-  }
-  const entries = Object.entries(record)
-    .filter(([, value]) => previewScalar(value) !== null)
-    .slice(0, 2)
-    .map(([key, value]) => `${key}: ${previewScalar(value)}`);
-  return entries.join(" · ");
-}
+const PRODUCT_NAME_OVERRIDES: Record<string, string> = {
+  github: "GitHub",
+  gitlab: "GitLab",
+  openai: "OpenAI",
+};
 
 function mcpRunFromToolName(
   toolName: string,
@@ -1358,7 +1255,7 @@ function mcpRunFromToolName(
     presetName,
     displayName: titleFromPresetName(presetName),
     toolName: match[2],
-    argsPreview: previewMcpArgs(argsObject),
+    args: argsObject,
     status: options.status,
     error: options.error,
   };
@@ -1398,7 +1295,8 @@ function mcpRunMapByTraceLine(message: UIMessage): Map<string, McpRunSummary> {
     if (!run) continue;
     const line = formatToolCallTrace(event);
     if (!line) continue;
-    runsByLine.set(line, mergeMcpRun(runsByLine.get(line), run));
+    const key = canonicalToolTrace(line);
+    runsByLine.set(key, mergeMcpRun(runsByLine.get(key), run));
   }
   return runsByLine;
 }
@@ -1440,102 +1338,10 @@ function formatCliArgs(run: CliRunSummary): string {
   return args.join(" ");
 }
 
-function cliActivitySummaryKey(status: CliRunStatus | undefined, active: boolean): string {
-  if (status === "error") return "message.cliActivityFailedOne";
-  return active && status === "running" ? "message.cliActivityRunningOne" : "message.cliActivityRanOne";
-}
-
-function cliActivitySummaryDefault(status: CliRunStatus | undefined, active: boolean): string {
-  if (status === "error") return "Failed @{{name}}";
-  return `${active && status === "running" ? "Using" : "Used"} @{{name}}`;
-}
-
-function cliActivityManySummaryKey(runs: CliRunSummary[], active: boolean): string {
-  if (runs.some((run) => run.status === "error")) return "message.cliActivityFailedMany";
-  return active && runs.some((run) => run.status === "running")
-    ? "message.cliActivityRunningMany"
-    : "message.cliActivityRanMany";
-}
-
-function cliActivityManySummaryDefault(runs: CliRunSummary[], active: boolean): string {
-  if (runs.some((run) => run.status === "error")) return "{{count}} CLI apps failed";
-  return `${active && runs.some((run) => run.status === "running") ? "Using" : "Used"} {{count}} CLI apps`;
-}
-
-function cliRunLabelKey(run: CliRunSummary, active: boolean): string {
-  if (run.status === "error") return "message.cliRunFailed";
-  return active && run.status === "running" ? "message.cliRunRunning" : "message.cliRunRan";
-}
-
-function cliRunLabelDefault(run: CliRunSummary, active: boolean): string {
-  if (run.status === "error") return "Failed";
-  return active && run.status === "running" ? "Using" : "Used";
-}
-
-function mcpActivitySummaryKey(status: McpRunStatus | undefined, active: boolean): string {
-  if (status === "error") return "message.mcpActivityFailedOne";
-  return active && status === "running" ? "message.mcpActivityRunningOne" : "message.mcpActivityRanOne";
-}
-
-function mcpActivitySummaryDefault(status: McpRunStatus | undefined, active: boolean): string {
-  if (status === "error") return "Failed {{name}}";
-  return `${active && status === "running" ? "Using" : "Used"} {{name}}`;
-}
-
-function mcpActivityManySummaryKey(runs: McpRunSummary[], active: boolean): string {
-  if (runs.some((run) => run.status === "error")) return "message.mcpActivityFailedMany";
-  return active && runs.some((run) => run.status === "running")
-    ? "message.mcpActivityRunningMany"
-    : "message.mcpActivityRanMany";
-}
-
-function mcpActivityManySummaryDefault(runs: McpRunSummary[], active: boolean): string {
-  if (runs.some((run) => run.status === "error")) return "{{count}} MCP calls failed";
-  return `${active && runs.some((run) => run.status === "running") ? "Using" : "Used"} {{count}} MCP tools`;
-}
-
-function mcpRunLabelKey(run: McpRunSummary, active: boolean): string {
-  if (run.status === "error") return "message.mcpRunFailed";
-  return active && run.status === "running" ? "message.mcpRunRunning" : "message.mcpRunRan";
-}
-
-function mcpRunLabelDefault(run: McpRunSummary, active: boolean): string {
-  if (run.status === "error") return "Failed";
-  return active && run.status === "running" ? "Using" : "Used";
-}
-
-function fileActivityVerb(editing: boolean, failed: boolean, deleted: boolean): string {
-  if (failed) return "Failed";
-  if (deleted) return editing ? "Deleting" : "Deleted";
-  return editing ? "Editing" : "Edited";
-}
-
-function fileActivitySummaryKey(editing: boolean, failed: boolean, deleted: boolean): string {
-  if (failed) return "message.fileActivityFailedOne";
-  if (deleted) return editing ? "message.fileActivityDeletingOne" : "message.fileActivityDeletedOne";
-  return editing ? "message.fileActivityEditingOne" : "message.fileActivityEditedOne";
-}
-
-function fileActivityManySummaryKey(editing: boolean, failed: boolean, deleted: boolean): string {
-  if (failed) return "message.fileActivityFailedMany";
-  if (deleted) return editing ? "message.fileActivityDeletingMany" : "message.fileActivityDeletedMany";
-  return editing ? "message.fileActivityEditingMany" : "message.fileActivityEditedMany";
-}
-
 function fileEditCallKey(edit: UIFileEdit): string {
   if (edit.call_id && edit.path) return `${edit.call_id}|${edit.tool}|${edit.path}`;
   if (edit.call_id) return `${edit.call_id}|${edit.tool}`;
   return `${edit.tool}|${edit.path}`;
-}
-
-function collectFileEdits(messages: UIMessage[]): UIFileEdit[] {
-  const edits: UIFileEdit[] = [];
-  for (const message of messages) {
-    if (message.kind === "trace" && message.fileEdits?.length) {
-      edits.push(...message.fileEdits);
-    }
-  }
-  return edits;
 }
 
 function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
@@ -1549,123 +1355,59 @@ function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
   return order.map((key) => byKey.get(key)).filter(Boolean) as UIFileEdit[];
 }
 
+/** Keep each edit at the point where its call first appeared. Later lifecycle
+ * events update that row in place instead of moving completed edits to the end. */
+function summarizeFileEditsByMessage(
+  messages: UIMessage[],
+  active: boolean,
+): Map<string, FileEditSummary[]> {
+  const messageByEdit = new Map<string, string>();
+  const edits: UIFileEdit[] = [];
+  for (const message of messages) {
+    for (const edit of message.fileEdits ?? []) {
+      const key = fileEditCallKey(edit);
+      if (!messageByEdit.has(key)) messageByEdit.set(key, message.id);
+      edits.push(edit);
+    }
+  }
+
+  const grouped = new Map<string, FileEditSummary[]>();
+  for (const edit of summarizeFileEdits(edits, active)) {
+    const messageId = messageByEdit.get(edit.key);
+    if (!messageId) continue;
+    const group = grouped.get(messageId) ?? [];
+    group.push(edit);
+    grouped.set(messageId, group);
+  }
+  return grouped;
+}
+
 function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSummary[] {
-  interface MutableSummary {
-    key: string;
-    path: string;
-    absolute_path?: string;
-    added: number;
-    deleted: number;
-    approximate: boolean;
-    binary: boolean;
-    pending: boolean;
-    hasSuccessfulChange: boolean;
-    hasActiveEditing: boolean;
-    hasFailed: boolean;
-    operation?: UIFileEdit["operation"];
-    error?: string;
-  }
+  return latestFileEditEvents(edits).flatMap((edit) => {
+    const editing = active && edit.status === "editing";
+    const failed = edit.status === "error";
+    if (!edit.path && edit.pending && !editing) return [];
+    if (!edit.path && !editing && !failed) return [];
 
-  const order: string[] = [];
-  const byPath = new Map<string, MutableSummary>();
-  for (const edit of latestFileEditEvents(edits)) {
-    const key = edit.path || edit.call_id || edit.tool;
-    let summary = byPath.get(key);
-    if (!summary) {
-      summary = {
-        key,
-        path: edit.path || "",
-        absolute_path: edit.absolute_path,
-        added: 0,
-        deleted: 0,
-        approximate: false,
-        binary: false,
-        pending: false,
-        hasSuccessfulChange: false,
-        hasActiveEditing: false,
-        hasFailed: false,
-        operation: undefined,
-      };
-      byPath.set(key, summary);
-      order.push(key);
-    }
-
-    if (edit.path && !summary.path) {
-      summary.path = edit.path;
-    }
-    if (edit.absolute_path) {
-      summary.absolute_path = edit.absolute_path;
-    }
-    if (edit.operation === "delete") {
-      summary.operation = "delete";
-    }
-    summary.pending = summary.pending || !!edit.pending || !edit.path;
-    if (!edit.path && edit.pending) {
-      if (active && edit.status === "editing") {
-        summary.hasActiveEditing = true;
-        summary.approximate = summary.approximate || !!edit.approximate;
-        if (!edit.binary) {
-          summary.added += edit.added;
-          summary.deleted += edit.deleted;
-        }
-      }
-      continue;
-    }
-    if (active && edit.status === "editing") {
-      summary.hasActiveEditing = true;
-      summary.binary = summary.binary || !!edit.binary;
-      summary.approximate = summary.approximate || !!edit.approximate;
-      if (!edit.binary) {
-        summary.added += edit.added;
-        summary.deleted += edit.deleted;
-      }
-      continue;
-    }
-
-    if (edit.status === "error") {
-      summary.hasFailed = true;
-      summary.error = edit.error ?? summary.error;
-      continue;
-    }
-
-    summary.hasSuccessfulChange = true;
-    summary.binary = summary.binary || !!edit.binary;
-    summary.approximate = active && (summary.approximate || !!edit.approximate);
-    if (!edit.binary) {
-      summary.added += edit.added;
-      summary.deleted += edit.deleted;
-    }
-  }
-
-  return order.flatMap((key) => {
-    const summary = byPath.get(key)!;
-    if (
-      !summary.path
-      && !summary.hasActiveEditing
-      && !summary.hasSuccessfulChange
-      && !summary.hasFailed
-    ) {
-      return [];
-    }
-    const status: UIFileEdit["status"] = summary.hasActiveEditing
+    const status: UIFileEdit["status"] = editing
       ? "editing"
-      : summary.hasSuccessfulChange
-        ? "done"
-        : summary.hasFailed
-          ? "error"
-          : "done";
+      : failed
+        ? "error"
+        : "done";
+    const binary = !!edit.binary;
     return [{
-      key: summary.key,
-      path: summary.path,
-      absolute_path: summary.absolute_path,
-      added: summary.added,
-      deleted: summary.deleted,
-      approximate: summary.approximate,
-      binary: summary.binary,
+      key: fileEditCallKey(edit),
+      path: edit.path || "",
+      absolute_path: edit.absolute_path,
+      added: binary ? 0 : edit.added,
+      deleted: binary ? 0 : edit.deleted,
+      approximate: active && !!edit.approximate,
+      binary,
       status,
-      operation: summary.operation,
-      pending: summary.pending && !summary.path,
-      error: summary.error,
+      operation: edit.operation,
+      pending: !!edit.pending && !edit.path,
+      error: edit.error,
+      diff: edit.diff,
     }];
   });
 }
@@ -1681,7 +1423,7 @@ function CliRunGroup({
 }) {
   if (runs.length === 0) return null;
   return (
-    <ul className="space-y-1" data-testid="activity-cli-runs">
+    <>
       {runs.map((run) => (
         <CliRunRow
           key={run.key}
@@ -1690,52 +1432,50 @@ function CliRunGroup({
           app={cliAppsByName.get(run.name.toLowerCase())}
         />
       ))}
-    </ul>
+    </>
   );
 }
 
 function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; app?: CliAppInfo }) {
   const { t } = useTranslation();
-  const [logoIndex, setLogoIndex] = useState(0);
-  const args = formatCliArgs(run);
+  const args = compactActivityPath(redactShellCommand(formatCliArgs(run)));
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
   const color = failed ? "#DC2626" : app?.brand_color || "#0891B2";
   const logoUrls = useMemo(() => logoFallbackUrls(app?.logo_url), [app?.logo_url]);
-  const logoUrl = logoUrls[logoIndex];
-  const label = t(cliRunLabelKey(run, active), {
-    defaultValue: cliRunLabelDefault(run, active),
-  });
-
-  useEffect(() => setLogoIndex(0), [app?.logo_url]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
+  const displayName = app?.display_name || titleFromPresetName(run.name);
+  const label = t(
+    `message.${failed ? "cliActivityFailedOne" : rowActive ? "cliActivityRunningOne" : "cliActivityRanOne"}`,
+    { name: displayName },
+  );
 
   return (
     <ActivityStep
-      as="li"
       active={rowActive}
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
-      title={`${label} @${run.name}${args ? ` ${args}` : ""}${run.error ? ` ${run.error}` : ""}`}
       label={label}
+      detail={args}
+      detailClassName="font-mono text-[12px]"
       marker={(
         <span
           data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark text-[6.5px] font-semibold text-white",
             rowActive && "animate-pulse",
           )}
-          style={{
-            borderColor: alphaColor(color, 22),
-            backgroundColor: logoUrl ? "hsl(var(--background))" : color,
-            boxShadow: rowActive ? `0 0 0 3px ${alphaColor(color, 9)}` : undefined,
-          }}
+          style={{ backgroundColor: logoUrl ? "transparent" : color }}
           aria-hidden
         >
           {logoUrl ? (
             <img
               src={logoUrl}
               alt=""
-              className="h-[78%] w-[78%] object-contain"
-              onError={() => setLogoIndex((index) => index + 1)}
+              decoding="async"
+              loading="lazy"
+              className="h-full w-full object-contain"
+              onLoad={onLogoLoad}
+              onError={onLogoError}
             />
           ) : app ? (
             cliAppInitials(app).slice(0, 2)
@@ -1744,40 +1484,7 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
           )}
         </span>
       )}
-    >
-      <div className="-mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-        <span className="max-w-[11rem] shrink-0 truncate font-mono text-[12.5px] font-semibold text-foreground/90">
-          @{run.name}
-        </span>
-        {failed ? (
-          <AlertCircle className="h-3 w-3 shrink-0 translate-y-[0.16em] text-destructive/75" aria-hidden />
-        ) : null}
-        {args ? (
-          <>
-            <span className="shrink-0 text-muted-foreground/36">·</span>
-            <span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground/72">
-              {args}
-            </span>
-          </>
-        ) : null}
-        {run.error ? (
-          <>
-            <span className="shrink-0 text-muted-foreground/30">·</span>
-            <span className="min-w-0 truncate text-[12px] text-destructive/72">
-              {run.error}
-            </span>
-          </>
-        ) : null}
-        {run.workingDir && !run.error ? (
-          <>
-            <span className="shrink-0 text-muted-foreground/30">·</span>
-            <span className="min-w-0 truncate text-[12px] text-muted-foreground/55">
-              {run.workingDir}
-            </span>
-          </>
-        ) : null}
-      </div>
-    </ActivityStep>
+    />
   );
 }
 
@@ -1792,7 +1499,7 @@ function McpRunGroup({
 }) {
   if (runs.length === 0) return null;
   return (
-    <ul className="space-y-1" data-testid="activity-mcp-runs">
+    <>
       {runs.map((run) => (
         <McpRunRow
           key={run.key}
@@ -1801,92 +1508,59 @@ function McpRunGroup({
           preset={mcpPresetsByName.get(run.presetName.toLowerCase())}
         />
       ))}
-    </ul>
+    </>
   );
 }
 
 function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolean; preset?: McpPresetInfo }) {
   const { t } = useTranslation();
-  const [logoIndex, setLogoIndex] = useState(0);
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
   const color = failed ? "#DC2626" : preset?.brand_color || "#6D5DF6";
   const logoUrls = useMemo(() => logoFallbackUrls(preset?.logo_url), [preset?.logo_url]);
-  const logoUrl = logoUrls[logoIndex];
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const displayName = preset?.display_name || run.displayName;
-  const label = t(mcpRunLabelKey(run, active), {
-    defaultValue: mcpRunLabelDefault(run, active),
-  });
-
-  useEffect(() => setLogoIndex(0), [preset?.logo_url]);
+  const activity = describeMcpActivity(
+    run.toolName,
+    run.args,
+    failed ? "error" : rowActive ? "running" : "done",
+    t,
+  );
+  const label = formatActivityTarget(t, activity.action, activity.target ?? "");
 
   return (
     <ActivityStep
-      as="li"
       active={rowActive}
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
-      title={`${label} ${displayName} ${run.toolName}${run.argsPreview ? ` ${run.argsPreview}` : ""}${run.error ? ` ${run.error}` : ""}`}
       label={label}
+      detail={displayName}
       marker={(
         <span
           data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark text-[6.5px] font-semibold text-white",
             rowActive && "animate-pulse",
           )}
-          style={{
-            borderColor: alphaColor(color, 22),
-            backgroundColor: logoUrl ? "hsl(var(--background))" : color,
-            boxShadow: rowActive ? `0 0 0 3px ${alphaColor(color, 9)}` : undefined,
-          }}
+          style={{ backgroundColor: logoUrl ? "transparent" : color }}
           aria-hidden
         >
           {logoUrl ? (
             <img
               src={logoUrl}
               alt=""
-              className="h-[78%] w-[78%] object-contain"
-              onError={() => setLogoIndex((index) => index + 1)}
+              decoding="async"
+              loading="lazy"
+              className="h-full w-full object-contain"
+              onLoad={onLogoLoad}
+              onError={onLogoError}
             />
           ) : preset ? (
             mcpPresetInitials(preset).slice(0, 2)
           ) : (
-            <Server className="h-3 w-3" aria-hidden />
+            <McpIcon className="h-3 w-3" aria-hidden />
           )}
         </span>
       )}
-    >
-      <div className="-mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-        <span className="max-w-[12rem] shrink-0 truncate text-[12.5px] font-semibold text-foreground/90">
-          {displayName}
-        </span>
-        {failed ? (
-          <AlertCircle className="h-3 w-3 shrink-0 translate-y-[0.16em] text-destructive/75" aria-hidden />
-        ) : null}
-        <span className="shrink-0 text-muted-foreground/36">·</span>
-        <span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground/72">
-          {run.toolName}
-          {run.argsPreview ? ` · ${run.argsPreview}` : ""}
-        </span>
-        {run.error ? (
-          <>
-            <span className="shrink-0 text-muted-foreground/30">·</span>
-            <span className="min-w-0 truncate text-[12px] text-destructive/72">
-              {run.error}
-            </span>
-          </>
-        ) : null}
-      </div>
-    </ActivityStep>
+    />
   );
-}
-
-function alphaColor(color: string, percent: number): string {
-  if (/^#[0-9a-f]{6}$/i.test(color)) {
-    const alpha = Math.round((percent / 100) * 255)
-      .toString(16)
-      .padStart(2, "0");
-    return `${color}${alpha}`;
-  }
-  return `color-mix(in srgb, ${color} ${percent}%, transparent)`;
 }

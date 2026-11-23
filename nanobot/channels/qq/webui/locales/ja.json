@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "QQ 設定ガイドを開く",
+    "officialLabel": "QQ ボットコンソールを開く",
+    "sections": {
+      "credentials": "手動入力の認証情報",
+      "advanced": "詳細設定"
+    },
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "QQ ボット App ID"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "許可ユーザー",
+        "placeholder": "Open ID（カンマ区切り）"
+      },
+      "msgFormat": {
+        "label": "メッセージ形式",
+        "choices": {
+          "plain": "プレーンテキスト",
+          "markdown": "Markdown"
+        }
+      },
+      "ackMessage": {
+        "label": "受信確認のメッセージ"
+      },
+      "mediaDir": {
+        "label": "メディアディレクトリ"
+      },
+      "downloadChunkSize": {
+        "label": "チャンクのサイズ（バイト）"
+      },
+      "downloadMaxBytes": {
+        "label": "ダウンロードの上限（バイト）"
+      },
+      "showCompactionNotices": {
+        "label": "圧縮の通知",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      }
+    }
+  },
+  "custom": {
+    "scanTitle": "スマートフォンの QQ でスキャン",
+    "waiting": "スキャン待ち…",
+    "connected": "連携完了",
+    "stopped": "キャンセル済み",
+    "connecting": "QR コードを準備中…",
+    "qrAlt": "QQ 連携用 QR コード",
+    "scanAgainWarning": "再連携すると、この QQ ボットを利用する他のアプリの接続が切れる可能性があります。App Secret がリセットされた場合、古いシークレットは無効になり、他のアプリでも新しいシークレットへの更新が必要です。",
+    "configured": "設定済み",
+    "bind": "QQ ボットと連携",
+    "rebind": "ボットと再連携",
+    "refresh": "QR コードを更新",
+    "retry": "再試行",
+    "expired": "QR コードの有効期限切れ",
+    "failed": "連携失敗",
+    "cancelFailed": "キャンセルできませんでした",
+    "retrying": "再試行中…",
+    "manualSetup": "認証情報を手動で入力"
+  }
+}

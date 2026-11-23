@@ -1,0 +1,92 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan Telegram",
+    "officialLabel": "Buka BotFather",
+    "fields": {
+      "token": {
+        "label": "Token bot",
+        "placeholder": "123456:ABC..."
+      },
+      "useProxy": {
+        "label": "Gunakan proxy"
+      },
+      "allowFrom": {
+        "label": "Pengguna diizinkan",
+        "placeholder": "* atau ID pengguna Telegram"
+      },
+      "groupPolicy": {
+        "label": "Aturan grup",
+        "choices": {
+          "mention": "Hanya mention",
+          "open": "Semua pesan",
+          "allowlist": "Daftar izin"
+        }
+      },
+      "mode": {
+        "label": "Modus koneksi",
+        "choices": {
+          "polling": "Jajak pendapat yang panjang",
+          "webhook": "kait web"
+        }
+      },
+      "replyToMessage": {
+        "label": "Membalas pesan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "reactEmoji": {
+        "label": "Baca emoji"
+      },
+      "connectionPoolSize": {
+        "label": "Ukuran kumpulan koneksi"
+      },
+      "poolTimeout": {
+        "label": "Batas waktu kumpulan koneksi habis"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "Tombol pesan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "richMessages": {
+        "label": "Pesan yang kaya",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "streamEditInterval": {
+        "label": "Interval pembaruan (detik)"
+      },
+      "webhookUrl": {
+        "label": "URL kait web"
+      },
+      "webhookListenHost": {
+        "label": "Tuan rumah mendengarkan webhook"
+      },
+      "webhookListenPort": {
+        "label": "Port mendengarkan webhook"
+      },
+      "webhookPath": {
+        "label": "Jalur webhook"
+      },
+      "webhookSecretToken": {
+        "label": "Token rahasia webhook"
+      },
+      "webhookMaxConnections": {
+        "label": "Batas koneksi Webhook"
+      }
+    }
+  }
+}

@@ -31,7 +31,7 @@ def _cleanup_partial_archive(skill_filename: Path) -> None:
             skill_filename.unlink()
 
 
-def package_skill(skill_path, output_dir=None):
+def package_skill(skill_path: str | Path, output_dir: str | Path | None = None) -> Path | None:
     """
     Package a skill folder into a .skill file.
 
@@ -44,7 +44,6 @@ def package_skill(skill_path, output_dir=None):
     """
     skill_path = Path(skill_path).resolve()
 
-    # Validate skill folder exists
     if not skill_path.exists():
         print(f"[ERROR] Skill folder not found: {skill_path}")
         return None
@@ -53,13 +52,11 @@ def package_skill(skill_path, output_dir=None):
         print(f"[ERROR] Path is not a directory: {skill_path}")
         return None
 
-    # Validate SKILL.md exists
     skill_md = skill_path / "SKILL.md"
     if not skill_md.exists():
         print(f"[ERROR] SKILL.md not found in {skill_path}")
         return None
 
-    # Run validation before packaging
     print("Validating skill...")
     valid, message = validate_skill(skill_path)
     if not valid:
@@ -68,7 +65,6 @@ def package_skill(skill_path, output_dir=None):
         return None
     print(f"[OK] {message}\n")
 
-    # Determine output location
     skill_name = skill_path.name
     if output_dir:
         output_path = Path(output_dir).resolve()
@@ -80,7 +76,7 @@ def package_skill(skill_path, output_dir=None):
 
     excluded_dirs = {".git", ".svn", ".hg", "__pycache__", "node_modules"}
 
-    files_to_package = []
+    files_to_package: list[Path] = []
     resolved_archive = skill_filename.resolve()
 
     for file_path in skill_path.rglob("*"):
@@ -106,11 +102,9 @@ def package_skill(skill_path, output_dir=None):
                 continue
             files_to_package.append(file_path)
 
-    # Create the .skill file (zip format)
     try:
         with zipfile.ZipFile(skill_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
             for file_path in files_to_package:
-                # Calculate the relative path within the zip.
                 arcname = Path(skill_name) / file_path.relative_to(skill_path)
                 zipf.write(file_path, arcname)
                 print(f"  Added: {arcname}")
@@ -124,7 +118,7 @@ def package_skill(skill_path, output_dir=None):
         return None
 
 
-def main():
+def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: python package_skill.py <path/to/skill-folder> [output-directory]")
         print("\nExample:")

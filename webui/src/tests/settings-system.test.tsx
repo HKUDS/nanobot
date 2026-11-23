@@ -1,0 +1,860 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import { installedMcpPresetsFromPayload } from "@/lib/mcp-preset-events";
+import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
+import { ClientProvider } from "@/providers/ClientProvider";
+import type { McpPresetInfo } from "@/lib/types";
+import { __clearLogoFallbackCacheForTests } from "@/hooks/useLogoFallback";
+import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, selectToolType, showOnlyReadyTools, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
+
+
+const installedAnyGen = {
+  name: "anygen",
+  display_name: "AnyGen",
+  category: "generation",
+  description: "Generate docs, slides, websites and more via AnyGen cloud API",
+  requires: "ANYGEN_API_KEY",
+  source: "harness",
+  entry_point: "cli-anything-anygen",
+  install_supported: true,
+  installed: true,
+  available: true,
+  status: "installed",
+  logo_url: "https://www.google.com/s2/favicons?domain=anygen.io&sz=64",
+  brand_color: "#111827",
+  skill_installed: true,
+};
+
+const agentPlugin = {
+  name: "plugin-computer-use",
+  display_name: "Computer Use",
+  category: "Plugin",
+  description: "Control the desktop with a live preview.",
+  docs_url: "",
+  note: "",
+  requires: "screen-recording, accessibility",
+  transport: "stdio",
+  install_supported: false,
+  installed: true,
+  configured: true,
+  enabled: false,
+  available: false,
+  status: "disabled",
+  required_fields: [],
+  connection_summary: "",
+  source: "agent-plugin",
+} satisfies McpPresetInfo;
+
+function selectAutomationFilter(name: string) {
+  fireEvent.pointerDown(screen.getByRole("button", { name: /^Filter/ }), { button: 0, ctrlKey: false });
+  fireEvent.click(screen.getByRole("menuitemradio", { name }));
+}
+
+describe("Settings system domains", () => {
+  installSettingsViewTestHooks();
+
+  it("asks before leaving with pending changes and lets the user restart later", () => {
+    const leave = vi.fn();
+    renderSettingsView({ initialSection: "runtime", initialSettings: {
+      ...settingsPayload(), requires_restart: true, restart_required_sections: ["runtime"],
+    }, onBackToChat: leave });
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    const dialog = screen.getByRole("dialog", { name: "Restart before leaving?" });
+    expect(leave).not.toHaveBeenCalled();
+    expect(within(dialog).getByText("Your changes are saved. Restart to apply them.")).toBeVisible();
+    expect(within(dialog).getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "Restart later", "Restart",
+    ]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restart later" }));
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("restarts from the exit prompt", () => {
+    const restart = vi.fn();
+    renderSettingsView({ initialSection: "runtime", initialSettings: {
+      ...settingsPayload(), requires_restart: true,
+    }, onRestart: restart });
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Restart" }));
+    expect(restart).toHaveBeenCalledTimes(1);
+  });
+
+  it("announces transient desktop utility failures once per action and keeps the exported path", async () => {
+    const openLogs = vi.fn().mockRejectedValue(new Error("Host could not open the folder"));
+    const exportDiagnostics = vi.fn().mockRejectedValueOnce(new Error("Host could not export"))
+      .mockResolvedValueOnce("/diagnostics/report.zip");
+    vi.stubGlobal("nanobotHost", { openLogs, exportDiagnostics });
+    renderSettingsView({ initialSection: "runtime", initialSettings: {
+      ...settingsPayload(), surface: "native",
+      runtime_capabilities: { can_restart_engine: false, can_open_logs: true, can_export_diagnostics: true },
+    } });
+
+    const open = screen.getByRole("button", { name: "Open" });
+    for (const attempts of [1, 2]) {
+      fireEvent.click(open);
+      await waitFor(() => expect(open).toBeEnabled());
+      expect(openLogs).toHaveBeenCalledTimes(attempts);
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not open logs folder.");
+      expect(screen.getAllByText("Could not open logs folder.")).toHaveLength(1);
+    }
+
+    const exportButton = screen.getByRole("button", { name: "Export" });
+    fireEvent.click(exportButton);
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toContain("Could not export diagnostics.");
+    expect(screen.getAllByText("Could not export diagnostics.")).toHaveLength(1);
+    fireEvent.click(exportButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Diagnostics" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Diagnostics exported to /diagnostics/report.zip.");
+  });
+
+  it("leaves directly when no restart is pending", () => {
+    const leave = vi.fn();
+    renderSettingsView({ initialSection: "runtime", initialSettings: settingsPayload(), onBackToChat: leave });
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    expect(leave).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps one restart action and pending notice in the sidebar across settings pages", async () => {
+    renderSettingsView({
+      initialSection: "runtime",
+      initialSettings: {
+        ...settingsPayload(),
+        requires_restart: true,
+        restart_required_sections: ["runtime", "image"],
+      },
+    });
+    const sidebar = screen.getByRole("complementary");
+    const restart = within(sidebar).getByRole("button", { name: "Restart" });
+    for (const section of ["Capabilities", "Models", "Advanced", "System"]) {
+      fireEvent.click(within(sidebar).getByRole("button", { name: section }));
+      await waitFor(() => {
+        expect(screen.getAllByRole("button", { name: "Restart" })).toEqual([restart]);
+        expect(screen.getAllByText("Saved. Restart to apply changes.")).toHaveLength(1);
+        expect(within(sidebar).getByText("Saved. Restart to apply changes.")).toBeVisible();
+      });
+    }
+  });
+
+  it("keeps enabled Agent Plugins out of MCP composer attachments", () => {
+    const enabled = { ...agentPlugin, enabled: true, available: true, status: "enabled" };
+    expect(installedMcpPresetsFromPayload({ presets: [enabled], installed_count: 1 })).toEqual([]);
+  });
+
+  it("enables and disables an installed Agent Plugin explicitly", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [agentPlugin], installed_count: 0 });
+      }
+      return jsonResponse({});
+    }));
+    requestMutationMock.mockImplementation(async (action: string) => {
+      const enabled = action.endsWith(".enable");
+      return {
+        presets: [{
+          ...agentPlugin,
+          enabled,
+          available: enabled,
+          status: enabled ? "enabled" : "disabled",
+        }],
+        installed_count: Number(enabled),
+      };
+    });
+
+    renderSettingsView();
+
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
+    expect(await screen.findByText("Computer Use")).toBeInTheDocument();
+    expect(screen.getByText(/Control the desktop/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Computer Use" }));
+    const dialog = screen.getByRole("dialog", { name: "Computer Use" });
+    expect(within(dialog).getByText("Declared permissions")).toBeVisible();
+    expect(within(dialog).getByText("screen-recording, accessibility")).toBeVisible();
+    expect(within(dialog).queryByRole("tab", { name: "Tools" })).not.toBeInTheDocument();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable" }));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.enable", { name: "plugin-computer-use" }, 20_000,
+    ));
+    const enabledButton = await screen.findByRole("button", { name: "Computer Use: Enabled" });
+    await waitFor(() => expect(enabledButton).toBeEnabled());
+    fireEvent.pointerDown(enabledButton, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Disable" }));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.disable", { name: "plugin-computer-use" }, 20_000,
+    ));
+    expect(await screen.findByRole("button", { name: "Enable" })).toBeInTheDocument();
+  });
+
+
+  it("groups a CLI-managed plugin under its app while keeping other plugins independent", async () => {
+    const managed = { ...agentPlugin, name: "plugin-cli-app-anygen", display_name: "Managed plugin", managed_by_cli: "anygen" };
+    const separate = { ...agentPlugin, name: "plugin-cli-app-other", display_name: "Separate plugin", managed_by_cli: null };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [installedAnyGen], installed_count: 1 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [managed, separate], installed_count: 1 });
+      return jsonResponse(settingsPayload());
+    }));
+    requestMutationMock.mockResolvedValue({
+      presets: [{ ...managed, enabled: true, status: "enabled" }, separate], installed_count: 2,
+    });
+    renderSettingsView({ initialSection: "apps" });
+
+    expect(await screen.findByRole("heading", { name: "AnyGen" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Managed plugin" })).not.toBeInTheDocument();
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
+    expect(screen.getByRole("heading", { name: "Separate plugin" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Managed plugin" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Search tools"), { target: { value: "separate" } });
+    expect(screen.getByRole("heading", { name: "Separate plugin" })).toBeVisible();
+    await selectToolType("CLI Apps");
+    expect(screen.queryByRole("heading", { name: "AnyGen" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Search tools"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Agent Plugin disabled" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Managed plugin" })).getByRole("button", { name: "Enable" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.enable", { name: "plugin-cli-app-anygen" }, 20_000,
+    ));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Agent Plugin disabled" })).not.toBeInTheDocument());
+  });
+
+  it("keeps a managed plugin accessible when its owning app is missing from the loaded catalog", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 1 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({
+        presets: [{ ...agentPlugin, managed_by_cli: "missing-app" }], installed_count: 0,
+      });
+      return jsonResponse(settingsPayload());
+    }));
+    renderSettingsView({ initialSection: "apps" });
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
+    expect(await screen.findByRole("heading", { name: "Computer Use" })).toBeVisible();
+  });
+
+  it.each(["apps", "skills", "automations", "channels"] as const)(
+    "uses the conversation-width content frame for the standalone %s page",
+    (initialSection) => {
+      renderSettingsView({ initialSection, initialSettings: settingsPayload(), showSidebar: false });
+
+      expect(screen.getByTestId("settings-section-transition")).toHaveClass("settings-feature-page");
+    },
+  );
+
+  it.each([
+    ["skills", "Loading skills…"],
+    ["apps", "Loading apps…"],
+    ["channels", "Loading channels…"],
+    ["automations", "Loading automations..."],
+  ] as const)("keeps the %s loading surface mounted when the settings snapshot arrives", async (initialSection, label) => {
+    let resolveSettings!: (value: Response) => void;
+    const pendingSettings = new Promise<Response>((resolve) => { resolveSettings = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/settings"
+      ? pendingSettings : new Promise<Response>(() => {})));
+    renderSettingsView({ initialSection, initialSettings: null, skillsLoading: true, showSidebar: false });
+    const skeleton = screen.getByRole("status", { name: label });
+    expect(skeleton).toHaveAttribute("aria-busy", "true");
+    await act(async () => { resolveSettings(jsonResponse(settingsPayload())); });
+    expect(screen.getByRole("status", { name: label })).toBe(skeleton);
+  });
+
+  it("shows available skills while the unrelated settings snapshot is still pending", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    renderSettingsView({ initialSection: "skills", initialSettings: null, showSidebar: false, skills: [{
+      name: "project-review", description: "Review a project.", source: "builtin", available: true, enabled: true,
+    }] });
+    expect(screen.getByRole("button", { name: "Open details for project-review" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Search installed skills" })).toBeVisible();
+  });
+
+  it("keeps the regular settings page at its existing width", () => {
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+
+    expect(screen.getByTestId("settings-section-transition")).toHaveClass("settings-grid");
+    expect(screen.getByTestId("settings-section-transition")).not.toHaveClass("settings-feature-page");
+  });
+
+  it.each(["apps", "skills", "automations", "channels"] as const)(
+    "keeps the standalone %s semantic heading and follows the main navigation state",
+    (initialSection) => {
+      renderSettingsView({ initialSection, initialSettings: settingsPayload(), showSidebar: false, mainNavigationExpanded: true });
+      const page = screen.getByTestId("settings-section-transition");
+      expect(page).toHaveAttribute("data-main-navigation-expanded", "true");
+      const heading = within(page).getByRole("heading", { level: 1 });
+      expect(heading.parentElement).toHaveClass("settings-feature-header");
+      expect(heading).not.toHaveAttribute("aria-hidden");
+    },
+  );
+
+  it("does not hide a standalone heading when the navigation is collapsed or absent", () => {
+    renderSettingsView({ initialSection: "skills", initialSettings: settingsPayload(), showSidebar: false, mainNavigationExpanded: false });
+    expect(screen.getByTestId("settings-section-transition")).toHaveAttribute("data-main-navigation-expanded", "false");
+    expect(screen.getByRole("heading", { name: "Apps", level: 1 })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("uses the inline section heading layout to align Apps titles and counts", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [installedAnyGen], installed_count: 1 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      return jsonResponse({});
+    }));
+    renderSettingsView({ initialSection: "apps", initialSettings: settingsPayload() });
+    await screen.findByText("AnyGen");
+    const title = screen.getByRole("heading", { name: "Tools" });
+    expect(title.parentElement).toHaveClass("settings-section-heading");
+    expect(title.nextElementSibling).toHaveTextContent("1");
+    expect(title.nextElementSibling).toHaveClass("tabular-nums");
+    for (const className of ["rounded-full", "bg-muted"]) {
+      expect(title.nextElementSibling).not.toHaveClass(className);
+    }
+
+    await selectToolType("MCP");
+    const mcpTitle = screen.getByRole("heading", { name: "MCP tools" });
+    expect(mcpTitle.parentElement).toHaveClass("settings-section-heading");
+    expect(mcpTitle.nextElementSibling).toHaveTextContent("0");
+    expect(screen.getByRole("switch", { name: "Ready only" })).toBeChecked();
+    expect(screen.getByText("No MCP tools available")).toBeVisible();
+    expect(screen.getByText("Add a custom MCP server below")).toBeVisible();
+  });
+
+  it.each(["cli", "mcp"] as const)(
+    "fills the rounded %s app icon without an inset tile and preserves its fallback",
+    async (kind) => {
+      __clearLogoFallbackCacheForTests();
+      const name = kind === "cli" ? "AnyGen" : "Linear";
+      const logoUrl = `/test-${kind}-logo.svg`;
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [{ ...installedAnyGen, logo_url: logoUrl }], installed_count: 1 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [{
+            ...agentPlugin,
+            name: "linear",
+            display_name: "Linear",
+            source: "builtin",
+            enabled: true,
+            logo_url: logoUrl,
+          }], installed_count: 1 });
+        }
+        return jsonResponse({});
+      }));
+      renderSettingsView({ initialSection: "apps", initialSettings: settingsPayload() });
+      await screen.findByText("AnyGen");
+      if (kind === "mcp") await selectToolType("MCP");
+      const row = (await screen.findByText(name)).closest("article")!;
+      const image = row.querySelector("img")!;
+      expect(image).toHaveAttribute("src", logoUrl);
+      expect(image).toHaveClass("h-full", "w-full", "object-contain");
+      fireEvent.load(image);
+      expect(image.parentElement).toHaveClass("h-9", "w-9", "overflow-hidden", "rounded-[10px]");
+      for (const tileClass of ["border", "bg-background", "bg-muted"]) {
+        expect(image.parentElement).not.toHaveClass(tileClass);
+      }
+
+      fireEvent.error(image);
+      expect(row.querySelector("img")).toBeNull();
+      const fallback = within(row).getByText(name[0], { exact: true });
+      expect(fallback).toBeVisible();
+      expect(fallback.closest(".h-9")).toHaveClass("w-9", "rounded-[10px]");
+    },
+  );
+
+  it("loads only the skill detail body and preserves it while checking dependencies again", async () => {
+    const skill = { name: "pr-review", description: "Review pull requests", source: "builtin", available: false, enabled: true };
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; })));
+    render(<ClientProvider client={{} as never} token="tok"><SkillsCatalogSettings skills={[skill]} /></ClientProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Open details for pr-review" }));
+    const detail = screen.getByRole("dialog");
+    expect(within(detail).getByText("Review pull requests")).toBeVisible();
+    expect(within(detail).getByRole("status", { name: "Loading skill details..." })).toHaveAttribute("aria-busy", "true");
+    await act(async () => finish(jsonResponse({ ...skill, raw_markdown: "Review repository changes.", requirements: {
+      bins: ["gh"], env: [], missing_bins: ["gh"], missing_env: [],
+    } })));
+    const toggle = within(detail).getByRole("switch");
+    expect(within(detail).getByText("Skill instructions")).toBeVisible();
+    let fail!: (error: Error) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    fireEvent.click(within(detail).getByRole("button", { name: "Check again" }));
+    expect(within(detail).getByText("Skill instructions")).toBeVisible();
+    expect(toggle).toBeDisabled();
+    expect(within(detail).queryByRole("status", { name: "Loading skill details..." })).not.toBeInTheDocument();
+    await act(async () => fail(new Error("Read failed")));
+    expect(within(detail).getByRole("alert")).toHaveTextContent("Could not load skill details.");
+    expect(within(detail).getByText("Skill instructions")).toBeVisible();
+    expect(toggle).toBeEnabled();
+  });
+
+  it("keeps skill group labels natural without changing grouping or filtering", () => {
+    render(<ClientProvider client={{} as never} token="tok">
+      <SkillsCatalogSettings skills={[
+        { name: "pr-review", description: "Review pull requests", source: "workspace", available: true },
+        { name: "cron", description: "Schedule reminders", source: "builtin", available: true },
+        { name: "team-guide", description: "Team conventions", source: "team", available: true },
+      ]} />
+    </ClientProvider>);
+    for (const name of ["Custom", "Built-in", "Other"]) {
+      const title = screen.getByRole("heading", { name });
+      expect(title).toHaveClass("text-[13px]", "font-medium", "leading-5");
+      for (const className of ["uppercase", "tracking-[0.08em]"]) {
+        expect(title).not.toHaveClass(className);
+      }
+      expect(title.nextElementSibling).toHaveTextContent("1");
+      expect(title.nextElementSibling).toHaveClass("leading-5");
+    }
+    fireEvent.change(screen.getByRole("textbox", { name: "Search installed skills" }), { target: { value: "cron" } });
+    expect(screen.queryByRole("heading", { name: "Custom" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Other" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Built-in" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open details for cron" })).toBeVisible();
+  });
+
+  it("creates an automation from the standalone empty state", async () => {
+    const onBackToChat = vi.fn();
+    const onStartAutomationChat = vi.fn().mockResolvedValue(true);
+    const settings = settingsPayload();
+    settings.providers = [{
+      name: "openai",
+      label: "OpenAI",
+      configured: true,
+    }];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settings);
+      if (url === "/api/webui/automations") return jsonResponse({ jobs: [] });
+      return jsonResponse({});
+    }));
+
+    renderSettingsView({
+      initialSection: "automations",
+      initialSettings: settings,
+      showSidebar: false,
+      onBackToChat,
+      onStartAutomationChat,
+    });
+
+    expect(screen.getByRole("heading", { name: "Automations" })).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelectorAll(".automation-calendar-day").length).toBeGreaterThanOrEqual(35));
+    expect(screen.queryByText("No automations yet.")).not.toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "Describe an automation" });
+    expect(input).toHaveAttribute(
+      "placeholder",
+      "What should nanobot automate?",
+    );
+    fireEvent.change(input, { target: { value: "Summarize updates every weekday at 9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onStartAutomationChat).toHaveBeenCalledWith(
+      "Summarize updates every weekday at 9",
+      undefined,
+      { intent: "create_automation" },
+      "primary",
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    expect(onBackToChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a way out of an empty automations filter", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/webui/automations") {
+        return jsonResponse({
+          jobs: [{
+            id: "job-1",
+            name: "Daily summary",
+            enabled: true,
+            schedule: { kind: "cron", expr: "0 9 * * *" },
+            payload: { message: "Summarize the day" },
+            state: { next_run_at_ms: Date.now() + 60_000 },
+          }],
+        });
+      }
+      return jsonResponse({});
+    }));
+
+    renderSettingsView({
+      initialSection: "automations",
+      initialSettings: settingsPayload(),
+      showSidebar: false,
+    });
+
+    expect(await screen.findByRole("button", { name: /Daily summary/ })).toBeInTheDocument();
+    selectAutomationFilter("Disabled 0");
+    expect(screen.queryByRole("button", { name: /Daily summary/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Today" })).toBeVisible();
+    selectAutomationFilter("All 1");
+    expect(await screen.findByRole("button", { name: /Daily summary/ })).toBeInTheDocument();
+  });
+
+  it("reveals status filters on demand and keeps every option selectable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/settings") return jsonResponse(settingsPayload());
+      if (String(input) === "/api/webui/automations") {
+        return jsonResponse({ jobs: [
+          {
+            id: "heartbeat", name: "heartbeat", enabled: true, protected: true,
+            schedule: { kind: "every", every_ms: 1_800_000 },
+            payload: { message: "System-managed automation" }, state: { next_run_at_ms: Date.now() + 60_000 },
+          },
+          {
+            id: "paused-job", name: "Paused reminder", enabled: false,
+            schedule: { kind: "every", every_ms: 86_400_000 },
+            payload: { message: "Check the repo" },
+            state: { last_run_at_ms: Date.now() - 60_000, last_status: "ok" },
+          },
+        ] });
+      }
+      return jsonResponse({});
+    }));
+    renderSettingsView({ initialSection: "automations", initialSettings: settingsPayload(), showSidebar: false });
+
+    const trigger = await screen.findByRole("button", { name: "Filter" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    const menu = screen.getByRole("menu", { name: "Filter" });
+    expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(4);
+    expect(within(menu).getByRole("menuitemradio", { name: "All 1" })).toHaveAttribute("aria-checked", "true");
+    expect(within(menu).queryByRole("menuitemradio", { name: /System/ })).not.toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Disabled 1" }));
+    expect(screen.getByRole("button", { name: "Filter: Disabled" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Paused reminder/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /heartbeat/ })).not.toBeInTheDocument();
+
+  });
+
+  it("coalesces focus refreshes while automations are already loading", async () => {
+    let resolveAutomations!: (response: Response) => void;
+    const pendingAutomations = new Promise<Response>((resolve) => {
+      resolveAutomations = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/webui/automations") return pendingAutomations;
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({
+      initialSection: "automations",
+      initialSettings: settingsPayload(),
+      showSidebar: false,
+    });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => (
+        String(input) === "/api/webui/automations"
+      ))).toHaveLength(1);
+    });
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("focus"));
+
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      String(input) === "/api/webui/automations"
+    ))).toHaveLength(1);
+    await act(async () => {
+      resolveAutomations(jsonResponse({ jobs: [] }));
+      await pendingAutomations;
+    });
+  });
+
+  it("refreshes plugin ownership after installing a CLI app without replacing its mutation result", async () => {
+    let installed = false;
+    const managed = { ...agentPlugin, name: "plugin-cli-app-anygen", display_name: "Managed plugin", enabled: true, managed_by_cli: "anygen" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings/cli-apps") return jsonResponse({
+        apps: [{ ...installedAnyGen, installed: false }], installed_count: 0,
+      });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({
+        presets: installed ? [managed] : [], installed_count: Number(installed),
+      });
+      return jsonResponse(settingsPayload());
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async () => {
+      installed = true;
+      return { apps: [installedAnyGen], installed_count: 1 };
+    });
+    renderSettingsView({ initialSection: "apps" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Install app" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/settings/mcp-presets")).toHaveLength(2));
+    const appAction = await screen.findByRole("button", { name: "App ready" });
+    fireEvent.pointerDown(appAction, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Agent Plugin" }));
+    expect(screen.getByRole("dialog", { name: "Managed plugin" })).toBeVisible();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/settings/cli-apps")).toHaveLength(1);
+  });
+
+  it("announces when copying an installed app's example prompt fails", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("Clipboard blocked"));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [{ ...installedAnyGen, installed: false }], installed_count: 0 });
+        }
+        if (String(input) === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        return jsonResponse(settingsPayload());
+      }));
+      requestMutationMock.mockResolvedValue({ apps: [installedAnyGen], installed_count: 1 });
+      renderSettingsView({ initialSection: "apps" });
+      fireEvent.click(await screen.findByRole("button", { name: "Install app" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Try @anygen" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Could not copy. Please try again.");
+      expect(writeText).toHaveBeenCalledWith("Ask nanobot to use @anygen for this task.");
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
+  it("shows a visible uninstall button for installed CLI apps and calls uninstall", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") {
+        return jsonResponse(settingsPayload());
+      }
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({
+          apps: [installedAnyGen],
+          installed_count: 1,
+          catalog_updated_at: "2026-04-18",
+        });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce({
+      apps: [{ ...installedAnyGen, installed: false, status: "available" }],
+      installed_count: 0,
+      catalog_updated_at: "2026-04-18",
+      last_action: {
+        ok: true,
+        message: "Uninstalled CLI for AnyGen.",
+        still_available: false,
+      },
+    });
+
+    const client = { requestMutation: requestMutationMock, status: "open", onStatus: () => () => {} } as never;
+    renderSettingsView({ client });
+
+    expect(await screen.findByText("AnyGen")).toBeInTheDocument();
+    const uninstall = screen.getByRole("button", { name: "Uninstall app" });
+
+    fireEvent.click(uninstall);
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.cli_app.uninstall",
+        { name: "anygen" },
+        20_000,
+      ),
+    );
+    expect(await screen.findByText("Uninstalled CLI for AnyGen.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    cleanup();
+    fetchMock.mockClear();
+    renderSettingsView({ client, initialSettings: settingsPayload() });
+    expect(screen.getByText("AnyGen")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Uninstall app" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("cli-apps"))).toHaveLength(0);
+  });
+
+  it("keeps runtime dependencies out of Apps and explains chat mentions", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({
+          apps: [{ ...installedAnyGen, installed: false, status: "available" }],
+          installed_count: 0,
+        });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [
+            {
+              name: "api",
+              display_name: "Api",
+              type: "feature",
+              enabled: true,
+              installed: true,
+              ready: true,
+              status: "enabled",
+              install_supported: true,
+              requires_restart: true,
+            },
+          ],
+          enabled_count: 1,
+        });
+      }
+      return jsonResponse({});
+    }));
+
+    renderSettingsView({ initialSection: "apps" });
+
+    expect(await screen.findByText("AnyGen")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Ready only" })).not.toBeChecked();
+    const filters = within(screen.getByRole("radiogroup", { name: "Tool type" }));
+    expect(filters.getByRole("radio", { name: "All" })).toBeChecked();
+    for (const name of ["CLI Apps", "Agent Plugins", "MCP"]) {
+      expect(filters.getByRole("radio", { name })).toBeInTheDocument();
+    }
+  });
+
+  it("installs optional channel support before enabling and disabling it", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "matrix",
+            display_name: "Matrix",
+            webui: "webui/index.ts",
+            type: "channel",
+            enabled: false,
+            configured: true,
+            installed: false,
+            ready: false,
+            status: "missing_dependency",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 0,
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async (action: string, values: Record<string, unknown>) => {
+      if (action === "settings.feature.enable") {
+        const enabled = values.install_only !== true;
+        return {
+          features: [{
+            name: "matrix",
+            display_name: "Matrix",
+            webui: "webui/index.ts",
+            type: "channel",
+            enabled,
+            running: enabled,
+            runtime_status: enabled ? "running" : "stopped",
+            configured: true,
+            installed: true,
+            ready: true,
+            status: enabled ? "enabled" : "not_enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: enabled ? 1 : 0,
+          last_action: {
+            ok: true,
+            message: enabled ? "Enabled channel 'matrix'" : "Installed support for channel 'matrix'",
+            enabled,
+          },
+        };
+      }
+      if (action === "settings.feature.disable") {
+        return {
+          features: [{
+            name: "matrix",
+            display_name: "Matrix",
+            webui: "webui/index.ts",
+            type: "channel",
+            enabled: false,
+            installed: true,
+            ready: false,
+            status: "not_enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 0,
+          requires_restart: true,
+          last_action: { ok: true, message: "Disabled channel 'matrix'", enabled: false },
+        };
+      }
+      return settingsPayload();
+    });
+
+    renderSettingsView({ initialSection: "channels" });
+
+    const matrixRow = await screen.findByRole("button", { name: "View Matrix settings" });
+    fireEvent.click(matrixRow);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Matrix channel" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install Matrix" })).toHaveFocus();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Install Matrix" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.feature.enable",
+        { name: "matrix", install_only: true },
+        150_000,
+      ),
+    );
+    const matrixToggle = await screen.findByRole("switch", { name: "Matrix channel" });
+    expect(matrixToggle).toHaveAttribute("aria-checked", "false");
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(matrixToggle);
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.feature.enable",
+        { name: "matrix" },
+        150_000,
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "Matrix channel" })).toHaveAttribute("aria-checked", "true"),
+    );
+    expect(screen.getAllByText("On").length).toBeGreaterThan(0);
+
+    const installedRow = screen.getByRole("button", { name: "View Matrix settings" });
+    expect(installedRow).toHaveAttribute("aria-haspopup", "dialog");
+    fireEvent.click(installedRow);
+    expect(screen.getByLabelText("Homeserver")).toBeInTheDocument();
+    expect(screen.getByLabelText("User ID")).toBeInTheDocument();
+    expect(screen.getByLabelText("Device ID")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.feature.disable",
+        { name: "matrix" },
+        20_000,
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "Matrix channel" })).toHaveAttribute("aria-checked", "false"),
+    );
+  });
+});

@@ -1,0 +1,1061 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import httpx
+import pytest
+
+try:
+    import slack_sdk  # noqa: F401
+except ImportError:
+    pytest.skip("Slack dependencies not installed (slack-sdk)", allow_module_level=True)
+
+from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.manager import ChannelManager
+from nanobot.channels.slack.runtime import SLACK_MAX_MESSAGE_LEN, SlackChannel, SlackConfig
+from nanobot.config.network import NetworkConfig
+
+
+class _FakeAsyncWebClient:
+    def __init__(self) -> None:
+        self.chat_post_calls: list[dict[str, object | None]] = []
+        self.file_upload_calls: list[dict[str, object | None]] = []
+        self.reactions_add_calls: list[dict[str, object | None]] = []
+        self.reactions_remove_calls: list[dict[str, object | None]] = []
+        self.conversations_list_calls: list[dict[str, object | None]] = []
+        self.conversations_replies_calls: list[dict[str, object | None]] = []
+        self.users_list_calls: list[dict[str, object | None]] = []
+        self.conversations_open_calls: list[dict[str, object | None]] = []
+        self._conversations_pages: list[dict[str, object]] = []
+        self._conversations_replies_response: dict[str, object] = {"messages": []}
+        self._users_pages: list[dict[str, object]] = []
+        self._open_dm_response: dict[str, object] = {"channel": {"id": "D_OPENED"}}
+
+    async def chat_postMessage(  # noqa: N802 - mirrors Slack SDK method name
+        self,
+        *,
+        channel: str,
+        text: str,
+        thread_ts: str | None = None,
+        blocks: list[dict[str, object]] | None = None,
+    ) -> None:
+        call: dict[str, object | None] = {
+            "channel": channel,
+            "text": text,
+            "thread_ts": thread_ts,
+        }
+        if blocks is not None:
+            call["blocks"] = blocks
+        self.chat_post_calls.append(call)
+
+    async def files_upload_v2(
+        self,
+        *,
+        channel: str,
+        file: str,
+        thread_ts: str | None = None,
+    ) -> None:
+        self.file_upload_calls.append(
+            {
+                "channel": channel,
+                "file": file,
+                "thread_ts": thread_ts,
+            }
+        )
+
+    async def reactions_add(
+        self,
+        *,
+        channel: str,
+        name: str,
+        timestamp: str,
+    ) -> None:
+        self.reactions_add_calls.append(
+            {
+                "channel": channel,
+                "name": name,
+                "timestamp": timestamp,
+            }
+        )
+
+    async def reactions_remove(
+        self,
+        *,
+        channel: str,
+        name: str,
+        timestamp: str,
+    ) -> None:
+        self.reactions_remove_calls.append(
+            {
+                "channel": channel,
+                "name": name,
+                "timestamp": timestamp,
+            }
+        )
+
+    async def conversations_list(self, **kwargs):
+        self.conversations_list_calls.append(kwargs)
+        if self._conversations_pages:
+            return self._conversations_pages.pop(0)
+        return {"channels": [], "response_metadata": {"next_cursor": ""}}
+
+    async def conversations_replies(self, **kwargs):
+        self.conversations_replies_calls.append(kwargs)
+        return self._conversations_replies_response
+
+    async def users_list(self, **kwargs):
+        self.users_list_calls.append(kwargs)
+        if self._users_pages:
+            return self._users_pages.pop(0)
+        return {"members": [], "response_metadata": {"next_cursor": ""}}
+
+    async def conversations_open(self, **kwargs):
+        self.conversations_open_calls.append(kwargs)
+        return self._open_dm_response
+
+
+@pytest.mark.asyncio
+async def test_send_uses_thread_for_channel_messages() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="C123",
+            content="hello",
+            media=["/tmp/demo.txt"],
+            metadata={"slack": {"thread_ts": "1700000000.000100", "channel_type": "channel"}},
+        )
+    )
+
+    assert len(fake_web.chat_post_calls) == 1
+    assert fake_web.chat_post_calls[0]["text"] == "hello"
+    assert fake_web.chat_post_calls[0]["thread_ts"] == "1700000000.000100"
+    assert len(fake_web.file_upload_calls) == 1
+    assert fake_web.file_upload_calls[0]["thread_ts"] == "1700000000.000100"
+
+
+@pytest.mark.asyncio
+async def test_structured_tool_start_sends_text_in_thread() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+    channel.tool_hint_max_length = 20
+    msg = outbound_message_for_event(
+        channel="slack",
+        chat_id="C123",
+        event=ProgressEvent(tool_hint=True, tool_events=[{
+            "phase": "start", "call_id": "call-1", "name": "web_search",
+            "arguments": {"query": "abcdefghijklmnopqrstuvwxyz"},
+        }]),
+        metadata={"slack": {"thread_ts": "1700000000.000100", "channel_type": "channel"}},
+    )
+
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
+
+    assert fake_web.chat_post_calls == [{
+        "channel": "C123",
+        "text": 'search "abcdefghijklmnopqrs…"',
+        "thread_ts": "1700000000.000100",
+    }]
+    assert msg.content == ""
+    assert msg.event.content == ""
+
+
+@pytest.mark.asyncio
+async def test_send_omits_thread_for_dm_root_messages() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="D123",
+            content="hello",
+            media=["/tmp/demo.txt"],
+            metadata={"slack": {"thread_ts": None, "channel_type": "im"}},
+        )
+    )
+
+    assert len(fake_web.chat_post_calls) == 1
+    assert fake_web.chat_post_calls[0]["text"] == "hello"
+    assert fake_web.chat_post_calls[0]["thread_ts"] is None
+    assert len(fake_web.file_upload_calls) == 1
+    assert fake_web.file_upload_calls[0]["thread_ts"] is None
+
+
+@pytest.mark.asyncio
+async def test_send_keeps_thread_for_dm_thread_messages() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="D123",
+            content="hello",
+            media=["/tmp/demo.txt"],
+            metadata={
+                "slack": {
+                    "thread_ts": "1700000000.000100",
+                    "channel_type": "im",
+                    "event": {"channel": "D123"},
+                }
+            },
+        )
+    )
+
+    assert len(fake_web.chat_post_calls) == 1
+    assert fake_web.chat_post_calls[0]["thread_ts"] == "1700000000.000100"
+    assert len(fake_web.file_upload_calls) == 1
+    assert fake_web.file_upload_calls[0]["thread_ts"] == "1700000000.000100"
+
+
+@pytest.mark.asyncio
+async def test_send_splits_long_messages() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="C123",
+            content="x" * (SLACK_MAX_MESSAGE_LEN + 10),
+        )
+    )
+
+    assert len(fake_web.chat_post_calls) == 2
+    assert all(len(str(call["text"])) <= SLACK_MAX_MESSAGE_LEN for call in fake_web.chat_post_calls)
+
+
+@pytest.mark.asyncio
+async def test_send_renders_buttons_on_last_message_chunk() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="C123",
+            content="Choose one",
+            buttons=[["Yes", "No"]],
+        )
+    )
+
+    assert len(fake_web.chat_post_calls) == 1
+    blocks = fake_web.chat_post_calls[0]["blocks"]
+    assert isinstance(blocks, list)
+    assert blocks[-1] == {
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "Yes"},
+                "value": "Yes",
+                "action_id": "btn_Yes",
+            },
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "No"},
+                "value": "No",
+                "action_id": "btn_No",
+            },
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_with_buttons_keeps_text_beyond_section_limit() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+    lines = [f"line {i:04d} " + "x" * 40 for i in range(200)]
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="C123",
+            content="\n".join(lines),
+            buttons=[["Yes", "No"]],
+        )
+    )
+
+    assert len(fake_web.chat_post_calls) == 1
+    blocks = fake_web.chat_post_calls[0]["blocks"]
+    assert isinstance(blocks, list)
+    sections = [block for block in blocks if block["type"] == "section"]
+    assert len(sections) > 1
+    assert all(len(section["text"]["text"]) <= 3000 for section in sections)
+    rendered = "\n".join(section["text"]["text"] for section in sections)
+    assert rendered == "\n".join(lines)
+    assert blocks[-1]["type"] == "actions"
+
+
+@pytest.mark.asyncio
+async def test_send_updates_reaction_when_final_response_sent() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True, react_emoji="eyes"), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="C123",
+            content="done",
+            metadata={
+                "slack": {"event": {"ts": "1700000000.000100"}, "channel_type": "channel"},
+            },
+        )
+    )
+
+    assert fake_web.reactions_remove_calls == [
+        {"channel": "C123", "name": "eyes", "timestamp": "1700000000.000100"}
+    ]
+    assert fake_web.reactions_add_calls == [
+        {"channel": "C123", "name": "white_check_mark", "timestamp": "1700000000.000100"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_resolves_channel_name_to_channel_id() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    fake_web._conversations_pages = [
+        {
+            "channels": [{"id": "C999", "name": "channel_x"}],
+            "response_metadata": {"next_cursor": ""},
+        }
+    ]
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="#channel_x",
+            content="hello",
+        )
+    )
+
+    assert fake_web.chat_post_calls == [
+        {"channel": "C999", "text": "hello", "thread_ts": None}
+    ]
+    assert len(fake_web.conversations_list_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_send_resolves_user_handle_to_dm_channel() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    fake_web._users_pages = [
+        {
+            "members": [
+                {
+                    "id": "U234",
+                    "name": "alice",
+                    "profile": {"display_name": "Alice"},
+                }
+            ],
+            "response_metadata": {"next_cursor": ""},
+        }
+    ]
+    fake_web._open_dm_response = {"channel": {"id": "D234"}}
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="@alice",
+            content="hello",
+        )
+    )
+
+    assert fake_web.conversations_open_calls == [{"users": "U234"}]
+    assert fake_web.chat_post_calls == [
+        {"channel": "D234", "text": "hello", "thread_ts": None}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_updates_reaction_on_origin_channel_for_cross_channel_send() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True, react_emoji="eyes"), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    fake_web._conversations_pages = [
+        {
+            "channels": [{"id": "C999", "name": "channel_x"}],
+            "response_metadata": {"next_cursor": ""},
+        }
+    ]
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="channel_x",
+            content="done",
+            metadata={
+                "slack": {
+                    "event": {"ts": "1700000000.000100", "channel": "D_ORIGIN"},
+                    "channel_type": "im",
+                },
+            },
+        )
+    )
+
+    assert fake_web.chat_post_calls == [
+        {"channel": "C999", "text": "done", "thread_ts": None}
+    ]
+    assert fake_web.reactions_remove_calls == [
+        {"channel": "D_ORIGIN", "name": "eyes", "timestamp": "1700000000.000100"}
+    ]
+    assert fake_web.reactions_add_calls == [
+        {"channel": "D_ORIGIN", "name": "white_check_mark", "timestamp": "1700000000.000100"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_does_not_reuse_origin_thread_ts_for_cross_channel_send() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    fake_web._conversations_pages = [
+        {
+            "channels": [{"id": "C999", "name": "channel_x"}],
+            "response_metadata": {"next_cursor": ""},
+        }
+    ]
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="channel_x",
+            content="done",
+            metadata={
+                "slack": {
+                    "event": {"ts": "1700000000.000100", "channel": "C_ORIGIN"},
+                    "thread_ts": "1700000000.000200",
+                    "channel_type": "channel",
+                },
+            },
+        )
+    )
+
+    assert fake_web.chat_post_calls == [
+        {"channel": "C999", "text": "done", "thread_ts": None}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_raises_when_named_target_cannot_be_resolved() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    with pytest.raises(ValueError, match="was not found"):
+        await channel.send(
+            OutboundMessage(
+                channel="slack",
+                chat_id="#missing-channel",
+                content="hello",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_with_thread_context_fetches_root_once() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    channel._bot_user_id = "UBOT"
+    fake_web = _FakeAsyncWebClient()
+    fake_web._conversations_replies_response = {
+        "messages": [
+            {"ts": "111.000", "user": "UROOT", "text": "drink water"},
+            {"ts": "112.000", "user": "U2", "text": "good idea"},
+            {"ts": "112.500", "user": "UBOT", "text": "I'll remind you."},
+            {"ts": "113.000", "user": "U3", "text": "<@UBOT> what did you see?"},
+        ]
+    }
+    channel._web_client = fake_web
+
+    content = await channel._with_thread_context(
+        "what did you see?",
+        chat_id="C123",
+        thread_ts="111.000",
+        raw_thread_ts="111.000",
+        current_ts="113.000",
+    )
+
+    assert fake_web.conversations_replies_calls == [
+        {"channel": "C123", "ts": "111.000", "limit": 20}
+    ]
+    assert "Slack thread context before this mention:" in content
+    assert "- <@UROOT>: drink water" in content
+    assert "- <@U2>: good idea" in content
+    assert "- bot: I'll remind you." in content
+    assert "U3" not in content
+    assert content.endswith("Current message:\nwhat did you see?")
+
+    second = await channel._with_thread_context(
+        "again",
+        chat_id="C123",
+        thread_ts="111.000",
+        raw_thread_ts="111.000",
+        current_ts="114.000",
+    )
+    assert second == "again"
+    assert len(fake_web.conversations_replies_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_with_thread_context_fetches_replies_in_dm_thread() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    channel._bot_user_id = "UBOT"
+    fake_web = _FakeAsyncWebClient()
+    fake_web._conversations_replies_response = {
+        "messages": [
+            {"ts": "211.000", "user": "UA", "text": "here is the file"},
+            {"ts": "212.000", "user": "UA", "text": "please read it"},
+        ]
+    }
+    channel._web_client = fake_web
+
+    content = await channel._with_thread_context(
+        "what did you see?",
+        chat_id="D123",
+        thread_ts="211.000",
+        raw_thread_ts="211.000",
+        current_ts="213.000",
+    )
+
+    assert fake_web.conversations_replies_calls == [
+        {"channel": "D123", "ts": "211.000", "limit": 20}
+    ]
+    assert "Slack thread context before this mention:" in content
+    assert "- <@UA>: here is the file" in content
+
+
+@pytest.mark.asyncio
+async def test_dm_root_message_has_no_thread_ts_and_no_thread_session() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    channel._bot_user_id = "UBOT"
+    channel._web_client = _FakeAsyncWebClient()
+    channel._handle_message = AsyncMock()  # type: ignore[method-assign]
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock())
+    req = SimpleNamespace(
+        type="events_api",
+        envelope_id="env-dm-root",
+        payload={
+            "event": {
+                "type": "message",
+                "user": "U1",
+                "channel": "D123",
+                "channel_type": "im",
+                "text": "hello",
+                "ts": "1700000000.000100",
+            }
+        },
+    )
+
+    await channel._on_socket_request(client, req)
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["session_key"] is None
+    assert kwargs["metadata"]["slack"]["thread_ts"] is None
+
+
+@pytest.mark.asyncio
+async def test_dm_thread_message_keeps_thread_ts_and_threaded_session() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    channel._bot_user_id = "UBOT"
+    channel._web_client = _FakeAsyncWebClient()
+    channel._handle_message = AsyncMock()  # type: ignore[method-assign]
+    channel._with_thread_context = AsyncMock(return_value="hello")  # type: ignore[method-assign]
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock())
+    req = SimpleNamespace(
+        type="events_api",
+        envelope_id="env-dm-thread",
+        payload={
+            "event": {
+                "type": "message",
+                "user": "U1",
+                "channel": "D123",
+                "channel_type": "im",
+                "text": "hello",
+                "ts": "1700000000.000200",
+                "thread_ts": "1700000000.000100",
+            }
+        },
+    )
+
+    await channel._on_socket_request(client, req)
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["session_key"] == "slack:D123:1700000000.000100"
+    assert kwargs["metadata"]["slack"]["thread_ts"] == "1700000000.000100"
+
+
+def _channel_mention_request(envelope_id: str, ts: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        type="events_api",
+        envelope_id=envelope_id,
+        payload={
+            "event": {
+                "type": "app_mention",
+                "user": "U1",
+                "channel": "C123",
+                "text": "<@UBOT> hello",
+                "ts": ts,
+            }
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_channel_root_message_uses_thread_scoped_session() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    channel._bot_user_id = "UBOT"
+    channel._web_client = _FakeAsyncWebClient()
+    channel._handle_message = AsyncMock()  # type: ignore[method-assign]
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock())
+
+    req = _channel_mention_request("env-c1", "1700000000.000100")
+
+    await channel._on_socket_request(client, req)
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["session_key"] == "slack:C123:1700000000.000100"
+    assert kwargs["metadata"]["slack"]["thread_ts"] == "1700000000.000100"
+
+
+@pytest.mark.asyncio
+async def test_channel_root_messages_do_not_share_one_session() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    channel._bot_user_id = "UBOT"
+    channel._web_client = _FakeAsyncWebClient()
+    channel._handle_message = AsyncMock()  # type: ignore[method-assign]
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock())
+
+    first = _channel_mention_request("env-c1", "1700000000.000100")
+    second = _channel_mention_request("env-c2", "1700000000.000200")
+
+    await channel._on_socket_request(client, first)
+    await channel._on_socket_request(client, second)
+
+    session_keys = [call.kwargs["session_key"] for call in channel._handle_message.await_args_list]
+    assert session_keys == [
+        "slack:C123:1700000000.000100",
+        "slack:C123:1700000000.000200",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_channel_root_message_without_reply_in_thread_uses_channel_session() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True, reply_in_thread=False), MessageBus())
+    channel._bot_user_id = "UBOT"
+    channel._web_client = _FakeAsyncWebClient()
+    channel._handle_message = AsyncMock()  # type: ignore[method-assign]
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock())
+
+    req = _channel_mention_request("env-c3", "1700000000.000300")
+
+    await channel._on_socket_request(client, req)
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["session_key"] is None
+    assert kwargs["metadata"]["slack"]["thread_ts"] is None
+
+
+@pytest.mark.asyncio
+async def test_channel_thread_reply_keeps_thread_session() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    channel._bot_user_id = "UBOT"
+    channel._web_client = _FakeAsyncWebClient()
+    channel._handle_message = AsyncMock()  # type: ignore[method-assign]
+    channel._with_thread_context = AsyncMock(return_value="hello")  # type: ignore[method-assign]
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock())
+    req = SimpleNamespace(
+        type="events_api",
+        envelope_id="env-c4",
+        payload={
+            "event": {
+                "type": "app_mention",
+                "user": "U1",
+                "channel": "C123",
+                "text": "<@UBOT> follow up",
+                "ts": "1700000000.000400",
+                "thread_ts": "1700000000.000100",
+            }
+        },
+    )
+
+    await channel._on_socket_request(client, req)
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["session_key"] == "slack:C123:1700000000.000100"
+
+
+@pytest.mark.asyncio
+async def test_slack_slash_command_skips_thread_context() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True, allow_from=[]), MessageBus())
+    channel._bot_user_id = "UBOT"
+    channel._with_thread_context = AsyncMock(return_value="wrapped")  # type: ignore[method-assign]
+    channel._handle_message = AsyncMock()  # type: ignore[method-assign]
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock())
+    req = SimpleNamespace(
+        type="events_api",
+        envelope_id="env-1",
+        payload={
+            "event": {
+                "type": "app_mention",
+                "user": "U1",
+                "channel": "C123",
+                "text": "<@UBOT> /restart",
+                "thread_ts": "111.000",
+                "ts": "112.000",
+            }
+        },
+    )
+
+    await channel._on_socket_request(client, req)
+
+    channel._with_thread_context.assert_not_awaited()
+    channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.await_args.kwargs["content"] == "/restart"
+
+
+@pytest.mark.asyncio
+async def test_slack_file_share_downloads_media_and_reaches_agent() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True, bot_token="xoxb-test"), MessageBus())
+    channel._bot_user_id = "UBOT"
+    channel._web_client = _FakeAsyncWebClient()
+    channel._handle_message = AsyncMock()  # type: ignore[method-assign]
+    channel._download_slack_file = AsyncMock(  # type: ignore[method-assign]
+        return_value=("/tmp/report.pdf", "[file: report.pdf]")
+    )
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock())
+    req = SimpleNamespace(
+        type="events_api",
+        envelope_id="env-file",
+        payload={
+            "event": {
+                "type": "message",
+                "subtype": "file_share",
+                "user": "U1",
+                "channel": "D123",
+                "channel_type": "im",
+                "text": "please read this",
+                "ts": "1700000000.000100",
+                "files": [
+                    {
+                        "id": "F123",
+                        "name": "report.pdf",
+                        "mimetype": "application/pdf",
+                        "url_private_download": "https://files.slack.com/report.pdf",
+                    }
+                ],
+            }
+        },
+    )
+
+    await channel._on_socket_request(client, req)
+
+    channel._download_slack_file.assert_awaited_once()
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["content"] == "please read this\n[file: report.pdf]"
+    assert kwargs["media"] == ["/tmp/report.pdf"]
+
+
+def test_slack_download_rejects_login_html() -> None:
+    html_response = httpx.Response(
+        200,
+        headers={"content-type": "text/html; charset=utf-8"},
+        content=b"<!doctype html><html><title>Sign in to Slack</title>",
+    )
+    markdown_response = httpx.Response(
+        200,
+        headers={"content-type": "text/markdown"},
+        content=b"# PR Extraction Guide\n",
+    )
+
+    assert SlackChannel._looks_like_html_download(html_response) is True
+    assert SlackChannel._looks_like_html_download(markdown_response) is False
+
+
+def test_slack_download_failure_marker_is_actionable() -> None:
+    marker = SlackChannel._download_failure_marker("image", "screenshot.png", "download failed")
+
+    assert "not available to nanobot" in marker
+    assert "files:read" in marker
+    assert "reinstall the Slack app" in marker
+
+
+def test_slack_channel_uses_channel_aware_allow_policy() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True, allow_from=[]), MessageBus())
+    assert channel.is_allowed("U1") is True
+    assert channel._is_allowed("U1", "C123", "channel") is True
+
+
+def test_mention_policy_responds_to_mentions_in_any_channel() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True, group_policy="mention"), MessageBus())
+    channel._bot_user_id = "UBOT"
+
+    assert channel._should_respond_in_channel("app_mention", "<@UBOT> hi", "C123") is True
+    assert channel._should_respond_in_channel("message", "<@UBOT> hi", "C999") is True
+    assert channel._should_respond_in_channel("message", "no mention here", "C123") is False
+
+
+def test_allowlist_policy_restricts_to_approved_channels() -> None:
+    channel = SlackChannel(
+        SlackConfig(enabled=True, group_policy="allowlist", group_allow_from=["C_OK"]),
+        MessageBus(),
+    )
+    channel._bot_user_id = "UBOT"
+
+    assert channel._should_respond_in_channel("message", "anything", "C_OK") is True
+    assert channel._should_respond_in_channel("app_mention", "<@UBOT> hi", "C_NOPE") is False
+    assert channel._is_allowed("U1", "C_OK", "channel") is True
+    assert channel._is_allowed("U1", "C_NOPE", "channel") is False
+
+
+def test_allowlist_with_require_mention_needs_both_channel_and_mention() -> None:
+    channel = SlackChannel(
+        SlackConfig(
+            enabled=True,
+            group_policy="allowlist",
+            group_allow_from=["C_OK"],
+            group_require_mention=True,
+        ),
+        MessageBus(),
+    )
+    channel._bot_user_id = "UBOT"
+
+    assert channel._should_respond_in_channel("app_mention", "<@UBOT> hi", "C_OK") is True
+    assert channel._should_respond_in_channel("message", "<@UBOT> hi", "C_OK") is True
+    assert channel._should_respond_in_channel("message", "just chatting", "C_OK") is False
+    assert channel._should_respond_in_channel("app_mention", "<@UBOT> hi", "C_NOPE") is False
+
+
+def test_group_require_mention_accepts_camel_case_alias() -> None:
+    config = SlackConfig.model_validate(
+        {
+            "enabled": True,
+            "groupPolicy": "allowlist",
+            "groupAllowFrom": ["C_OK"],
+            "groupRequireMention": True,
+        }
+    )
+    assert config.group_require_mention is True
+    assert config.group_allow_from == ["C_OK"]
+
+
+def test_to_mrkdwn_keeps_fenced_markdown_tables_intact() -> None:
+    text = "Intro\n\n```\n| a | b |\n| - | - |\n| 1 | 2 |\n```\n\nOutro"
+    out = SlackChannel._to_mrkdwn(text)
+
+    assert "```\n| a | b |\n| - | - |\n| 1 | 2 |\n```" in out
+    assert "**a**: 1" not in out
+    assert "*a*: 1" not in out
+
+
+def test_to_mrkdwn_still_converts_unfenced_markdown_tables() -> None:
+    out = SlackChannel._to_mrkdwn("| a | b |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |")
+
+    assert "| a | b |" not in out
+    assert out.splitlines() == ["*a*: 1", "*b*: 2", "", "*a*: 3", "*b*: 4"]
+
+
+def _patch_download_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    handler: Callable[[httpx.Request], httpx.Response],
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.channels.slack.runtime.PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(handler),
+    )
+    monkeypatch.setattr("nanobot.channels.slack.runtime.httpx_env_proxy_mounts", lambda: {})
+
+
+def _patch_download_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    validated: list[str],
+) -> None:
+    def validate(url: str) -> tuple[bool, str]:
+        validated.append(url)
+        if "169.254.169.254" in url:
+            return False, "blocked metadata address"
+        return True, ""
+
+    monkeypatch.setattr("nanobot.channels.slack.runtime.validate_url_target", validate)
+
+
+@pytest.mark.asyncio
+async def test_download_blocks_ssrf_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests: list[httpx.Request] = []
+    validated: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=b"should not be fetched")
+
+    _patch_download_transport(monkeypatch, handler)
+    _patch_download_validation(monkeypatch, validated)
+    channel = SlackChannel(SlackConfig(enabled=True, bot_token="xoxb-test"), MessageBus())
+    url = "http://169.254.169.254/latest/meta-data/"
+
+    path, _marker = await channel._download_slack_file(
+        {"id": "F1", "name": "x.bin", "url_private_download": url}
+    )
+
+    assert path is None
+    assert requests == []
+    assert validated == [url]
+
+
+@pytest.mark.asyncio
+async def test_download_blocks_unsafe_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests: list[httpx.Request] = []
+    validated: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            302,
+            headers={"location": "http://169.254.169.254/latest/meta-data/"},
+        )
+
+    _patch_download_transport(monkeypatch, handler)
+    _patch_download_validation(monkeypatch, validated)
+    channel = SlackChannel(SlackConfig(enabled=True, bot_token="xoxb-test"), MessageBus())
+    url = "https://files.slack.com/files-pri/x"
+
+    path, _marker = await channel._download_slack_file(
+        {"id": "F1", "name": "x.bin", "url_private_download": url}
+    )
+
+    assert path is None
+    assert len(requests) == 1
+    assert validated == [url, "http://169.254.169.254/latest/meta-data/"]
+
+
+@pytest.mark.asyncio
+async def test_download_follows_safe_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    requests: list[httpx.Request] = []
+    validated: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.host == "files.slack.com":
+            return httpx.Response(302, headers={"location": "https://cdn.example/file.bin"})
+        return httpx.Response(
+            200,
+            content=b"filedata",
+            headers={"content-type": "application/octet-stream"},
+        )
+
+    _patch_download_transport(monkeypatch, handler)
+    _patch_download_validation(monkeypatch, validated)
+    monkeypatch.setattr(
+        "nanobot.channels.slack.runtime.get_media_dir", lambda _channel=None: str(tmp_path)
+    )
+    channel = SlackChannel(SlackConfig(enabled=True, bot_token="xoxb-test"), MessageBus())
+    url = "https://files.slack.com/files-pri/x"
+
+    path, marker = await channel._download_slack_file(
+        {"id": "F1", "name": "x.bin", "url_private_download": url}
+    )
+
+    assert path is not None
+    assert Path(path).read_bytes() == b"filedata"
+    assert marker == "[file: x.bin]"
+    assert validated == [url, "https://cdn.example/file.bin"]
+    assert requests[0].headers["Authorization"] == "Bearer xoxb-test"
+    assert "Authorization" not in requests[1].headers
+
+
+@pytest.mark.parametrize("use_proxy", [True, False])
+@pytest.mark.asyncio
+async def test_start_uses_shared_proxy_for_web_api_and_socket_mode(monkeypatch, use_proxy) -> None:
+    network = NetworkConfig(proxy="http://127.0.0.1:7890")
+    channel = SlackChannel(
+        SlackConfig(bot_token="xoxb-test", app_token="xapp-test", use_proxy=use_proxy),
+        MessageBus(),
+        network=network,
+    )
+    captured = {}
+
+    def web_client(**kwargs):
+        captured["web"] = kwargs
+        return SimpleNamespace(auth_test=AsyncMock(return_value={"user_id": "U42"}))
+
+    async def connect():
+        channel._running = False
+
+    def socket_client(**kwargs):
+        captured["socket"] = kwargs
+        return SimpleNamespace(socket_mode_request_listeners=[], connect=connect)
+
+    monkeypatch.setattr("nanobot.channels.slack.runtime.AsyncWebClient", web_client)
+    monkeypatch.setattr("nanobot.channels.slack.runtime.SocketModeClient", socket_client)
+
+    await channel.start()
+
+    expected = network.proxy if use_proxy else None
+    assert captured["web"] == {"token": "xoxb-test", "proxy": expected}
+    assert captured["socket"]["proxy"] == expected
+    assert captured["socket"]["web_client"] is channel._web_client
+    assert channel._bot_user_id == "U42"
+
+
+@pytest.mark.asyncio
+async def test_download_uses_shared_proxy_and_keeps_redirect_validation(monkeypatch, tmp_path) -> None:
+    proxies = []
+    requests = []
+    validated = []
+    network = NetworkConfig(proxy="http://user:pass@127.0.0.1:7890")
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(302, headers={"location": "http://169.254.169.254/secret"})
+
+    def proxy_transport(*, proxy):
+        proxies.append(proxy)
+        return httpx.MockTransport(handler)
+
+    monkeypatch.setattr("nanobot.channels.slack.runtime.httpx.AsyncHTTPTransport", proxy_transport)
+    monkeypatch.setattr("nanobot.channels.slack.runtime.PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr("nanobot.channels.slack.runtime.get_media_dir", lambda _name: tmp_path)
+    _patch_download_validation(monkeypatch, validated)
+    channel = SlackChannel(
+        SlackConfig(bot_token="xoxb-test", use_proxy=True), MessageBus(), network=network,
+    )
+    url = "https://files.slack.com/file.bin"
+
+    path, _marker = await channel._download_slack_file({
+        "id": "F1", "name": "file.bin", "url_private_download": url,
+    })
+
+    assert path is None
+    assert len(proxies) == 1
+    assert proxies[0].url == httpx.URL("http://127.0.0.1:7890")
+    assert proxies[0].raw_auth == (b"user", b"pass")
+    assert len(requests) == 1
+    assert validated == [url, "http://169.254.169.254/secret"]
+    assert requests[0].headers["Authorization"] == "Bearer xoxb-test"

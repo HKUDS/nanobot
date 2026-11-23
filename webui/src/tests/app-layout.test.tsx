@@ -1,22 +1,60 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Window as HappyWindow } from "happy-dom";
 
 import i18n from "@/i18n";
-import type { ChatSummary, SessionAutomationJob } from "@/lib/types";
+import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
+import { useSessions } from "@/hooks/useSessions";
+import { TOAST_ACTION_MS } from "@/components/ui/toast";
+import type { NanobotClientOptions, RunState } from "@/lib/nanobot-client";
+import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
+import type {
+  ChatSummary,
+  ConnectionStatus,
+  SessionAutomationJob,
+  SidebarStatePayload,
+  WorkspaceScopePayload,
+} from "@/lib/types";
+
+(window as unknown as HappyWindow).happyDOM.settings.disableIframePageLoading = true;
 
 const connectSpy = vi.fn();
+let clientOptions: NanobotClientOptions | undefined;
 const refreshSpy = vi.fn();
 const createChatSpy = vi.fn().mockResolvedValue("chat-1");
 const deleteChatSpy = vi.fn();
-const getSessionAutomationsSpy = vi.fn<(key: string) => Promise<SessionAutomationJob[]>>();
+const getSessionAutomationsSpy = vi.fn<(key: string) => Promise<SessionAutomationJob[]>>().mockResolvedValue([]);
 const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
-const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
-const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
+const setSidebarStateSpy = vi.fn();
+const requestMutationSpy = vi.fn();
+const discardTemporaryChatSpy = vi.fn();
+const newTemporaryChatSpy = vi.fn<() => Promise<string>>();
+const sendMessageSpy = vi.fn();
+const sendSystemCommandSpy = vi.fn().mockResolvedValue(undefined);
+let mockDefaultChatId: string | null = null;
+const statusHandlers = new Set<(status: ConnectionStatus) => void>();
+const runStatusHandlers = new Set<(chatId: string, state: RunState) => void>();
+const runState = (startedAt: number | null): RunState => ({
+  active: startedAt !== null, startedAt, latestTurnId: null, generation: 0, unsettled: false,
+});
+const sessionUpdateHandlers = new Set<(
+  chatId: string,
+  scope?: string,
+  workspaceScope?: WorkspaceScopePayload,
+) => void>();
+const sidebarStateUpdateHandlers = new Set<(state: SidebarStatePayload) => void>();
+const pairingChangeHandlers = new Set<() => void>();
+const readyHandlers = new Set<() => void>();
 let mockSessions: ChatSummary[] = [];
-const HERO_GREETING_PATTERN =
-  /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
+
+async function clickDeleteAction(action: HTMLElement) {
+  fireEvent.click(action);
+  // Flush menu dismissal and Happy DOM's aria-hidden observer before timing Undo.
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+}
 
 function setNavigatorPlatform(platform: string): void {
   Object.defineProperty(window.navigator, "platform", {
@@ -37,12 +75,23 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
-      const body = routes[String(input)];
+      const route = routes[String(input)]
+        ?? (String(input) === "/api/webui/sidebar-state" ? {} : undefined)
+        ?? (/^\/api\/sessions\/[^/]+\/subagents$/.test(new URL(String(input), "http://localhost").pathname) ? { tasks: [] } : undefined);
+      const body =
+        typeof route === "function"
+          ? await (route as () => unknown | Promise<unknown>)()
+          : route;
       return body === undefined
         ? ({ ok: false, status: 404, json: async () => ({}) } as Response)
         : jsonResponse(body);
     }),
   );
+}
+
+function currentMonthTimestamp(day: number, hour = 10, minute = 0): number {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), day, hour, minute).getTime();
 }
 
 function baseSettingsPayload() {
@@ -58,8 +107,6 @@ function baseSettingsPayload() {
       temperature: 0.1,
       reasoning_effort: null,
       timezone: "UTC",
-      bot_name: "nanobot",
-      bot_icon: "nb",
       tool_hint_max_length: 40,
     },
     model_presets: [{
@@ -74,6 +121,8 @@ function baseSettingsPayload() {
       temperature: 0.1,
       reasoning_effort: null,
     }],
+    model_call_order: [],
+    model_call_order_editable: false,
     providers: [],
     web_search: {
       provider: "duckduckgo",
@@ -85,7 +134,7 @@ function baseSettingsPayload() {
     },
     web: {
       enable: true,
-      proxy: null,
+      use_proxy: false,
       user_agent: null,
       search: { max_results: 5, timeout: 30 },
       fetch: { use_jina_reader: true },
@@ -109,15 +158,10 @@ function baseSettingsPayload() {
       heartbeat: {
         enabled: true,
         interval_s: 1800,
-        keep_recent_messages: 8,
       },
       dream: {
         schedule: "every 2h",
-        max_batch_size: 20,
-        max_iterations: 15,
-        annotate_line_ages: true,
       },
-      unified_session: false,
     },
     advanced: {
       restrict_to_workspace: false,
@@ -140,24 +184,41 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/useSessions")>();
   return {
     ...actual,
-    useSessions: () => {
+    useSessions: vi.fn(function useMockSessions() {
       const [sessions, setSessions] = React.useState(mockSessions);
       return {
         sessions,
         loading: false,
         error: null,
         refresh: refreshSpy,
-        createChat: createChatSpy,
+        createChat: async (scope?: WorkspaceScopePayload | null) => {
+          const chatId = await createChatSpy(scope);
+          const now = new Date().toISOString();
+          setSessions((prev: ChatSummary[]) => [
+            {
+              key: `websocket:${chatId}`,
+              channel: "websocket",
+              chatId,
+              createdAt: now,
+              updatedAt: now,
+              title: "",
+              preview: "",
+              workspaceScope: scope ?? null,
+            },
+            ...prev.filter((session) => session.chatId !== chatId),
+          ]);
+          return chatId;
+        },
         forkChat: async () => "fork-chat",
-        getSessionAutomations: getSessionAutomationsSpy,
         deleteChat: async (key: string, options?: { deleteAutomations?: boolean }) => {
-          if (options === undefined) await deleteChatSpy(key);
-          else await deleteChatSpy(key, options);
+          const result = options === undefined ? await deleteChatSpy(key) : await deleteChatSpy(key, options);
+          if (result && !result.deleted) return result;
           setSessions((prev: ChatSummary[]) => prev.filter((s) => s.key !== key));
           return { deleted: true };
         },
+        getSessionAutomations: (key: string) => getSessionAutomationsSpy(key),
       };
-    },
+    }),
   };
 });
 
@@ -168,6 +229,8 @@ vi.mock("@/hooks/useTheme", async () => {
       React.createElement(React.Fragment, null, children),
     useTheme: () => ({
       theme: "light" as const,
+      preference: "light" as const,
+      setTheme: vi.fn(),
       toggle: toggleThemeSpy,
     }),
     useThemeValue: () => "light" as const,
@@ -175,54 +238,112 @@ vi.mock("@/hooks/useTheme", async () => {
 });
 
 vi.mock("@/lib/bootstrap", () => ({
+  BootstrapAuthRequiredError: class BootstrapAuthRequiredError extends Error {
+    constructor(message = "bootstrap authentication required") {
+      super(message);
+      this.name = "BootstrapAuthRequiredError";
+    }
+  },
   fetchBootstrap: vi.fn().mockResolvedValue({
     token: "tok",
+    api_token: "api-tok",
     ws_path: "/",
     expires_in: 300,
   }),
   deriveWsUrl: vi.fn(() => "ws://test"),
+  consumeUrlBootstrapSecret: vi.fn(() => ""),
   loadSavedSecret: vi.fn(() => ""),
   saveSecret: vi.fn(),
   clearSavedSecret: vi.fn(),
 }));
 
-vi.mock("@/lib/nanobot-client", () => {
+vi.mock("@/lib/nanobot-client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/nanobot-client")>();
   class MockClient {
+    constructor(options: NanobotClientOptions) { clientOptions = options; }
+    onTaskNotice = () => () => {};
     status = "idle" as const;
-    defaultChatId: string | null = null;
+    defaultChatId = mockDefaultChatId;
+    sendSystemCommand = sendSystemCommandSpy;
     connect = connectSpy;
-    onStatus = () => () => {};
+    onStatus = (handler: (status: ConnectionStatus) => void) => {
+      statusHandlers.add(handler);
+      return () => statusHandlers.delete(handler);
+    };
     onRuntimeModelUpdate = () => () => {};
+    onPairingChange = (handler: () => void) => {
+      pairingChangeHandlers.add(handler);
+      return () => pairingChangeHandlers.delete(handler);
+    };
+    onReady = (handler: () => void) => {
+      readyHandlers.add(handler);
+      return () => readyHandlers.delete(handler);
+    };
     onError = () => () => {};
     onChat = () => () => {};
-    onSessionUpdate = (handler: (chatId: string, scope?: string) => void) => {
+    onTranscript = () => () => {};
+    onSessionUpdate = (handler: (
+      chatId: string,
+      scope?: string,
+      workspaceScope?: WorkspaceScopePayload,
+    ) => void) => {
       sessionUpdateHandlers.add(handler);
       return () => sessionUpdateHandlers.delete(handler);
     };
-    onRunStatus = (handler: (chatId: string, startedAt: number | null) => void) => {
+    onSidebarStateUpdate = (handler: (state: SidebarStatePayload) => void) => {
+      sidebarStateUpdateHandlers.add(handler);
+      return () => sidebarStateUpdateHandlers.delete(handler);
+    };
+    onRunStatus = (handler: (chatId: string, state: RunState) => void) => {
       runStatusHandlers.add(handler);
       return () => runStatusHandlers.delete(handler);
     };
-    getRunStartedAt = () => null;
+    onRunCompletion = () => () => {};
+    getRunState = () => runState(null);
+    restorePendingRun = vi.fn();
+    getRunTurnId = () => null;
+    getUnsettledRunChatIds = () => [];
+    getRunGeneration = () => 0;
+    hasUnsettledRun = () => false;
+    canReconcileCanonicalCompletion = () => true;
+    reconcileCanonicalCompletion = () => true;
+    fenceCanonicalCompletedTurns = vi.fn();
     getGoalState = () => undefined;
-    sendMessage = vi.fn();
+    sendMessage = sendMessageSpy;
     newChat = vi.fn();
+    newTemporaryChat = newTemporaryChatSpy;
     attach = attachSpy;
+    setSidebarState = setSidebarStateSpy;
+    requestMutation = requestMutationSpy;
+    discardTemporaryChat = discardTemporaryChatSpy;
     close = vi.fn();
     updateUrl = updateUrlSpy;
+    updateMaxFrameBytes = vi.fn();
   }
 
-  return { NanobotClient: MockClient };
+  return { ...actual, NanobotClient: MockClient };
 });
 
-import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
+import {
+  BootstrapAuthRequiredError,
+  deriveWsUrl,
+  fetchBootstrap,
+  loadSavedSecret,
+} from "@/lib/bootstrap";
 import App from "@/App";
+import { mockBrowserFocus } from "./browser-focus";
+
+const defaultUseSessions = vi.mocked(useSessions).getMockImplementation()!;
 
 describe("App layout", () => {
+  let restoreBrowserFocus: (() => void) | undefined;
   beforeEach(async () => {
     await i18n.changeLanguage("en");
     mockSessions = [];
+    vi.mocked(useSessions).mockImplementation(defaultUseSessions);
+    clearReloadCache();
     connectSpy.mockClear();
+    clientOptions = undefined;
     updateUrlSpy.mockClear();
     refreshSpy.mockReset();
     createChatSpy.mockClear();
@@ -230,58 +351,314 @@ describe("App layout", () => {
     getSessionAutomationsSpy.mockReset().mockResolvedValue([]);
     toggleThemeSpy.mockReset();
     attachSpy.mockReset();
+    setSidebarStateSpy.mockReset().mockImplementation(
+      async (state: SidebarStatePayload) => state,
+    );
+    requestMutationSpy.mockReset();
+    discardTemporaryChatSpy.mockReset();
+    let temporaryChatCounter = 0;
+    newTemporaryChatSpy.mockImplementation(async () => (
+      `00000000-0000-4000-8000-${String(++temporaryChatCounter).padStart(12, "0")}`
+    ));
+    sendMessageSpy.mockReset();
+    sendSystemCommandSpy.mockReset().mockResolvedValue(undefined);
+    mockDefaultChatId = null;
+    statusHandlers.clear();
     runStatusHandlers.clear();
     sessionUpdateHandlers.clear();
+    sidebarStateUpdateHandlers.clear();
+    pairingChangeHandlers.clear();
+    readyHandlers.clear();
     window.history.replaceState(null, "", "/");
+    sessionStorage.removeItem("nanobot.remote-instance");
+    Reflect.deleteProperty(window, "nanobotHost");
     setNavigatorPlatform("Linux x86_64");
     localStorage.removeItem("nanobot-webui.sidebar");
+    localStorage.removeItem("nanobot-webui.sidebar.width");
     localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     localStorage.removeItem("nanobot-webui.sidebar.session-updates.v1");
+    localStorage.removeItem("nanobot-webui.collapsed-pane-groups.v1");
+    localStorage.removeItem("nanobot-webui.restartStartedAt");
+    localStorage.removeItem("nanobot-webui.restartRoute");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
+      api_token: "api-tok",
       ws_path: "/",
       expires_in: 300,
     });
     vi.mocked(deriveWsUrl).mockReset().mockReturnValue("ws://test");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 404,
-      }),
-    );
+    mockFetchRoutes({});
   });
 
   afterEach(() => {
+    cleanup();
+    restoreBrowserFocus?.();
+    restoreBrowserFocus = undefined;
+    Reflect.deleteProperty(window, "nanobotHost");
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
-  it("shows the auth form without an invalid-password error on first load", async () => {
+  it.each(["skills", "apps", "channels", "automations", "settings", "chat"]) (
+    "keeps the %s document skeleton while bootstrap is pending", (surface) => {
+      window.history.replaceState(null, "", `/#/${surface}`);
+      vi.mocked(fetchBootstrap).mockReturnValueOnce(new Promise(() => {}));
+      render(<App />);
+      expect(screen.getByRole("main")).toHaveAttribute("aria-busy", "true");
+      expect(screen.getByRole("main")).toHaveAttribute("data-startup-surface", surface);
+      expect(screen.getByRole("status")).toHaveTextContent("Loading nanobot…");
+    },
+  );
+
+  it.each([false, true])("enables task controls only when bootstrap advertises support: %s", async (supported) => {
+    mockSessions = [{
+      key: "websocket:chat-a", channel: "websocket", chatId: "chat-a",
+      createdAt: null, updatedAt: null, title: "Inspection", preview: "Inspect config",
+    }];
+    window.history.replaceState(null, "", "/#/chat/websocket%3Achat-a");
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 300,
+      terminal: { webui: { capabilities: supported ? ["webui.core.v1", "webui.subagents.v1"] : ["webui.core.v1"] } },
+    });
+    mockFetchRoutes({
+      "/api/sessions/websocket%3Achat-a/subagents?scope=window": { tasks: [{
+        task_id: "task-1", label: "Config check", task_description: "Inspect configuration",
+        state: "running", phase: "awaiting_model", elapsed_seconds: 2, iteration: 1,
+        tool_events: [], usage: null, receipts: {}, result: null, partial: false,
+        stop_reason: null, error: null, origin_turn_id: null, origin_message_id: null,
+        created_at: 100, completed_at: null,
+      }] },
+    });
+    render(<App />);
+    // Await the lazy module itself; cold Vite transformation is not the task
+    // capability contract exercised by the timed DOM assertions below.
+    await act(async () => { await import("@/components/thread/ThreadShell"); });
+    await screen.findByRole("textbox", {}, { timeout: 5_000 });
+    if (supported) {
+      const trigger = await screen.findByRole("button", { name: "Subtasks · Running: 1" });
+      expect(trigger).toHaveAttribute("aria-expanded", "false");
+      await userEvent.setup().click(trigger);
+      expect(await screen.findByRole("button", { name: /Config check Running/ })).toBeVisible();
+    } else expect(screen.queryByRole("button", { name: /Subtasks/ })).not.toBeInTheDocument();
+    const reads = vi.mocked(fetch).mock.calls.filter(([url]) => new URL(String(url), "http://localhost").pathname.endsWith("/subagents"));
+    expect(reads).toHaveLength(supported ? 1 : 0);
+    expect(requestMutationSpy).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "stale-password"])("shows a clean auth form when the initial automatic sign-in fails (saved password: %j)", async (savedPassword) => {
+    vi.mocked(loadSavedSecret).mockReturnValueOnce(savedPassword);
     vi.mocked(fetchBootstrap).mockRejectedValueOnce(
-      new Error("bootstrap failed: HTTP 401"),
+      new BootstrapAuthRequiredError("bootstrap failed: HTTP 401"),
     );
 
     render(<App />);
 
-    expect(await screen.findByText("Authentication required")).toBeInTheDocument();
-    expect(screen.queryByText("Invalid password. Try again.")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect to nanobot" }))
+      .toBeInTheDocument();
+    const password = screen.getByLabelText("WebUI password");
+    expect(password).not.toHaveAttribute("aria-describedby");
+    expect(password).toHaveAttribute(
+      "autocomplete",
+      "current-password",
+    );
+    expect(password).toHaveValue("");
+    expect(password).toHaveFocus();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(fetchBootstrap).toHaveBeenCalledWith("", savedPassword);
     expect(connectSpy).not.toHaveBeenCalled();
   });
 
-  it("shows an invalid-password error after a submitted password is rejected", async () => {
+  it("switches language before connecting while preserving the password draft", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.type(await screen.findByLabelText("WebUI password"), "draft-password");
+    await user.tab({ shift: true });
+    await user.tab({ shift: true });
+    expect(screen.getByRole("combobox", { name: "Change language" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await screen.findByRole("listbox");
+    await user.keyboard("{ArrowDown}{Enter}");
+
+    expect(await screen.findByRole("heading", { name: "连接到 nanobot" }))
+      .toBeInTheDocument();
+    const password = screen.getByLabelText("WebUI 密码");
+    expect(password).toHaveValue("draft-password");
+    expect(password).toHaveAttribute("placeholder", "WebUI 密码");
+    expect(screen.getByRole("button", { name: "连接" })).toBeEnabled();
+    expect(document.documentElement.lang).toBe("zh-CN");
+    expect(localStorage.getItem("nanobot.locale")).toBe("zh-CN");
+    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("opens password help as a dialog without submitting or clearing the password draft", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const password = await screen.findByLabelText("WebUI password");
+    await user.type(password, "draft-password");
+    await user.tab({ shift: true });
+    const helpTitle = "Where can I find the password?";
+    const help = screen.getByRole("button", { name: helpTitle });
+    expect(help).toHaveFocus();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(helpTitle);
+
+    await user.keyboard("{Enter}");
+
+    const dialog = await screen.findByRole("dialog", { name: helpTitle });
+    expect(dialog).toHaveFocus();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(dialog).toHaveTextContent("~/.nanobot/config.json");
+    expect(dialog).toHaveTextContent("channels.websocket.tokenIssueSecret");
+    expect(dialog).toHaveTextContent("If that value is empty, use channels.websocket.token.");
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(help).toHaveFocus());
+    expect(dialog).not.toBeInTheDocument();
+    expect(password).toHaveValue("draft-password");
+    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
+  });
+
+  it("toggles password visibility without changing the password", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const password = await screen.findByLabelText("WebUI password");
+    await user.type(password, "correct horse battery staple");
+    expect(password).toHaveAttribute("type", "password");
+
+    await user.click(screen.getByRole("button", { name: "Show password" }));
+
+    expect(password).toHaveAttribute("type", "text");
+    expect(password).toHaveValue("correct horse battery staple");
+    const hidePassword = screen.getByRole("button", { name: "Hide password" });
+    expect(hidePassword).toHaveFocus();
+
+    await user.click(hidePassword);
+
+    expect(password).toHaveAttribute("type", "password");
+    expect(password).toHaveValue("correct horse battery staple");
+    expect(screen.getByRole("button", { name: "Show password" })).toHaveFocus();
+  });
+
+  it("explains and focuses an empty auth password", async () => {
     vi.mocked(fetchBootstrap).mockRejectedValue(
       new Error("bootstrap failed: HTTP 401"),
     );
 
     render(<App />);
 
-    const password = await screen.findByPlaceholderText("Password");
-    fireEvent.change(password, { target: { value: "wrong-password" } });
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    const password = await screen.findByLabelText("WebUI password");
+    const connect = screen.getByRole("button", { name: "Connect" });
+    expect(connect).toBeEnabled();
+    fireEvent.click(connect);
 
-    expect(await screen.findByText("Invalid password. Try again.")).toBeInTheDocument();
-    expect(fetchBootstrap).toHaveBeenLastCalledWith("", "wrong-password");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Enter password",
+    );
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveAccessibleDescription("Enter password");
+    expect(password).toHaveFocus();
+    fireEvent.change(password, { target: { value: "   " } });
+    fireEvent.click(connect);
+    expect(password).toHaveValue("");
+    expect(password).toHaveAccessibleDescription("Enter password");
+    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the auth form when bootstrap does not issue an API token", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new BootstrapAuthRequiredError(
+        "bootstrap authentication required: missing api_token",
+      ),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect to nanobot" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the sign-in form mounted during submission and refocuses it on rejection", async () => {
+    let rejectAttempt!: (error: Error) => void;
+    vi.mocked(fetchBootstrap)
+      .mockRejectedValueOnce(new Error("bootstrap failed: HTTP 401"))
+      .mockReturnValueOnce(new Promise((_, reject) => { rejectAttempt = reject; }));
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const password = await screen.findByLabelText("WebUI password");
+    const submit = screen.getByRole("button", { name: "Connect" });
+    await user.type(password, "wrong-password");
+    await user.click(screen.getByRole("button", { name: "Show password" }));
+    await user.click(submit);
+
+    expect(screen.getByLabelText("WebUI password")).toBe(password);
+    expect(submit).toBeDisabled();
+    expect(submit).toHaveAttribute("aria-busy", "true");
+    expect(password).toHaveAttribute("readonly");
+    expect(fetchBootstrap).toHaveBeenCalledTimes(2);
+    expect(fetchBootstrap).toHaveBeenLastCalledWith("", "wrong-password");
+
+    await act(async () => rejectAttempt(new Error("bootstrap failed: HTTP 401")));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect password");
+    expect(screen.getByLabelText("WebUI password")).toBe(password);
+    expect(submit).toBeEnabled();
+    expect(password).toHaveAccessibleDescription("Incorrect password");
+    expect(password).toHaveValue("");
+    expect(password).toHaveAttribute("type", "password");
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveFocus();
+    expect(connectSpy).not.toHaveBeenCalled();
+    await user.type(password, "retry-password");
+    expect(password).toHaveValue("retry-password");
+    expect(password).not.toHaveAccessibleDescription();
+    expect(password).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps auth errors on the password field while the user waits", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValue(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+    render(<App />);
+    const password = await screen.findByLabelText("WebUI password");
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter password");
+    expect(password).toHaveAccessibleDescription("Enter password");
+    expect(password).toHaveFocus();
+
+    await act(async () => {
+      fireEvent.change(password, { target: { value: "wrong-password" } });
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    });
+    const retryPassword = screen.getByLabelText("WebUI password");
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect password");
+    expect(retryPassword).toHaveAccessibleDescription("Incorrect password");
+    expect(retryPassword).toHaveAttribute("aria-invalid", "true");
+    expect(retryPassword).toHaveFocus();
   });
 
   it("keeps sidebar layout out of the main thread width contract", async () => {
@@ -292,6 +669,13 @@ describe("App layout", () => {
     const main = container.querySelector("main");
     expect(main).toBeInTheDocument();
     expect(main).not.toHaveAttribute("style");
+    expect(screen.getByTestId("sidebar-brand-row")).toHaveClass("pt-3");
+    expect(screen.getByTestId("sidebar-brand-mark")).not.toHaveClass("mt-5");
+    const resizeHandle = screen.getByRole("separator", { name: "Resize sidebar" });
+    expect(resizeHandle).toHaveAttribute("aria-valuenow", "56");
+    fireEvent.keyDown(resizeHandle, { key: "Enter" });
+    expect(resizeHandle).toHaveAttribute("aria-valuenow", "272");
+    expect(main).not.toHaveAttribute("style");
 
     const asideClassNames = Array.from(container.querySelectorAll("aside")).map(
       (el) => el.className,
@@ -299,44 +683,825 @@ describe("App layout", () => {
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
   });
 
-  it("places Automations after Skills in the main sidebar", async () => {
+  it("loads settings once when opening the overview directly", async () => {
+    window.location.hash = "#/settings";
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload(), "/api/settings/usage": { days: [] } });
+    render(<App />);
+    await act(async () => { await import("@/components/settings/SettingsView"); });
+    expect(await screen.findByRole("navigation", { name: "Settings sections" })).toBeInTheDocument();
+    expect(await screen.findByText("Token usage")).toBeInTheDocument();
+    const reads = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url) === "/api/settings");
+    expect(reads()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    expect(reads()).toHaveLength(1);
+  });
+
+  it("uses one main landmark and a page heading in desktop settings", async () => {
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    const { container } = render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
+
+    await act(async () => {
+      await import("@/components/settings/SettingsView");
+    });
+
+    expect(
+      screen.getByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
+    const backButton = screen.getByRole("button", { name: "Back to chat" });
+    expect(backButton.closest("aside")).toHaveClass("pt-4", "lg:pt-4");
+    expect(backButton).not.toHaveClass("-ml-1");
+    expect(container.querySelectorAll("main")).toHaveLength(1);
+    expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeInTheDocument();
+  });
+
+  it("opens the full Models settings directly from the first-run prompt", async () => {
+    const user = userEvent.setup();
+    const base = baseSettingsPayload();
+    mockFetchRoutes({
+      "/api/settings": {
+        ...base,
+        agent: {
+          ...base.agent,
+          model: "",
+          resolved_provider: "",
+          has_api_key: false,
+          model_preset: "",
+        },
+        model_presets: [],
+        model_call_order: [],
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await user.click(await screen.findByRole("button", { name: "Choose model" }));
+
+    expect(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Model presets" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Manage providers" }));
+    expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add provider" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
+  });
+
+  it("opens the Apps catalog from the sidebar's bottom navigation", async () => {
+    mockSessions = [{ key: "websocket:chat-a", channel: "websocket", chatId: "chat-a", createdAt: null, updatedAt: null, preview: "First chat" }];
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/cli-apps": { apps: [], installed_count: 0 },
+      "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
+      "/api/remote-instances": { available: true, profiles: [] },
+    });
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
-    const skillsButton = within(sidebar).getByRole("button", { name: "Skills" });
-    const automationsButton = within(sidebar).getByRole("button", { name: "Automations" });
-
-    expect(appsButton.compareDocumentPosition(skillsButton) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
-    expect(
-      skillsButton.compareDocumentPosition(automationsButton) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    const footer = within(sidebar).getByTestId("sidebar-footer");
+    await within(footer).findByRole("button", { name: "Switch host" });
+    const buttons = within(footer).getAllByRole("button");
+    expect(buttons.map((button) => button.getAttribute("aria-label")))
+      .toEqual(["Apps", "Automations", "Settings", "Switch host"]);
+    expect(buttons.slice(0, 3).map((button) => button.textContent)).toEqual(["Apps", "Automations", "Settings"]);
+    fireEvent.click(within(footer).getByRole("button", { name: "Apps" }));
+    await act(async () => { await import("@/components/settings/SettingsView"); });
+    const sections = await screen.findByRole("group", { name: "Apps" });
+    expect(within(sections).getAllByRole("button").map((button) => button.textContent)).toEqual(["Tools", "Skills", "Channels"]);
+    expect(within(sections).getByRole("button", { name: "Tools" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("keeps focus and independent searches when navigating among Apps sections", async () => {
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/cli-apps": { apps: [], installed_count: 0 },
+      "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
+      "/api/settings/nanobot-features": { features: [], enabled_count: 0 },
+    });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const apps = within(sidebar).getByRole("button", { name: "Apps" });
+    fireEvent.click(apps);
+    await act(async () => { await import("@/components/settings/SettingsView"); });
+    await screen.findByRole("button", { name: "Tools", pressed: true });
+    const search = screen.getByLabelText("Search tools");
+    fireEvent.change(search, { target: { value: "mcp" } });
+    fireEvent.click(screen.getByRole("button", { name: "Channels" }));
+    expect(await screen.findByRole("searchbox", { name: "Search channels" })).toBe(search);
+    expect(search).toHaveValue("");
+    expect(window.location.hash).toBe("#/apps?section=channels");
+    expect(apps).toHaveAttribute("aria-current", "page");
+    expect(document.title).toBe("Apps");
+    fireEvent.change(search, { target: { value: "telegram" } });
+    search.focus();
+
+    act(() => {
+      window.history.replaceState(window.history.state, "", "#/apps?section=skills");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(await screen.findByLabelText("Search installed skills")).toBe(search);
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Channels" }));
+    expect(await screen.findByRole("searchbox", { name: "Search channels" })).toHaveValue("telegram");
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    expect(await screen.findByLabelText("Search tools")).toHaveValue("mcp");
+  });
+
+  it("opens management in the main content area while keeping the standalone deep link", async () => {
+    requestMutationSpy.mockResolvedValue({ hosts: [], files: [], incomplete: false });
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/remote-instances": { available: true, profiles: [] },
+    });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const originalHash = window.location.hash;
+    const originalTitle = document.title;
+    expect(within(sidebar).queryByRole("button", { name: "Remote connections" })).not.toBeInTheDocument();
+    fireEvent.pointerDown(await within(sidebar).findByRole("button", { name: "Switch host" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Manage connections" }));
+    expect(await screen.findByRole("heading", { name: "Remote connections" })).toBeVisible();
+    expect(screen.getByRole("main")).toContainElement(screen.getByRole("region", { name: "Remote connections" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(sidebar).toBeVisible();
+    fireEvent.click(await screen.findByRole("button", { name: "Connect to remote nanobot" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Other ways" }), { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByRole("menuitem", { name: "SSH connection" }));
+    const host = await screen.findByRole("textbox", { name: "SSH address" });
+    expect(screen.getByRole("dialog", { name: "Add connection" })).toContainElement(host);
+    expect(window.location.hash).toBe(originalHash);
+    expect(document.title).toBe(originalTitle);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
+    expect(window.location.hash).toBe("#/new");
+    expect(screen.queryByRole("textbox", { name: "SSH address" })).not.toBeInTheDocument();
+    act(() => {
+      window.history.replaceState(null, "", "#/remote");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(await screen.findByRole("button", { name: "Connect to remote nanobot" })).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "Remote connections" })).not.toBeInTheDocument();
+  });
+
+  it("lets sidebar navigation leave the management page without a second dismissal", async () => {
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/remote-instances": { available: true, profiles: [] },
+    });
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.pointerDown(await within(sidebar).findByRole("button", { name: "Switch host" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Manage connections" }));
+    expect(await screen.findByRole("region", { name: "Remote connections" })).toBeVisible();
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    expect(await screen.findByRole("heading", { name: "Apps" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Remote connections" })).not.toBeInTheDocument();
+    expect(window.location.hash).toBe("#/apps");
+  });
+
+  it("closes the mobile sidebar when managing connections from its host menu", async () => {
+    const user = userEvent.setup();
+    requestMutationSpy.mockResolvedValue({ hosts: [], files: [], incomplete: false });
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: !query.includes("1024px"), media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(),
+      removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    })));
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/remote-instances": { available: true, profiles: [] },
+    });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await user.click(await within(screen.getByRole("main")).findByRole("button", { name: "Toggle sidebar" }));
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.pointerDown(await within(sheet).findByRole("button", { name: "Switch host" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Manage connections" }));
+    await waitFor(() => expect(sheet).not.toBeInTheDocument());
+    expect(screen.getByRole("main")).toContainElement(screen.getByRole("region", { name: "Remote connections" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Remote connections" })).toBeVisible();
+    expect(window.location.hash).not.toBe("#/remote");
+    expect(screen.queryByRole("button", { name: "Remote connections" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Connect to remote nanobot" }));
+    expect(await screen.findByRole("dialog", { name: "Connect to remote nanobot" })).toBeVisible();
+  });
+
+  it("releases the mobile sidebar modal when switching to a server", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: !query.includes("1024px"), media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(),
+      removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    })));
+    const profile = { id: "3b968d52-081d-4898-9970-ff0a1fc93817", name: "Team server",
+      host: "team", port: null, ssh_config: "", identity_file: "",
+      config_path: "~/.nanobot/config.json", runtime_user: "", connected: false };
+    requestMutationSpy.mockResolvedValue({ ...profile, hostname: "team-host", gateway_id: "remote-gateway",
+      url: "http://127.0.0.1:23456/#/?bootstrapSecret=test-only" });
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/remote-instances": { available: true, profiles: [profile] },
+    });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await user.click(await within(screen.getByRole("main")).findByRole("button", { name: "Toggle sidebar" }));
+    const sheet = await screen.findByRole("dialog");
+    await user.click(await within(sheet).findByRole("button", { name: "Switch host" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Team server team" }));
+    const frame = await screen.findByTitle("nanobot on Team server");
+    fireEvent.load(frame);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
+    expect(frame).toBeVisible();
+  });
+
+  it("opens a remote setup deep link after reloading without opening Settings", async () => {
+    requestMutationSpy.mockResolvedValue({ hosts: [], files: [], incomplete: false });
+    window.history.replaceState(null, "", "#/remote");
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/remote-instances": { available: true, profiles: [] },
+    });
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "Connect to remote nanobot" })).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: "Settings sections" })).not.toBeInTheDocument();
+    expect(window.location.hash).toBe("#/remote");
+  });
+
+  it("keeps the compose action in place and hands off keyboard focus between sidebar toggles", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const sidebar = within(await screen.findByRole("navigation", { name: "Sidebar navigation" }));
+    const compose = sidebar.getByRole("button", { name: "New topic" });
+    expect(compose).not.toHaveAttribute("aria-current");
+    expect(compose.querySelector("svg")).toHaveAttribute("data-product-icon", "compose");
+
+    const expand = sidebar.getByRole("button", { name: "Toggle sidebar", expanded: false });
+    expand.focus();
+    await user.keyboard("{Enter}");
+    const collapse = sidebar.getByRole("button", { name: "Collapse sidebar", expanded: true });
+    expect(collapse).toHaveFocus();
+    expect(sidebar.getByRole("button", { name: "New topic" })).toBe(compose);
+    expect(compose).toHaveTextContent("New topic");
+
+    await user.keyboard(" ");
+    expect(expand).toHaveFocus();
+    expect(expand).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps a just-created topic route while the session list catches up", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const firstMessage = "keep this first turn visible";
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: firstMessage },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(window.location.hash).toBe(
+        `#/chat/${encodeURIComponent("websocket:chat-1")}`,
+      ),
+    );
+    expect(await screen.findByText(firstMessage)).toBeInTheDocument();
+  });
+
+  it.each([false, true])("closes the active temporary chat without losing its replacement (pending capture=%s)", async (pendingCapture) => {
+    const { unmount } = render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(within(sidebar).queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
+    const firstToggle = await screen.findByRole("button", { name: "Temporary chat" });
+    expect(firstToggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(firstToggle);
+    expect(firstToggle).toHaveAttribute("aria-pressed", "true");
+    expect(window.location.hash).toBe("");
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "first private message" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/[0-9a-f-]+$/));
+    const firstHash = window.location.hash;
+    expect(firstHash).toMatch(/^#\/temporary\/[0-9a-f-]+$/);
+    expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
+    expect(createChatSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
+    expect(discardTemporaryChatSpy).not.toHaveBeenCalled();
+    const secondToggle = screen.getByRole("button", { name: "Temporary chat" });
+    expect(secondToggle).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(secondToggle);
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "second private message" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/[0-9a-f-]+$/));
+    const secondHash = window.location.hash;
+    expect(secondHash).toMatch(/^#\/temporary\/[0-9a-f-]+$/);
+    expect(secondHash).not.toBe(firstHash);
+    expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
+    expect(discardTemporaryChatSpy).not.toHaveBeenCalled();
+
+    expect(within(sidebar).getByText("Temporary chats")).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", {
+      name: "first private message",
+    })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", {
+      name: "second private message",
+    })).toBeInTheDocument();
+
+    // Native capture delays the update callback, so React can run the route
+    // cleanup effect before it. Do not replace transitionSession with a sync mock.
+    const descriptor = Object.getOwnPropertyDescriptor(document, "startViewTransition");
+    const captures: (() => void)[] = [];
+    const capture = vi.fn((update: () => void) => {
+      const finished = new Promise<void>((resolve) => {
+        captures.push(() => { update(); resolve(); });
+      });
+      return { ready: finished, finished, skipTransition: vi.fn() };
+    });
+    const completeCaptures = async () => {
+      while (captures.length) await act(async () => { captures.shift()!(); });
+    };
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: capture });
+    try {
+      fireEvent.click(within(sidebar).getByRole("button", {
+        name: "first private message",
+      }));
+      expect(capture).toHaveBeenCalledTimes(1);
+      expect(window.location.hash).toBe(secondHash);
+      await completeCaptures();
+      await waitFor(() => expect(window.location.hash).toBe(firstHash));
+      expect(within(screen.getByTestId("thread-header")).getByText(
+        "first private message",
+      )).toBeInTheDocument();
+      await waitFor(() => expect(document.title).toBe("first private message"));
+      expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
+
+      if (pendingCapture) {
+        fireEvent.click(within(sidebar).getByRole("button", { name: "second private message" }));
+        expect(window.location.hash).toBe(firstHash);
+        expect(captures).toHaveLength(1);
+      }
+      fireEvent.click(within(sidebar).getByRole("button", {
+        name: "Close temporary chat: first private message",
+      }));
+      await completeCaptures();
+      await waitFor(() => expect(window.location.hash).toBe(secondHash));
+      expect(within(screen.getByTestId("thread-header")).getByText("second private message")).toBeInTheDocument();
+      expect(within(sidebar).queryByRole("button", {
+        name: "first private message",
+      })).not.toBeInTheDocument();
+      expect(within(sidebar).getByRole("button", {
+        name: "second private message",
+      })).toBeInTheDocument();
+      expect(discardTemporaryChatSpy).toHaveBeenCalledTimes(1);
+
+      unmount();
+      await waitFor(() => expect(discardTemporaryChatSpy).toHaveBeenCalledTimes(2));
+      const discardedChatIds = discardTemporaryChatSpy.mock.calls.map(([chatId]) => chatId);
+      expect(new Set(discardedChatIds).size).toBe(2);
+      expect(discardedChatIds).toEqual([
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000002",
+      ]);
+    } finally {
+      await completeCaptures();
+      if (descriptor) Object.defineProperty(document, "startViewTransition", descriptor);
+      else Reflect.deleteProperty(document, "startViewTransition");
+    }
+  });
+
+  it("shows the temporary-chat control only on the new-topic hero", async () => {
+    mockSessions = [{
+      key: "websocket:existing-chat",
+      channel: "websocket",
+      chatId: "existing-chat",
+      createdAt: "2026-08-06T10:00:00Z",
+      updatedAt: "2026-08-06T10:00:00Z",
+      preview: "Existing topic",
+    }];
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const heroHeader = screen.getByTestId("thread-header");
+    const heroTemporaryToggle = within(heroHeader).getByRole("button", {
+      name: "Temporary chat",
+    });
+    const themeToggle = within(heroHeader).getByRole("button", {
+      name: "Toggle theme from header",
+    });
+    expect(within(sidebar).queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("thread-composer-motion")).queryByRole("button", {
+      name: "Temporary chat",
+    })).not.toBeInTheDocument();
+    expect(heroTemporaryToggle.compareDocumentPosition(themeToggle)
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const user = userEvent.setup();
+    await user.hover(heroTemporaryToggle);
+    const temporaryTooltip = await screen.findByRole("tooltip");
+    expect(temporaryTooltip).toHaveTextContent("Temporary chat");
+    expect(temporaryTooltip).toHaveTextContent("Not saved to history or memory");
+    expect(within(temporaryTooltip).getByText(
+      "Ends on reload, close, or disconnection.",
+    )).toHaveClass("font-medium");
+    await user.unhover(heroTemporaryToggle);
+
+    fireEvent.click(within(sidebar).getByText("Existing topic"));
+    expect(window.location.hash).toBe("#/chat/websocket%3Aexisting-chat");
+    expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
+    const temporaryToggle = screen.getByRole("button", { name: "Temporary chat" });
+    expect(temporaryToggle).toHaveClass("h-8", "w-8", "rounded-control");
+    expect(within(temporaryToggle).queryByText("Temporary chat")).not.toBeInTheDocument();
+    fireEvent.click(temporaryToggle);
+    expect(temporaryToggle).toHaveAttribute("aria-pressed", "true");
+    expect(temporaryToggle).toHaveClass("icon-action");
+    expect(within(temporaryToggle).getByTestId("temporary-chat-icon")).toHaveClass(
+      "motion-safe:duration-150",
+      "text-[var(--temporary-control-active)]",
+    );
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.click(temporaryToggle);
+    expect(temporaryToggle).toHaveAttribute("aria-pressed", "false");
+    expect(within(temporaryToggle).getByTestId("temporary-chat-icon")).toHaveClass(
+      "motion-safe:duration-75",
+      "text-current",
+    );
+    fireEvent.click(temporaryToggle);
+    expect(window.location.hash).toBe("#/new");
+    expect(temporaryToggle).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "start temporary chat" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/[0-9a-f-]+$/));
+
+    expect(screen.queryByText("Not saved")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
+  });
+
+  it("allows leaving a page with temporary chats without blocking", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Temporary chat" }));
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "do not lose this" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/[0-9a-f-]+$/));
+
+    const beforeUnload = new Event("beforeunload", { cancelable: true });
+    act(() => window.dispatchEvent(beforeUnload));
+    expect(beforeUnload.defaultPrevented).toBe(false);
+  });
+
+  it("ends temporary chats quietly after a connection interruption", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => {
+      statusHandlers.forEach((handler) => handler("open"));
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Temporary chat" }));
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "connection-sensitive message" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(window.location.hash).toMatch(/^#\/temporary\/[0-9a-f-]+$/));
+
+    act(() => {
+      statusHandlers.forEach((handler) => handler("reconnecting"));
+    });
+
+    await waitFor(() => expect(window.location.hash).toBe("#/new"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("connection-sensitive message")).not.toBeInTheDocument();
+  });
+
+  it("keeps the context-menu project through navigation and first-message creation", async () => {
+    const projectScope = {
+      project_path: "/tmp/selected-project",
+      project_name: "selected-project",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+    mockSessions = [{
+      key: "websocket:existing-chat",
+      channel: "websocket",
+      chatId: "existing-chat",
+      createdAt: null,
+      updatedAt: null,
+      preview: "Existing topic",
+      workspaceScope: projectScope,
+    }];
+    mockFetchRoutes({
+      "/api/workspaces": {
+        schema_version: 1,
+        default_access_mode: "full",
+        default_scope: { ...projectScope, project_path: "/tmp/workspace", project_name: "workspace" },
+        controls: { can_change_project: true },
+      },
+    });
+    window.history.replaceState(null, "", "/#/chat/websocket%3Aexisting-chat");
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await screen.findByRole("button", { name: "Workspace access mode: Full Access" });
+    const projectSection = screen.getByRole("region", { name: "selected-project" });
+    fireEvent.contextMenu(within(projectSection).getByRole("button", { name: "selected-project" }));
+    await userEvent.setup().click(await screen.findByRole("menuitem", { name: "New topic" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/new"));
+    expect(await screen.findByRole("button", { name: "Switch directory" })).toHaveTextContent("selected-project");
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "project topic" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledWith(projectScope));
+  });
+
+  it("uses the restricted default scope without offering project selection", async () => {
+    mockFetchRoutes({
+      "/api/workspaces": {
+        schema_version: 1,
+        default_access_mode: "full",
+        default_scope: {
+          project_path: "/tmp/workspace",
+          project_name: "workspace",
+          access_mode: "full",
+          restrict_to_workspace: false,
+        },
+        controls: { can_change_project: true },
+      },
+    });
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: "Switch directory" })).toBeInTheDocument();
+    act(() => {
+      sessionUpdateHandlers.forEach((handler) => handler("selected-chat", "metadata", {
+        project_path: "/tmp/selected-project",
+        project_name: "selected-project",
+        access_mode: "full",
+        restrict_to_workspace: false,
+      }));
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Temporary chat" }));
+
+    expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Full Access")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "temporary project check" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sendMessageSpy).toHaveBeenCalled());
+    const options = sendMessageSpy.mock.calls.at(-1)?.[3];
+    expect(options?.workspaceScope).toMatchObject({
+      project_path: "/tmp/workspace",
+      access_mode: "restricted",
+      restrict_to_workspace: true,
+    });
+  });
+
+  it("preserves the first message when the gateway rejects a project", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const projectPath = "C:\\missing-project";
+    const directory = (path: string) => ({
+      path, parent: null, entries: [], partial: false,
+      truncated: false, host: "test-host", platform: "Windows",
+    });
+    const directoryUrl = (path: string) => `/api/workspaces/directories?${new URLSearchParams({ path, q: "", hidden: "0", partial: "1" })}`;
+    requestMutationSpy.mockResolvedValue({ path: projectPath, name: "missing-project" });
+    createChatSpy.mockRejectedValueOnce(
+      new Error("workspace_scope_rejected:project_path must be an existing directory"),
+    );
+    mockFetchRoutes({
+      "/api/workspaces": {
+        schema_version: 1,
+        default_access_mode: "default",
+        default_scope: {
+          project_path: "C:\\workspace",
+          project_name: "workspace",
+          access_mode: "restricted",
+          restrict_to_workspace: true,
+        },
+        controls: { can_change_project: true, can_browse_directories: true, can_resolve_project: true },
+      },
+      [directoryUrl("C:\\workspace")]: directory("C:\\workspace"),
+      [directoryUrl("C:\\workspace\\")]: directory("C:\\workspace"),
+      [directoryUrl(projectPath)]: directory(projectPath),
+      [directoryUrl(`${projectPath}\\`)]: directory(projectPath),
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("button", { name: "Switch directory" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Edit path:/ }));
+    fireEvent.change(await screen.findByRole("combobox"), {
+      target: { value: projectPath },
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    const message = screen.getByLabelText("Message input");
+    fireEvent.change(message, { target: { value: "keep this first message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
+    expect(message).toHaveValue("keep this first message");
+    const projectButton = screen.getByRole("button", { name: "Switch directory" });
+    await waitFor(() => expect(projectButton).toHaveFocus());
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again.",
+    );
+    fireEvent.click(projectButton);
+    fireEvent.click(screen.getByRole("button", { name: /^Edit path:/ }));
+    const pathInput = await screen.findByRole("combobox");
+    expect(pathInput).toHaveValue(`${projectPath}\\`);
+    expect(pathInput).toHaveAttribute("aria-invalid", "true");
+    expect(pathInput).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again.",
+    );
+    expect(window.location.hash).toBe("");
+    consoleError.mockRestore();
+  });
+
+  it("restores the standalone Channels page from a legacy restart route", async () => {
+    localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now()));
+    localStorage.setItem("nanobot-webui.restartRoute", "#/settings?section=channels");
+    window.history.replaceState(null, "", "/#/new");
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/nanobot-features": {
+        features: [{
+          name: "websocket",
+          display_name: "Websocket",
+          type: "channel",
+          enabled: true,
+          installed: true,
+          ready: true,
+          status: "enabled",
+          install_supported: true,
+          requires_restart: true,
+        }],
+        enabled_count: 1,
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    expect(
+      await screen.findByRole("heading", { name: "Apps" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Channels" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(screen.getByRole("navigation", { name: "Sidebar navigation" })).getByRole("button", { name: "Apps" })).toHaveAttribute("aria-current", "page");
+    expect(window.location.hash).toBe("#/settings?section=channels");
+  });
+
+  it.each(["before disconnect", "after disconnect"])("finishes a requested restart when another tab clears its marker %s", async (clearWhen) => {
+    mockDefaultChatId = "restart-fixture";
+    window.history.replaceState(null, "", "/#/settings?section=runtime");
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Restart" }));
+    expect(sendSystemCommandSpy).toHaveBeenCalledWith("restart-fixture", "/restart");
+    expect(screen.getByRole("button", { name: "Restarting..." })).toBeDisabled();
+    act(() => {
+      if (clearWhen === "before disconnect") localStorage.removeItem("nanobot-webui.restartStartedAt");
+      for (const handler of statusHandlers) handler("reconnecting");
+      localStorage.removeItem("nanobot-webui.restartStartedAt");
+      for (const handler of statusHandlers) handler("open");
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Restart" })).toBeEnabled());
+    expect(createChatSpy).not.toHaveBeenCalled();
+  });
+
+  it("refreshes settings after the browser reconnects from a restart", async () => {
+    let restartCompleted = false;
+    let refreshedSettingsRequests = 0;
+    let releaseRefreshedSettings!: () => void;
+    const refreshedSettingsReady = new Promise<void>((resolve) => {
+      releaseRefreshedSettings = resolve;
+    });
+    const pendingSettings = {
+      ...baseSettingsPayload(),
+      requires_restart: true,
+      restart_required_sections: ["runtime"],
+    };
+    const refreshedSettings = {
+      ...baseSettingsPayload(),
+      requires_restart: false,
+      restart_required_sections: [],
+    };
+    localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now() - 2_000));
+    window.history.replaceState(null, "", "/#/settings?section=runtime");
+    mockFetchRoutes({
+      "/api/settings": () => {
+        if (!restartCompleted) return pendingSettings;
+        refreshedSettingsRequests += 1;
+        if (refreshedSettingsRequests === 1) throw new Error("gateway is still starting");
+        return refreshedSettingsReady.then(() => refreshedSettings);
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Saved. Restart to apply changes.").length).toBeGreaterThan(0);
+    }, { timeout: 10_000 });
+
+    restartCompleted = true;
+    act(() => {
+      for (const handler of statusHandlers) handler("reconnecting");
+      for (const handler of statusHandlers) handler("open");
+    });
+
+    await waitFor(() => expect(refreshedSettingsRequests).toBeGreaterThan(1));
+    await act(async () => {
+      releaseRefreshedSettings();
+      await refreshedSettingsReady;
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/new"));
+    expect(await screen.findByTestId("thread-welcome-mark", {}, { timeout: 10_000 })).toBeInTheDocument();
+  }, 30_000);
+
   it("opens Skills from the main sidebar", async () => {
+    const longSkillDescription = [
+      "Work with GitHub repositories, issues, pull requests, releases, workflows,",
+      "and code search through the GitHub CLI.",
+      "Use this skill for repository maintenance, review automation, release preparation,",
+      "and other GitHub workflows that need authenticated command-line access.",
+    ].join(" ");
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
       "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
       "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
       "/api/webui/skills": {
         skills: [
-          { name: "cron", description: "Schedule reminders.", source: "builtin", available: true },
+          {
+            name: "cron",
+            description: "Schedule reminders.",
+            source: "builtin",
+            enabled: true,
+            deletable: false,
+            available: true,
+          },
           {
             name: "github",
             description: "Work with GitHub.",
             source: "builtin",
+            enabled: true,
+            deletable: false,
             available: false,
             unavailable_reason: "CLI: gh",
+          },
+          {
+            name: "custom-skill",
+            description: "A workspace skill.",
+            source: "workspace",
+            enabled: true,
+            deletable: true,
+            available: true,
           },
         ],
       },
       "/api/webui/skills/github": {
         name: "github",
-        description: "Work with GitHub.",
+        description: longSkillDescription,
         source: "builtin",
+        enabled: true,
+        deletable: false,
         available: false,
         unavailable_reason: "CLI: gh",
         requirements: {
@@ -345,44 +1510,356 @@ describe("App layout", () => {
           missing_bins: ["gh"],
           missing_env: [],
         },
+        install_options: [{
+          id: "brew",
+          kind: "brew",
+          label: "Install GitHub CLI (brew)",
+          command: "brew install gh",
+        }],
         raw_markdown: "---\nname: github\n---\nUse GitHub CLI.",
       },
+    });
+    requestMutationSpy.mockResolvedValueOnce({
+      skills: [
+        {
+          name: "cron",
+          description: "Schedule reminders.",
+          source: "builtin",
+          enabled: true,
+          deletable: false,
+          available: true,
+        },
+        {
+          name: "github",
+          description: "Work with GitHub.",
+          source: "builtin",
+          enabled: false,
+          deletable: false,
+          available: false,
+          unavailable_reason: "CLI: gh",
+        },
+        {
+          name: "custom-skill",
+          description: "A workspace skill.",
+          source: "workspace",
+          enabled: true,
+          deletable: true,
+          available: true,
+        },
+      ],
+      last_action: { name: "github", enabled: false, deleted: false },
     });
 
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const skillsButton = within(sidebar).getByRole("button", { name: "Skills" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Skills" }));
 
-    fireEvent.click(skillsButton);
-
-    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("textbox", { name: "Search installed skills" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Custom" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Built-in" })).toBeInTheDocument();
     expect(screen.getByText("cron")).toBeInTheDocument();
     expect(screen.getByText("github")).toBeInTheDocument();
-    expect(screen.getByText("Missing: CLI: gh")).toBeInTheDocument();
+    expect(screen.getByText("Needs setup")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Settings sections" })).not.toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "Skills" })).toHaveAttribute(
+    expect(within(sidebar).getByRole("button", { name: "Apps" })).toHaveAttribute(
       "aria-current",
       "page",
     );
-    expect(document.title).toBe("Skills · nanobot");
+    expect(document.title).toBe("Apps");
 
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
-    expect(await screen.findByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
+    expect(await screen.findByTestId("thread-welcome-mark")).toBeInTheDocument();
 
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
-    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Skills" }));
+    expect(await screen.findByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(screen.getByRole("button", { name: "Open details for github" }));
 
     expect(await screen.findByRole("heading", { name: "github" })).toBeInTheDocument();
-    expect(screen.getByText("Unavailable reason")).toBeInTheDocument();
-    expect(screen.getAllByText("CLI: gh").length).toBeGreaterThan(0);
-    expect(screen.getByText("Missing CLI")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Raw SKILL.md"));
+    const showMore = await screen.findByRole("button", { name: "Show more" });
+    expect(showMore).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(showMore);
+    expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByText("Setup required")).toBeInTheDocument();
+    expect(screen.getByText("brew install gh")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Skill instructions"));
     expect(screen.getByText(/Use GitHub CLI/)).toBeInTheDocument();
+    const enabledSwitch = screen.getByRole("switch", { name: "Disable github" });
+    expect(enabledSwitch).toHaveAttribute("aria-checked", "true");
+    expect(enabledSwitch).toHaveClass("h-5", "w-9", "bg-foreground");
+    fireEvent.click(enabledSwitch);
+    await waitFor(() => {
+      expect(screen.getByRole("switch", { name: "Enable github" })).toHaveAttribute(
+        "aria-checked",
+        "false",
+      );
+    });
+    expect(screen.getByRole("switch", { name: "Enable github" })).toHaveClass("h-5", "w-9", "bg-muted-foreground/25");
+  });
+
+  it("deletes a custom skill from its detail sheet", async () => {
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
+      "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
+      "/api/webui/skills": {
+        skills: [
+          {
+            name: "custom-skill",
+            description: "A workspace skill.",
+            source: "workspace",
+            enabled: true,
+            deletable: true,
+            available: true,
+          },
+        ],
+      },
+      "/api/webui/skills/custom-skill": {
+        name: "custom-skill",
+        description: "A workspace skill.",
+        source: "workspace",
+        enabled: true,
+        deletable: true,
+        available: true,
+        requirements: {
+          bins: [],
+          env: [],
+          missing_bins: [],
+          missing_env: [],
+        },
+        raw_markdown: "---\nname: custom-skill\n---\nWorkspace instructions.",
+      },
+    });
+    requestMutationSpy.mockResolvedValueOnce({
+      skills: [],
+      last_action: { name: "custom-skill", enabled: false, deleted: true },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Skills" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open details for custom-skill" }),
+    );
+    expect(await screen.findByRole("heading", { name: "custom-skill" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("heading", { name: "Delete custom-skill?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete skill" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Open details for custom-skill" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("No skills are available.")).toBeInTheDocument();
+  });
+
+  it("discovers and installs a skill from skills.sh", async () => {
+    let finishInstall!: (value: unknown) => void;
+    const pendingInstall = new Promise<unknown>((resolve) => {
+      finishInstall = resolve;
+    });
+    const installedPayload = {
+      skills: [
+        {
+          name: "react-testing",
+          description: "Test React apps.",
+          source: "workspace",
+          available: true,
+        },
+        { name: "cron", description: "Schedule reminders.", source: "builtin", available: true },
+      ],
+      last_action: {
+        installed: true,
+        already_installed: false,
+        name: "react-testing",
+      },
+    };
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
+      "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
+      "/api/webui/skills": {
+        skills: [
+          { name: "cron", description: "Schedule reminders.", source: "builtin", available: true },
+        ],
+      },
+      "/api/webui/skills/trending?provider=all": {
+        period: "mixed",
+        provider: "all",
+        install_supported: true,
+        skills: [
+          {
+            id: "vercel-labs/skills/find-skills",
+            skill_id: "find-skills",
+            name: "find-skills",
+            source: "vercel-labs/skills",
+            provider: "skills_sh",
+            installs: 14_481,
+            url: "https://skills.sh/vercel-labs/skills/find-skills",
+            installed: false,
+            install_supported: true,
+            metric: "installs_24h",
+            rank: 18,
+          },
+          {
+            id: "skillhub:ima-skills",
+            skill_id: "ima-skills",
+            name: "ima-skills",
+            source: "@tencent-adm/ima-skills",
+            provider: "skillhub",
+            installs: 11_831,
+            downloads: 142_525,
+            url: "https://skillhub.cn/skills/tencent-adm/ima-skills",
+            installed: false,
+            install_supported: true,
+            metric: "installs_total",
+            version: "1.1.8",
+            verified: true,
+            rank: 1,
+          },
+        ],
+      },
+      "/api/webui/skills/trends?id=vercel-labs%2Fskills%2Ffind-skills": {
+        trends: {
+          "vercel-labs/skills/find-skills": [20, 32, 28, 45, 41, 50, 62, 58],
+        },
+      },
+      "/api/webui/skills/search?q=React&provider=all": {
+        query: "React",
+        provider: "all",
+        install_supported: true,
+        skills: [
+          {
+            id: "acme/agent-skills/react-testing",
+            skill_id: "react-testing",
+            name: "React Testing",
+            source: "acme/agent-skills",
+            provider: "skills_sh",
+            installs: 42,
+            url: "https://skills.sh/acme/agent-skills/react-testing",
+            installed: false,
+            install_supported: true,
+            metric: "installs_total",
+          },
+          {
+            id: "skillhub:react",
+            skill_id: "react",
+            name: "React",
+            source: "@ivangdavila/react",
+            provider: "skillhub",
+            installs: 693,
+            downloads: 7_718,
+            url: "https://skillhub.cn/skills/ivangdavila/react",
+            installed: false,
+            install_supported: true,
+            metric: "installs_total",
+            version: "1.0.4",
+          },
+        ],
+      },
+      "/api/webui/skills/trends?id=acme%2Fagent-skills%2Freact-testing": {
+        trends: { "acme/agent-skills/react-testing": [] },
+      },
+    });
+    requestMutationSpy.mockImplementationOnce(() => pendingInstall);
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Skills" }));
+    const selectView = async (view: string) => {
+      const views = await screen.findByRole("radiogroup", { name: "Skills views" });
+      await userEvent.click(within(views).getByRole("radio", { name: view }));
+    };
+    await selectView("Marketplace");
+    expect(
+      await screen.findByRole("heading", { name: "Popular skills" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("find-skills")).toBeInTheDocument();
+    expect(screen.getByText("ima-skills")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open ima-skills on SkillHub" })).toHaveAttribute(
+      "href", "https://skillhub.cn/skills/tencent-adm/ima-skills",
+    );
+    expect(screen.getByRole("link", { name: "Open SkillHub" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open skills.sh" })).toBeInTheDocument();
+    expect(screen.getByText(/14,481 installs \/ 24h/)).toBeInTheDocument();
+    expect(screen.queryByText(/11,831 installs/)).not.toBeInTheDocument();
+    const sources = within(screen.getByRole("radiogroup", { name: "Skill source" }));
+    fireEvent.click(sources.getByRole("radio", { name: "SkillHub" }));
+    expect(screen.getByText("ima-skills")).toBeInTheDocument();
+    expect(screen.queryByText("find-skills")).not.toBeInTheDocument();
+    expect(
+      vi.mocked(fetch).mock.calls.some(
+        ([input]) =>
+          String(input) === "/api/webui/skills/trending?provider=skillhub",
+      ),
+    ).toBe(false);
+    fireEvent.click(sources.getByRole("radio", { name: "All" }));
+    expect(screen.getByText("find-skills")).toBeInTheDocument();
+    expect(screen.getByText("ima-skills")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("img", { name: "8-week install trend" }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Search skills" }), {
+      target: { value: "React" },
+    });
+
+    expect(await screen.findByText("React Testing")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open React on SkillHub" })).toHaveAttribute(
+      "href", "https://skillhub.cn/skills/ivangdavila/react",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Install React Testing" }));
+    expect(
+      await screen.findByRole("heading", { name: "Install React Testing?" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Install skill" }));
+
+    await waitFor(() => {
+      expect(requestMutationSpy).toHaveBeenCalledWith(
+        "skill.install",
+        {
+          provider: "skills_sh",
+          source: "acme/agent-skills",
+          skill: "react-testing",
+        },
+        150_000,
+      );
+    });
+    await selectView("Installed");
+    await selectView("Marketplace");
+    expect(screen.getByRole("textbox", { name: "Search skills" })).toHaveValue("React");
+    fireEvent.change(screen.getByRole("textbox", { name: "Search skills" }), { target: { value: "" } });
+    expect(
+      await screen.findByRole("button", { name: "Install find-skills" }),
+    ).toBeDisabled();
+
+    await act(async () => {
+      finishInstall(installedPayload);
+      await pendingInstall;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Install find-skills" })).toBeEnabled();
+    });
+    await selectView("Installed");
+    expect(screen.getByText("react-testing")).toBeInTheDocument();
   });
 
   it("opens Automations from the main sidebar", async () => {
@@ -402,7 +1879,7 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
+              next_run_at_ms: currentMonthTimestamp(17),
               last_status: "ok",
               pending: false,
               run_history: [],
@@ -427,7 +1904,7 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 11, 30, 0),
+              next_run_at_ms: currentMonthTimestamp(17, 11, 30),
               last_status: "ok",
               pending: false,
               run_history: [],
@@ -462,35 +1939,104 @@ describe("App layout", () => {
 
     fireEvent.click(automationsButton);
 
-    const heading = await screen.findByRole("heading", { name: "Automations" });
+    const heading = await screen.findByRole(
+      "heading",
+      { name: "Automations" },
+      { timeout: 5_000 },
+    );
     expect(heading).toBeInTheDocument();
     const automationsMain = heading.closest("main");
     expect(automationsMain).not.toBeNull();
     expect(within(automationsMain as HTMLElement).queryByText("Settings")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Daily repo check").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Check the repo status").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Release prep").length).toBeGreaterThanOrEqual(1);
+    expect((await screen.findAllByText(
+      "Daily repo check",
+      {},
+      { timeout: 5_000 },
+    )).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("Check the repo status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Daily repo check/ }));
+    expect(within(screen.getByRole("dialog", { name: "Daily repo check" })).getByText("Check the repo status")).toBeVisible();
+    const detail = within(screen.getByRole("dialog", { name: "Daily repo check" }));
+    expect(detail.queryByText("Release prep")).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(detail.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Open a chat" })).toHaveAttribute(
+      "href", "#/chat/websocket%3Achat-a",
+    );
+    await user.keyboard("{Escape}");
+    expect(detail.getByRole("button", { name: "More actions" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.getByText("WeChat quiz")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /WeChat quiz/ }));
     expect(screen.getByText("WeChat")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByText("weixin:wx-chat")).not.toBeInTheDocument();
     expect(screen.queryByText("memory with dream state")).not.toBeInTheDocument();
-    expect(screen.getByText("heartbeat")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /heartbeat/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "System tasks 1" })).not.toBeInTheDocument();
+    expect(screen.queryByText("heartbeat")).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Automations" })).toHaveAttribute(
       "aria-current",
       "page",
     );
-    expect(document.title).toBe("Automations · nanobot");
+    expect(document.title).toBe("Automations");
 
-    const searchInput = within(automationsMain as HTMLElement).getByPlaceholderText(
-      "Search task, message, linked chat, or schedule",
+  });
+
+  it("keeps the automation chat link stable across live sidebar renames without duplicating titles", async () => {
+    const key = "websocket:linked-chat";
+    mockSessions = [{
+      key, channel: "websocket", chatId: "linked-chat", createdAt: null, updatedAt: null,
+      title: "Stored title", preview: "Original preview",
+    }];
+    const sidebarState: SidebarStatePayload = {
+      schema_version: 1, pinned_keys: [], archived_keys: [], session_order: [],
+      title_overrides: { [key]: "推特大战场" }, project_name_overrides: {},
+      tags_by_key: {}, collapsed_groups: {}, workbench: { version: 1, tabs: {} },
+      view: { density: "comfortable", show_archived: false, sort: "updated_desc" },
+    };
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/webui/sidebar-state": sidebarState,
+      "/api/webui/automations": { jobs: [{
+        id: "reminder", name: "Drink water", enabled: true,
+        schedule: { kind: "every", every_ms: 60_000 },
+        payload: { message: "Take a break" },
+        state: { next_run_at_ms: currentMonthTimestamp(17) },
+        origin: { session_key: key, channel: "websocket", chat_id: "linked-chat",
+          title: "Stored title", preview: "Original preview" },
+      }] },
+    });
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    await within(sidebar).findByRole("button", { name: "推特大战场" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Drink water/ }));
+    const dialog = screen.getByRole("dialog", { name: "Drink water" });
+    expect(within(dialog).queryByText("推特大战场")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Stored title")).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(within(dialog).getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Open a chat" })).toHaveAttribute(
+      "href", "#/chat/websocket%3Alinked-chat",
     );
-    fireEvent.change(searchInput, { target: { value: "WeChat" } });
-    await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
-    expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
-
-    fireEvent.change(searchInput, { target: { value: "09-23" } });
-    await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
-    expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
+    for (const title of ["新会话名称", ""]) {
+      act(() => {
+        sidebarStateUpdateHandlers.forEach((handler) => handler({
+          ...sidebarState, title_overrides: title ? { [key]: title } : {},
+        }));
+      });
+      const expected = title || "Stored title";
+      expect(within(sidebar).getByText(expected)).toBeInTheDocument();
+      expect(within(dialog).queryByText(expected)).not.toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: "Open a chat" })).toHaveAttribute(
+        "href", "#/chat/websocket%3Alinked-chat",
+      );
+    }
+    await user.keyboard("{Escape}");
+    expect(within(dialog).getByRole("button", { name: "More actions" })).toHaveFocus();
+    expect(requestMutationSpy).not.toHaveBeenCalled();
   });
 
   it("edits a past one-time automation without resubmitting its old schedule", async () => {
@@ -507,6 +2053,7 @@ describe("App layout", () => {
       },
       state: {
         next_run_at_ms: null,
+        last_run_at_ms: currentMonthTimestamp(12),
         last_status: "ok",
         pending: false,
         run_history: [],
@@ -522,14 +2069,12 @@ describe("App layout", () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
       "/api/webui/automations": { jobs: [pastOneShot] },
-      "/api/webui/automations/update?id=past-one-shot": {
-        jobs: [
-          {
-            ...pastOneShot,
-            payload: { ...pastOneShot.payload, message: "Updated one-shot message" },
-          },
-        ],
-      },
+    });
+    requestMutationSpy.mockResolvedValueOnce({
+      jobs: [{
+        ...pastOneShot,
+        payload: { ...pastOneShot.payload, message: "Updated one-shot message" },
+      }],
     });
 
     render(<App />);
@@ -539,7 +2084,15 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
 
     expect((await screen.findAllByText("Past one-shot")).length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getByRole("button", { name: /Past one-shot/ }));
+    const runDetail = within(screen.getByRole("dialog", { name: "Past one-shot" }));
+    expect(runDetail.getByText("Completed")).toBeVisible();
+    expect(runDetail.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    fireEvent.click(runDetail.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
+    fireEvent.click(screen.getByRole("button", { name: /Past one-shot/ }));
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByRole("dialog", { name: "Edit task" });
     expect(screen.queryByText("Run time must be in the future.")).not.toBeInTheDocument();
     expect(
       screen.queryByText("Update the prompt and schedule. The linked chat stays unchanged."),
@@ -555,19 +2108,17 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/webui/automations/update?id=past-one-shot",
-        expect.any(Object),
+      expect(requestMutationSpy).toHaveBeenCalledWith(
+        "automation.update",
+        {
+          id: "past-one-shot",
+          values: {
+            name: "Past one-shot",
+            message: "Updated one-shot message",
+          },
+        },
+        20_000,
       );
-    });
-    const updateCall = vi.mocked(fetch).mock.calls.find(
-      ([url]) => String(url) === "/api/webui/automations/update?id=past-one-shot",
-    );
-    expect(updateCall).toBeTruthy();
-    const headers = updateCall?.[1]?.headers as Record<string, string>;
-    expect(JSON.parse(decodeURIComponent(headers["X-Nanobot-Automation-Values"]))).toEqual({
-      name: "Past one-shot",
-      message: "Updated one-shot message",
     });
   });
 
@@ -581,12 +2132,12 @@ describe("App layout", () => {
       "The full content should remain available without forcing the user into a small nested scroll area.",
     ].join("\n");
     const history = [
-      { run_at_ms: Date.UTC(2026, 3, 12, 10, 0, 0), status: "error", duration_ms: 900, error: "oldest failure" },
-      { run_at_ms: Date.UTC(2026, 3, 13, 10, 0, 0), status: "error", duration_ms: 800, error: "second oldest failure" },
-      { run_at_ms: Date.UTC(2026, 3, 14, 10, 0, 0), status: "ok", duration_ms: 700 },
-      { run_at_ms: Date.UTC(2026, 3, 15, 10, 0, 0), status: "ok", duration_ms: 600 },
-      { run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0), status: "ok", duration_ms: 500 },
-      { run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0), status: "ok", duration_ms: 400 },
+      { run_at_ms: currentMonthTimestamp(12), status: "error", duration_ms: 900, error: "oldest failure" },
+      { run_at_ms: currentMonthTimestamp(13), status: "error", duration_ms: 800, error: "second oldest failure" },
+      { run_at_ms: currentMonthTimestamp(14), status: "ok", duration_ms: 700 },
+      { run_at_ms: currentMonthTimestamp(15), status: "ok", duration_ms: 600 },
+      { run_at_ms: currentMonthTimestamp(16), status: "ok", duration_ms: 500 },
+      { run_at_ms: currentMonthTimestamp(17), status: "ok", duration_ms: 400 },
     ];
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
@@ -604,7 +2155,7 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 18, 10, 0, 0),
+              next_run_at_ms: currentMonthTimestamp(18),
               last_status: "ok",
               pending: false,
               run_history: history,
@@ -627,18 +2178,23 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
 
-    const detailHeading = await screen.findByRole("heading", { name: "Long detail automation" });
-    const detailPanel = detailHeading.closest("article") as HTMLElement;
-    expect(detailPanel).not.toBeNull();
-    const message = Array.from(detailPanel.querySelectorAll("section div")).find(
+    fireEvent.click(await screen.findByRole(
+      "button",
+      { name: /Long detail automation.*Planned/ },
+      { timeout: 5_000 },
+    ));
+    const detailPanel = await screen.findByRole("dialog", { name: "Long detail automation" });
+    const message = Array.from(detailPanel.querySelectorAll("section p")).find(
       (node) => node.textContent === longMessage,
     ) as HTMLElement | undefined;
     expect(message).toBeTruthy();
-    expect(message!).toHaveClass("line-clamp-6");
+    const preview = message!.closest(".expandable-text")!;
+    expect(preview).toHaveAttribute("data-state", "closed");
 
     fireEvent.click(within(detailPanel).getByRole("button", { name: "Show full message" }));
     expect(within(detailPanel).getByRole("button", { name: "Show less" })).toBeInTheDocument();
-    expect(message!).not.toHaveClass("line-clamp-6");
+    expect(preview).toHaveAttribute("data-state", "open");
+    expect(preview).toContainElement(message!);
 
     expect(within(detailPanel).queryByText("Recent health")).not.toBeInTheDocument();
     expect(within(detailPanel).queryByRole("button", { name: /Run history/ })).not.toBeInTheDocument();
@@ -664,13 +2220,13 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
-              last_run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0),
+              next_run_at_ms: currentMonthTimestamp(17),
+              last_run_at_ms: currentMonthTimestamp(16),
               last_status: "ok",
               pending: false,
               run_history: [
                 {
-                  run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0),
+                  run_at_ms: currentMonthTimestamp(16),
                   status: "ok",
                   duration_ms: 500,
                 },
@@ -692,25 +2248,114 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "侧边栏导航" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "自动任务" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "任务" }));
 
-    const heading = await screen.findByRole("heading", { name: "自动任务" });
+    const heading = await screen.findByRole("heading", { name: "任务" });
     expect(heading).toBeInTheDocument();
     const automationsMain = heading.closest("main");
     expect(automationsMain).not.toBeNull();
     expect(within(automationsMain as HTMLElement).queryByText("设置")).not.toBeInTheDocument();
-    expect(screen.getByText("任务队列")).toBeInTheDocument();
+    expect(screen.queryByText("任务队列")).not.toBeInTheDocument();
     expect(screen.getAllByText("每日检查").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("检查仓库状态").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("每 1天")).toBeInTheDocument();
+    expect(screen.queryByText("检查仓库状态")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /每日检查.*计划运行/ }));
+    const detail = within(screen.getByRole("dialog", { name: "每日检查" }));
+    expect(detail.getByText("检查仓库状态")).toBeVisible();
+    expect(detail.queryByText(/每 1天/)).not.toBeInTheDocument();
+    fireEvent.click(detail.getByRole("button", { name: "任务信息" }));
+    expect(within(screen.getByRole("dialog", { name: "任务信息" })).getByText(/每 1天/)).toBeVisible();
     expect(screen.queryByText("最近健康状态")).not.toBeInTheDocument();
     expect(screen.queryByText("近期无问题")).not.toBeInTheDocument();
     expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
-    expect(document.title).toBe("自动任务 · nanobot");
+    expect(document.title).toBe("任务");
   });
 
-  it("fully collapses the native host sidebar and previews it on hover", async () => {
+  it("collapses an empty sidebar, then restores the saved width when the first chat is created", async () => {
+    localStorage.setItem("nanobot-webui.sidebar", "1");
+    localStorage.setItem("nanobot-webui.sidebar.width", "320");
+    render(<App />);
+
+    const sidebar = await screen.findByTestId("host-sidebar-flow");
+    expect(sidebar).toHaveStyle({ width: "56px" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Toggle sidebar" }));
+    expect(sidebar).toHaveStyle({ width: "320px" });
+    fireEvent.keyDown(within(sidebar).getByRole("separator"), { key: "Enter" });
+    expect(sidebar).toHaveStyle({ width: "56px" });
+
+    const composer = await screen.findByLabelText("Message input");
+    fireEvent.change(composer, { target: { value: "First message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sidebar).toHaveStyle({ width: "320px" }));
+  });
+
+  it("resizes the sidebar, collapses at the drag threshold and restores its saved width", async () => {
+    mockSessions = [{ key: "websocket:chat-a", channel: "websocket", chatId: "chat-a", createdAt: null, updatedAt: null, preview: "First chat" }];
+    const view = render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const handle = screen.getByRole("separator", { name: "Resize sidebar" });
+    const sidebar = screen.getByTestId("host-sidebar-flow");
+    expect(sidebar).toHaveClass("group/sidebar");
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 272 });
+    expect(sidebar).toHaveAttribute("data-resizing", "true");
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 360 });
+    expect(sidebar).toHaveStyle({ width: "360px" });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 360 });
+    expect(sidebar).not.toHaveAttribute("data-resizing");
+    expect(sidebar).toHaveStyle({ width: "360px" });
+    expect(localStorage.getItem("nanobot-webui.sidebar.width")).toBe("360");
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 2, clientX: 360 });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientX: 150 });
+    expect(sidebar).toHaveStyle({ width: "56px" });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientX: 180 });
+    expect(sidebar).toHaveStyle({ width: "56px" });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientX: 240 });
+    fireEvent.pointerUp(handle, { pointerId: 2, clientX: 240 });
+    expect(sidebar).toHaveStyle({ width: "240px" });
+    fireEvent.keyDown(handle, { key: "Enter" });
+    expect(sidebar).toHaveStyle({ width: "56px" });
+    view.unmount();
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "56px" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Sidebar navigation" })).getByRole("button", { name: "Toggle sidebar" }));
+    expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "240px" });
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), { key: "ArrowRight" });
+    expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "272px" });
+  });
+
+  it.each(["pointerUp", "pointerCancel", "lostPointerCapture"] as const)("keeps highlight easing while disabling navigation target lag until %s", async (finish) => {
+    mockSessions = [{
+      key: "websocket:resize-test", channel: "websocket", chatId: "resize-test",
+      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
+      title: "Resize test", preview: "",
+    }];
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByTestId("host-sidebar-flow");
+    await within(sidebar).findByTestId("chats-selection-highlight");
+    const handle = within(sidebar).getByRole("separator", { name: "Resize sidebar" });
+    for (const label of ["Apps", "Automations"]) {
+      expect(within(sidebar).getByRole("button", { name: label })).toHaveClass(
+        "group-data-[resizing=true]/sidebar:transition-none",
+      );
+    }
+    for (const scope of ["actions", "chats"]) {
+      const highlight = within(sidebar).getByTestId(`${scope}-selection-highlight`);
+      expect(highlight).not.toHaveClass(
+        "group-data-[resizing=true]/sidebar:transition-none",
+      );
+      expect(highlight).toHaveClass("sidebar-selection-highlight");
+    }
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 272 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 400 });
+    expect(sidebar).toHaveAttribute("data-resizing", "true");
+    expect(sidebar).toHaveStyle({ width: "400px" });
+    fireEvent[finish](handle, { pointerId: 1, clientX: 400 });
+    expect(sidebar).not.toHaveAttribute("data-resizing");
+    expect(sidebar).not.toHaveAttribute("data-collapsed");
+  });
+
+  it("uses the shared sidebar controls and rail on the native host", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -723,6 +2368,7 @@ describe("App layout", () => {
     ];
     vi.mocked(fetchBootstrap).mockResolvedValue({
       token: "tok",
+      api_token: "api-tok",
       ws_path: "/",
       expires_in: 300,
       runtime_surface: "native",
@@ -732,36 +2378,73 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const flowSidebar = screen.getByTestId("host-sidebar-flow");
-    const toggle = screen.getByTestId("host-sidebar-toggle");
     expect(flowSidebar).toHaveStyle({ width: "272px" });
+    expect(screen.getByTestId("sidebar-brand-row")).toHaveClass("pt-3");
+    expect(screen.getByTestId("sidebar-brand-mark")).toHaveClass("mt-5");
+    expect(screen.getByRole("separator", { name: "Resize sidebar" })).toHaveAttribute("aria-valuenow", "272");
     expect(
       screen.getByRole("navigation", { name: "Sidebar navigation" }),
     ).toBeInTheDocument();
 
-    fireEvent.click(toggle);
-    await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "0px" }));
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), { key: "Enter" });
+    await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "56px" }));
     expect(
-      screen.queryByRole("navigation", { name: "Sidebar navigation" }),
-    ).not.toBeInTheDocument();
-
-    fireEvent.mouseEnter(toggle);
-    const previewSidebar = await screen.findByTestId("host-sidebar-preview");
-    expect(flowSidebar).toHaveStyle({ width: "0px" });
-    expect(previewSidebar).toHaveStyle({ width: "272px" });
-    expect(
-      within(previewSidebar).getByRole("navigation", {
-        name: "Sidebar navigation",
-      }),
+      screen.getByRole("navigation", { name: "Sidebar navigation" }),
     ).toBeInTheDocument();
 
-    fireEvent.click(toggle);
-    await waitFor(() =>
-      expect(screen.queryByTestId("host-sidebar-preview")).not.toBeInTheDocument(),
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "Sidebar navigation" }))
+        .getByRole("button", { name: "Toggle sidebar" }),
     );
-    expect(flowSidebar).toHaveStyle({ width: "272px" });
-    expect(
-      screen.getByRole("navigation", { name: "Sidebar navigation" }),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "272px" }));
+  });
+
+  it("aligns native settings navigation below the titlebar without extra top padding", async () => {
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok",
+      api_token: "api-tok",
+      ws_path: "/",
+      expires_in: 300,
+      runtime_surface: "native",
+    });
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
+
+    const backButton = await screen.findByRole("button", { name: "Back to chat" });
+    expect(backButton.closest("aside")).toHaveClass("pt-10", "lg:pt-10");
+    expect(backButton.closest("aside")).not.toHaveClass("pt-[4.25rem]");
+    expect(backButton).toHaveClass("-ml-1");
+  });
+
+  it("uses native chrome when the host bridge overrides browser gateway metadata", async () => {
+    Reflect.set(window, "nanobotHost", { getRuntimeInfo: vi.fn() });
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok",
+      api_token: "api-tok",
+      ws_path: "/",
+      expires_in: 300,
+      runtime_surface: "browser",
+    });
+    mockFetchRoutes({
+      "/api/settings": {
+        ...baseSettingsPayload(),
+        surface: "browser",
+        runtime_surface: "browser",
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.getByTestId("sidebar-brand-mark")).toHaveClass("mt-5");
+    });
+    expect(document.documentElement).toHaveClass("native-host");
   });
 
   it("switches to the next session when deleting the active chat", async () => {
@@ -783,40 +2466,272 @@ describe("App layout", () => {
         preview: "Second chat",
       },
     ];
+    window.history.replaceState(null, "", "/#/chat/websocket%3Achat-a");
 
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    await waitFor(() =>
-      expect(
-        within(sidebar).getByRole("button", { name: /^First chat$/ }),
-      ).toBeInTheDocument(),
-    );
-
-    fireEvent.pointerDown(screen.getByLabelText("Chat actions for First chat"), {
+    expect(await within(sidebar).findByRole("button", { name: "First chat" }))
+      .toHaveAttribute("aria-current", "page");
+    fireEvent.pointerDown(screen.getByLabelText("Topic actions for First chat"), {
       button: 0,
     });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
-
-    await waitFor(() =>
-      expect(screen.getByText("Delete this chat?")).toBeInTheDocument(),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-
-    await waitFor(() =>
-      expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a"),
-    );
-    await waitFor(() =>
-      expect(
-        within(sidebar).getByRole("button", { name: /^Second chat$/ }),
-      ).toBeInTheDocument(),
-    );
-    expect(screen.queryByText("Delete this chat?")).not.toBeInTheDocument();
+    const deleteFirst = await screen.findByRole("menuitem", { name: "Delete" });
+    vi.useFakeTimers();
+    await clickDeleteAction(deleteFirst);
+    expect(screen.getByText("Topic will be deleted")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeVisible();
+    expect(window.location.hash).toBe("#/chat/websocket%3Achat-b");
+    expect(within(sidebar).queryByRole("button", { name: /^First chat$/ })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS - 1); });
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    vi.useRealTimers();
+    expect(deleteChatSpy).toHaveBeenCalledTimes(1);
+    expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a");
+    expect(within(sidebar).getByRole("button", { name: /^Second chat$/ })).toBeInTheDocument();
     expect(document.body.style.pointerEvents).not.toBe("none");
+
+    fireEvent.pointerDown(screen.getByLabelText("Topic actions for Second chat"), { button: 0 });
+    const deleteLast = await screen.findByRole("menuitem", { name: "Delete" });
+    vi.useFakeTimers();
+    await clickDeleteAction(deleteLast);
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "56px" });
   }, 15_000);
 
-  it("shows localized bound automations in the first delete confirmation", async () => {
+  it.each([false, true])("archives only persisted selected topics in one sidebar update (draft=%s)", async (includeDraft) => {
+    mockSessions = ["a", "b", "c"].map((id) => ({
+      key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`,
+      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
+      title: `Topic ${id}`, preview: "",
+      projectLocked: includeDraft && id === "a" ? false : undefined,
+    }));
+    mockFetchRoutes({
+      "/api/webui/sidebar-state": { pinned_keys: ["websocket:chat-a", "websocket:chat-b"] },
+    });
+    window.history.replaceState(null, "", "/#/chat/websocket%3Achat-a");
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await within(sidebar).findByRole("button", { name: "Topic a" });
+    fireEvent.pointerDown(within(sidebar).getByLabelText("Topic actions for Topic a"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Topic b" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Archive" }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: includeDraft ? "Archive this topic?" : "Archive 2 topics?",
+    });
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledTimes(1));
+    expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      archived_keys: includeDraft ? ["websocket:chat-b"] : ["websocket:chat-a", "websocket:chat-b"],
+      pinned_keys: includeDraft ? ["websocket:chat-a"] : [],
+    }));
+    expect(window.location.hash).toBe(includeDraft ? "#/chat/websocket%3Achat-a" : "#/chat/websocket%3Achat-c");
+    expect(within(sidebar).getByRole("button", { name: "Topic c" })).toBeInTheDocument();
+    if (includeDraft) expect(within(sidebar).getByRole("button", { name: "Topic a" })).toBeInTheDocument();
+    else expect(within(sidebar).queryByRole("button", { name: "Topic a" })).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "Topic b" })).not.toBeInTheDocument();
+    const fallback = window.location.hash;
+    const undo = await screen.findByRole("button", { name: "Undo" });
+    expect(screen.getByText(includeDraft ? "Topic archived" : "2 topics archived")).toBeVisible();
+    fireEvent.click(undo);
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledTimes(2));
+    expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+      archived_keys: [], pinned_keys: ["websocket:chat-a", "websocket:chat-b"],
+    }));
+    expect(within(sidebar).getByRole("button", { name: "Topic b" })).toBeInTheDocument();
+    expect(window.location.hash).toBe(fallback);
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the topic and reports archive failure instead of retrying it silently", async () => {
+    const key = "websocket:chat-a";
+    mockSessions = [{
+      key, channel: "websocket", chatId: "chat-a", title: "Review notes", preview: "",
+      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
+    }];
+    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: [key] } });
+    let rejectSave!: (error: Error) => void;
+    setSidebarStateSpy.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }));
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Review notes"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledTimes(1));
+    expect(within(sidebar).getByRole("button", { name: "Review notes" })).toBeVisible();
+    expect(screen.queryByText("Topic archived")).not.toBeInTheDocument();
+    await act(async () => rejectSave(new Error("Disk full")));
+    expect(await screen.findByText("Could not change archive status.")).toBeVisible();
+    expect(within(sidebar).getByRole("button", { name: "Review notes" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+    act(() => statusHandlers.forEach((handler) => { handler("reconnecting"); handler("open"); }));
+    expect(setSidebarStateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([["a", "b"], ["b", "a"]])("restores pin order when undoing archives in %s, %s order", async (first, second) => {
+    const keys = ["a", "b", "c"].map((id) => `websocket:chat-${id}`);
+    mockSessions = ["a", "b", "c"].map((id, index) => ({
+      key: keys[index], channel: "websocket", chatId: `chat-${id}`, title: `Topic ${id}`, preview: "",
+      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
+    }));
+    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: keys } });
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    for (const id of ["a", "b"]) {
+      fireEvent.pointerDown(await within(sidebar).findByLabelText(`Topic actions for Topic ${id}`), { button: 0 });
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+      await waitFor(() => expect(within(sidebar).queryByRole("button", { name: `Topic ${id}` })).not.toBeInTheDocument());
+    }
+    for (const id of [first, second]) {
+      const card = screen.getByText(`Topic ${id}`, { selector: '[role="status"] span' }).closest<HTMLElement>("[data-toast-tone]")!;
+      fireEvent.click(within(card).getByRole("button", { name: "Undo" }));
+      await within(sidebar).findByRole("button", { name: `Topic ${id}` });
+    }
+    expect(setSidebarStateSpy).toHaveBeenCalledTimes(4);
+    expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pinned_keys: keys, archived_keys: [] }));
+  });
+
+  it("offers one Undo for a bulk topic deletion", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "First chat",
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        preview: "Second chat",
+      },
+      {
+        key: "websocket:chat-c",
+        channel: "websocket",
+        chatId: "chat-c",
+        createdAt: "2026-04-16T12:00:00Z",
+        updatedAt: "2026-04-16T12:00:00Z",
+        preview: "Third chat",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.pointerDown(within(sidebar).getByLabelText(
+      "Topic actions for First chat",
+    ), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Second chat" }));
+    expect(within(sidebar).getByText("2 selected")).toBeInTheDocument();
+
+    vi.useFakeTimers();
+    await clickDeleteAction(within(sidebar).getByRole("button", { name: "Delete" }));
+    expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
+    expect(screen.getByText("2 topics will be deleted")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Undo" })).toHaveLength(1);
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(deleteChatSpy).toHaveBeenCalledTimes(2);
+    expect(deleteChatSpy.mock.calls.map(([key]) => key)).toEqual([
+      "websocket:chat-a",
+      "websocket:chat-b",
+    ]);
+    expect(within(sidebar).getByRole("button", { name: "Third chat" }))
+      .toBeInTheDocument();
+  }, 15_000);
+
+  it.each(["undo", "failure", "unmount"] as const)("handles pending topic deletion on %s", async (outcome) => {
+    mockSessions = ["Review notes", "Release notes"].map((title, index) => ({
+      key: `websocket:chat-${index}`,
+      channel: "websocket",
+      chatId: `chat-${index}`,
+      createdAt: "2026-04-16T10:00:00Z",
+      updatedAt: "2026-04-16T10:00:00Z",
+      title,
+      preview: "",
+    }));
+    if (outcome === "failure") deleteChatSpy.mockRejectedValueOnce(new Error("Offline"));
+    const { unmount } = render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Review notes"), { button: 0 });
+    const deleteItem = await screen.findByRole("menuitem", { name: "Delete" });
+    vi.useFakeTimers();
+    await clickDeleteAction(deleteItem);
+    expect(within(sidebar).queryByRole("button", { name: "Review notes" })).not.toBeInTheDocument();
+    expect(screen.getByText("Topic will be deleted").closest('[role="status"]')).toHaveTextContent("Review notes");
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+
+    if (outcome === "undo") fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    if (outcome === "unmount") unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+
+    if (outcome === "failure") {
+      expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-0");
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not delete the topic");
+    } else {
+      expect(deleteChatSpy).not.toHaveBeenCalled();
+    }
+    if (outcome !== "unmount") {
+      expect(within(sidebar).getByRole("button", { name: "Review notes" })).toBeVisible();
+    }
+  });
+
+  it("confirms only the topic whose deletion was blocked by linked automations", async () => {
+    mockSessions = ["a", "b"].map((id) => ({
+      key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`, title: `Topic ${id}`, preview: "",
+      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
+    }));
+    const job: SessionAutomationJob = {
+      id: "late-job", name: "Added during undo", enabled: true,
+      schedule: { kind: "every", every_ms: 86_400_000 }, payload: { message: "Check the repo" }, state: {},
+    };
+    deleteChatSpy.mockResolvedValueOnce({ deleted: true })
+      .mockResolvedValueOnce({ deleted: false, blocked_by_automations: true, automations: [job] });
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Topic a"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Topic b" }));
+    vi.useFakeTimers();
+    await clickDeleteAction(within(sidebar).getByRole("button", { name: "Delete" }));
+    expect(screen.getByText("2 topics will be deleted")).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(deleteChatSpy.mock.calls).toEqual([["websocket:chat-a"], ["websocket:chat-b"]]);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+
+    const confirmToast = screen.getByText("Delete topic and linked automations?").closest<HTMLElement>("[data-toast-tone]")!;
+    expect(confirmToast).toHaveAttribute("data-toast-timed", "false");
+    expect(within(confirmToast).getByRole("status")).not.toHaveAttribute("title");
+    await clickDeleteAction(within(confirmToast).getByRole("button", { name: "1 automation" }));
+    const popover = screen.getByRole("dialog");
+    expect(within(popover).getByText("Topic b")).toBeVisible();
+    expect(within(popover).getByText("Added during undo")).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS * 3); });
+    expect(deleteChatSpy).toHaveBeenCalledTimes(2);
+
+    await clickDeleteAction(within(confirmToast).getByRole("button", { name: "Delete" }));
+    expect(confirmToast).toHaveAttribute("data-toast-timed", "true");
+    expect(within(confirmToast).getByText("Topic will be deleted")).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(deleteChatSpy).toHaveBeenCalledTimes(3);
+    expect(deleteChatSpy).toHaveBeenLastCalledWith("websocket:chat-b", { deleteAutomations: true });
+  }, 15_000);
+
+  it("lists linked automations by session in a toast dropdown and lets the user exclude a session from deletion", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -835,16 +2750,18 @@ describe("App layout", () => {
         preview: "Second chat",
       },
     ];
-    getSessionAutomationsSpy.mockResolvedValue([
-      {
-        id: "job-1",
-        name: "Daily repo check",
-        enabled: true,
-        schedule: { kind: "every", every_ms: 86_400_000 },
-        payload: { message: "Check the repo" },
-        state: { next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0) },
-      },
-    ]);
+    getSessionAutomationsSpy.mockImplementation(async (key: string) => (
+      key === "websocket:chat-a"
+        ? [{
+            id: "job-1",
+            name: "Daily repo check",
+            enabled: true,
+            schedule: { kind: "every", every_ms: 86_400_000 },
+            payload: { message: "Check the repo" },
+            state: { next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0) },
+          }]
+        : []
+    ));
     await i18n.changeLanguage("zh-CN");
 
     render(<App />);
@@ -857,32 +2774,118 @@ describe("App layout", () => {
       ).toBeInTheDocument(),
     );
 
-    fireEvent.pointerDown(screen.getByLabelText(/First chat.*会话操作/), {
+    fireEvent.pointerDown(screen.getByLabelText(/First chat.*话题操作/), {
       button: 0,
     });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "删除" }));
+    const deleteItem = await screen.findByRole("menuitem", { name: "删除" });
+    vi.useFakeTimers();
+    await clickDeleteAction(deleteItem);
 
-    await waitFor(() =>
-      expect(screen.getByText("Daily repo check")).toBeInTheDocument(),
-    );
-    expect(getSessionAutomationsSpy).toHaveBeenCalledWith("websocket:chat-a");
-    expect(
-      screen.getByText("这个对话有关联的自动任务。删除对话也会删除这些自动任务。"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText("This chat has scheduled automations. Deleting it will also delete them."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "First chat" })).toBeVisible();
+    const toast = screen.getByText("删除会话及关联自动任务？").closest<HTMLElement>("[data-toast-tone]")!;
+    expect(toast).toHaveAttribute("data-toast-timed", "false");
+    expect(within(toast).getByRole("status")).not.toHaveAttribute("title");
+    expect(toast.textContent).not.toContain("·");
 
-    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    await clickDeleteAction(within(toast).getByRole("button", { name: "1 个任务" }));
+    const details = screen.getByRole("dialog");
+    expect(within(details).getByText("First chat")).toBeVisible();
+    expect(within(details).getByText("Daily repo check")).toBeVisible();
+    expect(details.textContent).not.toContain("·");
 
-    await waitFor(() =>
-      expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a", {
-        deleteAutomations: true,
-      }),
-    );
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS * 3); });
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+    expect(within(sidebar).getByRole("button", { name: "First chat" })).toBeVisible();
+
+    await clickDeleteAction(within(details).getByRole("button", { name: "从本次删除中移除「First chat」" }));
+    expect(screen.queryByText("删除会话及关联自动任务？")).not.toBeInTheDocument();
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+    expect(within(sidebar).getByRole("button", { name: "First chat" })).toBeVisible();
+
+    vi.useRealTimers();
+    fireEvent.pointerDown(within(sidebar).getByLabelText(/First chat.*话题操作/), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "选择" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Second chat" }));
+    vi.useFakeTimers();
+    await clickDeleteAction(within(sidebar).getByRole("button", { name: "删除" }));
+
+    const bulkToast = screen.getByText("删除 2 个会话及关联自动任务？").closest<HTMLElement>("[data-toast-tone]")!;
+    expect(bulkToast).toHaveAttribute("data-toast-timed", "false");
+    await clickDeleteAction(within(bulkToast).getByRole("button", { name: "1 个任务" }));
+    const bulkDetails = screen.getByRole("dialog");
+    await clickDeleteAction(within(bulkDetails).getByRole("button", { name: "从本次删除中移除「First chat」" }));
+
+    expect(document.querySelectorAll("[data-toast-tone]")).toHaveLength(1);
+    expect(bulkToast).toHaveAttribute("data-toast-timed", "true");
+    expect(within(bulkToast).getByText("即将删除会话")).toBeVisible();
+    expect(within(bulkToast).getByText("Second chat")).toBeVisible();
+    expect(within(sidebar).getByRole("button", { name: "First chat" })).toBeVisible();
+    expect(within(sidebar).queryByRole("button", { name: "Second chat" })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
     expect(deleteChatSpy).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument();
+    expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-b");
+
+    vi.useRealTimers();
+    fireEvent.pointerDown(within(sidebar).getByLabelText(/First chat.*话题操作/), { button: 0 });
+    const deleteAgain = await screen.findByRole("menuitem", { name: "删除" });
+    vi.useFakeTimers();
+    await clickDeleteAction(deleteAgain);
+
+    const confirmToast = screen.getByText("删除会话及关联自动任务？").closest<HTMLElement>("[data-toast-tone]")!;
+    expect(document.querySelectorAll("[data-toast-tone]")).toHaveLength(1);
+    await clickDeleteAction(within(confirmToast).getByRole("button", { name: "删除" }));
+
+    expect(document.querySelectorAll("[data-toast-tone]")).toHaveLength(1);
+    expect(confirmToast).toHaveAttribute("data-toast-timed", "true");
+    expect(within(confirmToast).getByText("即将删除会话")).toBeVisible();
+    expect(within(confirmToast).getByRole("button", { name: "撤销" })).toBeVisible();
+    expect(within(sidebar).queryByRole("button", { name: "First chat" })).not.toBeInTheDocument();
+    expect(deleteChatSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS - 1); });
+    expect(deleteChatSpy).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(deleteChatSpy).toHaveBeenCalledTimes(2);
+    expect(deleteChatSpy).toHaveBeenLastCalledWith("websocket:chat-a", { deleteAutomations: true });
   }, 15_000);
+
+  it("closes the mobile drawer when selecting a new or current topic without a search tooltip", async () => {
+    restoreBrowserFocus = mockBrowserFocus();
+    const user = userEvent.setup();
+    mockSessions = ["First", "Second"].map((title, index) => ({
+      key: `websocket:mobile-${index}`,
+      channel: "websocket",
+      chatId: `mobile-${index}`,
+      createdAt: "2026-04-16T10:00:00Z",
+      updatedAt: "2026-04-16T10:00:00Z",
+      preview: `${title} mobile chat`,
+    }));
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: !query.includes("1024px"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    for (const title of ["First", "First", "Second"]) {
+      await user.click(await screen.findByRole("button", { name: "Toggle sidebar" }));
+      const sheet = await screen.findByRole("dialog");
+      await waitFor(() => expect(sheet).toHaveFocus());
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      await user.click(await within(sheet).findByRole("button", { name: `${title} mobile chat` }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(document.title).toBe(`${title} mobile chat`));
+      expect(screen.getByRole("button", { name: `${title} mobile chat` }))
+        .toHaveAttribute("aria-current", "page");
+    }
+  });
 
   it("keeps the mobile session action menu inside the sidebar sheet", async () => {
     mockSessions = [
@@ -925,7 +2928,7 @@ describe("App layout", () => {
     );
 
     fireEvent.pointerDown(
-      within(mobileSidebar).getByLabelText("Chat actions for Existing chat"),
+      within(mobileSidebar).getByLabelText("Topic actions for Existing chat"),
       { button: 0 },
     );
 
@@ -935,12 +2938,150 @@ describe("App layout", () => {
     expect(deleteItem).toBeInTheDocument();
 
     fireEvent.click(deleteItem);
-    await waitFor(() =>
-      expect(screen.getByText("Delete this chat?")).toBeInTheDocument(),
-    );
+    expect(await screen.findByRole("button", { name: "Undo" })).toBeVisible();
+    expect(sheet).not.toBeInTheDocument();
   }, 15_000);
 
-  it("applies persisted sidebar workspace state from the gateway", async () => {
+  it("renames inline in the mobile drawer without dismissing it and reloads the saved title", async () => {
+    restoreBrowserFocus = mockBrowserFocus();
+    const user = userEvent.setup();
+    mockSessions = [{
+      key: "websocket:chat-a", channel: "websocket", chatId: "chat-a",
+      createdAt: null, updatedAt: null, title: "Existing chat", preview: "",
+    }];
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: !query.includes("1024px"), media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(),
+      removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    })));
+    const persisted: { state?: SidebarStatePayload } = {};
+    mockFetchRoutes({ "/api/webui/sidebar-state": () => persisted.state ?? {} });
+    setSidebarStateSpy.mockImplementation(async (state: SidebarStatePayload) => {
+      persisted.state = state;
+      return state;
+    });
+    const firstRender = render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const route = window.location.hash;
+    await user.click(await screen.findByRole("button", { name: "Toggle sidebar" }));
+    const sheet = await screen.findByRole("dialog");
+    const startRename = async () => {
+      await user.click(within(sheet).getByRole("button", { name: "Topic actions for Existing chat" }));
+      await user.click(await within(sheet).findByRole("menuitem", { name: "Rename" }));
+      return within(sheet).getByRole("textbox", { name: "Topic name" });
+    };
+    const firstInput = await startRename();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.compositionStart(firstInput);
+    fireEvent.keyDown(firstInput, { key: "Escape" });
+    expect(firstInput).toBeInTheDocument();
+    expect(sheet).toBeInTheDocument();
+    fireEvent.compositionEnd(firstInput);
+    fireEvent.keyDown(firstInput, { key: "Escape" });
+    expect(within(sheet).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(sheet).toBeInTheDocument();
+
+    const input = await startRename();
+    await user.clear(input);
+    await user.type(input, "Renamed topic");
+    setSidebarStateSpy.mockRejectedValueOnce(new Error("Disk full"));
+    await user.keyboard("{Enter}");
+    expect(await within(sheet).findByRole("alert")).toHaveTextContent("Couldn't save the name. Try again.");
+    expect(input).toHaveValue("Renamed topic");
+    expect(persisted.state?.title_overrides["websocket:chat-a"]).toBeUndefined();
+    await user.keyboard("{Enter}");
+    expect(await within(sheet).findByRole("button", { name: "Renamed topic" })).toBeInTheDocument();
+    expect(persisted.state?.title_overrides["websocket:chat-a"]).toBe("Renamed topic");
+    expect(window.location.hash).toBe(route);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    firstRender.unmount();
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "Renamed topic" })).toBeInTheDocument();
+  });
+
+  it.each([false, true])("uses renamed topic titles in mention candidates and sends across reloads (split=%s)", async (split) => {
+    restoreBrowserFocus = mockBrowserFocus();
+    const user = userEvent.setup();
+    const target: ChatSummary = {
+      key: "websocket:target", channel: "websocket", chatId: "target",
+      createdAt: null, updatedAt: null, title: "Generated title", preview: "Original question",
+      handle: { id: "handle_0123456789abcdef0123456789abcdef", name: "gane" },
+    };
+    mockSessions = [
+      { ...target, key: "websocket:source", chatId: "source", title: "Source", handle: undefined },
+      { ...target, key: "websocket:second", chatId: "second", title: "Second", handle: undefined },
+      target,
+    ];
+    window.history.replaceState(null, "", split ? "/#/chat/websocket%3Asource" : "/#/new");
+    let persisted = {
+      workbench: { version: 1, tabs: split ? {
+        "tab:websocket:source": {
+          explicit: true, title: "Workspace", paneKeys: ["websocket:source", "websocket:second"],
+          layout: "columns",
+        },
+      } : {} },
+    } as Partial<SidebarStatePayload>;
+    mockFetchRoutes({ "/api/webui/sidebar-state": () => persisted });
+    setSidebarStateSpy.mockImplementation(async (state: SidebarStatePayload) => {
+      persisted = state;
+      return state;
+    });
+    const firstRender = render(<App />);
+    await act(async () => { await import("@/components/thread/ThreadShell"); });
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await user.click(await within(sidebar).findByRole("button", { name: "Topic actions for Generated title" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const name = screen.getByRole("textbox", { name: "Topic name" });
+    await user.clear(name);
+    await user.type(name, "会话编辑{Enter}");
+    await within(sidebar).findByText("会话编辑");
+    expect(persisted.title_overrides?.[target.key]).toBe("会话编辑");
+
+    const input = screen.getByRole("textbox", { name: /^Message / });
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+    expect(screen.getByRole("option", { name: /@gane/ })).toHaveTextContent("会话编辑");
+    fireEvent.change(input, { target: { value: "@会话", selectionStart: 3 } });
+    expect(screen.getByRole("option", { name: /@gane/ })).toHaveTextContent("会话编辑");
+    fireEvent.keyDown(input, { key: "Tab" });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input).toHaveValue("@gane ");
+    expect(screen.getByTestId("composer-session-mention-gane")).toHaveAttribute("title", "Session: 会话编辑");
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(sendMessageSpy).toHaveBeenCalled());
+    expect(sendMessageSpy.mock.calls.at(-1)?.[3]?.sessionMentions).toEqual([{
+      id: target.handle?.id, name: "gane", session_key: target.key, title: "会话编辑",
+    }]);
+
+    firstRender.unmount();
+    render(<App />);
+    await screen.findByText("会话编辑");
+    const restoredInput = await screen.findByRole("textbox", { name: /^Message / });
+    fireEvent.change(restoredInput, { target: { value: "@gane", selectionStart: 5 } });
+    expect(screen.getByRole("option", { name: /@gane/ })).toHaveTextContent("会话编辑");
+  });
+
+  it("searches the full preview of a session without a custom title", async () => {
+    restoreBrowserFocus = mockBrowserFocus();
+    const preview = `Review notes ${"alpha ".repeat(10)}orangeunique`;
+    mockSessions = [{
+      key: "websocket:target", channel: "websocket", chatId: "target",
+      createdAt: null, updatedAt: null, title: "", preview,
+      handle: { id: "handle_0123456789abcdef0123456789abcdef", name: "gane" },
+    }];
+    window.history.replaceState(null, "", "/#/new");
+    render(<App />);
+    await act(async () => { await import("@/components/thread/ThreadShell"); });
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const input = screen.getByRole("textbox", { name: /^Message / });
+    fireEvent.change(input, { target: { value: "@orangeunique", selectionStart: 13 } });
+    expect(screen.getByRole("option", { name: /@gane/ })).toHaveTextContent("orangeunique");
+  });
+
+  it("retries a failed sidebar read before enabling edits without losing saved state", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -968,26 +3109,19 @@ describe("App layout", () => {
       collapsed_groups: {},
       view: {
         density: "comfortable",
-        show_previews: false,
-        show_timestamps: false,
         show_archived: false,
         sort: "updated_desc",
       },
       updated_at: null,
     };
+    let sidebarReads = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (url: string | URL | Request) => {
         const href = String(url);
         if (href === "/api/webui/sidebar-state") {
+          if (++sidebarReads === 1) throw new Error("Gateway restarting");
           return { ok: true, json: async () => initialState };
-        }
-        if (href.startsWith("/api/webui/sidebar-state/update?")) {
-          const encoded = new URLSearchParams(href.split("?", 2)[1]).get("state");
-          return {
-            ok: true,
-            json: async () => JSON.parse(encoded ?? "{}"),
-          };
         }
         return { ok: false, status: 404 };
       }),
@@ -996,27 +3130,144 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => {
+      statusHandlers.forEach((handler) => handler("open"));
+    });
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(within(sidebar).getByText("Loading…")).toBeInTheDocument();
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(within(sidebar).getByText("Pinned")).toBeInTheDocument(),
+      { timeout: 5_000 },
     );
     expect(within(sidebar).getByRole("button", { name: /^Roadmap$/ })).toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: /^First chat$/ })).not.toBeInTheDocument();
 
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Show archived" }));
+    const scrollViewport = within(sidebar).getByRole("button", { name: /^Roadmap$/ }).closest(".sidebar-scrollbar");
+    const archiveButton = within(sidebar).getByRole("button", { name: "Show archived" });
+    expect(scrollViewport).toContainElement(archiveButton);
+    expect(scrollViewport).toContainElement(within(sidebar).getByRole("button", { name: /^Search$/ }));
+    fireEvent.click(archiveButton);
     await waitFor(() =>
       expect(within(sidebar).getByText("Archived")).toBeInTheDocument(),
     );
     expect(within(sidebar).getByRole("button", { name: /^First chat$/ })).toBeInTheDocument();
-    const updateUrl = vi.mocked(fetch).mock.calls
-      .map(([url]) => String(url))
-      .find((url) => url.startsWith("/api/webui/sidebar-state/update?"));
-    expect(updateUrl).toBeTruthy();
-    const encoded = new URLSearchParams(updateUrl?.split("?", 2)[1]).get("state");
-    expect(JSON.parse(encoded ?? "{}").view.show_archived).toBe(true);
+    expect(setSidebarStateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pinned_keys: initialState.pinned_keys,
+        archived_keys: initialState.archived_keys,
+        title_overrides: initialState.title_overrides,
+        view: expect.objectContaining({ show_archived: true }),
+      }),
+    );
 
     expect(within(sidebar).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
-  });
+  }, 10_000);
+
+  it.each([false, true])("preserves sidebar metadata and panes after both reads fail with partial cache: %s", async (cached) => {
+    const actual = await vi.importActual<typeof import("@/hooks/useSessions")>("@/hooks/useSessions");
+    vi.mocked(useSessions).mockImplementation(actual.useSessions);
+    const sessions: ChatSummary[] = ["a", "b"].map((id) => ({
+      key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`,
+      createdAt: null, updatedAt: null, preview: "",
+    }));
+    if (cached) {
+      activateReloadCache("ws://test");
+      writeReloadCache("sessions", sessions.slice(0, 1));
+    }
+    const saved = {
+      schema_version: 1,
+      pinned_keys: ["websocket:chat-b", "websocket:deleted"],
+      archived_keys: ["websocket:deleted"],
+      session_order: ["websocket:chat-a", "websocket:chat-b", "websocket:deleted"],
+      title_overrides: {
+        "websocket:chat-a": "Saved A", "websocket:chat-b": "Saved B", "websocket:deleted": "Old topic",
+      },
+      project_name_overrides: {},
+      tags_by_key: { "websocket:chat-b": ["important"], "websocket:deleted": ["old"] },
+      collapsed_groups: {},
+      workbench: {
+        version: 1,
+        tabs: {
+          "tab:saved": {
+            explicit: true, title: "Saved group",
+            paneKeys: ["websocket:chat-a", "websocket:chat-b", "websocket:deleted"],
+            layoutPaneKeys: ["websocket:chat-b", "websocket:chat-a", "websocket:deleted"],
+            layout: "columns", splitRatios: [0.4, 0.6],
+          },
+        },
+      },
+      view: {
+        density: "comfortable", show_archived: false, sort: "updated_desc",
+      },
+      updated_at: null,
+    };
+    let sidebarReads = 0;
+    let sessionsFail = true;
+    let serverSessions = sessions;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/sessions") {
+        return sessionsFail
+          ? Response.json({}, { status: 503 })
+          : jsonResponse({ sessions: serverSessions });
+      }
+      if (String(input) === "/api/webui/sidebar-state") {
+        return ++sidebarReads === 1
+          ? Response.json({}, { status: 503 })
+          : jsonResponse(saved);
+      }
+      return Response.json({}, { status: 404 });
+    }));
+
+    const markersKey = "nanobot-webui.sidebar.session-updates.v1";
+    localStorage.setItem(markersKey, JSON.stringify(["chat-b", "deleted"]));
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(within(sidebar).getByText("Loading…")).toBeInTheDocument();
+    await waitFor(() => expect(sidebarReads).toBe(2), { timeout: 5_000 });
+    await act(async () => {});
+    expect(within(sidebar).queryByText("Loading…")).not.toBeInTheDocument();
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
+    expect(JSON.parse(localStorage.getItem(markersKey)!)).toEqual(["chat-b", "deleted"]);
+
+    // A successful full list can authorize removal; the failed read and cache cannot.
+    sessionsFail = false;
+    act(() => sessionUpdateHandlers.forEach((handler) => handler("chat-a")));
+    await within(sidebar).findByRole("button", { name: "Group: Saved group" });
+    expect(await within(sidebar).findByRole("button", { name: "Saved B" })).toBeInTheDocument();
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith({
+      ...saved,
+      view: expect.objectContaining(saved.view),
+      pinned_keys: ["websocket:chat-b"],
+      archived_keys: [],
+      session_order: ["websocket:chat-a", "websocket:chat-b"],
+      title_overrides: { "websocket:chat-a": "Saved A", "websocket:chat-b": "Saved B" },
+      tags_by_key: { "websocket:chat-b": ["important"] },
+      workbench: {
+        version: 1,
+        tabs: {
+          "tab:saved": {
+            ...saved.workbench.tabs["tab:saved"],
+            paneKeys: ["websocket:chat-a", "websocket:chat-b"],
+            layoutPaneKeys: ["websocket:chat-b", "websocket:chat-a"],
+            splitRatios: [],
+          },
+        },
+      },
+    }));
+
+    expect(JSON.parse(localStorage.getItem(markersKey)!)).toEqual(["chat-b"]);
+    serverSessions = [];
+    act(() => sessionUpdateHandlers.forEach((handler) => handler("chat-a")));
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith({
+      ...saved, view: expect.objectContaining(saved.view),
+      pinned_keys: [], archived_keys: [], session_order: [],
+      title_overrides: {}, tags_by_key: {}, workbench: { version: 1, tabs: {} },
+    }));
+    expect(JSON.parse(localStorage.getItem(markersKey)!)).toEqual([]);
+  }, 10_000);
 
   it("sorts chats by displayed title when A-Z is persisted", async () => {
     mockSessions = [
@@ -1056,8 +3307,6 @@ describe("App layout", () => {
       collapsed_groups: {},
       view: {
         density: "comfortable",
-        show_previews: false,
-        show_timestamps: false,
         show_archived: false,
         sort: "title_asc",
       },
@@ -1079,16 +3328,16 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     await waitFor(() =>
-      expect(within(sidebar).getByText("Chats")).toBeInTheDocument(),
+      expect(within(sidebar).getByText("Topics")).toBeInTheDocument(),
     );
-    const group = within(sidebar).getByText("Chats").closest("section");
+    const group = within(sidebar).getByText("Topics").closest("section");
     expect(group).toBeTruthy();
     const labels = within(group as HTMLElement)
       .getAllByRole("button")
       .map((button) => button.textContent?.trim())
       .filter(Boolean);
 
-    expect(labels).toEqual(["Alpha plan", "New chat", "Zulu work"]);
+    expect(labels).toEqual(["Alpha plan", "New topic", "Zulu work"]);
   });
 
   it("shows running and completed session indicators in the sidebar", async () => {
@@ -1122,20 +3371,22 @@ describe("App layout", () => {
     );
 
     act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", 12_345);
+      for (const handler of runStatusHandlers) handler("chat-a", runState(12_345));
     });
-    expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument();
+    expect(within(sidebar).getByRole("img", { name: "Agent running" })).toBeInTheDocument();
 
     act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", null);
+      for (const handler of runStatusHandlers) handler("chat-a", runState(null));
     });
-    expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
-    expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "Agent running" }))
+      .not.toBeInTheDocument();
+    expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Working chat$/ }));
     });
-    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "New activity" }))
+      .not.toBeInTheDocument();
   });
 
   it("does not show an updated dot later when the active session finishes", async () => {
@@ -1174,20 +3425,23 @@ describe("App layout", () => {
     await waitFor(() => expect(document.title).toContain("Active work"));
 
     act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", 12_345);
+      for (const handler of runStatusHandlers) handler("chat-a", runState(12_345));
     });
-    expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument();
+    expect(within(sidebar).getByRole("img", { name: "Agent running" })).toBeInTheDocument();
 
     act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", null);
+      for (const handler of runStatusHandlers) handler("chat-a", runState(null));
     });
-    expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
-    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "Agent running" }))
+      .not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "New activity" }))
+      .not.toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Other chat$/ }));
     });
-    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "New activity" }))
+      .not.toBeInTheDocument();
   });
 
   it("marks inactive sessions when a thread update arrives", async () => {
@@ -1222,16 +3476,17 @@ describe("App layout", () => {
       for (const handler of sessionUpdateHandlers) handler("chat-b", "thread");
     });
 
-    expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
+    expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Scheduled update target$/ }));
     });
 
-    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "New activity" }))
+      .not.toBeInTheDocument();
   });
 
-  it("restores sidebar run indicators after a page reload", async () => {
+  it("restores sidebar runs from lifecycle replay without reviving them from stale session rows", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -1256,15 +3511,23 @@ describe("App layout", () => {
       JSON.stringify(["chat-b"]),
     );
 
-    render(<App />);
+    const { rerender } = render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    await waitFor(() =>
-      expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument(),
-    );
-    expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
-    expect(attachSpy).toHaveBeenCalledWith("chat-a");
+    await waitFor(() => expect(attachSpy).toHaveBeenCalledWith("chat-a"));
+    expect(within(sidebar).queryByRole("img", { name: "Agent running" })).not.toBeInTheDocument();
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", runState(12_345));
+    });
+    expect(within(sidebar).getByRole("img", { name: "Agent running" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", runState(null));
+    });
+    mockSessions = mockSessions.map((session) => ({ ...session }));
+    rerender(<App />);
+    expect(within(sidebar).queryByRole("img", { name: "Agent running" })).not.toBeInTheDocument();
   });
 
   it("restores the active chat from the URL hash after a page reload", async () => {
@@ -1295,7 +3558,7 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    await waitFor(() => expect(document.title).toBe("Active after reload · nanobot"));
+    await waitFor(() => expect(document.title).toBe("Active after reload"));
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     expect(
       within(sidebar).getByRole("button", { name: /^Active after reload$/ }),
@@ -1306,363 +3569,128 @@ describe("App layout", () => {
   });
 
   it("opens the settings view from the sidebar footer", async () => {
-    mockSessions = [
-      {
-        key: "websocket:chat-a",
-        channel: "websocket",
-        chatId: "chat-a",
-        createdAt: "2026-04-16T10:00:00Z",
-        updatedAt: "2026-04-16T10:00:00Z",
-        preview: "Existing chat",
-      },
-    ];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const href = String(input);
-        if (href === "/api/settings/provider-models?provider=openai") {
-          return jsonResponse({
-            provider: "openai",
-            label: "OpenAI",
-            status: "available",
-            catalog_kind: "official",
-            models: [
-              { id: "openai/gpt-4o", owned_by: "openai", context_window: 128000 },
-              { id: "openai/gpt-4o-mini", owned_by: "openai", context_window: 128000 },
-            ],
-            model_count: 2,
-            fetched_at: 1,
-          });
-        }
-        if (href.includes("/api/settings")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              agent: {
-                model: "openai/gpt-4o",
-                provider: "auto",
-                resolved_provider: "openai",
-                has_api_key: true,
-                model_preset: "default",
-                max_tokens: 8192,
-                context_window_tokens: 65536,
-                temperature: 0.1,
-                reasoning_effort: null,
-                timezone: "UTC",
-                bot_name: "nanobot",
-                bot_icon: "nb",
-                tool_hint_max_length: 40,
-              },
-              model_presets: [
-                {
-                  name: "default",
-                  label: "Default",
-                  active: true,
-                  is_default: true,
-                  model: "openai/gpt-4o",
-                  provider: "auto",
-                  max_tokens: 8192,
-                  context_window_tokens: 65536,
-                  temperature: 0.1,
-                  reasoning_effort: null,
-                },
-                {
-                  name: "deep",
-                  label: "deep",
-                  active: false,
-                  is_default: false,
-                  model: "anthropic/claude-opus-4-5",
-                  provider: "anthropic",
-                  max_tokens: 8192,
-                  context_window_tokens: 200000,
-                  temperature: 0.1,
-                  reasoning_effort: "high",
-                },
-              ],
-              providers: [
-                {
-                  name: "openai",
-                  label: "OpenAI",
-                  configured: true,
-                  api_key_hint: "open••••-key",
-                },
-                {
-                  name: "openrouter",
-                  label: "OpenRouter",
-                  configured: false,
-                  api_key_required: true,
-                  default_api_base: "https://openrouter.ai/api/v1",
-                },
-                {
-                  name: "ant_ling",
-                  label: "Ant Ling",
-                  configured: false,
-                  api_key_required: true,
-                  default_api_base: "https://api.ant-ling.com/v1",
-                },
-                {
-                  name: "azure_openai",
-                  label: "Azure OpenAI",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "huggingface",
-                  label: "Hugging Face",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "siliconflow",
-                  label: "SiliconFlow",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "volcengine",
-                  label: "VolcEngine",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "byteplus",
-                  label: "BytePlus",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "qianfan",
-                  label: "Qianfan",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "atomic_chat",
-                  label: "Atomic Chat",
-                  configured: false,
-                  api_key_required: false,
-                  default_api_base: "http://localhost:1337/v1",
-                },
-              ],
-              web_search: {
-                provider: "brave",
-                api_key_hint: "BSAo••••ew20",
-                base_url: null,
-                max_results: 5,
-                timeout: 30,
-                providers: [
-                  { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
-                  { name: "brave", label: "Brave Search", credential: "api_key" },
-                  { name: "tavily", label: "Tavily", credential: "api_key" },
-                ],
-              },
-              web: {
-                enable: true,
-                proxy: null,
-                user_agent: null,
-                search: { max_results: 5, timeout: 30 },
-                fetch: { use_jina_reader: true },
-              },
-              image_generation: {
-                enabled: false,
-                provider: "openrouter",
-                provider_configured: true,
-                model: "openai/gpt-5.4-image-2",
-                default_aspect_ratio: "1:1",
-                default_image_size: "1K",
-                max_images_per_turn: 4,
-                save_dir: "generated",
-                providers: [
-                  {
-                    name: "openrouter",
-                    label: "OpenRouter",
-                    configured: true,
-                    api_key_hint: "sk-o••••test",
-                    api_base: "https://openrouter.ai/api/v1",
-                    default_api_base: "https://openrouter.ai/api/v1",
-                  },
-                  {
-                    name: "gemini",
-                    label: "Gemini",
-                    configured: false,
-                    api_key_hint: null,
-                    api_base: null,
-                    default_api_base: "https://generativelanguage.googleapis.com/v1beta/openai/",
-                  },
-                ],
-              },
-              runtime: {
-                config_path: "/tmp/config.json",
-                workspace_path: "/tmp/workspace",
-                gateway_host: "127.0.0.1",
-                gateway_port: 18790,
-                heartbeat: {
-                  enabled: true,
-                  interval_s: 1800,
-                  keep_recent_messages: 8,
-                },
-                dream: {
-                  schedule: "every 2h",
-                },
-                unified_session: false,
-              },
-              advanced: {
-                restrict_to_workspace: false,
-                webui_allow_local_service_access: true,
-                webui_default_access_mode: "default",
-                private_service_protection_enabled: true,
-                ssrf_whitelist_count: 0,
-                mcp_server_count: 0,
-                exec_enabled: true,
-                exec_sandbox: null,
-                exec_path_prepend_set: false,
-                exec_path_append_set: false,
-              },
-              requires_restart: false,
-            }),
-          };
-        }
-        return { ok: false, status: 404, json: async () => ({}) };
-      }),
-    );
-
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/version-check": { updateAvailable: null },
+    });
     render(<App />);
-
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const searchButton = within(sidebar).getByRole("button", { name: "Search" });
-    const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
-    expect(searchButton.compareDocumentPosition(appsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
-
-    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
-    expect(document.title).toBe("Settings · nanobot");
-    expect(screen.getByTestId("overview-logo-openai")).toBeInTheDocument();
-    expect(screen.getByTestId("overview-logo-brave")).toBeInTheDocument();
-    expect(screen.getByTestId("overview-logo-openrouter")).toBeInTheDocument();
-    expect(screen.queryByTestId("overview-logo-nanobot-gateway")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("overview-logo-nanobot-workspace")).not.toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Sidebar navigation" })).not.toBeInTheDocument();
-    const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
-    expect(settingsNav.className).toContain("overflow-x-auto");
-    expect(settingsNav.className).not.toContain("grid-cols-2");
-    expect(within(settingsNav).getByRole("button", { name: "Overview" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(within(settingsNav).getByRole("button", { name: "Models" })).toBeInTheDocument();
-    expect(within(settingsNav).queryByRole("button", { name: "Providers" })).not.toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Image" })).toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
-    expect(within(settingsNav).queryByRole("button", { name: "Apps" })).not.toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Security" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Appearance" }));
-    expect(screen.getByText("Brand logos")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
-    expect(screen.queryByText("AI")).not.toBeInTheDocument();
-    expect(screen.getByText("Current configuration")).toBeInTheDocument();
-    expect(screen.queryByText("Presets")).not.toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Current configuration" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Add configuration" }));
-    const modelDialog = await screen.findByRole("dialog", { name: "New model configuration" });
-    expect(within(modelDialog).getByText("Save a provider and model as a one-click option.")).toBeInTheDocument();
-    fireEvent.change(within(modelDialog).getByPlaceholderText("Fast writing"), {
-      target: { value: "Fast writing" },
-    });
-    fireEvent.change(within(modelDialog).getByPlaceholderText("openai/gpt-4.1"), {
-      target: { value: "openai/gpt-4.1-mini" },
-    });
-    expect(within(modelDialog).getByRole("button", { name: /OpenAI/ })).toBeInTheDocument();
-    expect(within(modelDialog).getByRole("button", { name: "Save" })).toBeEnabled();
-    fireEvent.click(within(modelDialog).getByRole("button", { name: "Cancel" }));
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Auto/ }));
-    expect(screen.getAllByTestId("provider-picker-logo-openai").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("menuitem", { name: /Auto/ }));
-    const openModelPicker = () => {
-      const modelButtons = screen.getAllByRole("button", { name: /openai\/gpt-4o/ });
-      fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
-    };
-    openModelPicker();
-    await screen.findByText("openai/gpt-4o-mini");
-    fireEvent.click(screen.getAllByText("openai/gpt-4o-mini")[0]);
-    expect(screen.getByText("Unsaved changes.").parentElement?.className).toContain(
-      "text-blue-600",
-    );
-    const updatedModelButtons = screen.getAllByRole("button", { name: /openai\/gpt-4o-mini/ });
-    fireEvent.pointerDown(updatedModelButtons[updatedModelButtons.length - 1]);
-    await screen.findByText("openai/gpt-4o");
-    fireEvent.click(screen.getAllByText("openai/gpt-4o")[0]);
-    expect(screen.getByText("OpenRouter")).toBeInTheDocument();
-    expect(screen.getByText("Ant Ling")).toBeInTheDocument();
-    expect(screen.getByTestId("provider-logo-openai")).toBeInTheDocument();
-    expect(screen.getByText(/Product names, logos, and brands/)).toBeInTheDocument();
-    expect(screen.getAllByText("Not configured").length).toBeGreaterThan(0);
-    const clickProviderRow = (label: string) => {
-      const providerLabel = screen
-        .getAllByText(label)
-        .find((element) => element.className.includes("font-semibold"));
-      expect(providerLabel).toBeTruthy();
-      fireEvent.click(providerLabel!);
-    };
-    clickProviderRow("OpenAI");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
-      target: { value: "unsaved-openai-key" },
-    });
-    clickProviderRow("OpenRouter");
-    clickProviderRow("OpenAI");
-    expect(screen.getByText("open••••-key")).toBeInTheDocument();
-    expect(screen.queryByDisplayValue("unsaved-openai-key")).not.toBeInTheDocument();
-    clickProviderRow("Ant Ling");
-    expect(screen.getByDisplayValue("https://api.ant-ling.com/v1")).toBeInTheDocument();
-    clickProviderRow("Atomic Chat");
-    expect(screen.getByDisplayValue("http://localhost:1337/v1")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save provider" })).toBeEnabled();
-
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Image" }));
-    expect(screen.getByRole("heading", { name: "Image" })).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Sidebar navigation" }))
+      .getByRole("button", { name: "Settings" }));
+    await act(async () => { await import("@/components/settings/SettingsView"); });
+    const nav = await screen.findByRole("navigation", { name: "Settings sections" });
+    for (const name of ["Overview", "Appearance", "Models", "Capabilities", "System", "Advanced", "About"]) {
+      expect(within(nav).getByRole("button", { name })).toBeInTheDocument();
+    }
+    fireEvent.click(within(nav).getByRole("button", { name: "Appearance" }));
+    expect(await screen.findByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole("button", { name: "Models" }));
+    expect(await screen.findByText("Model presets")).toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole("button", { name: "Capabilities" }));
     expect(screen.getByRole("switch", { name: "Image generation" })).toBeInTheDocument();
-    expect(screen.getByText("Provider status")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("openai/gpt-5.4-image-2")).toBeInTheDocument();
-    expect(screen.getByText("Save directory")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.click(within(nav).getByRole("button", { name: "About" }));
+    expect(await screen.findByText("You're up to date")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
+  });
 
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Web" }));
-    expect(screen.getByText("Search provider")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Jina reader" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Brave Search/ })).toBeInTheDocument();
-    expect(screen.getByTestId("provider-picker-logo-brave")).toBeInTheDocument();
-    expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
-      target: { value: "unsaved-brave-key" },
+  it.each([true, false])("completes focused settings edits before history changes section (saved=%s)", async (saved) => {
+    const payload = { ...baseSettingsPayload(), transcription: { ...DEFAULT_TRANSCRIPTION_SETTINGS, language: "en" } };
+    mockFetchRoutes({ "/api/settings": payload });
+    let resolveSave!: (value: unknown) => void;
+    let rejectSave!: (error: Error) => void;
+    requestMutationSpy.mockImplementationOnce(() => new Promise((resolve, reject) => { resolveSave = resolve; rejectSave = reject; }));
+    window.history.replaceState(null, "", "/#/settings?section=voice");
+    render(<App />);
+    await act(async () => { await import("@/components/settings/SettingsView"); });
+    const language = await screen.findByPlaceholderText("Auto");
+    fireEvent.focus(language);
+    fireEvent.change(language, { target: { value: "ja" } });
+    expect(requestMutationSpy).not.toHaveBeenCalled();
+    act(() => {
+      window.history.replaceState(null, "", "/#/settings?section=models");
+      window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Brave Search/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Tavily" }));
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Tavily/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Brave Search" }));
-    expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
-    expect(screen.queryByDisplayValue("unsaved-brave-key")).not.toBeInTheDocument();
+    await waitFor(() => expect(requestMutationSpy).toHaveBeenCalledWith(
+      "settings.transcription.update", expect.objectContaining({ language: "ja" }), 20_000,
+    ));
+    expect(window.location.hash).toBe("#/settings?section=voice");
+    expect(language).toHaveValue("ja");
+    await act(async () => {
+      if (saved) resolveSave({ ...payload, transcription: { ...payload.transcription, language: "ja" } });
+      else rejectSave(new Error("Save failed"));
+    });
+    if (saved) {
+      await waitFor(() => expect(window.location.hash).toBe("#/settings?section=models"));
+      expect(await screen.findByText("Model presets")).toBeInTheDocument();
+    } else {
+      expect(window.location.hash).toBe("#/settings?section=voice");
+      expect(language).toHaveValue("ja");
+      expect(await screen.findByText("Save failed")).toBeVisible();
+    }
+  });
 
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "System" }));
-    expect(screen.getByText("Bot name")).toBeInTheDocument();
-    expect(screen.queryByText("Tool hint length")).not.toBeInTheDocument();
-    expect(screen.queryByText("Heartbeat")).not.toBeInTheDocument();
-    expect(screen.queryByText("Dream")).not.toBeInTheDocument();
-    expect(screen.queryByText("Unified session")).not.toBeInTheDocument();
-    expect(screen.getByText("Default workspace")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    fireEvent.pointerDown(screen.getByRole("button", { name: "UTC" }));
-    expect(screen.getByPlaceholderText("Search timezone")).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("Search timezone"), {
-      target: { value: "Shanghai" },
+  it("retains a capability draft while opening provider configuration", async () => {
+    const payload = { ...baseSettingsPayload(), transcription: { ...DEFAULT_TRANSCRIPTION_SETTINGS, language: "en" } };
+    mockFetchRoutes({ "/api/settings": payload });
+    window.history.replaceState(null, "", "/#/settings?section=voice");
+    render(<App />);
+    await act(async () => { await import("@/components/settings/SettingsView"); });
+    const language = await screen.findByPlaceholderText("Auto");
+    fireEvent.focus(language);
+    fireEvent.change(language, { target: { value: "ja" } });
+    fireEvent.click(screen.getByRole("button", { name: "Configure provider" }));
+    expect(await screen.findByText("Model presets")).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/settings?section=models");
+    expect(requestMutationSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Settings sections" })).getByRole("button", { name: "Capabilities" }));
+    fireEvent.click(within(screen.getByRole("region", { name: "Transcription" })).getByRole("button", { name: "Configure" }));
+    expect(screen.getByPlaceholderText("Auto")).toHaveValue("ja");
+  });
+
+  it.each([true, false])("completes standalone channel drafts before leaving by history (saved=%s)", async (saved) => {
+    const feature = {
+      name: "email", display_name: "Email", type: "channel", webui: "webui/index.ts", enabled: false,
+      configured: true, installed: true, requires_dependencies: false, ready: false, status: "not_enabled",
+      install_supported: true, requires_restart: false, configured_fields: ["channels.email.imapHost"],
+      config_values: { "channels.email.imapHost": "imap.example.test" },
+      setup: { fields: [{ key: "channels.email.imapHost", field: "imapHost", kind: "string", required: true, choices: [] }], requirements: [] },
+    };
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload(),
+      "/api/settings/nanobot-features": { features: [feature], enabled_count: 0 } });
+    let resolveSave!: (value: unknown) => void;
+    let rejectSave!: (error: Error) => void;
+    requestMutationSpy.mockImplementationOnce(() => new Promise((resolve, reject) => { resolveSave = resolve; rejectSave = reject; }));
+    window.history.replaceState(null, "", "/#/channels");
+    render(<App />);
+    await act(async () => {
+      await import("@/components/settings/SettingsView");
+      await import("@/components/settings/channels/ChannelSetupPanel");
     });
-    fireEvent.click(screen.getByRole("menuitem", { name: /Asia\/Shanghai/ }));
-    expect(screen.getByRole("button", { name: "Asia/Shanghai" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    fireEvent.click(await screen.findByRole("button", { name: "View Email settings" }));
+    const host = await screen.findByLabelText("IMAP host");
+    fireEvent.focus(host);
+    fireEvent.change(host, { target: { value: "imap.changed.test" } });
+    act(() => {
+      window.history.replaceState(null, "", "/#/new");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await waitFor(() => expect(requestMutationSpy).toHaveBeenCalledWith(
+      "settings.channel.configure", expect.objectContaining({ name: "email", values: { "channels.email.imapHost": "imap.changed.test" } }), 150_000,
+    ));
+    expect(window.location.hash).toBe("#/apps?section=channels");
+    expect(host).toHaveValue("imap.changed.test");
+    await act(async () => {
+      if (saved) resolveSave({ name: "email", saved: true, saved_keys: ["channels.email.imapHost"] });
+      else rejectSave(new Error("Save failed"));
+    });
+    if (saved) {
+      await waitFor(() => expect(window.location.hash).toBe("#/new"));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    } else {
+      expect(window.location.hash).toBe("#/apps?section=channels");
+      expect(host).toHaveValue("imap.changed.test");
+      expect(await screen.findByText("Save failed")).toBeVisible();
+    }
   });
 
   it("restores the settings section from the URL hash after a page reload", async () => {
@@ -1672,8 +3700,50 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Transcription" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=voice");
+  });
+
+  it("keeps the backend timezone without writing settings on mount", async () => {
+    const initialSettings = baseSettingsPayload();
+    mockFetchRoutes({
+      "/api/settings": initialSettings,
+    });
+    window.history.replaceState(null, "", "/#/settings?section=runtime");
+
+    render(<App />);
+
+    expect(await screen.findByText("UTC")).toBeInTheDocument();
+    expect(
+      requestMutationSpy.mock.calls.some(([action]) => action === "settings.agent.update"),
+    ).toBe(false);
+    expect(screen.queryByRole("heading", { name: "Region and timezone" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Used for schedules and time-aware replies."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search timezone")).not.toBeInTheDocument();
+    const systemSection = screen.getByRole("heading", { name: "System" }).closest("section");
+    expect(systemSection).not.toBeNull();
+    const system = within(systemSection as HTMLElement);
+    expect(system.getByText("Timezone")).toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).getByRole("button", { name: "Restart" })).toBeInTheDocument();
+    expect(
+      system.queryByText("Restart nanobot to apply runtime changes."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("falls back to Overview for the retired Files settings URL", async () => {
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    window.history.replaceState(null, "", "/#/settings?section=files");
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    expect(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Overview" })).not.toBeInTheDocument();
   });
 
   it("updates the URL hash when switching settings sections", async () => {
@@ -1684,26 +3754,81 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
-    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings");
 
     const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
+    const overviewButton = within(settingsNav).getByRole("button", {
+      name: "Overview",
+    });
+    const modelsButton = within(settingsNav).getByRole("button", {
+      name: "Models",
+    });
+    const settingsHighlight = within(settingsNav).getByTestId(
+      "settings-selection-highlight",
+    );
 
-    expect(await screen.findByRole("heading", { name: "Models" })).toBeInTheDocument();
+    expect(overviewButton).toHaveAttribute("aria-current", "page");
+    expect(overviewButton).not.toHaveClass("bg-sidebar-accent");
+    expect(overviewButton).toHaveClass("transition-[color,background-color]");
+    expect(settingsHighlight).toHaveAttribute("data-active-id", "overview");
+
+    fireEvent.click(modelsButton);
+
+    expect(await screen.findByText("Model presets")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Models" })).not.toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=models");
+    expect(modelsButton).toHaveAttribute("aria-current", "page");
+    expect(settingsHighlight).toHaveAttribute("data-active-id", "models");
 
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Voice" }));
+    const voiceButton = within(settingsNav).getByRole("button", {
+      name: "Capabilities",
+    });
+    fireEvent.click(voiceButton);
 
-    expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
-    expect(window.location.hash).toBe("#/settings?section=voice");
+    expect(await screen.findByRole("switch", { name: "Transcription" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/settings?section=capabilities");
+    expect(voiceButton).toHaveAttribute("aria-current", "page");
+    expect(settingsHighlight).toHaveAttribute("data-active-id", "capabilities");
   });
 
-  it("opens Apps from the main sidebar without replacing the sidebar", async () => {
+  it("defaults to Ready again when returning to Tools from another Apps tab", async () => {
+    const app = {
+      name: "example", display_name: "Example App", category: "productivity", description: "Example",
+      requires: "", source: "catalog", entry_point: "example", install_supported: true,
+      installed: true, available: true, status: "installed", skill_installed: false,
+    };
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/cli-apps": { apps: [app], installed_count: 1 },
+      "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
+      "/api/webui/skills": { skills: [] },
+    });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    await act(async () => { await import("@/components/settings/SettingsView"); });
+    expect(await screen.findByRole("heading", { name: "Example App" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Ready only" })).toBeChecked();
+    const types = within(screen.getByRole("radiogroup", { name: "Tool type" }));
+    await userEvent.click(types.getByRole("radio", { name: "MCP" }));
+    expect(types.getByRole("radio", { name: "MCP" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Skills" }));
+    expect(screen.getByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    expect(await screen.findByRole("heading", { name: "Example App" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Ready only" })).toBeChecked();
+  });
+
+  it("switches Apps tabs without replacing their navigation or the sidebar", async () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
       "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
       "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
+      "/api/webui/skills": { skills: [] },
     });
 
     render(<App />);
@@ -1715,13 +3840,53 @@ describe("App layout", () => {
     fireEvent.click(appsButton);
 
     expect(await screen.findByRole("heading", { name: "Apps" })).toBeInTheDocument();
+    expect(screen.queryByText("Add tools to nanobot, then @ them in chat.")).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Settings sections" })).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Apps" })).toHaveAttribute(
       "aria-current",
       "page",
     );
-    expect(document.title).toBe("Apps · nanobot");
+    expect(within(sidebar).getByTestId("actions-selection-highlight")).toHaveAttribute(
+      "data-active-id",
+      "utility:apps",
+    );
+    expect(within(sidebar).queryAllByRole("button", { current: "page" })).toHaveLength(1);
+    expect(screen.getByTestId("settings-section-transition")).toHaveAttribute(
+      "data-settings-section",
+      "apps",
+    );
+    expect(screen.getByTestId("settings-section-transition")).toHaveClass(
+      "animate-in",
+      "fade-in-0",
+      "slide-in-from-bottom-1",
+      "duration-200",
+      "motion-reduce:animate-none",
+    );
+    expect(document.title).toBe("Apps");
+    const sections = screen.getByRole("group", { name: "Apps" });
+    fireEvent.click(within(sections).getByRole("button", { name: "Skills" }));
+
+    expect(screen.getByRole("group", { name: "Apps" })).toBe(sections);
+    expect(within(sections).getByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
+    expect(window.location.hash).toBe("#/apps?section=skills");
+    expect(screen.getByRole("textbox", { name: "Search installed skills" })).toBeVisible();
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-section-transition")).toHaveAttribute(
+        "data-settings-section",
+        "skills",
+      );
+    });
+    expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "Apps" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(sidebar).getByTestId("actions-selection-highlight")).toHaveAttribute(
+      "data-active-id",
+      "utility:apps",
+    );
+    expect(document.title).toBe("Apps");
   });
 
   it("returns from settings to the blank start page when no session was active", async () => {
@@ -1746,7 +3911,7 @@ describe("App layout", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes("/api/settings")) {
+        if (String(input) === "/api/settings") {
           return {
             ok: true,
             status: 200,
@@ -1762,8 +3927,6 @@ describe("App layout", () => {
                 temperature: 0.1,
                 reasoning_effort: null,
                 timezone: "UTC",
-                bot_name: "nanobot",
-                bot_icon: "nb",
                 tool_hint_max_length: 40,
               },
               model_presets: [
@@ -1794,7 +3957,7 @@ describe("App layout", () => {
               },
               web: {
                 enable: true,
-                proxy: null,
+                use_proxy: false,
                 user_agent: null,
                 search: { max_results: 5, timeout: 30 },
                 fetch: { use_jina_reader: true },
@@ -1827,12 +3990,10 @@ describe("App layout", () => {
                 heartbeat: {
                   enabled: true,
                   interval_s: 1800,
-                  keep_recent_messages: 8,
                 },
                 dream: {
                   schedule: "every 2h",
                 },
-                unified_session: false,
               },
               advanced: {
                 restrict_to_workspace: false,
@@ -1858,15 +4019,17 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "New chat" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
     await waitFor(() => expect(document.title).toBe("nanobot"));
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
-    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
 
     await waitFor(() => expect(document.title).toBe("nanobot"));
-    expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
+    expect(screen.getByTestId("thread-welcome-mark")).toBeInTheDocument();
   });
 
   it("filters sessions in the centered search dialog", async () => {
@@ -1896,7 +4059,7 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     expect(within(sidebar).getByText("Q2 roadmap")).toBeInTheDocument();
     expect(within(sidebar).getByText("Travel ideas")).toBeInTheDocument();
-    const newChatButton = within(sidebar).getByRole("button", { name: "New chat" });
+    const newChatButton = within(sidebar).getByRole("button", { name: "New topic" });
     const searchButton = within(sidebar).getByRole("button", { name: "Search" });
     expect(
       newChatButton.compareDocumentPosition(searchButton) &
@@ -1936,6 +4099,543 @@ describe("App layout", () => {
     );
   });
 
+  it("keeps panes adjacent and orders tabs by their latest updated pane", async () => {
+    mockSessions = [
+      {
+        key: "websocket:alpha",
+        channel: "websocket",
+        chatId: "alpha",
+        createdAt: "2026-08-01T10:00:00Z",
+        updatedAt: "2026-08-01T10:00:00Z",
+        title: "Alpha tab",
+        preview: "",
+      },
+      {
+        key: "websocket:alpha-child",
+        channel: "websocket",
+        chatId: "alpha-child",
+        createdAt: "2026-08-05T10:00:00Z",
+        updatedAt: "2026-08-05T10:00:00Z",
+        title: "Alpha child",
+        preview: "",
+      },
+      {
+        key: "websocket:beta",
+        channel: "websocket",
+        chatId: "beta",
+        createdAt: "2026-08-04T10:00:00Z",
+        updatedAt: "2026-08-04T10:00:00Z",
+        title: "Beta tab",
+        preview: "",
+      },
+    ];
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string | URL | Request) => {
+      if (String(url) === "/api/webui/sidebar-state") {
+        return {
+          ok: true,
+          json: async () => ({
+            workbench: {
+              version: 1,
+              tabs: {
+                "tab:websocket:alpha": {
+                  explicit: true,
+                  title: "Alpha tab",
+                  paneKeys: ["websocket:alpha", "websocket:alpha-child"],
+                  layout: "columns",
+                },
+                "tab:websocket:beta": {
+                  explicit: false,
+                  title: null,
+                  paneKeys: ["websocket:beta"],
+                  layout: "columns",
+                },
+              },
+            },
+          }),
+        };
+      }
+      return { ok: false, status: 404 };
+    }));
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const alphaTab = await within(sidebar).findByRole("button", { name: "Group: Alpha tab" });
+    const betaTab = within(sidebar).getByRole("button", { name: "Beta tab" });
+    expect(alphaTab.compareDocumentPosition(betaTab) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+
+    const alphaGroup = alphaTab.closest("[data-sidebar-tab-group]") as HTMLElement;
+    const alphaChild = within(alphaGroup).getByRole("button", { name: "Alpha child" });
+    const alphaRoot = within(alphaGroup).getByRole("button", { name: "Alpha tab" });
+    expect(alphaChild.compareDocumentPosition(alphaRoot) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+  });
+
+  it("uses one active pane without workbench editing controls on mobile", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query.includes("max-width: 767px"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    mockSessions = [
+      {
+        key: "websocket:alpha",
+        channel: "websocket",
+        chatId: "alpha",
+        createdAt: "2026-08-01T10:00:00Z",
+        updatedAt: "2026-08-01T10:00:00Z",
+        title: "Alpha tab",
+        preview: "",
+      },
+      {
+        key: "websocket:alpha-child",
+        channel: "websocket",
+        chatId: "alpha-child",
+        createdAt: "2026-08-05T10:00:00Z",
+        updatedAt: "2026-08-05T10:00:00Z",
+        title: "Alpha child",
+        preview: "",
+      },
+    ];
+    window.history.replaceState(
+      null,
+      "",
+      "/#/chat/websocket%3Aalpha-child",
+    );
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string | URL | Request) => {
+      if (String(url) === "/api/webui/sidebar-state") {
+        return {
+          ok: true,
+          json: async () => ({
+            workbench: {
+              version: 1,
+              tabs: {
+                "tab:websocket:alpha": {
+                  explicit: true,
+                  title: "Alpha tab",
+                  paneKeys: ["websocket:alpha", "websocket:alpha-child"],
+                  layout: "bsp",
+                },
+              },
+            },
+          }),
+        };
+      }
+      return { ok: false, status: 404 };
+    }));
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const grid = await screen.findByTestId("pane-grid");
+    await waitFor(() => expect(Array.from(grid.children).map(
+      (pane) => pane.getAttribute("aria-label"),
+    )).toEqual(["Alpha child"]));
+    expect(screen.queryByRole("button", { name: "Layout" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add pane" })).not.toBeInTheDocument();
+
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.pointerDown(within(sidebar).getByRole("button", {
+      name: "Alpha child pane actions",
+    }), { button: 0, ctrlKey: false });
+    expect(await screen.findByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Remove" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Move to" })).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("animates replaced threads rather than focusing a visible pane (mobile=%s)", async mobile => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: mobile && query.includes("max-width: 767px"), media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    })));
+    mockSessions = ["alpha", "child", "other"].map(chatId => ({
+      key: `websocket:${chatId}`, channel: "websocket", chatId,
+      createdAt: null, updatedAt: null, title: `${chatId} topic`, preview: "",
+    }));
+    window.history.replaceState(null, "", "/#/chat/websocket%3Aalpha");
+    mockFetchRoutes({ "/api/webui/sidebar-state": { workbench: { version: 1, tabs: {
+      "tab:alpha": { explicit: true, title: "Group", paneKeys: ["websocket:alpha", "websocket:child"], layout: "columns" },
+    } } } });
+    render(<App />);
+    await act(async () => { await import("@/components/thread/ThreadShell"); });
+    await screen.findByTestId("workbench-pane-websocket:alpha");
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await within(sidebar).findByRole("button", { name: "Group: Group" });
+    const descriptor = Object.getOwnPropertyDescriptor(document, "startViewTransition");
+    const capture = vi.fn((update: () => void) => {
+      update();
+      return { ready: Promise.resolve(), finished: Promise.resolve(), skipTransition: vi.fn() };
+    });
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: capture });
+    try {
+      fireEvent.click(within(sidebar).getByRole("button", { name: "child topic" }));
+      await waitFor(() => expect(screen.getByTestId("workbench-pane-websocket:child")).toHaveAttribute("data-active", "true"));
+      expect(capture).toHaveBeenCalledTimes(mobile ? 1 : 0);
+      fireEvent.click(within(sidebar).getByRole("button", { name: "other topic" }));
+      await screen.findByTestId("workbench-pane-websocket:other");
+      expect(capture).toHaveBeenCalledTimes(mobile ? 2 : 1);
+    } finally {
+      if (descriptor) Object.defineProperty(document, "startViewTransition", descriptor);
+      else Reflect.deleteProperty(document, "startViewTransition");
+    }
+  });
+
+  it("materializes a singleton tab without linking it to another pane", async () => {
+    mockSessions = [
+      {
+        key: "websocket:solo",
+        channel: "websocket",
+        chatId: "solo",
+        createdAt: "2026-08-05T10:00:00Z",
+        updatedAt: "2026-08-05T10:00:00Z",
+        title: "Solo pane",
+        preview: "",
+      },
+      {
+        key: "websocket:other",
+        channel: "websocket",
+        chatId: "other",
+        createdAt: "2026-08-04T10:00:00Z",
+        updatedAt: "2026-08-04T10:00:00Z",
+        title: "Other pane",
+        preview: "",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => {
+      statusHandlers.forEach((handler) => handler("open"));
+    });
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(within(sidebar).queryByRole("button", { name: "Group: Solo pane" }))
+      .not.toBeInTheDocument();
+    setSidebarStateSpy.mockClear();
+
+    fireEvent.pointerDown(within(sidebar).getByRole("button", {
+      name: "Topic actions for Solo pane",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Create group" }));
+
+    const tabButton = await within(sidebar).findByRole("button", {
+      name: "Group: Solo pane",
+    });
+    const tabGroup = tabButton.closest("[data-sidebar-tab-group]") as HTMLElement;
+    expect(within(tabGroup).getByRole("list", { name: "Panes in Solo pane" }))
+      .toBeInTheDocument();
+    expect(within(tabGroup).getAllByRole("button", { name: "Solo pane" }))
+      .toHaveLength(1);
+    expect(within(sidebar).queryByRole("button", { name: "Group: Other pane" }))
+      .not.toBeInTheDocument();
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workbench: expect.objectContaining({
+          tabs: expect.objectContaining({
+            "tab:websocket:solo": expect.objectContaining({ explicit: true }),
+          }),
+        }),
+      }),
+    ));
+
+    fireEvent.pointerDown(within(tabGroup).getByRole("button", {
+      name: "Topic actions for Solo pane",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+
+    const renameDialog = await screen.findByRole("dialog", { name: "Rename group" });
+    expect(within(renameDialog).getByText("Give this group a name.")).toBeInTheDocument();
+    expect(within(renameDialog).getByPlaceholderText("Group name")).toHaveValue("Solo pane");
+  });
+
+  it("restores a created pane group from gateway state after remount", async () => {
+    mockSessions = [
+      {
+        key: "websocket:solo",
+        channel: "websocket",
+        chatId: "solo",
+        createdAt: "2026-08-05T10:00:00Z",
+        updatedAt: "2026-08-05T10:00:00Z",
+        title: "Solo pane",
+        preview: "",
+      },
+      {
+        key: "websocket:other",
+        channel: "websocket",
+        chatId: "other",
+        createdAt: "2026-08-04T10:00:00Z",
+        updatedAt: "2026-08-04T10:00:00Z",
+        title: "Other pane",
+        preview: "",
+      },
+    ];
+    let persistedState: SidebarStatePayload | null = null;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string | URL | Request) => {
+      if (String(url) === "/api/webui/sidebar-state") {
+        return {
+          ok: true,
+          json: async () => persistedState ?? {},
+        };
+      }
+      return { ok: false, status: 404 };
+    }));
+    setSidebarStateSpy.mockImplementation(async (state: SidebarStatePayload) => {
+      persistedState = state;
+      return state;
+    });
+
+    const firstRender = render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => {
+      statusHandlers.forEach((handler) => handler("open"));
+    });
+    const firstSidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.pointerDown(within(firstSidebar).getByRole("button", {
+      name: "Topic actions for Solo pane",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Create group" }));
+    await waitFor(() => expect(persistedState?.workbench.tabs["tab:websocket:solo"])
+      .toEqual(expect.objectContaining({ explicit: true })));
+
+    firstRender.unmount();
+    connectSpy.mockClear();
+
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const secondSidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(await within(secondSidebar).findByRole("button", { name: "Group: Solo pane" }))
+      .toBeInTheDocument();
+  });
+
+  it("keeps panes and layout scoped to the current topic tab", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    createChatSpy.mockResolvedValueOnce("chat-pane");
+    mockSessions = [
+      {
+        key: "websocket:chat-alpha",
+        channel: "websocket",
+        chatId: "chat-alpha",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Alpha",
+        preview: "Alpha notes",
+      },
+      {
+        key: "websocket:chat-beta",
+        channel: "websocket",
+        chatId: "chat-beta",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        title: "Beta",
+        preview: "Beta notes",
+      },
+    ];
+    window.history.replaceState(
+      null,
+      "",
+      "/#/chat/websocket%3Achat-alpha",
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const grid = await screen.findByTestId("pane-grid");
+    expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
+      .toEqual(["Alpha"]);
+    expect(screen.queryByRole("button", { name: "Layout" }))
+      .not.toBeInTheDocument();
+    const alphaInput = screen.getByRole("textbox", { name: "Message Alpha" });
+    expect(screen.getByTestId("workbench-pane-websocket:chat-alpha")).toContainElement(alphaInput);
+    fireEvent.change(alphaInput, { target: { value: "keep this Alpha draft" } });
+    fireEvent.change(alphaInput.closest(".thread-composer-surface")!.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["notes"], "alpha-notes.txt", { type: "text/plain" })] },
+    });
+    expect(within(await screen.findByTestId("composer-chip")).getByRole("button", { name: "alpha-notes.txt" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add pane" }));
+    expect(screen.queryByRole("dialog", { name: "Search" })).not.toBeInTheDocument();
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
+
+    await waitFor(() => expect(grid.children).toHaveLength(2));
+    expect(screen.getByRole("button", { name: "Layout" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/chat/websocket%3Achat-pane");
+    expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
+      .toEqual(["Alpha", "New topic"]);
+
+    const activeComposer = screen.getByTestId("active-pane-composer");
+    const paneInput = within(activeComposer).getByRole("textbox", {
+      name: "Message New topic",
+    });
+    expect(paneInput).toHaveClass("min-h-[50px]");
+    fireEvent.change(paneInput, { target: { value: "route this to the new pane" } });
+    fireEvent.keyDown(paneInput, { key: "Enter" });
+    await waitFor(() => expect(sendMessageSpy).toHaveBeenCalled());
+    expect(sendMessageSpy.mock.calls.at(-1)?.[0]).toBe("chat-pane");
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Layout" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Rows" }));
+    expect(grid).toHaveAttribute("data-layout", "rows");
+
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const paneTopicButton = within(sidebar)
+      .getAllByRole("button", { name: "New topic" })
+      .find((button) => button.closest("[data-sidebar-pane]"));
+    expect(paneTopicButton).toBeDefined();
+    expect(paneTopicButton?.closest("[data-sidebar-pane]"))
+      .toHaveAttribute("data-sidebar-pane", "websocket:chat-pane");
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Beta" }));
+    await waitFor(() => {
+      const nextGrid = screen.getByTestId("pane-grid");
+      expect(Array.from(nextGrid.children).map((pane) => pane.getAttribute("aria-label")))
+        .toEqual(["Beta"]);
+      expect(nextGrid).toHaveAttribute("data-layout", "columns");
+    });
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Alpha" }));
+    await waitFor(() => {
+      const restoredGrid = screen.getByTestId("pane-grid");
+      expect(Array.from(restoredGrid.children).map((pane) => pane.getAttribute("aria-label")))
+        .toEqual(["Alpha", "New topic"]);
+      expect(restoredGrid).toHaveAttribute("data-layout", "rows");
+    });
+
+    const alphaGroupButton = within(sidebar).getByRole("button", {
+      name: "Group: Alpha",
+    });
+    const alphaGroup = alphaGroupButton.closest("[data-sidebar-tab-group]") as HTMLElement;
+    fireEvent.pointerDown(within(alphaGroup).getByLabelText("Topic actions for Alpha"), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const renameDialog = await screen.findByRole("dialog", { name: "Rename group" });
+    fireEvent.change(within(renameDialog).getByPlaceholderText("Group name"), {
+      target: { value: "Research" },
+    });
+    fireEvent.click(within(renameDialog).getByRole("button", { name: "Save" }));
+    expect(await within(sidebar).findByRole("button", { name: "Group: Research" }))
+      .toBeInTheDocument();
+
+    fireEvent.pointerDown(within(sidebar).getByRole("button", {
+      name: "New topic pane actions",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByRole("menuitem", {
+      name: "Remove",
+    }));
+    await waitFor(() => expect(screen.getByTestId("pane-grid").children).toHaveLength(1));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Alpha" }));
+    const restoredInput = await screen.findByRole("textbox", { name: "Message Alpha" });
+    expect(screen.getByTestId("workbench-pane-websocket:chat-alpha")).toContainElement(restoredInput);
+    expect(restoredInput).toHaveValue("keep this Alpha draft");
+    expect(within(await screen.findByTestId("composer-chip")).getByRole("button", { name: "alpha-notes.txt" })).toBeVisible();
+    const researchGroup = within(sidebar).getByRole("button", {
+      name: "Group: Research",
+    }).closest("[data-sidebar-tab-group]") as HTMLElement;
+    expect(within(researchGroup).getByRole("list", { name: "Panes in Research" }))
+      .toBeInTheDocument();
+    expect(within(researchGroup).getByRole("button", { name: "Alpha" }))
+      .toBeInTheDocument();
+    expect(within(sidebar).getAllByRole("button", { name: "New topic" })).toHaveLength(2);
+  });
+
+  it("keeps a named group and its remaining pane active after deleting a pane", async () => {
+    mockSessions = [
+      {
+        key: "websocket:new-pane",
+        channel: "websocket",
+        chatId: "new-pane",
+        createdAt: "2026-08-05T12:00:00Z",
+        updatedAt: "2026-08-05T12:00:00Z",
+        title: "New topic",
+        preview: "",
+      },
+      {
+        key: "websocket:unrelated",
+        channel: "websocket",
+        chatId: "unrelated",
+        createdAt: "2026-08-05T11:00:00Z",
+        updatedAt: "2026-08-05T11:00:00Z",
+        title: "Unrelated",
+        preview: "",
+      },
+      {
+        key: "websocket:alpha",
+        channel: "websocket",
+        chatId: "alpha",
+        createdAt: "2026-08-05T10:00:00Z",
+        updatedAt: "2026-08-05T10:00:00Z",
+        title: "Alpha",
+        preview: "",
+      },
+    ];
+    window.history.replaceState(null, "", "/#/chat/websocket%3Anew-pane");
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string | URL | Request) => {
+      if (String(url) === "/api/webui/sidebar-state") {
+        return {
+          ok: true,
+          json: async () => ({
+            workbench: {
+              version: 1,
+              tabs: {
+                "tab:websocket:alpha": {
+                  explicit: false,
+                  title: "Research",
+                  paneKeys: ["websocket:alpha", "websocket:new-pane"],
+                  layoutPaneKeys: ["websocket:alpha", "websocket:new-pane"],
+                  layout: "columns",
+                  splitRatios: [],
+                },
+              },
+            },
+          }),
+        };
+      }
+      return { ok: false, status: 404 };
+    }));
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(await within(sidebar).findByRole("button", { name: "Group: Research" }))
+      .toBeInTheDocument();
+    expect((await screen.findByTestId("pane-grid")).children).toHaveLength(2);
+    fireEvent.pointerDown(within(sidebar).getByRole("button", {
+      name: "New topic pane actions",
+    }), { button: 0, ctrlKey: false });
+    const deletePane = await screen.findByRole("menuitem", { name: "Delete" });
+    vi.useFakeTimers();
+    await clickDeleteAction(deletePane);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(deleteChatSpy).toHaveBeenCalledWith("websocket:new-pane");
+    expect(window.location.hash).toBe("#/chat/websocket%3Aalpha");
+    expect(within(sidebar).getByRole("button", { name: "Group: Research" }))
+      .toBeInTheDocument();
+    expect(screen.getByTestId("pane-grid").children).toHaveLength(1);
+    expect(screen.getByTestId("pane-grid").firstElementChild)
+      .toHaveAttribute("aria-label", "Alpha");
+  }, 15_000);
+
   it("opens search from the keyboard shortcut", async () => {
     mockSessions = [
       {
@@ -1969,6 +4669,20 @@ describe("App layout", () => {
       expect(screen.queryByRole("dialog", { name: "Search" })).not.toBeInTheDocument(),
     );
     expect(createChatSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Apps", "#/apps", "!", "Digit1", "Meta+Shift+1 Control+Shift+1"],
+    ["Automations", "#/automations", "@", "Digit2", "Meta+Shift+2 Control+Shift+2"],
+    ["Settings", "#/settings", ",", "Comma", "Meta+, Control+,"],
+  ])("opens %s using its sidebar shortcut", async (name, hash, key, code, ariaShortcut) => {
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(within(sidebar).getByRole("button", { name })).toHaveAttribute("aria-keyshortcuts", ariaShortcut);
+    fireEvent.keyDown(window, { key, code, shiftKey: code !== "Comma", ctrlKey: true });
+    await waitFor(() => expect(window.location.hash).toBe(hash));
   });
 
   it.each([
@@ -2020,34 +4734,34 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/new");
   });
 
-  it("exposes the new chat keyboard shortcut in the sidebar title", async () => {
+  it("exposes the new chat keyboard shortcut in the sidebar tooltip", async () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
 
-    const newChatButton = within(sidebar).getByRole("button", { name: "New chat" });
-    expect(newChatButton).toHaveAttribute(
-      "title",
-      "New chat (Ctrl+Shift+O)",
-    );
+    const newChatButton = within(sidebar).getByRole("button", { name: "New topic" });
+    await userEvent.setup().hover(newChatButton);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("New topic");
+    expect(tooltip.querySelector("kbd")).toHaveTextContent("Ctrl+Shift+O");
     expect(newChatButton).toHaveAttribute(
       "aria-keyshortcuts",
       "Meta+Shift+O Control+Shift+O",
     );
   });
 
-  it("uses macOS shortcut glyphs in the sidebar title", async () => {
+  it("uses macOS shortcut glyphs in the sidebar tooltip", async () => {
     setNavigatorPlatform("MacIntel");
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
 
-    expect(within(sidebar).getByRole("button", { name: "New chat" })).toHaveAttribute(
-      "title",
-      "New chat (⌘⇧O)",
-    );
+    await userEvent.setup().hover(within(sidebar).getByRole("button", { name: "New topic" }));
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("New topic");
+    expect(tooltip.querySelector("kbd")).toHaveTextContent("⌘⇧O");
   });
 
   it("keeps large sidebars light while search still covers every chat", async () => {
@@ -2110,49 +4824,95 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle theme from header" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Toggle theme from header" }));
     expect(toggleThemeSpy).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), { key: "Enter" });
     const sidebarAside = container.querySelector("aside.lg\\:block") as HTMLElement;
     await waitFor(() => expect(sidebarAside.style.width).toBe("56px"));
 
-    expect(screen.queryByRole("button", { name: "Start a new chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start a new topic" })).not.toBeInTheDocument();
     const rail = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    expect(within(rail).getByRole("button", { name: "New chat" })).toBeInTheDocument();
+    expect(within(rail).getByRole("button", { name: "New topic" })).toBeInTheDocument();
     expect(within(rail).getByRole("button", { name: "Search" })).toBeInTheDocument();
     expect(within(rail).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
-    expect(within(rail).queryByText("Existing chat")).not.toBeInTheDocument();
+    expect(within(rail).queryByRole("button", { name: "Existing chat" })).not.toBeInTheDocument();
 
     fireEvent.click(within(rail).getByRole("button", { name: "Toggle sidebar" }));
     await waitFor(() => expect(sidebarAside.style.width).toBe("272px"));
 
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "New chat" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
     expect(createChatSpy).not.toHaveBeenCalled();
-    expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Start a new chat" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("thread-welcome-mark")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start a new topic" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Toggle theme from header" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Settings" })).toBeInTheDocument();
 
     expect(within(sidebar).getByText("Existing chat")).toBeInTheDocument();
   });
 
+  it("does not apply a bootstrap refresh after its reconnect is cancelled", async () => {
+    const { unmount } = render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    let complete!: (boot: Awaited<ReturnType<typeof fetchBootstrap>>) => void;
+    vi.mocked(fetchBootstrap).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
+    vi.mocked(deriveWsUrl).mockImplementation((_path, token) => `ws://test?token=${token}`);
+    const controller = new AbortController();
+    const refresh = clientOptions!.onReauth!(controller.signal);
+    controller.abort();
+    await act(async () => {
+      complete({ token: "stale", api_token: "stale-api", ws_path: "/" });
+      await expect(refresh).resolves.toBeNull();
+    });
+    expect(updateUrlSpy).not.toHaveBeenCalled();
+    vi.mocked(fetchBootstrap).mockResolvedValueOnce({ token: "fresh", api_token: "fresh-api", ws_path: "/" });
+    await act(async () => {
+      await expect(clientOptions!.onReauth!(new AbortController().signal)).resolves.toBe("ws://test?token=fresh");
+    });
+    expect(updateUrlSpy).toHaveBeenCalledWith("ws://test?token=fresh");
+    unmount();
+  });
+
+  it("does not apply a timed credential refresh after signing out", async () => {
+    vi.mocked(fetchBootstrap).mockResolvedValueOnce({
+      token: "old", api_token: "old-api", ws_path: "/", expires_in: 0.001,
+    });
+    let complete!: (boot: Awaited<ReturnType<typeof fetchBootstrap>>) => void;
+    vi.mocked(fetchBootstrap).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
+    vi.mocked(deriveWsUrl).mockImplementation((_path, token) => `ws://test?token=${token}`);
+
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    window.history.replaceState(null, "", "/#/settings");
+    await import("@/components/settings/SettingsView");
+    render(<App />);
+    const signOut = await screen.findByRole("button", { name: "Sign out" }, { timeout: 4_000 });
+    await waitFor(() => expect(fetchBootstrap).toHaveBeenCalledTimes(2), { timeout: 8_000 });
+    fireEvent.click(signOut);
+    await screen.findByLabelText("WebUI password");
+
+    await act(async () => complete({ token: "late", api_token: "late-api", ws_path: "/" }));
+    expect(updateUrlSpy).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("WebUI password")).toBeInTheDocument();
+  }, 10_000);
+
   it("refreshes the bootstrap token before REST settings auth expires", async () => {
     vi.useFakeTimers();
     vi.mocked(fetchBootstrap)
       .mockResolvedValueOnce({
         token: "tok-1",
+        api_token: "api-tok-1",
         ws_path: "/",
         expires_in: 30,
       })
       .mockResolvedValueOnce({
         token: "tok-2",
+        api_token: "api-tok-2",
         ws_path: "/",
         expires_in: 300,
       });
     vi.mocked(deriveWsUrl).mockImplementation(
-      (_wsPath: string, token: string) => `ws://test?token=${token}`,
+      (_wsPath, token) => `ws://test?token=${token}`,
     );
 
     const { unmount } = render(<App />);
@@ -2168,5 +4928,287 @@ describe("App layout", () => {
     expect(fetchBootstrap).toHaveBeenCalledTimes(2);
     expect(updateUrlSpy).toHaveBeenCalledWith("ws://test?token=tok-2");
     unmount();
+  });
+
+  it("refreshes pairing immediately on notices and ready, only while visible", async () => {
+    vi.useFakeTimers();
+    let requests: Record<string, unknown>[] = [];
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
+    const { unmount } = render(<App />);
+    await act(async () => {});
+    const pairingReads = () => vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing").length;
+    expect(pairingReads()).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    requests = [{ code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent" }];
+    await act(async () => { for (const handler of pairingChangeHandlers) handler(); });
+    expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
+    expect(pairingReads()).toBe(2);
+    requests = [];
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(pairingReads()).toBe(3);
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    const setVisibility = (state: DocumentVisibilityState) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      act(() => setVisibility("hidden"));
+      requests = [];
+      await act(async () => {
+        for (const handler of pairingChangeHandlers) handler();
+        for (const handler of readyHandlers) handler();
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(pairingReads()).toBe(3);
+      await act(async () => setVisibility("visible"));
+      expect(pairingReads()).toBe(4);
+      expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+
+      requests = [{ code: "IJKL-MNOP", channel: "feishu", sender_id: "bob", delivery_status: "sent" }];
+      await act(async () => { for (const handler of readyHandlers) handler(); });
+      expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
+      expect(pairingReads()).toBe(5);
+      unmount();
+      await act(async () => {
+        for (const handler of pairingChangeHandlers) handler();
+        for (const handler of readyHandlers) handler();
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(pairingReads()).toBe(5);
+    } finally {
+      if (visibilityDescriptor) Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      else Reflect.deleteProperty(document, "visibilityState");
+    }
+  });
+
+  it("polls for cross-process pairing changes and expiry without a notice", async () => {
+    vi.useFakeTimers();
+    let requests: Record<string, unknown>[] = [];
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
+    render(<App />);
+    await act(async () => {});
+    requests = [{ code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", expires_in_seconds: 5 }];
+    await act(async () => { await vi.advanceTimersByTimeAsync(14_999); });
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.getByRole("dialog", { name: "Pair account" })).toHaveTextContent("Code expires 5s.");
+    requests = [];
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_999); });
+    expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("coalesces notices during an older pairing read and pauses while hidden (%s)", async (hide) => {
+    let finishOldRead!: (value: unknown) => void;
+    const oldSnapshot = new Promise((resolve) => { finishOldRead = resolve; });
+    let reads = 0;
+    mockFetchRoutes({ "/api/settings/pairing": () => ++reads === 1 ? oldSnapshot : { requests: [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent",
+    }] } });
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    const setVisibility = (state: DocumentVisibilityState) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    const { unmount } = render(<App />);
+    try {
+      await waitFor(() => expect(reads).toBe(1));
+      act(() => {
+        for (let notice = 0; notice < 3; notice += 1) {
+          for (const handler of pairingChangeHandlers) handler();
+        }
+        if (hide) setVisibility("hidden");
+      });
+      expect(reads).toBe(1);
+      await act(async () => { finishOldRead({ requests: [] }); });
+      if (hide) {
+        expect(reads).toBe(1);
+        await act(async () => setVisibility("visible"));
+      }
+      expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
+      expect(reads).toBe(2);
+    } finally {
+      unmount();
+      if (visibilityDescriptor) Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      else Reflect.deleteProperty(document, "visibilityState");
+    }
+  });
+
+  it.each(["success", "failure"])("reconciles a late pairing mutation after a notice shows a newer request (%s)", async (outcome) => {
+    let requests = [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", expires_in_seconds: 120,
+    }];
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
+    let reply!: (payload: unknown) => void;
+    let fail!: (error: Error) => void;
+    requestMutationSpy.mockImplementationOnce(() => new Promise((resolve, reject) => { reply = resolve; fail = reject; }));
+    render(<App />);
+    const popup = await screen.findByRole("dialog", { name: "Pair account" });
+    fireEvent.change(within(popup).getByRole("textbox", { name: "Pairing code" }), {
+      target: { value: "ABCD-EFGH" },
+    });
+    expect(requestMutationSpy).toHaveBeenCalledWith("settings.pairing.approve", { code: "ABCD-EFGH" }, expect.any(Number));
+    requests = [{
+      code: "IJKL-MNOP", channel: "feishu.second", sender_id: "bob", expires_in_seconds: 240,
+    }];
+    await act(async () => { for (const handler of pairingChangeHandlers) handler(); });
+    expect(popup).toHaveTextContent("Code expires 4 min.");
+    await act(async () => {
+      if (outcome === "success") reply({ requests: [] });
+      else fail(new Error("Approval unavailable"));
+    });
+    expect(screen.getByRole("dialog", { name: "Pair account" })).toHaveTextContent("Code expires 4 min.");
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing")).toHaveLength(3);
+    expect(requestMutationSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["sending", "failed"])("explains an undelivered pairing reply (%s) without empty code slots", async (delivery_status) => {
+    mockFetchRoutes({ "/api/settings/pairing": { requests: [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status,
+    }] } });
+    render(<App />);
+    const popup = await screen.findByRole("dialog", { name: "Pair account" });
+    expect(within(popup).getByText("Already received a code?").closest("details")).not.toHaveAttribute("open");
+    expect(within(popup).getByText(/another private message to retry/)).toBeVisible();
+    if (delivery_status === "failed") expect(within(popup).getByRole("alert")).toBeVisible();
+    fireEvent.click(within(popup).getByText("Already received a code?"));
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+    expect(requestMutationSpy).not.toHaveBeenCalledWith("settings.pairing.approve", expect.anything(), expect.anything());
+  });
+
+  it.each([undefined, "sent"])("keeps legacy/delivered pairing usable behind a failed request (%s)", async (delivery_status) => {
+    mockFetchRoutes({ "/api/settings/pairing": { requests: [
+      { code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "failed" },
+      { code: "IJKL-MNOP", channel: "feishu.second", sender_id: "bob", delivery_status },
+    ] } });
+    render(<App />);
+    const popup = await screen.findByRole("dialog", { name: "Pair account" });
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+    expect(within(popup).queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(popup).getByText("2 pending")).toBeVisible();
+  });
+
+  it("shows a dismissed pairing request again when its snooze expires", async () => {
+    vi.useFakeTimers();
+    mockFetchRoutes({ "/api/settings/pairing": { requests: [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent",
+    }] } });
+    render(<App />);
+    await act(async () => {});
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Pair account" }))
+      .getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    const popup = screen.getByRole("dialog", { name: "Pair account" });
+    expect(popup).toBeVisible();
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+  });
+
+  it("shows a recovered pairing reply even after its failure notice was dismissed", async () => {
+    vi.useFakeTimers();
+    let delivery_status = "failed";
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests: [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status,
+    }] }) });
+    render(<App />);
+    await act(async () => {});
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Pair account" }))
+      .getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+
+    delivery_status = "sent";
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    const popup = screen.getByRole("dialog", { name: "Pair account" });
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+    expect(within(popup).queryByRole("alert")).not.toBeInTheDocument();
+    expect(requestMutationSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed pairing approval idle until the user retries", async () => {
+    vi.useFakeTimers();
+    let requests = [{ code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent" }];
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
+    requestMutationSpy
+      .mockRejectedValueOnce(new Error("Approval unavailable"))
+      // Bound the old automatic retry loop while reproducing it.
+      .mockImplementation(() => new Promise(() => {}));
+    render(<App />);
+    await act(async () => {});
+    const popup = screen.getByRole("dialog", { name: "Pair account" });
+    fireEvent.change(within(popup).getByRole("textbox", { name: "Pairing code" }), {
+      target: { value: "ABCD-EFGH" },
+    });
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(requestMutationSpy).toHaveBeenCalledTimes(1);
+    expect(within(popup).getByText("Approval unavailable")).toBeVisible();
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
+
+    requests = [];
+    requestMutationSpy.mockResolvedValueOnce({ requests });
+    fireEvent.click(within(popup).getByRole("button", { name: "Retry" }));
+    await act(async () => {});
+    expect(requestMutationSpy).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+  });
+
+  it("reuses an in-flight pairing poll then reads current requests on visible return", async () => {
+    let resolvePairing!: (response: Response) => void;
+    const pendingPairing = new Promise<Response>((resolve) => {
+      resolvePairing = resolve;
+    });
+    let reads = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (String(input) !== "/api/settings/pairing") return Promise.resolve({ ok: false, status: 404 } as Response);
+      return ++reads === 1 ? pendingPairing : Promise.resolve(jsonResponse({ requests: [{
+        code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent",
+      }] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+
+    const setVisibility = (state: DocumentVisibilityState) => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: state,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+
+    try {
+      render(<App />);
+      await waitFor(() => {
+        expect(fetchMock.mock.calls.filter(([input]) => (
+          String(input) === "/api/settings/pairing"
+        ))).toHaveLength(1);
+      });
+
+      act(() => setVisibility("hidden"));
+      act(() => setVisibility("visible"));
+
+      expect(fetchMock.mock.calls.filter(([input]) => (
+        String(input) === "/api/settings/pairing"
+      ))).toHaveLength(1);
+      await act(async () => {
+        resolvePairing(jsonResponse({ requests: [] }));
+        await pendingPairing;
+      });
+      expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
+      expect(reads).toBe(2);
+    } finally {
+      if (visibilityDescriptor) {
+        Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      } else {
+        Reflect.deleteProperty(document, "visibilityState");
+      }
+    }
   });
 });

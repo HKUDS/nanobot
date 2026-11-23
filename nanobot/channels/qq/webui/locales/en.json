@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "Open QQ setup",
+    "officialLabel": "Open QQ bot console",
+    "sections": {
+      "credentials": "Manual credentials",
+      "advanced": "Advanced"
+    },
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "QQ bot app ID"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Allowed users",
+        "placeholder": "Open IDs, comma separated"
+      },
+      "msgFormat": {
+        "label": "Message format",
+        "choices": {
+          "plain": "Plain text",
+          "markdown": "Markdown"
+        }
+      },
+      "ackMessage": {
+        "label": "Acknowledgement message"
+      },
+      "mediaDir": {
+        "label": "Media directory"
+      },
+      "downloadChunkSize": {
+        "label": "Chunk size (bytes)"
+      },
+      "downloadMaxBytes": {
+        "label": "Download limit (bytes)"
+      },
+      "showCompactionNotices": {
+        "label": "Compaction notices",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "QQ binding QR code",
+    "scanTitle": "Scan with mobile QQ",
+    "waiting": "Waiting for scan…",
+    "connected": "Binding complete",
+    "stopped": "Cancelled",
+    "connecting": "Preparing QR code…",
+    "scanAgainWarning": "Rebinding may interrupt other apps using this QQ bot. If the App Secret is reset, the old secret becomes invalid and those apps need the new secret.",
+    "configured": "Configured",
+    "bind": "Bind QQ bot",
+    "rebind": "Rebind bot",
+    "refresh": "Refresh QR code",
+    "retry": "Retry",
+    "expired": "QR code expired",
+    "failed": "Binding failed",
+    "cancelFailed": "Could not cancel",
+    "retrying": "Retrying…",
+    "manualSetup": "Enter credentials manually"
+  }
+}

@@ -1,5 +1,3 @@
-"""Tests for restart notice helpers."""
-
 from __future__ import annotations
 
 import os
@@ -28,7 +26,6 @@ def test_set_and_consume_restart_notice_env_roundtrip(monkeypatch):
     assert notice.started_at_raw
     assert notice.metadata == {}
 
-    # Consumed values should be cleared from env.
     assert consume_restart_notice_from_env() is None
     assert "NANOBOT_RESTART_NOTIFY_CHANNEL" not in os.environ
     assert "NANOBOT_RESTART_NOTIFY_CHAT_ID" not in os.environ
@@ -54,6 +51,23 @@ def test_restart_notice_preserves_metadata_across_env(monkeypatch):
         "slack": {"thread_ts": "1700.42", "channel_type": "channel"}
     }
     assert "NANOBOT_RESTART_NOTIFY_METADATA" not in os.environ
+
+
+def test_restart_notice_drops_process_local_webui_turn_metadata(monkeypatch):
+    monkeypatch.delenv("NANOBOT_RESTART_NOTIFY_METADATA", raising=False)
+
+    set_restart_notice_to_env(
+        channel="websocket",
+        chat_id="chat-1",
+        metadata={
+            "webui_turn_id": "turn-from-old-process",
+            "slack": {"thread_ts": "1700.42"},
+        },
+    )
+
+    notice = consume_restart_notice_from_env()
+    assert notice is not None
+    assert notice.metadata == {"slack": {"thread_ts": "1700.42"}}
 
 
 def test_restart_notice_clears_stale_metadata(monkeypatch):

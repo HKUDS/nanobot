@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan Teams",
+    "officialLabel": "Buka portal pengembang Teams",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID"
+      },
+      "appPassword": {
+        "label": "Secret klien",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "Tenant ID",
+        "placeholder": "Tenant ID opsional"
+      },
+      "path": {
+        "label": "Jalur callback",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "Pengguna diizinkan",
+        "placeholder": "ID pengguna Teams, dipisahkan koma"
+      },
+      "host": {
+        "label": "Dengarkan tuan rumah"
+      },
+      "port": {
+        "label": "Dengarkan pelabuhan"
+      },
+      "replyInThread": {
+        "label": "Balasan thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "Balasan mention saja"
+      },
+      "validateInboundAuth": {
+        "label": "Verifikasi permintaan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "refTtlDays": {
+        "label": "Masa referensi (hari)"
+      },
+      "pruneWebChatRefs": {
+        "label": "Hapus referensi Web Chat",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "Hapus referensi grup",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "Interval penyegaran (detik)"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "Host tepercaya"
+      }
+    }
+  }
+}

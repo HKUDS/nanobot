@@ -1,0 +1,27 @@
+import { MessageCircle } from "lucide-react";
+
+import type { ChannelUiContribution } from "@/channel-plugins/types";
+import { chatAppGuideUrl } from "@/channel-plugins/catalog";
+
+import { WhatsAppConnectFlow } from "./WhatsAppConnectFlow";
+
+export default {
+  presentation: {
+    logoUrl: "/brand/channels/whatsapp.svg",
+    displayName: "WhatsApp",
+    initials: "WA",
+    color: "#25D366",
+    icon: MessageCircle,
+    setup: {
+      mode: "connect",
+      docsUrl: chatAppGuideUrl("whatsapp"),
+      manualFields: [
+        { key: "channels.whatsapp.useProxy", section: "connection", control: "switch" },
+        { key: "channels.whatsapp.allowFrom", section: "access" },
+        { key: "channels.whatsapp.groupPolicy", section: "behavior" },
+      ],
+    },
+  },
+  ConnectFlow: WhatsAppConnectFlow,
+  canConnectBeforeConfigured: true,
+} satisfies ChannelUiContribution;

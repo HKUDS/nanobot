@@ -1,0 +1,494 @@
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import { HostNavigationContext } from "@/components/remote/HostSwitcher";
+import { AboutSettings } from "@/components/settings/overview/OverviewSettings";
+import { VersionCheckRowView } from "@/components/settings/overview/VersionCheckRowView";
+import { NanobotClient } from "@/lib/nanobot-client";
+import { ClientProvider } from "@/providers/ClientProvider";
+import type { SettingsPayload } from "@/lib/types";
+import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, readLocalPreferences, writeLocalPreferences } from "@/lib/local-preferences";
+import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks, selectToolType } from "@/tests/settings-test-utils";
+
+  const thirdPartyBrandNotice =
+    "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement.";
+
+describe("Settings overview and appearance", () => {
+  installSettingsViewTestHooks();
+
+  it.each([{ capabilities: [] }, { capabilities: ["webui.core.v1", "webui.self-update.v1"] }])(
+    "checks on About entry without calling the legacy updater (%j)",
+    async ({ capabilities }) => {
+      const fetcher = vi.fn(async () => jsonResponse({
+        updateAvailable: { currentVersion: "0.2.2", latestVersion: "0.3.6" },
+      }));
+      vi.stubGlobal("fetch", fetcher);
+      render(
+        <ClientProvider client={new NanobotClient({ url: "ws://localhost:8765" })} token="tok"
+          webuiCapabilities={capabilities}>
+          <AboutSettings settings={settingsPayload()} />
+        </ClientProvider>,
+      );
+      expect(await screen.findByRole("link", { name: "Installation guide" })).toBeVisible();
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(fetcher).toHaveBeenCalledWith("/api/settings/version-check", expect.any(Object));
+      expect(screen.queryByRole("button", { name: /^Update$/ })).not.toBeInTheDocument();
+    },
+  );
+
+  it("displays a caller-owned version result and delegates checking without a client provider", () => {
+    const check = vi.fn();
+    const { rerender } = render(<VersionCheckRowView currentVersion="0.3.5" checking={false}
+      result={{ type: "update", latestVersion: "0.3.6", pypiUrl: "https://pypi.org/project/nanobot-ai/" }} onCheck={check} />);
+    expect(screen.getByText("v0.3.6")).toBeVisible();
+    expect(screen.getByRole("link", { name: "PyPI" })).toHaveAttribute("href", "https://pypi.org/project/nanobot-ai/");
+    rerender(<VersionCheckRowView currentVersion="0.3.5" checking={false} result={{ type: "up-to-date" }} onCheck={check} />);
+    expect(screen.getByText("You're up to date")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it("delegates update actions and keeps saved-job details available in the shared view", () => {
+    const requestUpdate = vi.fn();
+    const props = { currentVersion: "0.3.5", checking: false, onCheck: vi.fn(),
+      onRequestUpdate: requestUpdate };
+    const { rerender } = render(<VersionCheckRowView {...props}
+      result={{ type: "update", latestVersion: "0.3.7.dev2026101501",
+        releaseUrl: "https://github.com/HKUDS/nanobot/releases/tag/v0.3.7.dev2026101501" }} />);
+    expect(screen.getByText("v0.3.7.dev2026101501")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Release notes" })).toHaveAttribute("href",
+      "https://github.com/HKUDS/nanobot/releases/tag/v0.3.7.dev2026101501");
+    expect(requestUpdate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("link", { name: "Installation guide" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Update$/ }));
+    expect(requestUpdate).toHaveBeenCalledTimes(1);
+
+    rerender(<VersionCheckRowView {...props} currentVersion="0.3.6"
+      result={{ type: "up-to-date" }} hasPendingUpdate />);
+    expect(screen.queryByRole("button", { name: /^Update$/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View details" }));
+    expect(requestUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets the visible Preview label toggle the setting without consenting to an update", () => {
+    const changeChannel = vi.fn().mockResolvedValue(undefined);
+    const requestUpdate = vi.fn();
+    render(<VersionCheckRowView currentVersion="0.3.6" checking={false} result={null} onCheck={vi.fn()}
+      releaseStatus={{ channel: "stable", revision: 1, currentVersion: "0.3.6", state: "current" }}
+      canChangeChannel onChangeChannel={changeChannel} onRequestUpdate={requestUpdate} />);
+    const toggle = screen.getByRole("switch", { name: "Receive preview updates" });
+    expect(toggle).toHaveAccessibleDescription("Try new features early.");
+    fireEvent.click(document.querySelector(`label[for="${toggle.id}"]`)!);
+    expect(changeChannel).toHaveBeenCalledTimes(1);
+    expect(changeChannel).toHaveBeenCalledWith("preview");
+    expect(requestUpdate).not.toHaveBeenCalled();
+  });
+
+  it("opens the notifications section and preserves independent browser-local channel preferences", () => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, notificationSound: true });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload(), showSidebar: true });
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(screen.getByRole("switch", { name: "Browser notifications" })).toHaveAttribute("aria-checked", "false");
+    const sound = screen.getByRole("switch", { name: "Completion sound" });
+    expect(sound).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(sound);
+    expect(readLocalPreferences()).toMatchObject({ browserNotifications: false, notificationSound: false });
+  });
+
+
+  it.each(["local", "other tab"])("preserves a %s notification opt-out when another preference changes", (source) => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, browserNotifications: true, notificationSound: true });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload(), showSidebar: true });
+    act(() => {
+      const next = { ...readLocalPreferences(), browserNotifications: false };
+      if (source === "local") writeLocalPreferences(next);
+      else {
+        localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify(next));
+        window.dispatchEvent(new StorageEvent("storage", { key: LOCAL_PREFS_STORAGE_KEY }));
+      }
+    });
+    fireEvent.click(screen.getByRole("switch", { name: "Code wrapping" }));
+    expect(readLocalPreferences()).toMatchObject({ browserNotifications: false, notificationSound: true, codeWrap: false });
+  });
+
+  it("links the host's short commit beside its version", () => {
+    const commit = "abcdef12".repeat(5);
+    renderSettingsView({
+      initialSection: "about",
+      initialSettings: { ...settingsPayload(), version: { current: "0.3.5", commit } },
+    });
+    expect(screen.getByText("v0.3.5")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "abcdef1" });
+    expect(link).toHaveAttribute("href", `https://github.com/HKUDS/nanobot/commit/${commit}`);
+    expect(link).toHaveAttribute("title", commit);
+    const reportUrl = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
+    expect(reportUrl.origin + reportUrl.pathname).toBe("https://github.com/HKUDS/nanobot/issues/new");
+    expect(reportUrl.searchParams.get("template")).toBe("bug_report.yml");
+    expect(reportUrl.searchParams.get("version")).toBe(`0.3.5 (commit ${commit})`);
+  });
+
+  it.each([undefined, null])("keeps About usable when the host reports no commit (%s)", (commit) => {
+    renderSettingsView({
+      initialSection: "about",
+      initialSettings: { ...settingsPayload(), version: { current: "0.3.5", commit } },
+    });
+    expect(screen.getByText("v0.3.5")).toBeInTheDocument();
+    expect(screen.getByText("Checking...")).toBeVisible();
+    expect(document.querySelector('a[href*="/commit/"]')).toBeNull();
+    const reportUrl = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
+    expect(reportUrl.searchParams.get("version")).toBe("0.3.5");
+    expect(reportUrl.searchParams.get("python_version")).toBeNull();
+    expect(reportUrl.searchParams.get("os")).toBeNull();
+    expect(reportUrl.searchParams.get("channel")).toBe("WebSocket");
+    expect(reportUrl.searchParams.get("llm_provider")).toBe("openai");
+    expect(reportUrl.searchParams.get("model")).toBe("openai/gpt-4o");
+    expect(reportUrl.searchParams.get("additional")).toBeNull();
+  });
+
+  it("prefills the remote gateway environment separately from the browser", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Browser on Windows");
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      environment: { python_version: "3.14.2", os: "Darwin", os_version: "24.4.0", architecture: "arm64" },
+    };
+    render(
+      <ClientProvider client={new NanobotClient({ url: "ws://localhost:8765" })} token="tok">
+        <HostNavigationContext.Provider value={{ kind: "embedded", name: "Remote", hostname: "private-host", open: vi.fn() }}>
+          <AboutSettings settings={payload} />
+        </HostNavigationContext.Provider>
+      </ClientProvider>,
+    );
+    const url = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
+    expect(url.searchParams.get("python_version")).toBe("3.14.2");
+    expect(url.searchParams.get("os")).toBe("macOS 24.4.0 (arm64)");
+    expect(url.searchParams.get("channel")).toBe("WebSocket");
+    expect(url.searchParams.get("browser")).toBe("Browser on Windows");
+    expect(url.searchParams.get("connection")).toBe("Remote host");
+    expect(url.searchParams.get("model")).toBe("openai/gpt-4o");
+    expect(url.searchParams.get("llm_provider")).toBe("openai");
+    expect(url.searchParams.get("additional")).toBeNull();
+    expect(url.href).not.toContain(encodeURIComponent(payload.runtime.config_path));
+    expect(url.href).not.toContain("private-host");
+  });
+
+  it("edits browser appearance while gateway settings are pending or unavailable", async () => {
+    let rejectSettings!: (reason: Error) => void;
+    const pendingSettings = new Promise<Response>((_, reject) => { rejectSettings = reject; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/settings"
+      ? pendingSettings : new Promise<Response>(() => {})));
+    renderSettingsView({ initialSection: "appearance", initialSettings: null, showSidebar: true });
+    const input = screen.getByRole("spinbutton", { name: "Custom text size" });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "22" } });
+    await waitFor(() => expect(readLocalPreferences().customReadingTextSize).toBe(22));
+    await act(async () => { rejectSettings(new Error("Gateway unavailable")); });
+    expect(screen.getByRole("spinbutton", { name: "Custom text size" })).toBe(input);
+    fireEvent.change(input, { target: { value: "24" } });
+    await waitFor(() => expect(readLocalPreferences().customReadingTextSize).toBe(24));
+    expect(screen.queryByText("Gateway unavailable")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Models" }));
+    expect(await screen.findByText("Gateway unavailable")).toBeVisible();
+  });
+
+  it("keeps an explicit native restart failure visible on Appearance", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    const restart = vi.fn().mockRejectedValue(new Error("Engine restart failed"));
+    renderSettingsView({ initialSection: "appearance", showSidebar: true,
+      initialSettings: { ...settingsPayload(), surface: "native", runtime_capabilities: { can_restart_engine: true, can_open_logs: false, can_export_diagnostics: false } },
+      onNativeEngineRestart: restart });
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(await screen.findByText("Engine restart failed")).toBeVisible();
+    expect(restart).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("spinbutton", { name: "Custom text size" })).toBeEnabled();
+  });
+
+  it("saves the reading size immediately while preserving the other local preferences", async () => {
+    const previous = { ...DEFAULT_LOCAL_PREFS, codeWrap: false, brandLogos: false, notificationSound: true };
+    writeLocalPreferences(previous);
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+
+    expect(screen.getByRole("radio", { name: "Standard reading text" })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: "Large reading text" }));
+
+    await waitFor(() => expect(readLocalPreferences()).toEqual({ ...previous, readingTextSize: "large" }));
+    expect(screen.getByRole("radio", { name: "Large reading text" })).toBeChecked();
+  });
+
+  it("edits and remembers a custom reading size without committing an empty input", async () => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, notificationSound: true, codeWrap: false });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+    fireEvent.focus(screen.getByRole("spinbutton", { name: "Custom text size" }));
+    const input = screen.getByRole("spinbutton", { name: "Custom text size" });
+    fireEvent.change(input, { target: { value: "" } });
+    expect(readLocalPreferences().customReadingTextSize).toBe(18);
+    fireEvent.change(input, { target: { value: "24" } });
+    await waitFor(() => expect(readLocalPreferences()).toMatchObject({
+      readingTextSize: "custom", customReadingTextSize: 24, notificationSound: true, codeWrap: false,
+    }));
+    fireEvent.click(screen.getByRole("radio", { name: "Standard reading text" }));
+    fireEvent.focus(screen.getByRole("spinbutton", { name: "Custom text size" }));
+    expect(screen.getByRole("spinbutton", { name: "Custom text size" })).toHaveValue(24);
+    const currentInput = screen.getByRole("spinbutton", { name: "Custom text size" });
+    fireEvent.change(currentInput, { target: { value: "21" } });
+    expect(readLocalPreferences().customReadingTextSize).toBe(21);
+    fireEvent.change(currentInput, { target: { value: "40" } });
+    fireEvent.blur(currentInput);
+    expect(currentInput).toHaveValue(40);
+    expect(currentInput).toHaveAttribute("aria-invalid", "true");
+    expect(readLocalPreferences().customReadingTextSize).toBe(21);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Your text remains at 21 px.");
+    fireEvent.change(currentInput, { target: { value: "22" } });
+    expect(currentInput).not.toHaveAttribute("aria-invalid", "true");
+    expect(readLocalPreferences().customReadingTextSize).toBe(22);
+  });
+
+  it("keeps an invalid Enter edit focused until corrected or cancelled", async () => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, readingTextSize: "custom" });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+    const input = screen.getByRole("spinbutton", { name: "Custom text size" });
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "40" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Your text remains at 18 px.");
+    expect(readLocalPreferences().customReadingTextSize).toBe(18);
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input).toHaveValue(18);
+    expect(input).not.toHaveAttribute("aria-invalid", "true");
+    fireEvent.change(input, { target: { value: "22" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).not.toHaveFocus();
+    expect(readLocalPreferences().customReadingTextSize).toBe(22);
+  });
+
+  it.each(["", "40"])("restores the saved custom size after another tab interrupts draft %j", async (draft) => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, readingTextSize: "custom", customReadingTextSize: 24 });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Custom text size" }), { target: { value: draft } });
+    act(() => {
+      localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify({ ...readLocalPreferences(), schemaVersion: 1, readingTextSize: "small" }));
+      window.dispatchEvent(new StorageEvent("storage", { key: LOCAL_PREFS_STORAGE_KEY }));
+    });
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Small reading text" })).toBeChecked());
+    fireEvent.focus(screen.getByRole("spinbutton", { name: "Custom text size" }));
+    expect(screen.getByRole("spinbutton", { name: "Custom text size" })).toHaveValue(24);
+  });
+
+  it("persists the file edit display local preference", async () => {
+    renderSettingsView({
+      initialSection: "appearance",
+      initialSettings: settingsPayload(),
+      showSidebar: true,
+    });
+
+    expect(screen.getByText("Edit preview")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Diff" }));
+
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem("nanobot-webui.settings-preferences") || "{}");
+      expect(saved.fileEditDisplayMode).toBe("diff");
+    });
+  });
+
+  it("shows the brand logo explanation in a tooltip when requested", async () => {
+    renderSettingsView({
+      initialSection: "appearance",
+      initialSettings: settingsPayload(),
+      showSidebar: true,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Brand logos" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(thirdPartyBrandNotice);
+  });
+
+
+  it("publishes the latest settings payload to the shell", async () => {
+    const payload = settingsPayload();
+    const onSettingsChange = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ onSettingsChange });
+
+    await waitFor(() => expect(onSettingsChange).toHaveBeenCalledWith(payload));
+  });
+
+  it("does not keep Apps loading while an empty CLI catalog refresh is pending", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({
+            apps: [],
+            installed_count: 0,
+            catalog_updated_at: null,
+            catalog_refresh_pending: true,
+          });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView();
+
+    expect(await screen.findByText("No tools available")).toBeInTheDocument();
+    await selectToolType("MCP");
+    expect(await screen.findByText("Add MCP")).toBeInTheDocument();
+  });
+
+  it("shows token activity on the overview", async () => {
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      usage: {
+        days: [
+          {
+            date: new Date().toISOString().slice(0, 10),
+            input_tokens: 1200,
+            output_tokens: 300,
+            cache_read_tokens: 500,
+            cache_write_tokens: 0,
+            cache_read_observed_input_tokens: 1200,
+            cache_write_observed_input_tokens: 1200,
+            total_tokens: 1500,
+            requests: 2,
+          },
+        ],
+        total_tokens: 1500,
+        total_tokens_30d: 1500,
+        total_tokens_365d: 1500,
+        peak_day_tokens: 1500,
+        current_streak_days: 1,
+        longest_streak_days: 1,
+        active_days_30d: 1,
+        requests_30d: 2,
+        updated_at: "2026-06-03T00:00:00Z",
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/usage") return jsonResponse(payload.usage);
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "overview" });
+
+    expect(await screen.findByLabelText("1,500 tokens in the last 30 days")).toBeInTheDocument();
+    expect(screen.getByText("Token usage")).toBeInTheDocument();
+  });
+
+  it("coalesces focus refreshes while usage is already loading", async () => {
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      usage: {
+        days: [],
+        total_tokens: 0,
+        total_tokens_30d: 0,
+        total_tokens_365d: 0,
+        peak_day_tokens: 0,
+        current_streak_days: 0,
+        longest_streak_days: 0,
+        active_days_30d: 0,
+        requests_30d: 0,
+        updated_at: null,
+      },
+    };
+    let resolveUsage!: (response: Response) => void;
+    const pendingUsage = new Promise<Response>((resolve) => {
+      resolveUsage = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/usage") return pendingUsage;
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "overview", initialSettings: payload });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => (
+        String(input) === "/api/settings/usage"
+      ))).toHaveLength(1);
+    });
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("focus"));
+
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      String(input) === "/api/settings/usage"
+    ))).toHaveLength(1);
+    await act(async () => {
+      resolveUsage(jsonResponse(payload.usage));
+      await pendingUsage;
+    });
+  });
+
+  it("aligns token activity days with the configured timezone", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-02T18:00:00Z"));
+    const basePayload = settingsPayload();
+    const payload: SettingsPayload = {
+      ...basePayload,
+      agent: {
+        ...basePayload.agent,
+        timezone: "Asia/Shanghai",
+      },
+      usage: {
+        days: [
+          {
+            date: "2026-06-03",
+            input_tokens: 1200,
+            output_tokens: 300,
+            cache_read_tokens: 500,
+            cache_write_tokens: 0,
+            cache_read_observed_input_tokens: 1200,
+            cache_write_observed_input_tokens: 1200,
+            total_tokens: 1500,
+            requests: 2,
+          },
+        ],
+        total_tokens: 1500,
+        total_tokens_30d: 1500,
+        total_tokens_365d: 1500,
+        peak_day_tokens: 1500,
+        current_streak_days: 1,
+        longest_streak_days: 1,
+        active_days_30d: 1,
+        requests_30d: 2,
+        updated_at: "2026-06-03T00:00:00Z",
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+
+    renderSettingsView({ initialSection: "overview", initialSettings: payload });
+
+    expect(screen.getByLabelText(/2026-06-03: 1,500 tokens, 2 requests/)).toBeInTheDocument();
+  });
+});

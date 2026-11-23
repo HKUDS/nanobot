@@ -1,0 +1,35 @@
+{
+  "setup": {
+    "primaryAction": "Connect WhatsApp",
+    "docsLabel": "Open WhatsApp setup",
+    "officialLabel": "Open WhatsApp help",
+    "fields": {
+      "allowFrom": {
+        "label": "Allowed contacts",
+        "placeholder": "Phone numbers or WhatsApp IDs"
+      },
+      "groupPolicy": {
+        "label": "Group rules",
+        "choices": {
+          "mention": "Mentions only",
+          "open": "All messages",
+          "allowlist": "Allowlist"
+        }
+      },
+      "useProxy": {
+        "label": "Use proxy"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "WhatsApp linking QR code",
+    "scanTitle": "Link WhatsApp",
+    "scanDescription": "In WhatsApp, open Linked devices, choose Link a device, then scan this code.",
+    "waiting": "Waiting for WhatsApp…",
+    "connected": "WhatsApp is connected.",
+    "stopped": "The WhatsApp connection attempt stopped. Start again to get a new code.",
+    "connecting": "Connecting…",
+    "scanAgain": "Link another account",
+    "connect": "Link WhatsApp"
+  }
+}

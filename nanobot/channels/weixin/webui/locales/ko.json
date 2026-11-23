@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "primaryAction": "WeChat 연결",
+    "docsLabel": "WeChat 설정 가이드 열기",
+    "officialLabel": "WeChat 열기",
+    "fields": {
+      "allowFrom": {
+        "label": "허용 사용자",
+        "placeholder": "사용자 ID, 쉼표로 구분"
+      },
+      "token": {
+        "label": "토큰",
+        "placeholder": "QR 로그인으로 저장됨"
+      },
+      "sendProgress": {
+        "label": "진행 상황 전송"
+      },
+      "sendToolHints": {
+        "label": "도구 힌트"
+      },
+      "streaming": {
+        "label": "스트리밍 API 사용"
+      },
+      "replyProgressMessages": {
+        "label": "항목별 진행 상황"
+      },
+      "replyProgressMaxMessages": {
+        "label": "진행 메시지 상한"
+      },
+      "contextMessageBudget": {
+        "label": "컨텍스트 메시지 상한"
+      },
+      "blockStreaming": {
+        "label": "답변 분할"
+      },
+      "blockStreamingMinChars": {
+        "label": "블록 최소 글자 수(글자)"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "블록 수 상한"
+      },
+      "baseUrl": {
+        "label": "API URL"
+      },
+      "cdnBaseUrl": {
+        "label": "CDN URL"
+      },
+      "routeTag": {
+        "label": "경로 태그"
+      },
+      "stateDir": {
+        "label": "상태 디렉터리"
+      },
+      "pollTimeout": {
+        "label": "폴링 제한 시간(초)"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "WeChat 로그인 QR 코드",
+    "scanTitle": "WeChat으로 스캔",
+    "waiting": "WeChat으로 QR 코드를 스캔해 주세요…",
+    "connected": "WeChat이 연결되었습니다.",
+    "stopped": "WeChat 로그인이 중지되었습니다.",
+    "connecting": "연결 중...",
+    "verifyTitle": "인증 필요",
+    "verifyDescription": "계속하려면 WeChat에 표시된 숫자를 입력하세요.",
+    "verifyMismatch": "코드가 일치하지 않습니다. WeChat에 표시된 새 숫자를 입력하세요.",
+    "expired": "WeChat 로그인이 만료되었습니다. 다시 연결하려면 다시 스캔하세요.",
+    "failed": "WeChat에 연결할 수 없습니다. 다시 시도하세요.",
+    "verifyPlaceholder": "코드",
+    "verifySubmit": "인증"
+  }
+}

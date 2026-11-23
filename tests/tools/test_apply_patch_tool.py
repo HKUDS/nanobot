@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from nanobot.agent.tools.apply_patch import ApplyPatchTool
+from nanobot.execution.files import WritableFile
 
 
 def test_apply_patch_edits_replace(tmp_path):
@@ -89,7 +92,14 @@ def test_apply_patch_edits_add_to_existing_file(tmp_path):
     )
 
 
-def test_apply_patch_edits_add_to_existing_file_without_final_newline(tmp_path):
+@pytest.mark.parametrize(
+    "new_text",
+    [
+        pytest.param("beta", id="without_final_newline"),
+        pytest.param("\nbeta", id="respects_leading_newline"),
+    ],
+)
+def test_apply_patch_add_separates_existing_file_without_final_newline(tmp_path, new_text):
     target = tmp_path / "notes.txt"
     target.write_text("alpha", encoding="utf-8")
     tool = ApplyPatchTool(workspace=tmp_path)
@@ -100,7 +110,7 @@ def test_apply_patch_edits_add_to_existing_file_without_final_newline(tmp_path):
                 {
                     "path": "notes.txt",
                     "action": "add",
-                    "new_text": "beta",
+                    "new_text": new_text,
                 }
             ]
         )
@@ -131,25 +141,22 @@ def test_apply_patch_edits_add_to_existing_crlf_file_without_final_newline(tmp_p
     assert target.read_bytes() == b"alpha\r\nbravo\r\ncharlie\r\n"
 
 
-def test_apply_patch_edits_add_to_existing_file_respects_leading_newline(tmp_path):
+@pytest.mark.parametrize("original", [None, b"", b"alpha\r\nbravo"], ids=["new", "empty", "crlf"])
+def test_apply_patch_replaces_text_from_an_earlier_edit_in_the_batch(tmp_path, original):
     target = tmp_path / "notes.txt"
-    target.write_text("alpha", encoding="utf-8")
+    if original is not None:
+        target.write_bytes(original)
     tool = ApplyPatchTool(workspace=tmp_path)
 
-    result = asyncio.run(
-        tool.execute(
-            edits=[
-                {
-                    "path": "notes.txt",
-                    "action": "add",
-                    "new_text": "\nbeta",
-                }
-            ]
-        )
-    )
+    result = asyncio.run(tool.execute(edits=[
+        {"path": "notes.txt", "action": "add", "new_text": "charlie"},
+        {"path": "./notes.txt", "action": "replace", "old_text": "charlie", "new_text": "delta"},
+    ]))
 
-    assert "update notes.txt" in result
-    assert target.read_text(encoding="utf-8") == "alpha\nbeta\n"
+    assert result.startswith("Patch applied:\n")
+    assert result.count("notes.txt") == 1
+    assert f"{'add' if original is None else 'update'} notes.txt" in result
+    assert target.read_bytes() == (b"alpha\r\nbravo\r\ndelta\r\n" if original else b"delta\n")
 
 
 def test_apply_patch_rejects_delete_action(tmp_path):
@@ -367,7 +374,7 @@ def test_apply_patch_media_dir_is_read_only_by_default(tmp_path, monkeypatch):
     media.mkdir()
     target = media / "demo.md"
     target.write_text("before\n", encoding="utf-8")
-    monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
     tool = ApplyPatchTool(workspace=workspace, allowed_dir=workspace)
 
     result = asyncio.run(
@@ -427,7 +434,7 @@ def test_apply_patch_edits_reports_invalid_edit_shapes(tmp_path):
     assert "each edit must be an object" in non_object
 
 
-def test_apply_patch_edits_rolls_back_when_late_operation_fails(tmp_path):
+def test_apply_patch_preflight_rejects_missing_later_file_without_partial_write(tmp_path):
     first = tmp_path / "first.txt"
     first.write_text("before\n")
     tool = ApplyPatchTool(workspace=tmp_path)
@@ -453,3 +460,49 @@ def test_apply_patch_edits_rolls_back_when_late_operation_fails(tmp_path):
 
     assert "file to update does not exist: missing.txt" in result
     assert first.read_text() == "before\n"
+
+
+@pytest.mark.parametrize("first_exists", [True, False], ids=["existing-file", "added-file"])
+def test_apply_patch_edits_rolls_back_when_later_write_fails(tmp_path, monkeypatch, first_exists):
+    first = tmp_path / "first.txt"
+    first_original = b"before\r\nfirst tail"
+    if first_exists:
+        first.write_bytes(first_original)
+    second = tmp_path / "second.txt"
+    second_original = b"before\r\nsecond tail"
+    second.write_bytes(second_original)
+    tool = ApplyPatchTool(workspace=tmp_path)
+    write = WritableFile.write
+    failed = False
+
+    def _fail_second_write(target, *args, **kwargs):
+        nonlocal failed
+        write(target, *args, **kwargs)
+        if target.path == second.resolve() and not failed:
+            failed = True
+            raise OSError("injected second write failure")
+
+    monkeypatch.setattr(WritableFile, "write", _fail_second_write)
+
+    result = asyncio.run(
+        tool.execute(
+            edits=[
+                {"path": "first.txt", "action": "add", "new_text": "after"},
+                {
+                    "path": "second.txt",
+                    "action": "replace",
+                    "old_text": "before",
+                    "new_text": "after",
+                },
+            ]
+        )
+    )
+
+    assert failed
+    assert getattr(result, "is_error", False)
+    assert "Error applying patch: injected second write failure" in result
+    if first_exists:
+        assert first.read_bytes() == first_original
+    else:
+        assert not first.exists()
+    assert second.read_bytes() == second_original

@@ -1,5 +1,3 @@
-"""Helpers for restart notification messages."""
-
 from __future__ import annotations
 
 import json
@@ -7,7 +5,9 @@ import os
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
+
+from nanobot.bus.events import INBOUND_META_TURN_ID
 
 RESTART_NOTIFY_CHANNEL_ENV = "NANOBOT_RESTART_NOTIFY_CHANNEL"
 RESTART_NOTIFY_CHAT_ID_ENV = "NANOBOT_RESTART_NOTIFY_CHAT_ID"
@@ -40,9 +40,14 @@ def set_restart_notice_to_env(
     os.environ[RESTART_NOTIFY_CHANNEL_ENV] = channel
     os.environ[RESTART_NOTIFY_CHAT_ID_ENV] = chat_id
     os.environ[RESTART_STARTED_AT_ENV] = str(time.time())
-    if metadata:
+    persisted_metadata = dict(metadata or {})
+    persisted_metadata.pop(INBOUND_META_TURN_ID, None)
+    if persisted_metadata:
         try:
-            os.environ[RESTART_NOTIFY_METADATA_ENV] = json.dumps(metadata, default=str)
+            os.environ[RESTART_NOTIFY_METADATA_ENV] = json.dumps(
+                persisted_metadata,
+                default=str,
+            )
         except (TypeError, ValueError):
             os.environ.pop(RESTART_NOTIFY_METADATA_ENV, None)
     else:
@@ -64,7 +69,7 @@ def consume_restart_notice_from_env() -> RestartNotice | None:
         except (TypeError, ValueError):
             parsed = None
         if isinstance(parsed, dict):
-            metadata = parsed
+            metadata = cast(dict[str, Any], parsed)
     return RestartNotice(
         channel=channel,
         chat_id=chat_id,

@@ -1,0 +1,1307 @@
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { expect, it, vi } from "vitest";
+import type { ProviderCreationUpdate, SettingsPayload } from "@/lib/types";
+import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
+
+
+function renderProviderManager(options: Parameters<typeof renderSettingsView>[0]) {
+  const result = renderSettingsView(options);
+  fireEvent.click(screen.getByRole("button", { name: "Manage providers" }));
+  return result;
+}
+
+async function chooseProviderToConfigure(label: string) {
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Add provider" }),
+  );
+  fireEvent.click(await screen.findByRole("option", { name: label }));
+}
+
+describe("Settings providers", () => {
+  installSettingsViewTestHooks();
+
+  it("manages providers unused by presets and returns focus through the manager", async () => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    payload.providers = [
+      { name: "openai", label: "OpenAI", configured: true },
+      { name: "deepseek", label: "DeepSeek", configured: true, api_base: "https://api.deepseek.com" },
+    ];
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    expect(screen.queryByRole("button", { name: "DeepSeek" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add provider" })).not.toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Manage providers" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("button", { name: "DeepSeek" }));
+    fireEvent.change(screen.getByLabelText("API URL"), {
+      target: { value: "https://unsaved.example/v1" },
+    });
+    await user.click(screen.getByRole("button", { name: "Back to providers" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "DeepSeek" })).toHaveFocus());
+    await user.keyboard("{Enter}");
+    expect(screen.getByLabelText("API URL")).toHaveValue("https://api.deepseek.com");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("configures the current provider without losing the preset name or model (save: %s)", async (save) => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    payload.providers = [{
+      name: "openai", label: "OpenAI", configured: true,
+      api_key_hint: "configured", api_base: "https://api.openai.com/v1",
+    }];
+    requestMutationMock.mockResolvedValueOnce({
+      ...payload,
+      providers: [{ ...payload.providers[0], api_base: "https://gateway.example/v1" }],
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await user.click(screen.getByRole("button", { name: "New preset" }));
+    const name = screen.getByRole("textbox", { name: "Preset name" });
+    await user.type(name, "Keep this draft");
+    const model = screen.getByRole("combobox", { name: "Select model" });
+    await user.click(model);
+    fireEvent.change(model, { target: { value: "gpt-4o-mini" } });
+    await user.keyboard("{Enter}");
+    const picker = screen.getByRole("combobox", { name: "OpenAI" });
+    await user.click(picker);
+    await user.click(screen.getByRole("option", { name: "Configure OpenAI…" }));
+    fireEvent.change(screen.getByLabelText("API URL"), {
+      target: { value: "https://gateway.example/v1" },
+    });
+    await user.click(screen.getByRole("button", { name: save ? "Save provider" : "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "OpenAI" })).not.toBeInTheDocument());
+    expect(screen.getByRole("dialog", { name: "New preset" })).toBeVisible();
+    expect(name).toHaveValue("Keep this draft");
+    expect(model).toHaveValue("gpt-4o-mini");
+    expect(picker).toHaveTextContent("OpenAI");
+    expect(picker).toHaveFocus();
+    expect(requestMutationMock).toHaveBeenCalledTimes(save ? 1 : 0);
+    await user.click(picker);
+    await user.click(screen.getByRole("option", { name: "Configure OpenAI…" }));
+    expect(screen.getByLabelText("API URL")).toHaveValue(
+      save ? "https://gateway.example/v1" : "https://api.openai.com/v1",
+    );
+  });
+
+  it("preserves the preset draft when signing out of its current provider", async () => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    const provider = {
+      name: "openai_codex", label: "OpenAI Codex", configured: true,
+      auth_type: "oauth" as const, api_key_required: false, oauth_login_supported: true,
+    };
+    payload.providers = [provider];
+    requestMutationMock.mockResolvedValueOnce({
+      ...payload, providers: [{ ...provider, configured: false }],
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await user.click(screen.getByRole("button", { name: "New preset" }));
+    await user.type(screen.getByRole("textbox", { name: "Preset name" }), "OAuth draft");
+    const picker = screen.getByRole("combobox", { name: "OpenAI Codex" });
+    await user.click(picker);
+    await user.click(screen.getByRole("option", { name: "Configure OpenAI Codex…" }));
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("dialog", { name: "New preset" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("OAuth draft");
+    expect(picker).toHaveTextContent("OpenAI Codex");
+    await waitFor(() => expect(picker).toHaveFocus());
+    expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.oauth_logout", { provider: "openai_codex" }, 20_000,
+    );
+  });
+
+  it("opens provider setup from the preset picker with the keyboard and returns to the draft on cancel", async () => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    payload.providers = [{ name: "openai", label: "OpenAI", configured: true }];
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await user.click(screen.getByRole("button", { name: "New preset" }));
+    const name = screen.getByRole("textbox", { name: "Preset name" });
+    await user.type(name, "Keep this draft");
+    const providerPicker = screen.getByRole("combobox", { name: "OpenAI" });
+    await user.click(providerPicker);
+    await user.keyboard("{End}{Enter}");
+    const dialog = await screen.findByRole("dialog", { name: "Add provider" });
+    await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "Search providers" })).toHaveFocus());
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add provider" })).not.toBeInTheDocument());
+    expect(screen.getByRole("dialog", { name: "New preset" })).toBeVisible();
+    expect(name).toHaveValue("Keep this draft");
+    expect(providerPicker).toHaveTextContent("OpenAI");
+    expect(providerPicker).toHaveFocus();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("selects the newly added provider and preserves the preset draft (custom: %s)", async (custom) => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    const provider = { name: custom ? "company" : "moonshot", label: custom ? "Company" : "Moonshot", configured: false };
+    payload.providers = custom ? [] : [provider];
+    requestMutationMock.mockResolvedValueOnce({
+      ...payload, providers: [{ ...provider, configured: true, api_key_hint: "configured" }],
+      ...(custom ? { created_provider: provider.name } : {}),
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await user.click(screen.getByRole("button", { name: "New preset" }));
+    const name = screen.getByRole("textbox", { name: "Preset name" });
+    await user.type(name, "My first preset");
+    const providerPicker = screen.getByRole("combobox", { name: "No configured providers" });
+    expect(providerPicker).toBeEnabled();
+    await user.click(providerPicker);
+    await user.click(screen.getByRole("option", { name: "Add provider" }));
+    await user.click(custom
+      ? screen.getByRole("button", { name: "Custom" })
+      : screen.getByRole("option", { name: "Moonshot" }));
+    if (custom) {
+      await user.type(screen.getByPlaceholderText("My model provider"), "Company");
+      await user.type(screen.getByPlaceholderText("https://api.example.com/v1"), "https://gateway.example/v1");
+    }
+    await user.type(screen.getByPlaceholderText("Enter API key"), "test-key");
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "New preset" })).toBeVisible());
+    expect(name).toHaveValue("My first preset");
+    await waitFor(() => expect(providerPicker).toHaveFocus());
+    expect(providerPicker).toHaveTextContent(provider.label);
+    expect(name).toHaveValue("My first preset");
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+    expect(requestMutationMock.mock.calls[0][0]).toBe(custom ? "settings.provider.create" : "settings.provider.update");
+  });
+
+  it("searches provider aliases and configures in the same dialog without adding an unsaved row", async () => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    payload.providers = [
+      { name: "deepseek", label: "DeepSeek", configured: true },
+      { name: "volcengine", label: "VolcEngine", configured: false },
+      { name: "volcengine_coding_plan", label: "VolcEngine Coding Plan", configured: false },
+    ];
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+    const trigger = screen.getByRole("button", { name: "Add provider" });
+    await user.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Add provider" });
+    const search = within(dialog).getByRole("combobox", { name: "Search providers" });
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(within(dialog).queryByRole("option", { name: "DeepSeek" })).not.toBeInTheDocument();
+    await user.type(search, "火山");
+    expect(within(dialog).getAllByRole("option")).toHaveLength(2);
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getByRole("dialog", { name: "VolcEngine Coding Plan" })).toBe(dialog);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(within(dialog).getByLabelText("API key", { selector: "input" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "VolcEngine Coding Plan" })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Back to providers" }));
+    expect(screen.getByRole("dialog", { name: "Add provider" })).toBe(dialog);
+    expect(screen.getByRole("combobox")).toHaveValue("火山");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
+    expect(screen.getByRole("button", { name: "Add provider" })).toHaveFocus();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps custom provider creation available for empty searches and discards cancelled drafts", async () => {
+    const user = userEvent.setup();
+    renderProviderManager({ initialSection: "models", initialSettings: settingsPayload() });
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await user.type(screen.getByRole("combobox"), "does-not-exist");
+    expect(screen.getByRole("status")).toHaveTextContent("No providers match this search.");
+    await user.click(screen.getByRole("button", { name: "Custom" }));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    await user.type(screen.getByPlaceholderText("My model provider"), "Unsaved gateway");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    expect(screen.getByRole("combobox")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Custom" }));
+    expect(screen.getByPlaceholderText("My model provider")).toHaveValue("");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("uses a bottom sheet on mobile without opening the keyboard immediately", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query === "(max-width: 639px)", media: query,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })));
+    renderProviderManager({ initialSection: "models", initialSettings: settingsPayload() });
+    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    const dialog = screen.getByRole("dialog", { name: "Add provider" });
+    expect(dialog).toHaveClass("rounded-t-3xl", "bottom-0");
+    expect(screen.getByRole("combobox")).not.toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+    expect(screen.getByRole("dialog", { name: "Custom" })).toBe(dialog);
+  });
+
+  it("adds a built-in provider only after saving and returns focus to its management row", async () => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    payload.providers = [{ name: "moonshot", label: "Moonshot", configured: false }];
+    requestMutationMock.mockResolvedValueOnce({
+      ...payload, providers: [{ ...payload.providers[0], configured: true, api_key_hint: "configured" }],
+    });
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+    const trigger = screen.getByRole("button", { name: "Add provider" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("option", { name: "Moonshot" }));
+    await user.type(screen.getByPlaceholderText("Enter API key"), "test-key");
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
+    expect(screen.getByRole("button", { name: "Moonshot" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Moonshot" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    expect(screen.queryByRole("option", { name: "Moonshot" })).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("retains the add-provider draft after a failed save (custom: %s)", async (custom) => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    payload.providers = [{ name: "moonshot", label: "Moonshot", configured: false }];
+    requestMutationMock.mockRejectedValueOnce(new Error("Provider could not be saved"));
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await user.click(custom
+      ? screen.getByRole("button", { name: "Custom" })
+      : screen.getByRole("option", { name: "Moonshot" }));
+    const dialog = screen.getByRole("dialog");
+    if (custom) {
+      await user.type(screen.getByPlaceholderText("My model provider"), "Company gateway");
+      await user.type(screen.getByPlaceholderText("https://api.example.com/v1"), "https://gateway.example/v1");
+    }
+    await user.type(screen.getByPlaceholderText("Enter API key"), "test-key");
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Add provider" })).toBeEnabled());
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByPlaceholderText("Enter API key")).toHaveValue("test-key");
+    await user.click(within(dialog).getByRole("button", { name: "Back to providers" }));
+    expect(screen.getByRole("dialog", { name: "Add provider" })).toBe(dialog);
+    await user.click(custom
+      ? screen.getByRole("button", { name: "Custom" })
+      : screen.getByRole("option", { name: "Moonshot" }));
+    expect(screen.getByPlaceholderText("Enter API key")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
+    expect(screen.queryByRole("button", { name: "Moonshot" })).not.toBeInTheDocument();
+  });
+
+  it("keeps provider labels and keyboard configuration accessible with decorative logos", async () => {
+    const user = userEvent.setup();
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      providers: [{
+        name: "openai_codex",
+        label: "OpenAI Codex",
+        configured: true,
+        auth_type: "oauth",
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        model_catalog: "builtin",
+        oauth_account: "test-account",
+        oauth_login_supported: true,
+      }],
+    };
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+
+    const provider = await screen.findByRole("button", { name: "OpenAI Codex" });
+    expect(within(provider).getByText("Configure")).toBeInTheDocument();
+    expect(within(provider).queryByRole("img")).not.toBeInTheDocument();
+    provider.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "OpenAI Codex" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
+    expect(screen.getByRole("button", { name: "OpenAI Codex" })).toHaveFocus();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+
+  it.each([false, true])("signs in to the xAI Grok provider (from preset: %s)", async (fromPreset) => {
+    const base = settingsPayload();
+    const xaiProvider = {
+      name: "xai_grok",
+      label: "xAI Grok",
+      configured: false,
+      auth_type: "oauth",
+      api_key_required: false,
+      api_key_hint: null,
+      api_base: null,
+      default_api_base: "https://cli-chat-proxy.grok.com/v1",
+      model_catalog: "builtin",
+      oauth_account: null,
+      oauth_expires_at: null,
+      oauth_login_supported: true,
+    } satisfies SettingsPayload["providers"][number];
+    const payload: SettingsPayload = { ...base, providers: [xaiProvider] };
+    const signedIn: SettingsPayload = {
+      ...payload,
+      providers: [{ ...xaiProvider, configured: true, oauth_account: "user@example.com" }],
+    };
+    const authorization = {
+      status: "authorization_required",
+      provider: "xai_grok",
+      flow_id: "flow-123",
+      authorization_url: "https://auth.x.ai/oauth2/authorize?state=test",
+      expires_in: 600,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock
+      .mockResolvedValueOnce(authorization)
+      .mockResolvedValueOnce(signedIn);
+    const popup = {
+      opener: window,
+      location: { href: "about:blank" },
+      close: vi.fn(),
+    };
+    vi.stubGlobal("open", vi.fn(() => popup));
+
+    (fromPreset ? renderSettingsView : renderProviderManager)({ initialSection: "models", initialSettings: payload });
+
+    if (fromPreset) {
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "New preset" }));
+      await user.type(screen.getByRole("textbox", { name: "Preset name" }), "OAuth preset");
+      await user.click(screen.getByRole("combobox", { name: "No configured providers" }));
+      await user.click(screen.getByRole("option", { name: "Add provider" }));
+      await user.click(screen.getByRole("option", { name: "xAI Grok" }));
+    } else {
+      await chooseProviderToConfigure("xAI Grok");
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.provider.oauth_login",
+        { provider: "xai_grok" },
+        20_000,
+      ),
+    );
+    expect(popup.opener).toBeNull();
+    expect(popup.location.href).toBe(authorization.authorization_url);
+
+    expect(
+      screen.getByText(
+        "Complete sign-in in your browser. If nanobot does not connect automatically, paste the authorization code below.",
+      ),
+    ).toBeInTheDocument();
+    const callbackInput = await screen.findByRole("textbox", {
+      name: "Authorization code",
+    });
+    fireEvent.change(callbackInput, {
+      target: { value: "secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Finish sign-in" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.provider.oauth_complete",
+        {
+          provider: "xai_grok",
+          flow_id: "flow-123",
+          authorization_response: "secret",
+        },
+        20_000,
+      ),
+    );
+    if (fromPreset) {
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "xAI Grok" })).not.toBeInTheDocument());
+      expect(screen.getByRole("combobox", { name: "xAI Grok" })).toHaveFocus();
+      expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("OAuth preset");
+    } else {
+      expect(await screen.findByText("Signed in")).toBeInTheDocument();
+    }
+  });
+
+  it("recognizes remote access before starting xAI Grok sign-in", async () => {
+    const happyWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void };
+    };
+    const originalUrl = window.location.href;
+    happyWindow.happyDOM.setURL("http://203.0.113.10:18887/#/settings?section=models");
+
+    try {
+      const base = settingsPayload();
+      const xaiProvider = {
+        name: "xai_grok",
+        label: "xAI Grok",
+        configured: false,
+        auth_type: "oauth",
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        default_api_base: "https://cli-chat-proxy.grok.com/v1",
+        model_catalog: "builtin",
+        oauth_account: null,
+        oauth_expires_at: null,
+        oauth_login_supported: true,
+      } satisfies SettingsPayload["providers"][number];
+      const payload: SettingsPayload = { ...base, providers: [xaiProvider] };
+      const authorization = {
+        status: "authorization_required",
+        provider: "xai_grok",
+        flow_id: "flow-remote",
+        authorization_url: "https://auth.x.ai/oauth2/authorize?state=remote",
+        expires_in: 600,
+      };
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return jsonResponse({});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      requestMutationMock.mockResolvedValueOnce(authorization);
+      const popup = {
+        opener: window,
+        location: { href: "about:blank" },
+        close: vi.fn(),
+      };
+      const openMock = vi.fn(() => popup);
+      vi.stubGlobal("open", openMock);
+
+      renderProviderManager({ initialSection: "models", initialSettings: payload });
+
+      await chooseProviderToConfigure("xAI Grok");
+      expect(
+        screen.getByText(
+          "Select Sign in to open xAI on your computer, then paste the authorization code shown after login.",
+        ),
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+      const dialog = (await screen.findByText("Select Sign in to open xAI on your computer. After signing in, paste the authorization code shown by xAI below.")).closest('[role="dialog"]') as HTMLElement;
+
+      expect(openMock).not.toHaveBeenCalled();
+      expect(
+        within(dialog).getByText(
+          "Select Sign in to open xAI on your computer. After signing in, paste the authorization code shown by xAI below.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("textbox", { name: "Authorization code" }),
+      ).toBeInTheDocument();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Sign in" }));
+      expect(openMock).toHaveBeenCalledWith(
+        authorization.authorization_url,
+        "_blank",
+        "noopener,noreferrer",
+      );
+      expect(popup.opener).toBeNull();
+    } finally {
+      happyWindow.happyDOM.setURL(originalUrl);
+    }
+  });
+
+  it("polls local OpenAI Codex sign-in until the loopback callback completes", async () => {
+    const base = settingsPayload();
+    const codexProvider = {
+      name: "openai_codex",
+      label: "OpenAI Codex",
+      configured: false,
+      auth_type: "oauth",
+      api_key_required: false,
+      api_key_hint: null,
+      api_base: null,
+      default_api_base: "https://chatgpt.com/backend-api",
+      model_catalog: "builtin",
+      oauth_account: null,
+      oauth_expires_at: null,
+      oauth_login_supported: true,
+    } satisfies SettingsPayload["providers"][number];
+    const payload: SettingsPayload = { ...base, providers: [codexProvider] };
+    const signedIn: SettingsPayload = {
+      ...payload,
+      providers: [{ ...codexProvider, configured: true, oauth_account: "acct-codex" }],
+    };
+    const authorization = {
+      status: "authorization_required",
+      provider: "openai_codex",
+      flow_id: "flow-codex-local",
+      authorization_url: "https://auth.openai.com/oauth/authorize?state=local",
+      expires_in: 600,
+      completion_input: "callback_url",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock
+      .mockResolvedValueOnce(authorization)
+      .mockResolvedValueOnce(signedIn);
+    const openMock = vi.fn();
+    vi.stubGlobal("open", openMock);
+
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+
+    await chooseProviderToConfigure("OpenAI Codex");
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    const dialog = (await screen.findByText("Finish signing in using your browser. If nanobot does not connect automatically, copy the full URL from the localhost page’s address bar—even if the page cannot load—paste it below, then select “Finish sign-in”.")).closest('[role="dialog"]') as HTMLElement;
+
+    expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.oauth_login",
+      { provider: "openai_codex" },
+      20_000,
+    );
+    expect(openMock).not.toHaveBeenCalled();
+    expect(
+      within(dialog).getByText(
+        "Finish signing in using your browser. If nanobot does not connect automatically, copy the full URL from the localhost page’s address bar—even if the page cannot load—paste it below, then select “Finish sign-in”.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Waiting for sign-in to finish…")).toBeInTheDocument();
+
+    expect(
+      await screen.findByText("Signed in", {}, { timeout: 2500 }),
+    ).toBeInTheDocument();
+  });
+
+  it("completes remote OpenAI Codex sign-in with the full callback URL", async () => {
+    const happyWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void };
+    };
+    const originalUrl = window.location.href;
+    happyWindow.happyDOM.setURL("http://203.0.113.10:18887/#/settings?section=models");
+
+    try {
+      const base = settingsPayload();
+      const codexProvider = {
+        name: "openai_codex",
+        label: "OpenAI Codex",
+        configured: false,
+        auth_type: "oauth",
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        default_api_base: "https://chatgpt.com/backend-api",
+        model_catalog: "builtin",
+        oauth_account: null,
+        oauth_expires_at: null,
+        oauth_login_supported: true,
+      } satisfies SettingsPayload["providers"][number];
+      const payload: SettingsPayload = { ...base, providers: [codexProvider] };
+      const signedIn: SettingsPayload = {
+        ...payload,
+        providers: [{ ...codexProvider, configured: true, oauth_account: "acct-codex" }],
+      };
+      const authorization = {
+        status: "authorization_required",
+        provider: "openai_codex",
+        flow_id: "flow-codex",
+        authorization_url: "https://auth.openai.com/oauth/authorize?state=test",
+        expires_in: 600,
+        completion_input: "callback_url",
+      };
+      const callbackUrl =
+        "http://localhost:1455/auth/callback?code=secret&state=test";
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return jsonResponse({});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      requestMutationMock.mockImplementation(async (
+        action: string,
+        mutationPayload: Record<string, unknown>,
+      ) => {
+        if (action === "settings.provider.oauth_login") return authorization;
+        if (mutationPayload.authorization_response === callbackUrl) return signedIn;
+        return {
+          status: "pending",
+          provider: "openai_codex",
+          flow_id: "flow-codex",
+        };
+      });
+      const popup = {
+        opener: window,
+        location: { href: "about:blank" },
+        close: vi.fn(),
+      };
+      const openMock = vi.fn(() => popup);
+      vi.stubGlobal("open", openMock);
+
+      renderProviderManager({ initialSection: "models", initialSettings: payload });
+
+      await chooseProviderToConfigure("OpenAI Codex");
+      expect(
+        screen.getByText(
+          "Sign in through this browser, then paste the full localhost callback URL back into nanobot.",
+        ),
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+      const dialog = (await screen.findByText("Open ChatGPT in this browser and finish signing in. On the localhost page, copy the full URL from the address bar—even if the page cannot load—paste it below, then select “Finish sign-in”.")).closest('[role="dialog"]') as HTMLElement;
+
+      expect(openMock).not.toHaveBeenCalled();
+      expect(
+        within(dialog).getByText(
+          "Open ChatGPT in this browser and finish signing in. On the localhost page, copy the full URL from the address bar—even if the page cannot load—paste it below, then select “Finish sign-in”.",
+        ),
+      ).toBeInTheDocument();
+      expect(within(dialog).getByText("Paste the callback URL to continue.")).toBeInTheDocument();
+      const callbackInput = within(dialog).getByRole("textbox", {
+        name: "Callback URL",
+      });
+      expect(callbackInput).toHaveAttribute(
+        "placeholder",
+        "Paste the full callback URL here",
+      );
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Open ChatGPT" }));
+      expect(openMock).toHaveBeenCalledWith(
+        authorization.authorization_url,
+        "_blank",
+        "noopener,noreferrer",
+      );
+      expect(popup.opener).toBeNull();
+
+      fireEvent.change(callbackInput, { target: { value: callbackUrl } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Finish sign-in" }));
+
+      await waitFor(() =>
+        expect(requestMutationMock).toHaveBeenCalledWith(
+          "settings.provider.oauth_complete",
+          {
+            provider: "openai_codex",
+            flow_id: "flow-codex",
+            authorization_response: callbackUrl,
+          },
+          20_000,
+        ),
+      );
+      expect(await screen.findByText("Signed in")).toBeInTheDocument();
+    } finally {
+      happyWindow.happyDOM.setURL(originalUrl);
+    }
+  });
+
+  it("saves proxy switches for xAI and OpenAI Codex OAuth providers before sign-in", async () => {
+    const base = settingsPayload();
+    const providers: SettingsPayload["providers"] = [
+      {
+        name: "xai_grok",
+        label: "xAI Grok",
+        configured: false,
+        auth_type: "oauth",
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        default_api_base: "https://cli-chat-proxy.grok.com/v1",
+        model_catalog: "builtin",
+        oauth_account: null,
+        oauth_expires_at: null,
+        oauth_login_supported: true,
+        use_proxy: true,
+        advanced_fields: ["extra_body", "use_proxy"],
+        extra_body: null,
+      },
+      {
+        name: "openai_codex",
+        label: "OpenAI Codex",
+        configured: false,
+        auth_type: "oauth",
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        default_api_base: "https://chatgpt.com/backend-api",
+        model_catalog: "builtin",
+        oauth_account: null,
+        oauth_expires_at: null,
+        oauth_login_supported: true,
+        use_proxy: false,
+        advanced_fields: ["extra_body", "use_proxy"],
+        extra_body: null,
+      },
+    ];
+    let payload: SettingsPayload = { ...base, providers };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async (
+      _action: string,
+      values: { provider?: string; use_proxy?: boolean; extraBody?: string },
+    ) => {
+      payload = {
+        ...payload,
+        providers: payload.providers.map((provider) =>
+          provider.name === values.provider
+            ? {
+                ...provider,
+                use_proxy: values.use_proxy,
+                extra_body: values.extraBody ? JSON.parse(values.extraBody) : null,
+              }
+            : provider,
+        ),
+      };
+      return payload;
+    });
+
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+
+    await chooseProviderToConfigure("xAI Grok");
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    const xaiProxy = screen.getByRole("switch", { name: "Use proxy" });
+    expect(xaiProxy).toBeChecked();
+    expect(screen.queryByPlaceholderText("http://127.0.0.1:7890")).not.toBeInTheDocument();
+    fireEvent.click(xaiProxy);
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sign in" })).toHaveAttribute(
+      "title",
+      "Save advanced changes before signing in.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.provider.update",
+        {
+          provider: "xai_grok",
+          extraBody: "",
+          use_proxy: false,
+        },
+        20_000,
+      ),
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to providers" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to providers" }));
+    await chooseProviderToConfigure("OpenAI Codex");
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    const codexProxy = screen.getByRole("switch", { name: "Use proxy" });
+    expect(codexProxy).not.toBeChecked();
+    fireEvent.click(codexProxy);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.provider.update",
+        {
+          provider: "openai_codex",
+          extraBody: "",
+          use_proxy: true,
+        },
+        20_000,
+      ),
+    );
+  });
+
+  it("persists a disabled proxy switch on an API-key provider without changing credentials", async () => {
+    const base = settingsPayload();
+    let payload: SettingsPayload = { ...base, providers: [{
+      name: "openrouter", label: "OpenRouter", configured: true,
+      api_key_hint: "sk-••••test", api_base: "https://openrouter.ai/api/v1",
+      use_proxy: true, advanced_fields: ["use_proxy"],
+    }] };
+    requestMutationMock.mockImplementation(async (_action, values) => {
+      payload = { ...payload, providers: payload.providers.map((provider) => ({ ...provider, use_proxy: values.use_proxy })) };
+      return payload;
+    });
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(screen.getByRole("button", { name: "OpenRouter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    const useProxy = screen.getByRole("switch", { name: "Use proxy" });
+    expect(useProxy).toBeChecked();
+    fireEvent.click(useProxy);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.update",
+      { provider: "openrouter", apiBase: "https://openrouter.ai/api/v1", apiKey: undefined, use_proxy: false },
+      20_000,
+    ));
+    fireEvent.click(await screen.findByRole("button", { name: "OpenRouter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    expect(screen.getByRole("switch", { name: "Use proxy" })).not.toBeChecked();
+  });
+
+  it("maps provider request switches to raw extraBody fields", async () => {
+    const base = settingsPayload();
+    const providers: SettingsPayload["providers"] = [
+      {
+        name: "xai_grok",
+        label: "xAI Grok",
+        configured: true,
+        auth_type: "oauth",
+        api_key_required: false,
+        oauth_account: "grok@example.com",
+        oauth_login_supported: true,
+        advanced_fields: ["extra_body", "use_proxy"],
+        extra_body: null,
+      },
+      {
+        name: "openai_codex",
+        label: "OpenAI Codex",
+        configured: true,
+        auth_type: "oauth",
+        api_key_required: false,
+        oauth_account: "codex@example.com",
+        oauth_login_supported: true,
+        advanced_fields: ["extra_body", "use_proxy"],
+        extra_body: null,
+      },
+      {
+        name: "deepseek",
+        label: "DeepSeek",
+        configured: true,
+        api_key_required: true,
+        api_key_hint: "deep••••test",
+        api_base: "https://api.deepseek.com",
+        advanced_fields: ["extra_body"],
+        extra_body: null,
+      },
+      {
+        name: "openai",
+        label: "OpenAI",
+        configured: true,
+        api_key_required: true,
+        api_key_hint: "sk-••••test",
+        api_base: "https://api.openai.com/v1",
+        provider_api_configurable: true,
+        request_apis: ["chat_completions", "responses"],
+        advanced_fields: ["extra_body"],
+        extra_body: null,
+      },
+    ];
+    let payload: SettingsPayload = { ...base, providers };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async (_action, values) => {
+      payload = { ...payload, providers: payload.providers.map((provider) =>
+        provider.name === values.provider ? {
+          ...provider,
+          extra_body: values.extraBody ? JSON.parse(values.extraBody) : null,
+          api: values.api ?? provider.api,
+        } : provider) };
+      return payload;
+    });
+
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(screen.getByRole("button", { name: "xAI Grok" }));
+    const xSearch = screen.getByRole("switch", { name: "X Search" });
+    expect(xSearch).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(xSearch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.update",
+      expect.objectContaining({ provider: "xai_grok" }),
+      20_000,
+    ));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
+
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI Codex" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Fast" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.update",
+      expect.objectContaining({ provider: "openai_codex" }),
+      20_000,
+    ));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
+
+    fireEvent.click(screen.getByRole("button", { name: /^DeepSeek/ }));
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to providers" }));
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI" }));
+    fireEvent.click(screen.getByRole("switch", { name: "OpenAI web search" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: "OpenAI" }),
+    ).toBeVisible());
+
+    await waitFor(() => {
+      const requestUpdates = requestMutationMock.mock.calls
+        .filter(([action]) => action === "settings.provider.update")
+        .map(([, values]) => {
+          const update = values as {
+            provider: string;
+            api?: { supported_apis: string[]; preferred_api: string };
+            extraBody?: string;
+          };
+          return [update.provider, {
+            ...(update.api ? { api: update.api } : {}),
+            extraBody: JSON.parse(update.extraBody ?? "{}"),
+          }] as const;
+        });
+      expect(requestUpdates).toEqual([
+        ["xai_grok", { extraBody: { tools: [] } }],
+        ["openai_codex", { extraBody: { service_tier: "priority" } }],
+        ["openai", {
+          api: { supported_apis: ["responses"], preferred_api: "responses" },
+          extraBody: { tools: [{ type: "web_search" }] },
+        }],
+      ]);
+    });
+  });
+
+  it("recognizes and removes versioned web search tools without losing raw settings", async () => {
+    const base = settingsPayload();
+    const payload: SettingsPayload = {
+      ...base,
+      providers: [{
+        name: "openai",
+        label: "OpenAI",
+        configured: true,
+        api_key_required: true,
+        api_key_hint: "sk-••••test",
+        api_base: "https://api.openai.com/v1",
+        provider_api_configurable: true,
+        request_apis: ["chat_completions", "responses"],
+        advanced_fields: ["extra_body"],
+        extra_body: {
+          metadata: { owner: "legacy-config" },
+          tools: [
+            { type: "web_search_preview", search_context_size: "medium" },
+            { type: "file_search", vector_store_ids: ["vs_legacy"] },
+          ],
+        },
+      }],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockResolvedValueOnce(payload);
+
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(await screen.findByRole("button", { name: "OpenAI" }));
+    const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
+    expect(searchSwitch).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(searchSwitch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() => {
+      const updateCall = requestMutationMock.mock.calls.find(
+        ([action]) => action === "settings.provider.update",
+      );
+      expect(updateCall).toBeTruthy();
+      const values = updateCall?.[1] as { extraBody: string };
+      expect(JSON.parse(values.extraBody)).toEqual({
+        metadata: { owner: "legacy-config" },
+        tools: [{ type: "file_search", vector_store_ids: ["vs_legacy"] }],
+      });
+    });
+  });
+
+  it("creates a custom provider with folded advanced request settings", async () => {
+    const base = settingsPayload();
+    let payload: SettingsPayload = {
+      ...base,
+      providers: [
+        {
+          name: "deepseek",
+          label: "DeepSeek",
+          configured: true,
+          api_key_required: true,
+          api_key_hint: "deep••••test",
+          api_base: "https://api.deepseek.com",
+        },
+        {
+          name: "openrouter",
+          label: "OpenRouter",
+          configured: false,
+          api_key_required: true,
+          api_key_hint: null,
+          api_base: null,
+          default_api_base: "https://openrouter.ai/api/v1",
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementationOnce(async (
+      _action: string,
+      values: ProviderCreationUpdate,
+    ) => {
+        payload = {
+          ...payload,
+          created_provider: "custom-company-gateway",
+          providers: [
+            ...payload.providers,
+            {
+              name: "custom-company-gateway",
+              label: values.name,
+              is_custom: true,
+              configured: true,
+              api_key_required: false,
+              api_key_hint: "sk-c••••pany",
+              api_base: values.apiBase,
+              default_api_base: null,
+              advanced_fields: [
+                "extra_headers",
+                "extra_body",
+                "extra_query",
+                "use_proxy",
+                "thinking_style",
+              ],
+              extra_headers: JSON.parse(values.extraHeaders ?? "{}"),
+              extra_body: JSON.parse(values.extraBody ?? "{}"),
+              extra_query: JSON.parse(values.extraQuery ?? "{}"),
+              use_proxy: values.use_proxy,
+              thinking_style: values.thinkingStyle,
+            },
+          ],
+        };
+        return payload;
+    });
+
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add provider" }),
+    );
+    const customOption = await screen.findByRole("button", { name: "Custom" });
+    const openRouterOption = screen.getByRole("option", { name: "OpenRouter" });
+    expect(customOption.querySelector("svg, img")).not.toBeNull();
+    expect(openRouterOption.querySelector("svg, img")).not.toBeNull();
+    fireEvent.click(customOption);
+
+    fireEvent.change(screen.getByPlaceholderText("My model provider"), {
+      target: { value: "Company Gateway" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("https://api.example.com/v1"), {
+      target: { value: "https://gateway.example/v1" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Enter API key"), {
+      target: { value: "sk-company" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    for (const [title, value] of [
+      ["Headers", '{"X-Tenant":"engineering"}'],
+      ["Body parameters", '{"service_tier":"priority"}'],
+      ["Query parameters", '{"api-version":"2026-01-01"}'],
+    ]) {
+      fireEvent.click(screen.getByRole("button", { name: `${title} Not configured Edit` }));
+      const editor = screen.getByRole("dialog", { name: title });
+      fireEvent.change(within(editor).getByRole("textbox", { name: title }), { target: { value } });
+      fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: title })).not.toBeInTheDocument());
+    }
+    fireEvent.click(screen.getByRole("switch", { name: "Use proxy" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Reasoning format" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "enable_thinking" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
+
+    await waitFor(() => {
+      const createCall = requestMutationMock.mock.calls.find(
+        ([action]) => action === "settings.provider.create",
+      );
+      expect(createCall).toBeTruthy();
+      expect(createCall?.[1]).toEqual({
+        name: "Company Gateway",
+        apiKey: "sk-company",
+        apiBase: "https://gateway.example/v1",
+        use_proxy: true,
+        extraHeaders: '{"X-Tenant":"engineering"}',
+        extraBody: '{"service_tier":"priority"}',
+        extraQuery: '{"api-version":"2026-01-01"}',
+        thinkingStyle: "enable_thinking",
+      });
+    });
+    expect(
+      await screen.findByRole("button", { name: /Company Gateway/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Add provider" }),
+    ).toBeInTheDocument();
+  });
+  it("declares custom connection APIs on creation and preserves them when editing", async () => {
+    const user = userEvent.setup();
+    let payload = settingsPayload();
+    payload.provider_api_configuration_supported = true;
+    const api = { supported_apis: ["anthropic_messages" as const], preferred_api: "anthropic_messages" as const };
+    requestMutationMock.mockImplementation(async (action, args) => {
+      if (action === "settings.provider.create") {
+        payload = {
+          ...payload,
+          providers: [...payload.providers, {
+            name: "tenant", label: "Tenant", is_custom: true, configured: true,
+            api_base: args.apiBase, api: args.api,
+            provider_api_configurable: true,
+            request_apis: args.api.supported_apis,
+          }],
+        };
+      }
+      if (action === "settings.provider.update") {
+        payload = { ...payload, providers: payload.providers.map((row) => row.name === "tenant"
+          ? { ...row, api: args.api, request_apis: args.api.supported_apis } : row) };
+      }
+      return payload;
+    });
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await user.click(screen.getByRole("button", { name: "Custom" }));
+    await user.type(screen.getByPlaceholderText("My model provider"), "Tenant");
+    await user.type(screen.getByPlaceholderText("https://api.example.com/v1"), "https://tenant.test");
+    expect(screen.queryByRole("group", { name: "Supported APIs" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
+    expect(screen.getByRole("switch", { name: "Chat Completions" })).toBeDisabled();
+    await user.click(screen.getByRole("switch", { name: "Anthropic Messages" }));
+    await user.click(screen.getByRole("switch", { name: "Chat Completions" }));
+    expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Anthropic Messages");
+    expect(screen.getByRole("switch", { name: "Anthropic Messages" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
+    expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.create", expect.objectContaining({ api }), 20_000);
+    await user.click(screen.getByRole("button", { name: "Tenant" }));
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
+    expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Anthropic Messages");
+    await user.click(screen.getByRole("switch", { name: "Responses" }));
+    await user.click(screen.getByRole("combobox", { name: "Default API" }));
+    await user.click(screen.getByRole("option", { name: "Responses" }));
+    await user.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.update", expect.objectContaining({
+      provider: "tenant", api: { supported_apis: ["anthropic_messages", "responses"], preferred_api: "responses" },
+    }), 20_000));
+    await user.click(screen.getByRole("button", { name: "Tenant" }));
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
+    expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Responses");
+  });
+
+  it("hides connection API declarations on hosts without the capability", async () => {
+    renderProviderManager({ initialSection: "models", initialSettings: settingsPayload() });
+    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    expect(screen.queryByRole("combobox", { name: "Default API" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Supported APIs" })).not.toBeInTheDocument();
+  });
+
+  it("saves and reopens OpenAI defaults, including automatic routing", async () => {
+    const user = userEvent.setup();
+    let payload = settingsPayload();
+    payload.providers = [{
+      name: "openai", label: "OpenAI", configured: true,
+      api_key_hint: "sk-...",
+      provider_api_configurable: true, request_apis: ["chat_completions", "responses"],
+      api: { supported_apis: ["responses"], preferred_api: "responses" },
+    }];
+    requestMutationMock.mockImplementation(async (_action, args) => {
+      payload = { ...payload, providers: [{ ...payload.providers[0], api: args.api }] };
+      return payload;
+    });
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+    await user.click(screen.getByRole("button", { name: "OpenAI" }));
+    expect(screen.queryByRole("combobox", { name: "Default API" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
+    expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Responses");
+    await user.click(screen.getByRole("combobox", { name: "Default API" }));
+    await user.click(screen.getByRole("option", { name: "Chat Completions" }));
+    await user.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
+    expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.update", expect.objectContaining({
+      provider: "openai", api: { supported_apis: ["chat_completions"], preferred_api: "chat_completions" },
+    }), 20_000);
+    await user.click(screen.getByRole("button", { name: "OpenAI" }));
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
+    expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Chat Completions");
+    await user.click(screen.getByRole("combobox", { name: "Default API" }));
+    await user.click(screen.getByRole("option", { name: "Auto" }));
+    await user.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
+    expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.update", expect.objectContaining({
+      provider: "openai", api: null,
+    }), 20_000);
+    await user.click(screen.getByRole("button", { name: "OpenAI" }));
+    await user.click(screen.getByRole("button", { name: "Advanced options" }));
+    expect(screen.getByRole("combobox", { name: "Default API" })).toHaveTextContent("Auto");
+  });
+
+  it("keeps ordinary OpenAI edits available on hosts without API declarations", async () => {
+    const payload = settingsPayload();
+    payload.providers = [{
+      name: "openai", label: "OpenAI", configured: true,
+      api_key_hint: "sk-...",
+      api_base: "https://api.openai.com/v1", advanced_fields: ["extra_body"],
+      extra_body: { tools: [{ type: "web_search" }] },
+    }];
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI" }));
+    expect(screen.queryByRole("combobox", { name: "Default API" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "OpenAI web search" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("API URL"), { target: { value: "https://gateway.test/v1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.provider.update", expect.objectContaining({
+      provider: "openai", apiBase: "https://gateway.test/v1",
+    }), 20_000));
+    const update = requestMutationMock.mock.calls.at(-1)?.[1];
+    expect(JSON.parse(update.extraBody)).toEqual({ tools: [{ type: "web_search" }] });
+  });
+
+});

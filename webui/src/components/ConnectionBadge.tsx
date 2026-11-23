@@ -1,8 +1,6 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
-import { useClient } from "@/providers/ClientProvider";
 import type { ConnectionStatus } from "@/lib/types";
 
 const COPY: Record<ConnectionStatus, { color: string }> = {
@@ -24,12 +22,8 @@ const COPY: Record<ConnectionStatus, { color: string }> = {
   },
 };
 
-export function ConnectionBadge() {
+export function ConnectionBadge({ status }: { status: ConnectionStatus }) {
   const { t } = useTranslation();
-  const { client } = useClient();
-  const [status, setStatus] = useState<ConnectionStatus>(client.status);
-
-  useEffect(() => client.onStatus(setStatus), [client]);
 
   const meta = COPY[status];
   const pulsing =
