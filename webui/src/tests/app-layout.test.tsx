@@ -1313,24 +1313,40 @@ describe("App layout", () => {
     const prompt = "Use the explicit default preset";
     fireEvent.change(input, { target: { value: prompt } });
     let rejectSelection!: () => void;
-    sendSystemCommandSpy.mockImplementationOnce(() => new Promise((resolve) => {
-      rejectSelection = () => resolve({ command_result: { command: "/model", parts: [{ key: "model.failed", values: { error: "Provider unavailable" } }] } });
-    }));
+    if (surface === "temporary") {
+      sendSystemCommandSpy.mockImplementationOnce(() => new Promise((resolve) => {
+        rejectSelection = () => resolve({ command_result: { command: "/model", parts: [{ key: "model.failed", values: { error: "Provider unavailable" } }] } });
+      }));
+    } else {
+      expect(createChatSpy).not.toHaveBeenCalled();
+      createChatSpy.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+        rejectSelection = () => reject(new Error("model_preset_rejected:Provider unavailable"));
+      }));
+    }
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(sendSystemCommandSpy).toHaveBeenCalledWith(expect.any(String), "/model default"));
+    await waitFor(() => expect(rejectSelection).toBeDefined());
     expect(sendMessageSpy).not.toHaveBeenCalled();
     await act(async () => rejectSelection());
     expect(await screen.findByRole("alert")).toHaveTextContent("Provider unavailable");
     expect(input).toHaveValue(prompt);
     expect(input).toBeEnabled();
     expect(sendMessageSpy).not.toHaveBeenCalled();
-    if (surface === "temporary") expect(discardTemporaryChatSpy).toHaveBeenCalledWith(sendSystemCommandSpy.mock.calls[0][0]);
-    sendSystemCommandSpy.mockResolvedValueOnce({ command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "default" } }] } });
+    if (surface === "temporary") {
+      expect(discardTemporaryChatSpy).toHaveBeenCalledWith(sendSystemCommandSpy.mock.calls[0][0]);
+      sendSystemCommandSpy.mockResolvedValueOnce({ command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "default" } }] } });
+    } else {
+      createChatSpy.mockResolvedValueOnce("confirmed-chat");
+    }
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(sendMessageSpy).toHaveBeenCalledTimes(1));
-    expect(sendMessageSpy).toHaveBeenCalledWith(sendSystemCommandSpy.mock.calls[1][0], prompt, undefined,
+    const chatId = surface === "temporary" ? sendSystemCommandSpy.mock.calls[1][0] : "confirmed-chat";
+    expect(sendMessageSpy).toHaveBeenCalledWith(chatId, prompt, undefined,
       surface === "automations" ? expect.objectContaining({ intent: "create_automation" }) : expect.any(Object));
-    expect(sendSystemCommandSpy).toHaveBeenCalledTimes(2);
+    if (surface === "temporary") expect(sendSystemCommandSpy).toHaveBeenCalledTimes(2);
+    else {
+      expect(createChatSpy.mock.calls.map((call) => call[2])).toEqual(["default", "default"]);
+      expect(sendSystemCommandSpy).not.toHaveBeenCalled();
+    }
   });
 
   it("preserves the first message when the gateway rejects a project", async () => {

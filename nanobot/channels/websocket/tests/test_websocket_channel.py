@@ -5126,6 +5126,7 @@ async def test_commands_api_returns_slash_command_metadata(bus: MagicMock, start
         assert response.status_code == 200
         body = response.json()
         commands = {row["command"]: row for row in body["commands"]}
+        assert "/skill" not in commands
         assert commands["/stop"]["title"] == "Stop task"
         assert commands["/new"]["lifecycle"] == "finalize_active_turn"
         assert commands["/stop"]["lifecycle"] == "stop_active_turn"

@@ -39,7 +39,7 @@ const BUILTIN_COMMAND_ICONS: Record<string, LucideIcon> = {
   "/goal": GoalIcon, "/trigger": TriggerIcon,
   "/dream": DreamIcon, "/dream-log": DreamLogIcon, "/dream-restore": RestoreMemoryIcon,
   "/dream-prompt": PromptTemplateIcon, "/evaluator-prompt": PromptTemplateIcon,
-  "/skill": SkillsIcon, "/help": HelpIcon, "/pairing": PairingIcon,
+  "/help": HelpIcon, "/pairing": PairingIcon,
 };
 
 export type SlashPalettePlacement = "above" | "below" | "beside";

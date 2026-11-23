@@ -24,6 +24,7 @@ from nanobot.security.workspace_access import (
     default_workspace_scope,
     validate_workspace_scope_payload,
 )
+from nanobot.session.model_selection import SessionModelPreset
 from nanobot.session.webui_turns import latest_live_websocket_turn
 from nanobot.webui.session_identity import webui_session_key
 
@@ -492,21 +493,26 @@ class WebUIWorkspaceController:
         scope: WorkspaceScope,
         *,
         expected_generation: str | None = None,
+        initial_preset: str | None = None,
     ) -> tuple[str | None, bool]:
         async with self._scope_lock(chat_id):
             return await self._persist_scope(
-                webui_session_key(chat_id), scope, expected_generation,
+                webui_session_key(chat_id), scope, expected_generation, initial_preset,
             )
 
     async def _persist_scope(
         self, session_key: str, scope: WorkspaceScope, expected_generation: str | None = None,
+        initial_preset: str | None = None,
     ) -> tuple[str | None, bool]:
         generation = expected_generation
         created = False
         if self._sessions is not None:
             generation, created = await self._sessions.state.open_with_metadata(
                 session_key,
-                {"webui": True, WORKSPACE_SCOPE_METADATA_KEY: scope.metadata()},
+                {
+                    "webui": True, WORKSPACE_SCOPE_METADATA_KEY: scope.metadata(),
+                    **SessionModelPreset(initial_preset).metadata_update(),
+                },
                 expected_generation=generation,
                 validate_existing=lambda metadata: self._validate_existing_project(metadata, scope),
             )

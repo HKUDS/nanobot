@@ -230,7 +230,7 @@ Recognized fields: `content`, `text`, `message` (checked in that order). Invalid
 
 | `type` | Fields | Effect |
 |--------|--------|--------|
-| `new_chat` | Optional `workspace_scope`, `request_id` | Server mints a new `chat_id`, subscribes this connection, replies with `attached`. |
+| `new_chat` | Optional `workspace_scope`, `model_preset`, `request_id` | Server mints a new `chat_id`, subscribes this connection, replies with `attached`. A trusted WebUI first send may specify a preset; the gateway validates it before saving the new session with its workspace and preset. An invalid preset returns `model_preset_rejected` without creating a session. |
 | `new_temporary_chat` | Optional `request_id` | Authenticated WebUI only; creates a connection-owned temporary chat and replies with `attached` and `temporary: true`. |
 | `fork_chat` | `source_chat_id`, `before_user_index`; optional `title`, `request_id` | Creates and attaches a non-destructive fork before the selected user message. |
 | `attach` | `chat_id` | Subscribe to an existing `chat_id` (e.g. after a page reload). Replies with `attached`. |

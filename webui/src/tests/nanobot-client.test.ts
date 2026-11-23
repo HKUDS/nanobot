@@ -2465,9 +2465,9 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
 
-    const promise = client.newChat(1_000, workspaceScope);
+    const promise = client.newChat(1_000, workspaceScope, "fast");
     expect(lastSocket().sent.map((value) => JSON.parse(value))).toContainEqual({
-      type: "new_chat", workspace_scope: workspaceScope, request_id: expect.any(String),
+      type: "new_chat", workspace_scope: workspaceScope, model_preset: "fast", request_id: expect.any(String),
     });
     lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id", request_id: lastRequestId() });
     await expect(promise).resolves.toBe("fresh-id");

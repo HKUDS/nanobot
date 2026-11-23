@@ -1895,7 +1895,7 @@ export type FilePreviewPayload = FilePreviewMetadata & (
 );
 
 export type Outbound =
-  | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload; request_id?: string }
+  | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload; model_preset?: string; request_id?: string }
   | { type: "new_temporary_chat"; request_id?: string }
   | {
       type: "webui_request";

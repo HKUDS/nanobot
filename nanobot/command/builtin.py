@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
 
 USER_SHELL_COMMAND = "/__shell"
+# Both graphical and terminal chat composers provide the $ skill picker.
+CHAT_UI_COMMAND_REPLACEMENTS = {"/skill": "$"}
 
 
 CORE_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
@@ -510,7 +512,10 @@ def _help_parts(specs: tuple[BuiltinCommandSpec, ...]) -> list[CommandLine | str
 
 
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
-    return command_reply(ctx.msg, "/help", *_help_parts(ctx.loop.commands.specs), metadata={"render_as": "text"})
+    specs = ctx.loop.commands.specs
+    if ctx.msg.channel == "websocket" and ctx.msg.metadata.get("webui") is True:
+        specs = tuple(spec for spec in specs if spec.command not in CHAT_UI_COMMAND_REPLACEMENTS)
+    return command_reply(ctx.msg, "/help", *_help_parts(specs), metadata={"render_as": "text"})
 
 
 def build_help_text(specs: tuple[BuiltinCommandSpec, ...] = CORE_COMMAND_SPECS, *, locale: object = None) -> str:

@@ -603,9 +603,10 @@ export class NanobotClient {
   }
 
   /** Ask the server to provision a new chat_id; resolves with the assigned id. */
-  newChat(timeoutMs: number = 5_000, workspaceScope?: WorkspaceScopePayload | null): Promise<string> {
+  newChat(timeoutMs: number = 5_000, workspaceScope?: WorkspaceScopePayload | null, modelPreset?: string | null): Promise<string> {
     return this.requestChat({
       type: "new_chat",
+      ...(modelPreset ? { model_preset: modelPreset } : {}),
       ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
     }, timeoutMs, "newChat");
   }

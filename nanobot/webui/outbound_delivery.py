@@ -389,6 +389,7 @@ class WebUIOutboundDelivery:
         phase: str,
         include_source: bool = False,
         transcript_overrides: dict[str, Any] | None = None,
+        deferred_receipt: bool = False,
     ) -> bool:
         self._transcripts.prepare_event(chat_id, event, metadata=metadata, phase=phase, include_source=include_source)
         record = {**event, **(transcript_overrides or {})}
@@ -399,6 +400,9 @@ class WebUIOutboundDelivery:
             or not self._temporary_chats.should_persist_transcript(chat_id)
         ):
             return True
+        if deferred_receipt:
+            # Let channel delivery retry storage failures with the original generation, before fanout.
+            return await self._transcripts.append_many(chat_id, [record], metadata=metadata, raise_storage_errors=True)
         persisted = await self._transcripts.append(chat_id, record, metadata=metadata)
         return self._retain_turn_on_transcript_failure(
             chat_id, persisted=persisted, metadata=metadata, phase=phase,
@@ -501,14 +505,13 @@ class WebUIOutboundDelivery:
             msg = replace(msg, metadata={**msg.metadata, WEBUI_TURN_METADATA_KEY: notification_id})
         recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
         body = await self._message_payload(msg, progress)
+        guarded_receipt = notification_id is not None and bool(msg.metadata.get(HISTORY_GENERATION_METADATA_KEY))
         persisted = await self._persist_turn_transcript_event(
             msg.chat_id, body, metadata=msg.metadata,
             phase="activity" if progress else "answer", include_source=True,
-            transcript_overrides={"text": msg.content},
+            transcript_overrides={"text": msg.content}, deferred_receipt=guarded_receipt,
         )
-        # The guarded append admits a deferred receipt to its original generation.
-        # The same chat_id may now address a replacement session.
-        if notification_id is not None and msg.metadata.get(HISTORY_GENERATION_METADATA_KEY) and not persisted:
+        if guarded_receipt and not persisted:
             return
         if body["text"] != msg.content:
             body.pop("command_result", None)  # Do not let raw parts override signed Markdown.

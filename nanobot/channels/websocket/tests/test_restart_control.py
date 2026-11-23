@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -15,6 +16,7 @@ from nanobot.command.router import CommandContext
 from nanobot.config.schema import Config
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import RECOVERY_METADATA_KEY
+from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.webui.metadata import WEBUI_RESTART_CONTROL_METADATA_KEY
 from nanobot.webui.session_list_index import list_webui_sessions
 
@@ -44,7 +46,7 @@ async def _acknowledge_restart(message, monkeypatch):
         ))
 
 
-@pytest.mark.parametrize("scenario", ["typed", "settings", "reset"])
+@pytest.mark.parametrize("scenario", ["typed", "settings", "reset", "busy", "reset_during_retry"])
 async def test_restart_completion_after_gateway_start(history, tmp_path, monkeypatch, scenario):
     sessions, bus, channel, connection = _channel(tmp_path, sessions=history.sessions)
     chat_id = "restart-chat"
@@ -84,11 +86,29 @@ async def test_restart_completion_after_gateway_start(history, tmp_path, monkeyp
             await cmd_new(CommandContext(msg=reset, session=None, key=reset.session_key, raw=reset.content, loop=loop))
         subscriber.send.reset_mock()
 
+        if scenario in {"busy", "reset_during_retry"}:
+            append = fresh.state.append_history
+            attempts = []
+
+            async def busy_once(key, facts, *, expected_generation, skip_invalid):
+                attempts.append(expected_generation)
+                if len(attempts) == 1:
+                    if scenario == "reset_during_retry":
+                        await fresh.state.reset(key)
+                        raise SessionOperationQueueFullError("session queue full")
+                    raise sqlite3.OperationalError("database is locked")
+                return await append(key, facts, expected_generation=expected_generation, skip_invalid=skip_invalid)
+
+            monkeypatch.setattr(fresh.state, "append_history", busy_once)
+            monkeypatch.setattr("nanobot.channels.manager._SEND_RETRY_DELAYS", (0,))
+
         task = manager._notify_restart_done_if_needed()
         if task is not None:
             await task
         frames = _sent_ws_payloads(subscriber)
-        if scenario != "typed":
+        if scenario in {"busy", "reset_during_retry"}:
+            assert len(attempts) == 2 and attempts[0] and attempts[1] == attempts[0]
+        if scenario not in {"typed", "busy"}:
             assert frames == []
             assert history.read(message.session_key) == []
             return

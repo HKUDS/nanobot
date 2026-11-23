@@ -21,7 +21,8 @@ from nanobot.bus.events import (
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.application import builtin_command_starts_agent_turn
-from nanobot.command.builtin import USER_SHELL_COMMAND
+from nanobot.command.builtin import CHAT_UI_COMMAND_REPLACEMENTS, USER_SHELL_COMMAND
+from nanobot.command.router import normalize_command_text
 from nanobot.providers.model_options import ModelOptions, ModelOptionsPayload
 from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.runtime_context import (
@@ -364,7 +365,28 @@ class WebUICommandRouter:
             )
             if scope is None:
                 return
-            await self._workspaces.stage_scope(new_id, scope)
+            if "model_preset" in envelope:
+                # First send with an explicit preset: never persist a synthetic /model exchange.
+                if not self._transport.is_allowed(client_id) or connection not in self._webui_connections:
+                    await self._transport.webui_send_event(connection, "error", detail="access_denied", **request_fields)
+                    return
+                try:
+                    name = envelope["model_preset"]
+                    if not isinstance(name, str) or not name.strip():
+                        raise ValueError("Expected a model preset name")
+                    resolve = self.gateway.resolve_model_preset
+                    if resolve is None or self.gateway.session_manager is None:
+                        raise ValueError("Model selection unavailable")
+                    preset = resolve(name)
+                except (KeyError, ValueError) as exc:
+                    await self._transport.webui_send_event(
+                        connection, "error", detail="model_preset_rejected", reason=str(exc.args[0]) if exc.args else str(exc),
+                        **request_fields,
+                    )
+                    return
+                await self._workspaces.persist_scope(new_id, scope, initial_preset=preset)
+            else:
+                await self._workspaces.stage_scope(new_id, scope)
             self._transport.webui_attach(connection, new_id)
             await self._transport.webui_send_event(
                 connection,
@@ -667,6 +689,15 @@ class WebUICommandRouter:
                 **rejection_fields,
             )
             return
+
+        if envelope.get("webui") is True and content.lstrip().startswith("/"):
+            command = normalize_command_text(content).split(maxsplit=1)[0].lower()
+            if replacement := CHAT_UI_COMMAND_REPLACEMENTS.get(command):
+                await self._transport.webui_send_event(
+                    connection, "error", detail="message_rejected", reason=f"{command} → {replacement}",
+                    **rejection_fields,
+                )
+                return
 
         # A client may retry the same turn after an ACK was lost. Check before
         # resolving already-committed refs; never dispatch that turn twice.

@@ -382,6 +382,7 @@ class WebUITranscriptRecorder:
 
     async def append_many(
         self, chat_id: str, events: Sequence[dict[str, Any]], *, metadata: dict[str, Any] | None,
+        raise_storage_errors: bool = False,
     ) -> bool:
         if self.sessions is None:
             return True  # A transport-only channel has no durable session service.
@@ -408,6 +409,8 @@ class WebUITranscriptRecorder:
                 self._log.warning("history append failed for {}: {}", chat_id, error)
             valid = valid and not errors
         except (OSError, ValueError, TypeError, sqlite3.Error, SessionConflictError, SessionOperationQueueFullError) as exc:
+            if raise_storage_errors and isinstance(exc, (OSError, sqlite3.OperationalError, SessionOperationQueueFullError)):
+                raise
             self._log.warning("history append failed for {}: {}", chat_id, exc)
             return False
         return valid

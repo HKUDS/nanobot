@@ -8,7 +8,7 @@ from nanobot.agent.skills import SkillsLoader
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command.application import register_builtin_commands
-from nanobot.command.builtin import cmd_skill
+from nanobot.command.builtin import cmd_help, cmd_skill
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.config.schema import ModelPresetConfig
 
@@ -133,3 +133,14 @@ async def test_skill_command_registered_on_router(tmp_path: Path) -> None:
 
     assert out is not None
     assert "No skills available." in out.content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("channel", "metadata", "lists_skills"), [("websocket", {"webui": True}, False), ("telegram", {}, True)])
+async def test_help_lists_commands_for_the_requesting_client(tmp_path, channel, metadata, lists_skills):
+    loop = _make_loop(tmp_path)
+    msg = InboundMessage(channel=channel, chat_id="room", sender_id="user", content="/help", metadata=metadata)
+    reply = await cmd_help(CommandContext(msg=msg, key=msg.session_key, session=None, raw="/help", loop=loop))
+    commands = {row.split()[0] for row in reply.content.splitlines() if row.startswith("/")}
+    assert "/help" in commands
+    assert ("/skill" in commands) is lists_skills
