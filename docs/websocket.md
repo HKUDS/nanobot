@@ -134,7 +134,7 @@ All frames are JSON text. Each message has an `event` field.
 
 `media` and `reply_to` are only present when applicable.
 
-Slash command replies use the same `message` frame, with `side_channel: true` and an optional `command_result`. For example, a successful `/model fast` reply includes `{"command":"/model","parts":[{"key":"model.switched","values":{"preset":"fast"}}, …]}`. Render known keys in the reader’s language and insert values verbatim. A `{"text":"…"}` part is literal output, such as a diff. Use the frame’s `text` when no supported result is available. The same result is available when loading saved replies. A receipt does not by itself start or finish an agent turn; `/compact` continues to report its existing lifecycle events.
+Slash command replies may include `command_result` for localization. Translate known keys, preserve values and literal text, and use the frame’s `text` if the result is absent or unsupported.
 
 **`delta`** — streaming text chunk (only when `streaming: true`):
 
@@ -230,7 +230,7 @@ Recognized fields: `content`, `text`, `message` (checked in that order). Invalid
 
 | `type` | Fields | Effect |
 |--------|--------|--------|
-| `new_chat` | Optional `workspace_scope`, `model_preset`, `request_id` | Server mints a new `chat_id`, subscribes this connection, replies with `attached`. A trusted WebUI first send may specify a preset; the gateway validates it before saving the new session with its workspace and preset. An invalid preset returns `model_preset_rejected` without creating a session. |
+| `new_chat` | Optional `workspace_scope`, `request_id`, `model_preset` (trusted WebUI only) | Server mints a new `chat_id`, subscribes this connection, replies with `attached`. Invalid presets return `model_preset_rejected` without creating a chat. |
 | `new_temporary_chat` | Optional `request_id` | Authenticated WebUI only; creates a connection-owned temporary chat and replies with `attached` and `temporary: true`. |
 | `fork_chat` | `source_chat_id`, `before_user_index`; optional `title`, `request_id` | Creates and attaches a non-destructive fork before the selected user message. |
 | `attach` | `chat_id` | Subscribe to an existing `chat_id` (e.g. after a page reload). Replies with `attached`. |
