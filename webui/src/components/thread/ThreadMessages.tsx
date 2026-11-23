@@ -108,7 +108,18 @@ export function ThreadMessages({
   const { t } = useTranslation();
   const { activityMode } = useLocalPreferences();
   const messageListRef = useRef<HTMLDivElement>(null);
-  const mobileActions = useMediaQuery("(max-width: 767px), (hover: none)");
+  const noHover = useMediaQuery("(hover: none)");
+  const [narrowList, setNarrowList] = useState(false);
+  useLayoutEffect(() => {
+    const list = messageListRef.current;
+    if (!list || noHover) return;
+    const measure = (width: number) => setNarrowList(width > 0 && width < 768);
+    measure(list.getBoundingClientRect().width);
+    const observer = new ResizeObserver(([entry]) => measure(entry.contentRect.width));
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [noHover]);
+  const mobileActions = noHover || narrowList;
   const rawUnits = useMemo(() => buildDisplayUnits(messages), [messages]);
   const units = useMemo(() => filterThreadDisplayUnits(rawUnits), [rawUnits]);
   const forkBoundaryAfterUnitIndex = useMemo(() => {
@@ -154,6 +165,7 @@ export function ThreadMessages({
   }, [activityMode]);
   const [activeContextBlockKey, setActiveContextBlockKey] = useState<string | null>(null);
   const [openContextBlockKey, setOpenContextBlockKey] = useState<string | null>(null);
+  if (!mobileActions && openContextBlockKey !== null) setOpenContextBlockKey(null);
   const pointedContextBlockRef = useRef<string | null>(null);
   const setActivityExpanded = useCallback((key: string, expanded: boolean) => {
     onActivityToggle?.();
@@ -186,7 +198,7 @@ export function ThreadMessages({
     ? <div key="thread-prelude" className={cn("flow-root", marginTop)}>{prefix}{preludeInset}{beforeMessages}</div> : null;
 
   return (
-    <div ref={messageListRef} className="flex w-full flex-col">
+    <div ref={messageListRef} data-compact-message-actions={mobileActions || undefined} className="flex w-full flex-col">
       <AssistantSelectionAction
         containerRef={messageListRef}
         onQuoteSelection={onQuoteSelection}

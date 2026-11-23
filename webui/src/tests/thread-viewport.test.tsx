@@ -361,9 +361,9 @@ describe("ThreadViewport", () => {
     expect(takeUserControl).toHaveBeenCalledTimes(1);
   });
 
-  it.each([390, 1024])("yields scroll control before expanding message activity at %ipx", (width) => {
+  it.each([true, false])("yields scroll control before expanding message activity (no hover: %s)", (noHover) => {
     vi.spyOn(window, "matchMedia").mockImplementation(query => ({
-      matches: width === 390 && query.includes("max-width: 767px"), media: query, onchange: null,
+      matches: noHover && query === "(hover: none)", media: query, onchange: null,
       addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
     }));
     const takeUserControl = vi.spyOn(ThreadMotionCoordinator.prototype, "takeUserControl");
@@ -379,7 +379,7 @@ describe("ThreadViewport", () => {
     );
     const region = screen.getByTestId("thread-message-region");
     let actions = region;
-    if (width === 390) {
+    if (noHover) {
       expect(within(region).queryByRole("button", { name: "Worked" })).not.toBeInTheDocument();
       fireEvent.click(within(region).getByRole("button", { name: "Message actions" }));
       actions = screen.getByRole("dialog", { name: "Message actions" });

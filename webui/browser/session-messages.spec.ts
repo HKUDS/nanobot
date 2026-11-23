@@ -16,7 +16,19 @@ for (const theme of ["light", "dark"] as const) {
       const code = incoming.last().locator("pre");
       await expect(code).toBeVisible();
 
-      const layout = await page.getByRole("main", { name: "Session messages" }).evaluate((main) => {
+      const pane = page.locator('main[aria-label="Session messages"]');
+      const row = pane.locator("[data-thread-display-unit]").filter({ has: page.getByText("@mira", { exact: true }) });
+      const menu = row.getByRole("button", { name: "Message actions" });
+      if (width >= 768) {
+        await pane.evaluate(node => { node.style.maxWidth = "550px"; });
+        await expect(row).toHaveCSS("padding-left", "16px");
+        await menu.click();
+        const sheet = page.getByRole("dialog", { name: "Message actions" });
+        await expect(sheet).toBeVisible();
+        await pane.evaluate(node => { node.style.maxWidth = "none"; });
+        await expect(sheet).toBeHidden();
+      }
+      const layout = await pane.evaluate((main) => {
         const rows = [...main.querySelectorAll<HTMLElement>("[data-session-message]")];
         const own = main.querySelector<HTMLElement>("[data-user-text-bubble] > p")!;
         const ownStyle = getComputedStyle(own);
@@ -58,7 +70,6 @@ for (const theme of ["light", "dark"] as const) {
         expect(Math.abs(bubble.handleLeft - bubble.bodyLeft)).toBeLessThan(1);
       }
 
-      const row = page.locator("[data-thread-display-unit]").filter({ has: page.getByText("@mira", { exact: true }) });
       const copy = row.getByRole("button", { name: "Copy", exact: true });
       if (width >= 768) {
         const side = row.locator("[data-message-side-actions]");
@@ -87,6 +98,10 @@ for (const theme of ["light", "dark"] as const) {
       await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
       await copy.click();
       await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("Looks good.");
+      if (width >= 768) {
+        await pane.evaluate(node => { node.style.maxWidth = "550px"; });
+        await expect(menu).toHaveAttribute("aria-expanded", "false");
+      }
     });
   }
 }
