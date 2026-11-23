@@ -1,15 +1,14 @@
 import { useState } from "react";
 import {
-  Archive,
   ArrowRight,
   ArrowUpCircle,
   MoreHorizontal,
-  PanelLeft,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
   AppsIcon,
+  ArchiveIcon,
   AutomationsIcon,
   ComposeIcon,
   SearchIcon,
@@ -21,6 +20,7 @@ import {
   LiveElapsedBadge,
   MutedHandleBadge,
   SessionStatusDot,
+  SidebarDrawerIcon,
   ZenDoneCircle,
   useLiveClock,
 } from "@/components/session/SessionVisuals";
@@ -127,7 +127,6 @@ export function WorkspaceTopBar({
 
   const overviewLabel = isZh ? "工作台" : "Overview";
   const drawerLabel = isZh ? "会话抽屉" : "Sessions drawer";
-  const doneLabel = isZh ? "归档" : "Archive";
   const inChat = view === "chat";
 
   // Calm single-line summary for the pulse whisper button
@@ -178,23 +177,23 @@ export function WorkspaceTopBar({
             aria-current={view === "overview" ? "page" : undefined}
             onClick={() => onOpenOverview(null)}
             className={cn(
-              "host-no-drag inline-flex h-8 shrink-0 items-center gap-2 rounded-lg px-1.5 text-[13px] transition-colors",
+              "host-no-drag inline-flex h-7 shrink-0 items-center gap-2 rounded-lg px-1.5 text-[13px] leading-none transition-colors",
               view === "overview"
                 ? "font-medium text-foreground"
                 : "text-muted-foreground/80 hover:bg-foreground/[0.04] hover:text-foreground",
             )}
           >
-            <span className="relative h-5 w-5 shrink-0">
+            <span className="relative h-[18px] w-[18px] shrink-0">
               <img
                 src="/brand/nanobot_mark.svg"
                 alt=""
-                className="h-5 w-5 select-none object-contain dark:opacity-0"
+                className="h-[18px] w-[18px] select-none object-contain dark:opacity-0"
                 draggable={false}
               />
               <img
                 src="/brand/nanobot_mark_night.svg"
                 alt=""
-                className="absolute inset-0 h-5 w-5 select-none object-contain opacity-0 dark:opacity-100"
+                className="absolute inset-0 h-[18px] w-[18px] select-none object-contain opacity-0 dark:opacity-100"
                 draggable={false}
               />
             </span>
@@ -213,23 +212,21 @@ export function WorkspaceTopBar({
             </span>
           }
         >
-          <Button
+          <button
             type="button"
-            variant="ghost"
-            size="icon"
             data-testid="topbar-drawer-toggle"
             aria-label={drawerLabel}
             aria-pressed={drawerOpen || drawerPinned}
             onClick={onToggleDrawer}
             className={cn(
-              "host-no-drag h-7 w-7 shrink-0 rounded-lg transition-colors",
+              "host-no-drag inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-foreground/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
               drawerOpen || drawerPinned
-                ? "bg-foreground/[0.07] text-foreground"
-                : "text-muted-foreground/65 hover:bg-foreground/[0.04] hover:text-foreground",
+                ? "text-foreground"
+                : "text-muted-foreground/70",
             )}
           >
-            <PanelLeft className="h-[15px] w-[15px]" strokeWidth={1.75} aria-hidden />
-          </Button>
+            <SidebarDrawerIcon open={drawerOpen || drawerPinned} />
+          </button>
         </HoverHint>
 
         {/* Compact mobile session title when in chat (< md) */}
@@ -274,9 +271,9 @@ export function WorkspaceTopBar({
                   type="button"
                   title={activeSession.project.name}
                   onClick={() => onOpenOverview(activeSession.project.id)}
-                  className="host-no-drag max-w-[9rem] shrink-0 truncate rounded-md px-1.5 py-0.5 text-muted-foreground/80 transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                  className="host-no-drag inline-flex h-7 max-w-[9rem] shrink-0 items-center truncate rounded-md px-1.5 text-muted-foreground/80 transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
                 >
-                  {activeSession.project.name}
+                  <span className="truncate">{activeSession.project.name}</span>
                 </button>
                 <span aria-hidden className="text-foreground/20">/</span>
                 {activeWorkbenchGroup && activeWorkbenchGroup.panes.length > 1 ? (
@@ -292,7 +289,7 @@ export function WorkspaceTopBar({
                             aria-current={paneActive ? "page" : undefined}
                             onClick={() => onSelectSession(pane.session.key)}
                             className={cn(
-                              "host-no-drag inline-flex max-w-[11rem] items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors",
+                              "host-no-drag inline-flex h-7 max-w-[11rem] items-center gap-1.5 rounded-md px-2 transition-colors",
                               paneActive
                                 ? "bg-foreground/[0.055] font-medium text-foreground"
                                 : "text-muted-foreground/70 hover:bg-foreground/[0.035] hover:text-foreground",
@@ -331,8 +328,8 @@ export function WorkspaceTopBar({
         ) : null}
       </div>
 
-      {/* Right: Quiet Live Pulse (shown outside Overview so Overview stays uncluttered) + Subtle Actions */}
-      <div className="flex shrink-0 items-center gap-1">
+      {/* Right: Quiet Live Pulse (shown outside Overview so Overview stays uncluttered) + Optically Aligned Action Groups */}
+      <div className="flex h-7 shrink-0 items-center">
         {view !== "overview" ? (
         <Popover open={pulseOpen} onOpenChange={setPulseOpen}>
           <PopoverTrigger asChild>
@@ -341,7 +338,7 @@ export function WorkspaceTopBar({
               data-testid="live-pulse-trigger"
               aria-label={attentionCount > 0 ? pulseSummary : (isZh ? "静默" : "Quiet")}
               className={cn(
-                "host-no-drag inline-flex h-8 items-center gap-1.5 rounded-full px-2 text-[12px] transition-all duration-150 sm:gap-2 sm:px-2.5",
+                "host-no-drag mr-1.5 inline-flex h-7 items-center gap-1.5 rounded-full px-2 text-[12px] leading-none transition-all duration-150 sm:gap-2 sm:px-2.5",
                 attentionCount > 0
                   ? "bg-foreground/[0.035] font-medium text-foreground/85 hover:bg-foreground/[0.065]"
                   : "text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground",
@@ -459,38 +456,39 @@ export function WorkspaceTopBar({
         </Popover>
         ) : null}
 
-        {/* Active thread actions (Session automations, prompt search, pane layout, add pane, temporary toggle) */}
-        <div
-          ref={onThreadActionsHostChange}
-          data-testid="topbar-thread-actions"
-          className="host-no-drag flex shrink-0 items-center gap-0.5 empty:hidden [&_button]:h-7 [&_button]:w-7 [&_button]:rounded-lg [&_button]:text-muted-foreground/80 [&_button:hover]:bg-foreground/[0.05] [&_button:hover]:text-foreground [&_button>svg]:h-[15px] [&_button>svg]:w-[15px]"
-        />
+        {/* Active thread actions (Session automations, prompt search, pane layout, add pane, archive) */}
+        <div className="flex h-7 shrink-0 items-center gap-0.5">
+          <div
+            ref={onThreadActionsHostChange}
+            data-testid="topbar-thread-actions"
+            className="host-no-drag flex h-7 shrink-0 items-center gap-0.5 empty:hidden [&_button]:inline-flex [&_button]:h-7 [&_button]:w-7 [&_button]:items-center [&_button]:justify-center [&_button]:rounded-lg [&_button]:p-0 [&_button]:text-muted-foreground/80 [&_button:hover]:bg-foreground/[0.05] [&_button:hover]:text-foreground [&_svg]:h-[15px] [&_svg]:w-[15px] [&_svg]:stroke-[1.75]"
+          />
 
-        {canMarkActiveDone && activeSession ? (
-          <HoverHint content={isZh ? "归档当前会话（可撤销）" : "Archive current session"} side="bottom">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              data-testid="topbar-done-button"
-              aria-label={isZh ? "归档当前会话" : "Archive current session"}
-              onClick={() => onDoneSession(activeSession.session.key)}
-              className="host-no-drag h-7 w-7 gap-1.5 rounded-lg p-0 text-[12px] font-normal text-muted-foreground/75 transition-colors hover:bg-foreground/[0.045] hover:text-foreground xl:w-auto xl:px-2"
-            >
-              <Archive className="h-[15px] w-[15px]" strokeWidth={1.85} aria-hidden />
-              <span className="hidden xl:inline">{doneLabel}</span>
-            </Button>
-          </HoverHint>
-        ) : null}
+          {canMarkActiveDone && activeSession ? (
+            <HoverHint content={isZh ? "归档当前会话（可撤销）" : "Archive current session"} side="bottom">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                data-testid="topbar-done-button"
+                aria-label={isZh ? "归档当前会话" : "Archive current session"}
+                onClick={() => onDoneSession(activeSession.session.key)}
+                className="host-no-drag h-7 w-7 rounded-lg p-0 text-muted-foreground/80 transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+              >
+                <ArchiveIcon className="h-[15px] w-[15px]" />
+              </Button>
+            </HoverHint>
+          ) : null}
+        </div>
 
         {inChat ? (
-          <span aria-hidden className="mx-0.5 hidden h-3.5 w-px bg-border/60 sm:inline-block" />
+          <span aria-hidden className="mx-1.5 hidden h-3.5 w-px shrink-0 bg-border/55 sm:inline-block" />
         ) : null}
 
         {/* Quiet utility controls — gently recessed during active reading/chat on hover-capable devices */}
         <div
           className={cn(
-            "flex items-center gap-0.5 transition-opacity duration-200",
+            "flex h-7 items-center gap-0.5 transition-opacity duration-200",
             inChat && "media-hover:opacity-60 hover:opacity-100 focus-within:opacity-100 group-hover/topbar:opacity-100",
           )}
         >
@@ -512,9 +510,9 @@ export function WorkspaceTopBar({
               data-testid="topbar-new-chat-button"
               aria-label={t("sidebar.newChat")}
               onClick={onNewChat}
-              className="host-no-drag h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+              className="host-no-drag h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
             >
-              <ComposeIcon className="h-[15px] w-[15px]" />
+              <ComposeIcon className="h-[13.5px] w-[13.5px] -translate-y-[0.5px]" />
             </Button>
           </HoverHint>
 
@@ -596,18 +594,18 @@ export function WorkspaceTopBar({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={onToggleTheme}>
-                  <ThemeToggleIcon theme={theme} />
+                  <ThemeToggleIcon theme={theme} className="h-[15px] w-[15px]" />
                   {t("thread.header.toggleTheme")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
 
-          <div className="hidden items-center gap-0.5 sm:flex">
+          <div className="hidden h-7 items-center gap-0.5 sm:flex">
             <HostSwitcher
               collapsed
               menuSide="bottom"
-              className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+              className="h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground [&_svg]:h-[15px] [&_svg]:w-[15px] [&_svg]:stroke-[1.75] [&>span]:-translate-y-[0.5px] [&_span[aria-hidden]]:ring-background"
             />
 
             <HoverHint
@@ -706,9 +704,9 @@ export function WorkspaceTopBar({
                 size="icon"
                 aria-label={t("thread.header.toggleTheme")}
                 onClick={onToggleTheme}
-                className="host-no-drag h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                className="host-no-drag h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
               >
-                <ThemeToggleIcon theme={theme} />
+                <ThemeToggleIcon theme={theme} className="h-[15.5px] w-[15.5px] stroke-[1.75]" />
               </Button>
             </HoverHint>
           </div>

@@ -354,11 +354,11 @@ export function MissionControlView({
     >
       <div className="mx-auto flex w-full max-w-[780px] flex-col gap-9 px-5 pb-16 pt-6 sm:gap-10 sm:px-10 sm:pt-11">
         {/* Single Quiet Navigation Rail: Projects on left, Lifecycle on right — zero filler copy */}
-        <header className="flex flex-col gap-2.5 border-b border-border/40 pb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:pb-0">
+        <header className="flex flex-col gap-2.5 border-b border-border/40 pb-3 sm:flex-row sm:items-end sm:justify-between sm:gap-6 sm:pb-0">
           <div
             role="tablist"
             aria-label={isZh ? "项目" : "Projects"}
-            className="zen-no-scrollbar flex min-w-0 flex-1 items-center gap-4 overflow-x-auto pr-2 text-[13.5px] sm:gap-5 sm:pr-0"
+            className="zen-no-scrollbar flex min-w-0 flex-1 items-center gap-4 overflow-x-auto pr-2 text-[13.5px] leading-5 sm:gap-5 sm:pr-0"
           >
             <button
               type="button"
@@ -406,7 +406,7 @@ export function MissionControlView({
           <div
             role="tablist"
             aria-label={isZh ? "视图" : "View"}
-            className="flex shrink-0 items-center gap-4 text-[12.5px] sm:pb-3"
+            className="flex shrink-0 items-center gap-4 text-[12.5px] leading-5 sm:pb-3"
           >
             <button
               type="button"

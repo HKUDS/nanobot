@@ -167,6 +167,44 @@ export function ZenDoneCircle({
   );
 }
 
+/**
+ * Obsidian-inspired sidebar drawer icon: hollow outline when collapsed,
+ * filled left pane when open/pinned — clear visual state without box clutter.
+ */
+export function SidebarDrawerIcon({
+  open,
+  className,
+}: {
+  open: boolean;
+  className?: string;
+}) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={cn("h-[15px] w-[15px]", className)}
+    >
+      <path
+        d="M5.5 4h3.5v16H5.5A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4Z"
+        fill="currentColor"
+        stroke="none"
+        className={cn(
+          "origin-left transition-all duration-200 ease-out motion-reduce:transition-none",
+          open ? "scale-x-100 opacity-100" : "scale-x-0 opacity-0",
+        )}
+      />
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <line x1="9" y1="4" x2="9" y2="20" />
+    </svg>
+  );
+}
+
 /** Calm tabular elapsed time — pure typography without loud pill chrome. */
 export function LiveElapsedBadge({
   startedAtSec,
