@@ -46,7 +46,7 @@ export function scrubSubagentAnnounceBody(
 
 export function scrubSubagentUiMessages(messages: UIMessage[]): UIMessage[] {
   return messages.map((m) => {
-    if (m.role !== "assistant" || m.renderAs === "text" || typeof m.content !== "string") {
+    if (m.role !== "assistant" || m.renderAs === "text" || m.commandResult !== undefined || typeof m.content !== "string") {
       return m;
     }
     if (!m.content.includes("[Subagent")) {

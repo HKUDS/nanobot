@@ -1,3 +1,5 @@
+import i18n from "i18next";
+import { resolveInitialLocale } from "../i18n/config";
 import { uploadAttachments, uploadCapability, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments";
 import { DeliveryReceipts } from "../../../packages/client-events/delivery";
 import { decodeNotification } from "../../../packages/client-events/notifications";
@@ -866,6 +868,7 @@ export class NanobotClient {
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,
+      ...(content.trimStart().startsWith("/") ? { locale: i18n.resolvedLanguage || resolveInitialLocale() } : {}),
     };
     if (!this.frameFitsTransport(frame)) {
       if (options?.turnId && isSystemCommandTurnId(options.turnId)) {

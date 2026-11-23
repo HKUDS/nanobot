@@ -39,7 +39,7 @@ const BUILTIN_COMMAND_ICONS: Record<string, LucideIcon> = {
   "/goal": GoalIcon, "/trigger": TriggerIcon,
   "/dream": DreamIcon, "/dream-log": DreamLogIcon, "/dream-restore": RestoreMemoryIcon,
   "/dream-prompt": PromptTemplateIcon, "/evaluator-prompt": PromptTemplateIcon,
-  "/skill": SkillsIcon, "/help": HelpIcon, "/pairing": PairingIcon,
+  "/help": HelpIcon, "/pairing": PairingIcon,
 };
 
 export type SlashPalettePlacement = "above" | "below" | "beside";
@@ -80,10 +80,6 @@ const groupHeaderClass = "px-2.5 pb-1 pt-1 text-[11px] font-medium tracking-norm
 const badgeClass =
   "inline-flex shrink-0 items-center rounded-full bg-foreground/[0.06] px-1.5 py-0.5 text-[10.5px] font-medium leading-none text-muted-foreground dark:bg-white/[0.08]";
 
-export function slashCommandI18nKey(command: string): string {
-  return command.replace(/^\//, "").replace(/-/g, "_");
-}
-
 export function skillSourceBucket(source: string): SkillSourceBucket {
   return source === "workspace" || source === "builtin" ? source : "other";
 }
@@ -94,9 +90,7 @@ function skillBucketText(sourceOrBucket: string, kind: "sourceKey" | "groupKey",
 }
 
 function resolveSlashCommand(command: SlashPaletteCommand, t: TFunction) {
-  const key = slashCommandI18nKey(command.command);
-  const title = t(`thread.composer.slash.commands.${key}.title`, { defaultValue: command.title });
-  const description = t(`thread.composer.slash.commands.${key}.description`, { defaultValue: command.description });
+  const { title, description } = command;
   const detail = command.detail || description;
   return {
     Icon: BUILTIN_COMMAND_ICONS[command.command] ?? COMMAND_ICONS[command.icon] ?? HelpIcon,

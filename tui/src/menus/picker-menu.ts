@@ -25,6 +25,7 @@ interface PickerMenuOptions<T> {
   searchText: (item: T) => string
   render: (item: T, selected: boolean) => string | TextChunk[]
   emptyText?: string
+  pageText?: (range: string, total: number) => string
   maxWidth?: number
   onSelect?: (item: T) => void
 }
@@ -196,9 +197,11 @@ export class PickerMenu<T> {
     if (visibleMatches.length < this.matches.length) {
       const end = this.windowStart + visibleMatches.length
       const directions = `${this.windowStart > 0 ? "↑" : ""}${end < this.matches.length ? "↓" : ""}`
+      const range = `${this.windowStart + 1}–${end}`
+      const page = this.options.pageText?.(range, this.matches.length) ?? `${range} of ${this.matches.length}`
       this.root.add(new TextRenderable(this.renderer, {
         id: `${this.options.id}-overflow`,
-        content: `  ${this.windowStart + 1}–${end} of ${this.matches.length} ${directions}`,
+        content: `  ${page} ${directions}`,
         width: "100%",
         height: 1,
         wrapMode: "none",

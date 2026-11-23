@@ -2215,68 +2215,6 @@
           "goalActive": "Goal is running",
           "goalReady": "Start a sustained objective",
           "stopRunning": "Running now"
-        },
-        "commands": {
-          "new": {
-            "title": "New chat",
-            "description": "Reset this topic and start a new one."
-          },
-          "compact": {
-            "title": "Compact context",
-            "description": "Compact context and continue chatting."
-          },
-          "stop": {
-            "title": "Stop task",
-            "description": "Stop the active task in this chat."
-          },
-          "restart": {
-            "title": "Restart nanobot",
-            "description": "Restart the nanobot process."
-          },
-          "status": {
-            "title": "Show status",
-            "description": "Check runtime, provider, and channel status."
-          },
-          "model": {
-            "title": "Model",
-            "description": "View or switch the current model preset."
-          },
-          "dream": {
-            "title": "Run Dream",
-            "description": "Organize memory now."
-          },
-          "dream_log": {
-            "title": "Dream log",
-            "description": "View changes from the last Dream run."
-          },
-          "dream_restore": {
-            "title": "Restore memory",
-            "description": "Restore a previous Dream memory snapshot."
-          },
-          "dream_prompt": {
-            "title": "Dream settings",
-            "description": "Set how Dream organizes this workspace's memory."
-          },
-          "goal": {
-            "title": "Long-running goal",
-            "description": "Have the assistant keep working toward this goal."
-          },
-          "cancel_goal": {
-            "title": "Cancel goal",
-            "description": "Cancel the active or blocked goal in this chat."
-          },
-          "trigger": {
-            "title": "CLI trigger",
-            "description": "Create a CLI trigger for this chat."
-          },
-          "help": {
-            "title": "Show help",
-            "description": "Show available slash commands."
-          },
-          "pairing": {
-            "title": "Pairing",
-            "description": "Manage pairing requests."
-          }
         }
       },
       "mentions": {
@@ -2734,6 +2672,7 @@
       "body": "The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again."
     },
     "turnRejected": {
+      "temporaryCommand": "Temporary chats support only /model and /stop. Use a regular chat for other commands.",
       "title": "Message was not sent",
       "body": "The gateway rejected this message. Review its text or attachments, then try again."
     },

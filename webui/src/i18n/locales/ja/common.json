@@ -2025,68 +2025,6 @@
         "navigateHint": "↑↓ 選択",
         "selectHint": "Enter/Tab 入力",
         "closeHint": "Esc 閉じる",
-        "commands": {
-          "new": {
-            "title": "新しいチャット",
-            "description": "現在のトピックをリセットして、新しく始めます。"
-          },
-          "compact": {
-            "title": "コンテキストを圧縮",
-            "description": "コンテキストを圧縮し、会話を続けます。"
-          },
-          "stop": {
-            "title": "タスクを停止",
-            "description": "このチャットで実行中のタスクを停止します。"
-          },
-          "restart": {
-            "title": "nanobot を再起動",
-            "description": "nanobot のプロセスを再起動します。"
-          },
-          "status": {
-            "title": "ステータスを表示",
-            "description": "実行、プロバイダー、チャンネルの状態を確認します。"
-          },
-          "model": {
-            "title": "モデル",
-            "description": "現在のモデルプリセットを確認・切り替えます。"
-          },
-          "dream": {
-            "title": "Dream を実行",
-            "description": "メモリーを今すぐ整理します。"
-          },
-          "dream_log": {
-            "title": "Dream ログ",
-            "description": "前回の Dream の変更を確認します。"
-          },
-          "dream_restore": {
-            "title": "メモリを復元",
-            "description": "以前の Dream メモリースナップショットに戻します。"
-          },
-          "dream_prompt": {
-            "title": "Dream 設定",
-            "description": "このワークスペースのメモリーを Dream が整理する方法を設定します。"
-          },
-          "goal": {
-            "title": "長期目標",
-            "description": "アシスタントがこの目標に向けて作業を続けます。"
-          },
-          "cancel_goal": {
-            "title": "目標を取り消す",
-            "description": "このチャットの実行中またはブロック中の目標を取り消します。"
-          },
-          "trigger": {
-            "title": "CLI トリガー",
-            "description": "このチャット用の CLI トリガーを作成します。"
-          },
-          "help": {
-            "title": "ヘルプを表示",
-            "description": "使用できるスラッシュコマンドを表示します。"
-          },
-          "pairing": {
-            "title": "ペアリング",
-            "description": "連携のリクエストを管理します。"
-          }
-        },
         "badges": {
           "current": "現在",
           "recent": "最近"
@@ -2552,6 +2490,7 @@
       "body": "このプロジェクトまたはアクセスモードはゲートウェイに拒否されました。既存のプロジェクトまたは別のアクセスモードを選択して、もう一度お試しください。"
     },
     "turnRejected": {
+      "temporaryCommand": "一時チャットで使えるコマンドは /model と /stop のみです。他のコマンドは通常のチャットで使ってください。",
       "title": "メッセージは送信されませんでした",
       "body": "ゲートウェイがこのメッセージを拒否しました。本文または添付ファイルを確認して、もう一度お試しください。"
     },

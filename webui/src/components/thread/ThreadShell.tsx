@@ -1081,8 +1081,8 @@ export function ThreadShell({
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
-      if (content.trim() === "/cancel_goal" && options?.sideChannel) {
-        return cancelGoal().then(() => true);
+      if (content.trim() === "/cancel_goal" && options?.sideChannel && client.status !== "open") {
+        return Promise.reject(new Error(t("thread.composer.cancelGoalOffline")));
       }
       setRestoredFirstDraft((current) => current?.chatId === chatId ? { ...current, error: "" } : current);
       const submitted = send(content, images, withWorkspaceScope(options));
@@ -1097,7 +1097,7 @@ export function ThreadShell({
       }
       return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
     },
-    [cancelGoal, chatId, send, withWorkspaceScope],
+    [chatId, client, send, t, withWorkspaceScope],
   );
 
   const loadTemporaryFilePreview = useCallback((path: string) =>

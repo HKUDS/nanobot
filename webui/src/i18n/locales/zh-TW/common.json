@@ -2025,68 +2025,6 @@
         "navigateHint": "↑↓ 選擇",
         "selectHint": "Enter/Tab 填入",
         "closeHint": "Esc 關閉",
-        "commands": {
-          "new": {
-            "title": "新增話題",
-            "description": "重置當前話題，開始新話題"
-          },
-          "compact": {
-            "title": "壓縮上下文",
-            "description": "壓縮上下文後繼續對話"
-          },
-          "stop": {
-            "title": "停止任務",
-            "description": "停止此對話正在執行的任務"
-          },
-          "restart": {
-            "title": "重新啟動 nanobot",
-            "description": "重啟 nanobot 程序"
-          },
-          "status": {
-            "title": "檢視狀態",
-            "description": "檢視執行、提供商和聊天平臺狀態"
-          },
-          "model": {
-            "title": "模型",
-            "description": "檢視或切換當前模型預設"
-          },
-          "dream": {
-            "title": "執行 Dream",
-            "description": "手動整理記憶"
-          },
-          "dream_log": {
-            "title": "Dream 日誌",
-            "description": "檢視上次 Dream 整理的修改"
-          },
-          "dream_restore": {
-            "title": "恢復記憶",
-            "description": "恢復到之前的 Dream 記憶快照"
-          },
-          "dream_prompt": {
-            "title": "Dream 設定",
-            "description": "設定 Dream 如何整理當前工作區記憶"
-          },
-          "goal": {
-            "title": "長期目標",
-            "description": "讓助手持續推進當前目標"
-          },
-          "cancel_goal": {
-            "title": "取消目標",
-            "description": "取消目前對話中執行或受阻的目標"
-          },
-          "trigger": {
-            "title": "CLI 觸發器",
-            "description": "建立繫結當前對話的 CLI 觸發器"
-          },
-          "help": {
-            "title": "檢視說明",
-            "description": "檢視可用的斜槓命令"
-          },
-          "pairing": {
-            "title": "配對",
-            "description": "管理配對請求"
-          }
-        },
         "badges": {
           "current": "目前",
           "recent": "最近"
@@ -2552,6 +2490,7 @@
       "body": "閘道拒絕了此專案或存取模式。請選擇現有專案或其他存取模式，然後再試一次。"
     },
     "turnRejected": {
+      "temporaryCommand": "臨時聊天僅支援 /model 和 /stop。請在一般聊天中使用其他指令。",
       "title": "訊息未傳送",
       "body": "閘道拒絕了這則訊息。請檢查內容或附件後再試一次。"
     },

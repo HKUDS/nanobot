@@ -2025,68 +2025,6 @@
         "navigateHint": "↑↓ Naviguer",
         "selectHint": "Entrée/Tab Insérer",
         "closeHint": "Échap Fermer",
-        "commands": {
-          "new": {
-            "title": "Nouvelle discussion",
-            "description": "Réinitialisez ce sujet et commencez-en un nouveau."
-          },
-          "compact": {
-            "title": "Compacter le contexte",
-            "description": "Compactez le contexte et poursuivez la discussion."
-          },
-          "stop": {
-            "title": "Arrêter la tâche",
-            "description": "Arrêtez la tâche active dans cette discussion."
-          },
-          "restart": {
-            "title": "Redémarrer nanobot",
-            "description": "Redémarrez le processus nanobot."
-          },
-          "status": {
-            "title": "Afficher l’état",
-            "description": "Vérifiez l’état d’exécution, des fournisseurs et des canaux."
-          },
-          "model": {
-            "title": "Modèle",
-            "description": "Consultez ou changez le préréglage de modèle actuel."
-          },
-          "dream": {
-            "title": "Lancer Dream",
-            "description": "Organisez la mémoire maintenant."
-          },
-          "dream_log": {
-            "title": "Journal Dream",
-            "description": "Consultez les modifications de la dernière exécution de Dream."
-          },
-          "dream_restore": {
-            "title": "Restaurer la mémoire",
-            "description": "Restaurez un instantané précédent de la mémoire Dream."
-          },
-          "dream_prompt": {
-            "title": "Réglages Dream",
-            "description": "Définissez comment Dream organise la mémoire de cet espace."
-          },
-          "goal": {
-            "title": "Objectif long terme",
-            "description": "Demandez à l’assistant de poursuivre cet objectif."
-          },
-          "cancel_goal": {
-            "title": "Annuler l’objectif",
-            "description": "Annuler l’objectif actif ou bloqué de cette conversation."
-          },
-          "trigger": {
-            "title": "Déclencheur CLI",
-            "description": "Créez un déclencheur CLI pour cette discussion."
-          },
-          "help": {
-            "title": "Afficher l’aide",
-            "description": "Affichez les commandes slash disponibles."
-          },
-          "pairing": {
-            "title": "Appairage",
-            "description": "Gérez les demandes d’association."
-          }
-        },
         "badges": {
           "current": "Actuel",
           "recent": "Récent"
@@ -2552,6 +2490,7 @@
       "body": "La passerelle a refusé ce projet ou ce mode d’accès. Choisissez un projet existant ou un autre mode d’accès, puis réessayez."
     },
     "turnRejected": {
+      "temporaryCommand": "Seules les commandes /model et /stop sont disponibles dans une discussion temporaire. Pour les autres commandes, utilisez une discussion normale.",
       "title": "Le message n’a pas été envoyé",
       "body": "La passerelle a refusé ce message. Vérifiez le texte ou les pièces jointes, puis réessayez."
     },

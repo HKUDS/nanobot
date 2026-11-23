@@ -16,6 +16,44 @@ describe("NanobotTui transcript", () => {
   const createRenderer = (rendererOptions: Parameters<typeof createTestRenderer>[0]) => (
     createTestRenderer(rendererOptions)
   )
+  test("keeps localized help syntax literal live and after reattaching to the thread", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const help = {
+      event: "message", chat_id: "chat", turn_id: "help", side_channel: true, render_as: "text",
+      text: "Commandes nanobot :\n/model [preset]\n/dream-prompt [init]", command_result: { command: "/help", parts: [
+        { key: "help.title", values: {} }, { text: "/model [preset]" }, { text: "/dream-prompt [init]" },
+      ] },
+    } as const
+    const original = globalThis.fetch
+    const lang = process.env.LC_ALL
+    globalThis.fetch = Object.assign(async () => Response.json({
+      schemaVersion: 3, projection: "events", events: [help],
+    }), { preconnect: original.preconnect })
+    try {
+      process.env.LC_ALL = "fr_FR.UTF-8"
+      const app = NanobotTui.mount(setup.renderer, { ...options, apiUrl: "http://fixture", apiToken: "fixture" }, client())
+      app.accept({ event: "attached", chat_id: "chat" })
+      app.accept(help)
+      await setup.flush()
+      const live = setup.captureCharFrame()
+      expect(live).toContain("Commandes nanobot")
+      expect(live).toContain("/model [preset]")
+      expect(live).toContain("/dream-prompt [init]")
+      process.env.LC_ALL = "zh_TW.UTF-8"
+      app.accept({ event: "attached", chat_id: "chat" })
+      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+      await setup.flush()
+      const replay = setup.captureCharFrame()
+      expect(replay).toContain("Commandes nanobot")
+      expect(replay).toContain("/model [preset]")
+      expect(replay).toContain("/dream-prompt [init]")
+    } finally {
+      globalThis.fetch = original
+      if (lang === undefined) delete process.env.LC_ALL
+      else process.env.LC_ALL = lang
+    }
+  })
+
   test("loads earlier transcript pages in place when PageUp reaches the top", async () => {
     setup = await createRenderer({ width: 100, height: 40, screenMode: "alternate-screen" })
     const original = globalThis.fetch
@@ -78,6 +116,27 @@ describe("NanobotTui transcript", () => {
       expect(composer.plainText).toBe("!cat oldest.log")
     } finally {
       globalThis.fetch = original
+    }
+  })
+
+  test("localizes deferred slash results and compaction without consuming the active answer", async () => {
+    const lang = process.env.LC_ALL
+    process.env.LC_ALL = "fr_FR.UTF-8"
+    try {
+      setup = await createRenderer({ width: 100, height: 26, screenMode: "alternate-screen" })
+      const app = mount(setup)
+      app.accept({ event: "delta", chat_id: "chat", turn_id: "agent", text: "Beginning" })
+      app.accept({ event: "message", chat_id: "chat", text: "Modèle actuel : `{preset}`\nRaw {model}", side_channel: true, turn_id: "notice",
+        command_result: { command: "/model", parts: [{ key: "model.current", values: { model: "{preset}" } }, { text: "Raw {model}" }] } })
+      app.accept({ event: "context_compaction", chat_id: "chat", compaction_id: "manual", phase: "succeeded" })
+      app.accept({ event: "delta", chat_id: "chat", turn_id: "agent", text: " to end" })
+      app.accept({ event: "turn_end", chat_id: "chat", turn_id: "agent" })
+      await setup.flush()
+      const frame = setup.captureCharFrame()
+      for (const text of ["Modèle actuel", "{preset}", "Raw {model}", "Contexte compressé.", "Beginning to end"]) expect(frame).toContain(text)
+    } finally {
+      if (lang === undefined) delete process.env.LC_ALL
+      else process.env.LC_ALL = lang
     }
   })
 
