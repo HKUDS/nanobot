@@ -21,7 +21,8 @@ from nanobot.bus.events import (
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.application import builtin_command_starts_agent_turn
-from nanobot.command.builtin import USER_SHELL_COMMAND
+from nanobot.command.builtin import CHAT_UI_COMMAND_REPLACEMENTS, USER_SHELL_COMMAND
+from nanobot.command.router import normalize_command_text
 from nanobot.providers.model_options import ModelOptions, ModelOptionsPayload
 from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.runtime_context import (
@@ -668,6 +669,15 @@ class WebUICommandRouter:
             )
             return
 
+        if envelope.get("webui") is True and content.lstrip().startswith("/"):
+            command = normalize_command_text(content).split(maxsplit=1)[0].lower()
+            if replacement := CHAT_UI_COMMAND_REPLACEMENTS.get(command):
+                await self._transport.webui_send_event(
+                    connection, "error", detail="message_rejected", reason=f"{command} → {replacement}",
+                    **rejection_fields,
+                )
+                return
+
         # A client may retry the same turn after an ACK was lost. Check before
         # resolving already-committed refs; never dispatch that turn twice.
         now = time.monotonic()
@@ -753,6 +763,9 @@ class WebUICommandRouter:
         }
         if envelope.get("webui") is True:
             metadata["webui"] = True
+            locale = envelope.get("locale")
+            if content.lstrip().startswith("/") and isinstance(locale, str) and 0 < len(locale) <= 64:
+                metadata["locale"] = locale
             metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
         trusted_webui = metadata.get("webui") is True and connection in self._webui_connections
         # The settings Restart button uses the existing silent command protocol.
@@ -845,6 +858,8 @@ class WebUICommandRouter:
         if temporary_policy is not None:
             self._temporary_chats.register_media(connection, chat_id, [str(item.path) for item in uploaded])
         is_webui = metadata.get("webui") is True
+        stop_control = content.lstrip().startswith("/") and normalize_command_text(content).lower() == "/stop"
+        show_user_message = is_webui and not (restart_control or stop_control)
         queued_owner = None
         if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
             queued_owner = register_queued_websocket_turn_if_idle(chat_id, turn_id)
@@ -881,7 +896,7 @@ class WebUICommandRouter:
                 session_generation, session_created = admission
             if session_generation is not None:
                 metadata[HISTORY_GENERATION_METADATA_KEY] = session_generation
-            if is_webui and not restart_control and temporary_policy is None:
+            if show_user_message and temporary_policy is None:
                 await self._transcripts.append_user_message(
                     chat_id,
                     content,
@@ -930,9 +945,9 @@ class WebUICommandRouter:
         for attachment, name in zip(media, media_names, strict=False):
             if name:
                 attachment["name"] = name
-        if is_webui and not restart_control:
-            if session_created:
-                await self._outbound.session_updated(chat_id, scope="metadata")
+        if is_webui and not restart_control and session_created:
+            await self._outbound.session_updated(chat_id, scope="metadata")
+        if show_user_message:
             await self.broadcast_user_message(
                 connection,
                 chat_id,

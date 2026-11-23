@@ -11,7 +11,8 @@ import pytest
 
 from nanobot.agent.context import TranscriptInput
 from nanobot.bus.events import InboundMessage
-from nanobot.providers.base import LLMResponse, LLMUsage
+from nanobot.command.results import message_text
+from nanobot.providers.base import GenerationSettings, LLMResponse, LLMUsage
 from nanobot.session.manager import Session
 from nanobot.session.state import SessionState
 
@@ -22,7 +23,7 @@ def _make_loop():
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
-    provider = MagicMock(aclose=AsyncMock())
+    provider = MagicMock(aclose=AsyncMock(), generation=GenerationSettings())
     provider.get_default_model.return_value = "test-model"
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
@@ -34,6 +35,7 @@ def _make_loop():
         mock_sessions.return_value.state.get = AsyncMock(side_effect=lambda key: Session(key))
         mock_sessions.return_value.state.peek.return_value = None
         mock_sub_mgr.return_value.close = AsyncMock()
+        mock_sub_mgr.return_value.get_running_count_by_session.return_value = 0
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
     return loop, bus
 
@@ -74,7 +76,7 @@ class TestRestartCommand:
              patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
              patch("nanobot.command.builtin.os.execv") as mock_execv:
             out = await cmd_restart(ctx)
-            assert "Restarting" in out.content
+            assert "Restarting" in message_text(out)
             assert os.environ.get(RESTART_NOTIFY_CHANNEL_ENV) == "cli"
             assert os.environ.get(RESTART_NOTIFY_CHAT_ID_ENV) == "direct"
             assert os.environ.get(RESTART_STARTED_AT_ENV)
@@ -184,7 +186,7 @@ class TestRestartCommand:
                 pass
 
             mock_dispatch.assert_not_called()
-            assert "Restarting" in out.content
+            assert "Restarting" in message_text(out)
             assert scheduled
             await scheduled[0]
 
@@ -207,7 +209,7 @@ class TestRestartCommand:
                 pass
 
             mock_dispatch.assert_not_called()
-            assert "nanobot" in out.content.lower() or "Model" in out.content
+            assert "nanobot" in message_text(out).lower() or "Model" in message_text(out)
 
     @pytest.mark.asyncio
     async def test_run_propagates_external_cancellation(self):
@@ -228,9 +230,9 @@ class TestRestartCommand:
         response = await loop._process_message(msg)
 
         assert response is not None
-        assert "/restart" in response.content
-        assert "/status" in response.content
-        assert response.metadata == {"render_as": "text"}
+        assert "/restart" in message_text(response)
+        assert "/status" in message_text(response)
+        assert response.metadata == {}
 
     @pytest.mark.asyncio
     async def test_status_reports_runtime_info(self):
@@ -262,13 +264,13 @@ class TestRestartCommand:
         response = await loop._process_message(msg, runtime=runtime)
 
         assert response is not None
-        assert "Model: test-model" in response.content
-        assert "Tokens: 0 in / 0 out" in response.content
-        assert "Context: 20k/200k (10% of input budget)" in response.content
-        assert "Session: 3 messages" in response.content
-        assert "Uptime: 2m 5s" in response.content
-        assert "Tasks: 0 active" in response.content
-        assert response.metadata == {"render_as": "text"}
+        assert "Model: test-model" in message_text(response)
+        assert "Tokens: 0 in / 0 out" in message_text(response)
+        assert "Context: 20500/200000 (10% of input budget)" in message_text(response)
+        assert "Session: 3 messages" in message_text(response)
+        assert "Uptime: 0:02:05" in message_text(response)
+        assert "Tasks: 0 active" in message_text(response)
+        assert response.metadata == {}
         loop.consolidator.estimate_session_prompt_tokens.assert_called_once_with(
             session,
             runtime=runtime,
@@ -296,7 +298,7 @@ class TestRestartCommand:
         response = await loop._process_message(msg)
 
         assert response is not None
-        assert "Tasks: 3 active" in response.content
+        assert "Tasks: 3 active" in message_text(response)
 
     @pytest.mark.asyncio
     async def test_run_agent_loop_estimates_usage_when_provider_omits_it(self, monkeypatch):
@@ -345,9 +347,9 @@ class TestRestartCommand:
         )
 
         assert response is not None
-        assert "Tokens: 1200 in / 34 out" in response.content
-        assert "Context: 1k/200k (0% of input budget)" in response.content
-        assert "Tasks: 0 active" in response.content
+        assert "Tokens: 1200 in / 34 out" in message_text(response)
+        assert "Context: 1200/200000 (0% of input budget)" in message_text(response)
+        assert "Tasks: 0 active" in message_text(response)
 
     @pytest.mark.asyncio
     async def test_process_direct_preserves_render_metadata(self):
@@ -359,4 +361,5 @@ class TestRestartCommand:
         response = await loop.process_direct("/status", session_key="cli:test")
 
         assert response is not None
-        assert response.metadata == {"render_as": "text"}
+        assert "Tasks:" in response.content
+        assert response.metadata["render_as"] == "text"

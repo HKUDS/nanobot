@@ -9,6 +9,7 @@ from nanobot.command.application import (
     builtin_command_starts_agent_turn,
     register_builtin_commands,
 )
+from nanobot.command.results import message_text
 from nanobot.command.router import CommandContext, CommandRouter
 
 
@@ -134,7 +135,7 @@ class TestMidTurnCommandDispatchedDirectly:
         fake_loop.sessions.state.reset = AsyncMock()
         result = await router.dispatch(ctx)
         assert result is not None
-        assert "New session" in result.content
+        assert "New session" in message_text(result)
         fake_loop.sessions.state.reset.assert_awaited_once_with("test:chat1")
 
     @pytest.mark.asyncio
@@ -150,10 +151,10 @@ class TestMidTurnCommandDispatchedDirectly:
         assert result is not None
         assert result.channel == "test"
         assert result.chat_id == "chat1"
-        assert result.metadata["render_as"] == "text"
-        assert "/new" in result.content
-        assert "/goal <goal>" in result.content
-        assert "/pairing [list|approve <code>|deny <code>|revoke <user_id>]" in result.content
+        assert result.event.command == "/help"
+        assert "/new" in message_text(result)
+        assert "/goal <goal>" in message_text(result)
+        assert "/pairing [list|approve <code>|deny <code>|revoke <user_id>]" in message_text(result)
 
     @pytest.mark.asyncio
     async def test_prefix_command_args_populated(self, router: CommandRouter) -> None:
@@ -205,7 +206,7 @@ class TestMidTurnCommandDispatchedDirectly:
         result = await router.dispatch(ctx)
 
         assert result is not None
-        assert result.content == (
+        assert message_text(result) == (
             'Command "/status" does not accept arguments. Did you mean "/status"?'
         )
 
@@ -247,7 +248,7 @@ class TestPairingCommandDispatch:
         )
         result = await router.dispatch(ctx)
         assert result is not None
-        assert "ABCD-EFGH" in result.content
+        assert "ABCD-EFGH" in message_text(result)
         assert result.metadata.get("_pairing_command") is True
 
     @pytest.mark.asyncio
@@ -266,8 +267,8 @@ class TestPairingCommandDispatch:
         )
         result = await router.dispatch(ctx)
         assert result is not None
-        assert "Approved" in result.content
-        assert result.content == (
+        assert "Approved" in message_text(result)
+        assert message_text(result) == (
             "Approved pairing code `ABCD-EFGH` — 123 can now access telegram"
         )
         assert result.metadata.get("_pairing_command") is True
@@ -288,6 +289,6 @@ class TestPairingCommandDispatch:
         )
         result = await router.dispatch(ctx)
         assert result is not None
-        assert "Revoked" in result.content
-        assert result.content == "Revoked 123 from telegram"
+        assert "Revoked" in message_text(result)
+        assert message_text(result) == "Revoked 123 from telegram"
         assert result.metadata.get("_pairing_command") is True

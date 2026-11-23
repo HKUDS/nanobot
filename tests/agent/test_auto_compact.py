@@ -14,6 +14,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext
+from nanobot.command.results import message_text
 from nanobot.config.schema import AgentDefaults, Config
 from nanobot.events import NO_EVENTS, ContextCompactionEvent
 from nanobot.providers.base import LLMResponse
@@ -581,7 +582,7 @@ class TestAutoCompactIdleDetection:
         ctx = CommandContext(msg=msg, session=session, key="cli:test", raw=raw, loop=loop)
         result = await loop.commands.dispatch_priority(ctx)
         assert result is not None
-        assert "stopped" in result.content.lower() or "no active task" in result.content.lower()
+        assert message_text(result) == "Stopped."
 
         session_after = loop.sessions.get_or_create("cli:test")
         assert any(m["content"] == "old message" for m in session_after.messages)
@@ -603,7 +604,7 @@ class TestAutoCompactIdleDetection:
         response = await loop._process_message(msg)
 
         assert response is not None
-        assert "new session started" in response.content.lower()
+        assert response.event.parts[0]["key"] == "new.done"
 
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(session_after.messages) == 0

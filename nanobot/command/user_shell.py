@@ -3,6 +3,7 @@
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
+from nanobot.command.results import command_reply, line
 from nanobot.command.router import CommandContext
 from nanobot.security.workspace_access import bind_workspace_scope, reset_workspace_scope
 
@@ -16,11 +17,11 @@ async def cmd_user_shell(ctx: CommandContext) -> OutboundMessage:
         or metadata.get("webui") is not True
         or metadata.get(INBOUND_META_USER_SHELL) is not True
     ):
-        content = "Shell commands are only available from a trusted local client."
+        content = line("shell.trusted")
     elif not command:
-        content = "Type a command after `!`, for example `!pwd`."
+        content = line("shell.usage")
     elif not isinstance(tool := ctx.loop.tools.get("exec"), ExecTool):
-        content = "Shell execution is disabled in this nanobot configuration."
+        content = line("shell.disabled")
     else:
         session = ctx.session or await ctx.loop.sessions.state.get(ctx.key)
         scope = ctx.loop.workspace_scopes.for_turn(
@@ -52,7 +53,4 @@ async def cmd_user_shell(ctx: CommandContext) -> OutboundMessage:
         finally:
             reset_workspace_scope(workspace_token)
             reset_request_context(request_token)
-    return OutboundMessage(
-        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id, content=content,
-        metadata={**metadata, "render_as": "text"},
-    )
+    return command_reply(ctx.msg, "/__shell", content)

@@ -226,6 +226,9 @@ export async function fetchHistory(
             role: "activity", content: event.text,
             ...(event.tool_events?.length ? { toolEvents: event.tool_events } : {}),
           })
+        } else if (event.side_channel === true) {
+          messages.push({ role: "assistant", content: event.text, forkIndex: userIndex,
+            ...(event.render_as === "text" ? { renderAs: event.render_as } : {}) })
         } else {
           // A final message can repeat the answer already saved by stream_end.
           if (stream && stream.turnId === event.turn_id) {

@@ -6,6 +6,7 @@ WORKDIR /app/webui
 RUN npm ci
 COPY webui/ ./
 COPY packages/client-events/ /app/packages/client-events/
+COPY nanobot/command/locales/ /app/nanobot/command/locales/
 COPY nanobot/channels/ /app/nanobot/channels/
 RUN mkdir -p /app/nanobot/web && npm run build
 

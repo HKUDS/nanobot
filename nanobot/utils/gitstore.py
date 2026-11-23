@@ -29,7 +29,12 @@ class GitStoreError(RuntimeError):
 
 
 class GitStoreDirtyError(GitStoreError):
-    """Restore was refused before changing any files or Git state."""
+    """A staged index or an uncommitted path prevents a safe restore."""
+
+    def __init__(self, *, path: str | None = None) -> None:
+        self.path = path
+        super().__init__(f"Memory has uncommitted changes in `{path}`." if path is not None
+                         else "The memory repository has staged changes.")
 
 
 @dataclass
@@ -554,7 +559,7 @@ class GitStore:
 
         # A restore commit uses the whole index. Do not consume pre-staged changes.
         if any(porcelain.get_tree_changes(repo).values()):
-            raise GitStoreDirtyError("The memory repository has staged changes.")
+            raise GitStoreDirtyError()
 
         head = self._head_tree(repo)
         head_pages = self._directory_tree_files(repo, head, self._tracked_dirs)
@@ -576,7 +581,7 @@ class GitStore:
                     blob = normalizer.checkin_normalize(Blob.from_string(dest.read_bytes()), git_path)
                     if blob.id == sha:
                         continue
-            raise GitStoreDirtyError(f"Memory has uncommitted changes in `{path}`.")
+            raise GitStoreDirtyError(path=path)
 
     def revert(self, commit: str, *, message_prefix: str | None = None) -> str | None:
         """Revert (undo) the changes introduced by the given commit.

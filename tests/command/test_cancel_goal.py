@@ -8,6 +8,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import GoalStateSyncEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.command.results import message_text
 from nanobot.goal.assembly import install_goal
 from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.session.goal_state import GOAL_STATE_KEY
@@ -52,12 +53,12 @@ async def test_user_command_cancels_goal_without_a_model_and_survives_reconnect(
     outbound = []
     while not loop.bus.outbound.empty():
         outbound.append(loop.bus.outbound.get_nowait())
-    assert outbound[-1].content == "Goal cancelled."
+    assert message_text(outbound[-1]) == "Goal cancelled."
     sync = [item.event for item in outbound if isinstance(item.event, GoalStateSyncEvent)]
     assert [event.goal_state for event in sync] == [{"active": False}]
     assert await WebUISessionProjection(loop.sessions).persisted_goal_state(session.key) == {"active": False}
     await loop._dispatch_inbound(msg)
-    assert loop.bus.outbound.get_nowait().content == "No goal to cancel."
+    assert message_text(loop.bus.outbound.get_nowait()) == "No goal to cancel."
     assert (await loop.sessions.state.read_header(session.key)).metadata[GOAL_STATE_KEY] == goal
     loop.provider.chat_stream_with_retry.assert_not_awaited()
 
@@ -113,7 +114,7 @@ async def test_cancellation_requires_a_current_user_request(loop, source):
     await loop._dispatch_inbound(msg)
     assert (await loop.sessions.state.read_header(session.key)).metadata[GOAL_STATE_KEY]["status"] == "blocked"
     reply = loop.bus.outbound.get_nowait()
-    assert "only be cancelled by a user" in reply.content or "changed" in reply.content
+    assert "only be cancelled by a user" in message_text(reply) or "changed" in message_text(reply)
     loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
@@ -133,7 +134,7 @@ async def test_cancel_save_failure_keeps_goal_visible_and_reports_failure(loop, 
     monkeypatch.setattr(loop.sessions._store, "replace_metadata", fail_cancellation)
     await loop._dispatch_inbound(msg)
     reply = loop.bus.outbound.get_nowait()
-    assert "Could not save" in reply.content
+    assert "Could not save" in message_text(reply)
     assert loop.bus.outbound.empty()
     goal = await WebUISessionProjection(loop.sessions).persisted_goal_state(msg.session_key)
     assert goal["status"] == "blocked"
@@ -146,7 +147,7 @@ async def test_direct_command_preserves_cancelled_goal_when_saving_command_histo
         GOAL_STATE_KEY: {"status": "active", "objective": "Cancel this task"},
     })
     result = await loop.process_direct("/cancel_goal")
-    assert result.content == "Goal cancelled."
+    assert message_text(result) == "Goal cancelled."
     saved = await loop.sessions.state.read(key)
     assert saved.metadata[GOAL_STATE_KEY]["status"] == "cancelled"
     loop.provider.chat_stream_with_retry.assert_not_awaited()

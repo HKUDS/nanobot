@@ -11,6 +11,7 @@ import pytest
 from nanobot.agent.runner import AgentRunResult
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.runtime_events import RuntimeModelChanged
+from nanobot.command.results import message_text
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronSchedule
 from nanobot.execution import processes
@@ -384,7 +385,7 @@ async def test_idle_storage_scan_does_not_delay_stop(agent, monkeypatch):
         async with asyncio.timeout(3):
             while True:
                 reply = await agent.bus.consume_outbound()
-                if reply.content == "Stopped 1 task(s).":
+                if message_text(reply) == "Stopped.":
                     break
         assert not consumer.done()
         assert not release_scan.is_set()

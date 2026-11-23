@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from nanobot.command.builtin import CHAT_UI_COMMAND_REPLACEMENTS, register_core_commands
 from nanobot.command.builtin import build_help_text as build_registered_help_text
-from nanobot.command.builtin import register_core_commands
 from nanobot.command.router import CommandRouter, normalize_command_text
 from nanobot.command.spec import BuiltinCommandSpec
 from nanobot.goal.command import register_goal_command
@@ -24,13 +24,13 @@ def _builtin_specs() -> tuple[BuiltinCommandSpec, ...]:
 BUILTIN_COMMAND_SPECS = _builtin_specs()
 
 
-def build_help_text() -> str:
-    return build_registered_help_text(BUILTIN_COMMAND_SPECS)
+def build_help_text(*, locale: object = None) -> str:
+    return build_registered_help_text(BUILTIN_COMMAND_SPECS, locale=locale)
 
 
 def builtin_command_palette() -> list[dict[str, str | bool]]:
     """Return structured command metadata for UI command palettes."""
-    return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS]
+    return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS if spec.command not in CHAT_UI_COMMAND_REPLACEMENTS]
 
 
 def builtin_command_starts_agent_turn(text: str) -> bool:

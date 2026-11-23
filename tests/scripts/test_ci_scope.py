@@ -49,6 +49,7 @@ def selected(result):
         ("nanobot/webui/ws_http.py", {"python", "webui", "tui", "docker"}),
         ("nanobot/session/session_messages.py", {"python", "webui", "tui", "docker"}),
         ("packages/client-events/notifications.ts", {"webui", "tui", "docker"}),
+        ("nanobot/command/locales/core.json", {"python", "webui", "tui", "docker"}),
         ("nanobot/update_recovery.py", {"python", "docker", "native"}),
         ("nanobot/release_trust.py", {"python", "docker", "native"}),
         ("nanobot/gateway/runtime.py", {"python", "docker", "native"}),

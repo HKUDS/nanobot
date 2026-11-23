@@ -117,6 +117,8 @@ export type InboundEvent =
       chat_id: string
       text: string
       render_as?: "text"
+      side_channel?: true
+      command_result?: unknown
       kind?: "tool_hint" | "progress" | "reasoning"
       tool_events?: ToolProgressEvent[]
       turn_id?: string

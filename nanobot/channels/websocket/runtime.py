@@ -1098,6 +1098,9 @@ class WebSocketChannel(BaseChannel):
         # Give an idle writer a chance to start without waiting for physical I/O.
         await asyncio.sleep(0)
 
+    async def send_command_result(self, msg: OutboundMessage) -> None:
+        await self._outbound.send(msg)
+
     async def send(self, msg: OutboundMessage) -> None:
         await self._outbound.send(msg)
 

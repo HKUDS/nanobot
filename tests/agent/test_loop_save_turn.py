@@ -23,6 +23,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted, TurnRunStatusChanged
+from nanobot.command.results import message_text
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from nanobot.goal.assembly import install_goal
 from nanobot.providers.base import (
@@ -279,7 +280,7 @@ async def test_new_with_bot_suffix_does_not_persist_command(tmp_path: Path) -> N
     )
 
     assert response is not None
-    assert response.content == "New session started."
+    assert message_text(response) == "New session started."
     session = loop.sessions.get_or_create("websocket:chat-1")
     assert session.messages == []
 
@@ -315,7 +316,7 @@ async def test_invalid_slash_command_is_rejected_without_calling_provider(
     )
 
     assert response is not None
-    assert response.content == expected
+    assert message_text(response) == expected
     loop.provider.chat_stream_with_retry.assert_not_awaited()
     session = loop.sessions.get_or_create("websocket:chat-1")
     persisted = [
@@ -324,7 +325,7 @@ async def test_invalid_slash_command_is_rejected_without_calling_provider(
     ]
     assert persisted == [
         ("user", content, True),
-        ("assistant", response.content, True),
+        ("assistant", expected, True),
     ]
 
 
@@ -1390,7 +1391,7 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
 
     async def observe_stop_reply(message):
         await publish_outbound(message)
-        if message.metadata.get("message_id") == "stop-attempt" and message.content.startswith("Stopped "):
+        if message.metadata.get("message_id") == "stop-attempt" and message_text(message) == "Stopped.":
             stop_acknowledged.set()
 
     monkeypatch.setattr(loop.bus, "publish_outbound", observe_stop_reply)
@@ -1440,8 +1441,8 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
         outbound = []
         while loop.bus.outbound_size:
             outbound.append(await loop.bus.consume_outbound())
-        stop_responses = [item.content for item in outbound if item.content.startswith("Stopped ")]
-        assert stop_responses == ["Stopped 1 task(s)."]
+        stop_responses = [message_text(item) for item in outbound if message_text(item) == "Stopped."]
+        assert stop_responses == ["Stopped."]
         endings = [item.event for item in outbound if isinstance(item.event, TurnEndEvent)]
         cancelled = [event for event in endings if event.outcome == "cancelled"]
         assert len(cancelled) == 1 and cancelled[0].goal_state["status"] == "active"
@@ -1810,7 +1811,7 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
     stop_ctx = CommandContext(msg=stop_msg, session=None, key=stop_msg.session_key, raw="/stop", loop=loop)
     stop_result = await cmd_stop(stop_ctx)
 
-    assert "Stopped 1 task" in stop_result.content
+    assert message_text(stop_result) == "Stopped."
     assert task.done()
 
     loop.sessions.invalidate("feishu:c4")

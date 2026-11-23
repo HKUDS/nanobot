@@ -4,6 +4,8 @@ import os
 from contextlib import nullcontext
 from pathlib import Path
 
+import pytest
+
 from nanobot.webui.build import (
     ensure_webui_bundle,
     inspect_webui_bundle,
@@ -76,10 +78,11 @@ def test_inspect_webui_bundle_detects_channel_owned_ui_source(tmp_path: Path) ->
     assert status.newest_source == channel_ui
 
 
-def test_shared_notifications_make_existing_bundle_stale(tmp_path: Path) -> None:
+@pytest.mark.parametrize("asset", ["packages/client-events/notifications.ts", "nanobot/command/locales/core.json"])
+def test_shared_client_assets_make_existing_bundle_stale(tmp_path: Path, asset: str) -> None:
     source = tmp_path / "webui"
     dist = tmp_path / "nanobot/web/dist"
-    shared = tmp_path / "packages/client-events/notifications.ts"
+    shared = tmp_path / asset
     _touch(source / "package.json", mtime_ns=10)
     _touch(dist / "index.html", mtime_ns=20)
     _touch(shared, mtime_ns=30)

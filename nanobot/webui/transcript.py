@@ -342,8 +342,6 @@ class WebUITranscriptRecorder:
         envelope = session_message_envelope(metadata)
         if envelope is not None and envelope["target_session_key"] != webui_session_key(chat_id):
             envelope = None
-        if text.strip() == "/stop" and not media_paths and envelope is None:
-            return False
         event = build_user_transcript_event(
             chat_id,
             text,
@@ -1035,7 +1033,11 @@ def _augment_projected_message(
     cached: bool = False,
 ) -> None:
     if augment_text is not None and projected.get("render_as") != "text":
-        projected["text"] = augment_text(projected["text"])
+        text = projected["text"]
+        projected["text"] = augment_text(text)
+        if projected["text"] != text:
+            # Clients prefer structured receipts to text. Do not override a freshly signed image.
+            projected.pop("command_result", None)
     if augment_media is not None and isinstance(raw_media := record.get("media"), list):
         paths = [path for path in cast(list[object], raw_media) if isinstance(path, str) and path]
         if paths:
@@ -1131,6 +1133,8 @@ def _client_projection_event(
         projected = {"event": "message", **common, "text": content}
         if record.get("side_channel") is True:
             projected["side_channel"] = True
+        if "command_result" in record:
+            projected["command_result"] = record["command_result"]
         if render_as_text:
             projected["render_as"] = "text"
         kind = record.get("kind")

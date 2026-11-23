@@ -67,7 +67,7 @@ class TestNewCommandArchival:
         response = await loop._process_message(new_msg, runtime=expected_runtime)
 
         assert response is not None
-        assert "new session started" in response.content.lower()
+        assert response.event.parts[0]["key"] == "new.done"
 
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(session_after.messages) == 0
@@ -104,7 +104,7 @@ class TestNewCommandArchival:
         response = await loop._process_message(new_msg, runtime=expected_runtime)
 
         assert response is not None
-        assert "new session started" in response.content.lower()
+        assert response.event.parts[0]["key"] == "new.done"
 
         assert len(scheduled) == 1
         await scheduled[0]
@@ -137,7 +137,7 @@ class TestNewCommandArchival:
         response = await loop._process_message(new_msg, runtime=expected_runtime)
 
         assert response is not None
-        assert "new session started" in response.content.lower()
+        assert response.event.parts[0]["key"] == "new.done"
         assert loop.sessions.get_or_create("cli:test").messages == []
 
     @pytest.mark.asyncio

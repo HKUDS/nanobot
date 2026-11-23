@@ -58,6 +58,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter
 from nanobot.command.builtin import register_core_commands
+from nanobot.command.results import as_text_message, message_text
 from nanobot.command.router import CommandExpansion, command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
@@ -881,12 +882,7 @@ class AgentLoop:
         if ctx.msg.session_generation is not None and session.generation != ctx.msg.session_generation:
             raise SessionConflictError("command belongs to a replaced session")
         if result.temporary_session_error is not None and not session.policy.persist:
-            return OutboundMessage(
-                channel=ctx.msg.channel,
-                chat_id=ctx.msg.chat_id,
-                content=result.temporary_session_error,
-                metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
-            )
+            return result.temporary_session_error
         session.add_message("user", ctx.msg.content, _command=True, media=list(ctx.msg.media))
         await self.sessions.state.prepare_input(session)
         return result.message
@@ -2122,14 +2118,14 @@ class AgentLoop:
             # Shortcut commands skip BUILD and SAVE, so we must persist the
             # turn here so WebUI history hydration after turn_end sees the
             # message.  Mark messages with _command so get_history can filter
-            # them out of LLM context.  /new is excluded because it
-            # intentionally clears the session.
-            if cmd_ctx.raw.lower() != "/new" and ctx.commit_session:
+            # them out of LLM context. Commands that clear the session or
+            # leave its archive untouched can return a receipt without writing here.
+            if cmd_ctx.record_exchange and ctx.commit_session:
                 ctx.input_persisted_early = await self._persist_user_message_early(
                     ctx.msg, session, _command=True
                 )
                 session.add_message(
-                    "assistant", result.content, _command=True
+                    "assistant", message_text(result), _command=True
                 )
                 self._clear_pending_user_turn(session)
                 await self.sessions.state.prepare_input(session)
@@ -2648,7 +2644,8 @@ class AgentLoop:
                     delivery = self.turn_delivery_factory.create(msg, session_key)
                     kwargs["delivery"] = delivery
                     try:
-                        return await self._process_message(msg, **kwargs)
+                        response = await self._process_message(msg, **kwargs)
+                        return as_text_message(response) if response is not None else None
                     finally:
                         if temporary_parent:
                             parent = self.sessions.state.peek_header(session_key)

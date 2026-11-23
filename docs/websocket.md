@@ -134,6 +134,8 @@ All frames are JSON text. Each message has an `event` field.
 
 `media` and `reply_to` are only present when applicable.
 
+WebUI and TUI can send `locale` with a slash command. Display the reply’s `text` as sent; `command_result` can carry state changes such as a confirmed model switch.
+
 **`delta`** — streaming text chunk (only when `streaming: true`):
 
 ```json
