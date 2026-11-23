@@ -1,5 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
+
+async function openChatFailure(page: Page, query = "") {
+  await page.goto(`/browser/fixture.html?case=chat-failure${query}`);
+  // The fixture imports its components and initializes i18n before React mounts.
+  await page.getByRole("main").waitFor({ state: "visible" });
+}
 
 for (const locale of ["en", "zh-CN", "zh-TW", "fr", "ja", "ko", "es", "pt-BR", "vi", "id"]) {
   for (const gateway of ["bwrap", "seatbelt"]) {
@@ -9,7 +15,7 @@ for (const locale of ["en", "zh-CN", "zh-TW", "fr", "ja", "ko", "es", "pt-BR", "
       await page.setViewportSize({ width: 390, height: 1000 });
       await page.addInitScript((locale) => localStorage.setItem("nanobot.locale", locale), locale);
       await page.emulateMedia({ reducedMotion: "reduce" });
-      await page.goto(`/browser/fixture.html?case=chat-failure&notice=sandbox&gateway=${gateway}`);
+      await openChatFailure(page, `&notice=sandbox&gateway=${gateway}`);
       const notice = page.locator(".thread-composer-notice");
       await expect(notice).toContainText(gateway === "bwrap" ? "Bubblewrap (bwrap)" : "macOS Seatbelt (sandbox-exec)");
       await expect(notice).not.toContainText(/{{|settings\.sandbox/);
@@ -27,7 +33,7 @@ for (const locale of ["en", "zh-CN", "zh-TW", "fr", "ja", "ko", "es", "pt-BR", "
 }
 
 test("sandbox guidance stays generic without gateway backend details", async ({ page }) => {
-  await page.goto("/browser/fixture.html?case=chat-failure&notice=sandbox&gateway=unknown");
+  await openChatFailure(page, "&notice=sandbox&gateway=unknown");
   const notice = page.locator(".thread-composer-notice");
   await expect(notice).toContainText("sandbox launcher");
   await expect(notice).not.toContainText(/bwrap|sandbox-exec/);
@@ -48,7 +54,7 @@ for (const width of [1440, 390]) {
             document.documentElement.classList.toggle("dark", dark);
           });
         }, { dark: variant === "hero", locale: width === 390 ? "zh-CN" : "en" });
-        await page.goto(`/browser/fixture.html?case=chat-failure&notice=${notice}&variant=${variant}`);
+        await openChatFailure(page, `&notice=${notice}&variant=${variant}`);
         const alert = page.locator(".thread-composer-notice");
         const composer = page.locator(".thread-composer-surface");
         await expect(alert).toBeVisible();
@@ -100,7 +106,7 @@ for (const width of [1440, 390]) {
         localStorage.setItem("nanobot.locale", locale);
         localStorage.setItem("nanobot-webui.settings-preferences", JSON.stringify({ schemaVersion: 1, readingTextSize: size }));
       }, { size, locale: width === 390 ? "zh-CN" : "en" });
-      await page.goto("/browser/fixture.html?case=chat-failure");
+      await openChatFailure(page);
       const image = page.getByAltText("Failure screenshot");
       await expect(image).toBeVisible();
       await expect(page.getByText("Earlier context / 之前的上下文")).toBeVisible();
