@@ -11,8 +11,8 @@ import type { HostAnchor } from "./host-bridge";
 import type { HostPicker, EmbeddedPicker } from "./host-navigation";
 import { HostConnectionStatus } from "./HostConnectionStatus";
 
-function HostMenuContent({ picker, portalContainer }: { picker: HostPicker; portalContainer?: HTMLElement | null }) {
-  return <DropdownMenuContent side="top" align="end" sideOffset={8} collisionPadding={12}
+function HostMenuContent({ picker, portalContainer, side = "top" }: { picker: HostPicker; portalContainer?: HTMLElement | null; side?: "top" | "bottom" }) {
+  return <DropdownMenuContent side={side} align={side === "bottom" ? "start" : "end"} sideOffset={8} collisionPadding={12}
     portalContainer={portalContainer} className="flex w-64 max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden"
     onEscapeKeyDown={(event) => { if (event.isComposing) event.preventDefault(); }}
     onCloseAutoFocus={(event) => { event.preventDefault(); picker.restoreFocus(); }}>
@@ -101,12 +101,13 @@ function HostMenuItems({ picker }: { picker: HostPicker }) {
 }
 
 /** Shared sidebar control. Remote frames can only open the trusted shell's menu. */
-export function HostSwitcherView({ picker, status, collapsed = false, portalContainer, className }: {
+export function HostSwitcherView({ picker, status, collapsed = false, portalContainer, className, menuSide = "top" }: {
   picker: HostPicker | EmbeddedPicker | null;
   status: ConnectionStatus;
   collapsed?: boolean;
   portalContainer?: HTMLElement | null;
   className?: string;
+  menuSide?: "top" | "bottom";
 }) {
   const { t } = useTranslation();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -145,8 +146,8 @@ export function HostSwitcherView({ picker, status, collapsed = false, portalCont
   const trigger = <TooltipTrigger asChild>{button}</TooltipTrigger>;
   // The mobile sidebar already owns the modal lock; a nested lock can outlive it on navigation.
   return <TooltipProvider><Tooltip>
-    {shell ? <DropdownMenu modal={!portalContainer}><DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger><HostMenuContent picker={shell} portalContainer={portalContainer} /></DropdownMenu> : trigger}
-    <TooltipContent side="top" className="max-w-[min(24rem,calc(100vw-2rem))] space-y-1 break-words">
+    {shell ? <DropdownMenu modal={!portalContainer}><DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger><HostMenuContent picker={shell} portalContainer={portalContainer} side={menuSide} /></DropdownMenu> : trigger}
+    <TooltipContent side={menuSide} className="max-w-[min(24rem,calc(100vw-2rem))] space-y-1 break-words">
       <p className="font-medium">{picker.name}</p>
       {picker.hostname !== picker.name ? <p className="font-mono text-xs text-muted-foreground">{picker.hostname}</p> : null}
       <p>{currentLabel}</p>

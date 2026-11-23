@@ -1417,7 +1417,29 @@ export function ThreadShell({
         "thread-conversation relative flex min-w-0 flex-1 flex-col overflow-hidden",
         headerPortalTarget === undefined && !hideHeader && "thread-workspace",
       )}>
-        {hideHeaderTitle && inlineHandle && !temporary && session?.handle ? (
+        {hideHeaderTitle && multiplePanes && !temporary ? (
+          <div
+            aria-label={session?.handle ? `Session @${session.handle.name}` : title}
+            className="flex h-9 shrink-0 items-center gap-2 border-b border-border/45 bg-background/80 px-3 text-[12px]"
+          >
+            {workspaceScope?.project_name ? (
+              <>
+                <span className="max-w-[8rem] shrink-0 truncate font-medium text-muted-foreground">
+                  {workspaceScope.project_name}
+                </span>
+                <span aria-hidden className="text-muted-foreground/45">/</span>
+              </>
+            ) : null}
+            <span className={cn("min-w-0 flex-1 truncate", composerActive ? "font-medium text-foreground" : "text-muted-foreground")}>
+              {title}
+            </span>
+            {inlineHandle && session?.handle ? (
+              <span className="shrink-0 rounded-md bg-muted/75 px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-muted-foreground">
+                @{session.handle.name}
+              </span>
+            ) : null}
+          </div>
+        ) : hideHeaderTitle && inlineHandle && !temporary && session?.handle ? (
           <div
             aria-label={`Session @${session.handle.name}`}
             className="flex h-8 shrink-0 items-center px-3 text-[12px]"

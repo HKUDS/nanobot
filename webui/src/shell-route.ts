@@ -5,13 +5,15 @@ export const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 export const RESTART_ROUTE_KEY = "nanobot-webui.restartRoute";
 const RESTART_ROUTE_TTL_MS = 5 * 60 * 1000;
 
-export type ShellView = "chat" | "settings" | "apps" | "automations" | "remote";
+export type ShellView = "overview" | "chat" | "settings" | "apps" | "automations" | "remote";
 export type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
   settingsSection: SettingsSectionKey;
   settingsFocus?: SettingsFocusTarget;
   temporary?: boolean;
+  /** True when the user landed on bare `/` without specifying `/new` or `/chat/...`. */
+  landing?: boolean;
 };
 
 const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
@@ -41,6 +43,10 @@ export function defaultShellRoute(): ShellRoute {
   return { view: "chat", activeKey: null, settingsSection: "overview" };
 }
 
+export function overviewShellRoute(activeKey: string | null = null): ShellRoute {
+  return { view: "overview", activeKey, settingsSection: "overview" };
+}
+
 export function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
   if (isAppsSection(section)) return "apps";
   if (section === "automations") return "automations";
@@ -48,7 +54,7 @@ export function shellViewForSettingsSection(section: SettingsSectionKey): ShellV
 }
 
 export function changesSettingsSurface(current: ShellRoute, next: ShellRoute): boolean {
-  return current.view !== "chat" && current.view !== "remote" &&
+  return current.view !== "chat" && current.view !== "overview" && current.view !== "remote" &&
     (current.view !== next.view || current.settingsSection !== next.settingsSection);
 }
 
@@ -93,7 +99,8 @@ export function readShellRoute(): ShellRoute {
     ? window.location.hash.slice(1)
     : window.location.hash;
   const hash = maybeRestoreRestartHash(currentHash);
-  if (!hash || hash === "/" || hash === "/new") return defaultShellRoute();
+  if (!hash || hash === "/") return { ...defaultShellRoute(), landing: true };
+  if (hash === "/new") return defaultShellRoute();
 
   const [path, query = ""] = hash.split("?", 2);
   const params = new URLSearchParams(query);
@@ -109,6 +116,9 @@ export function readShellRoute(): ShellRoute {
       ? returnChat.key : null);
   const temporary = Boolean(returnChat && "temporary" in returnChat && returnChat.temporary === true);
 
+  if (path === "/overview") {
+    return { view: "overview", activeKey, temporary, settingsSection: "overview" };
+  }
   if (path === "/settings") {
     const focus = params.get("focus");
     return {
@@ -169,6 +179,9 @@ export function readShellRoute(): ShellRoute {
 }
 
 export function shellRouteHash(route: ShellRoute): string {
+  if (route.view === "overview") {
+    return "#/overview";
+  }
   if (route.view === "chat") {
     if (route.temporary && route.activeKey?.startsWith("websocket:")) {
       const chatId = route.activeKey.slice("websocket:".length);

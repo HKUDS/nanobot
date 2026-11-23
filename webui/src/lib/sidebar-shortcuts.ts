@@ -1,6 +1,8 @@
 const SIDEBAR_SHORTCUTS = {
   newChat: { key: "O", shift: true },
   search: { key: "K", shift: false },
+  overview: { key: "1", shift: false },
+  drawer: { key: "B", shift: false },
   apps: { key: "1", shift: true },
   automations: { key: "2", shift: true },
   settings: { key: ",", shift: false },
