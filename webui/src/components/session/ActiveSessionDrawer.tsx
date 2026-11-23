@@ -1,5 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
+  Archive,
   ArrowRight,
   ChevronDown,
   MessageCircleDashed,
@@ -153,7 +154,7 @@ export function ActiveSessionDrawer({
       aria-hidden={!visible || undefined}
       {...(!visible ? { inert: "" } : {})}
       className={cn(
-        "zen-drawer-panel flex h-full w-[min(19rem,calc(100vw-2rem))] shrink-0 flex-col border-r border-border/45 bg-sidebar/95 text-sidebar-content backdrop-blur-xl",
+        "zen-drawer-panel flex h-full w-[min(19rem,calc(100vw-2rem))] shrink-0 flex-col border-r border-border/45 bg-sidebar/95 text-sidebar-content backdrop-blur-xl dark:border-white/[0.07]",
         !pinned && "shadow-[0_24px_60px_rgba(15,23,42,0.14)] dark:shadow-[0_24px_60px_rgba(0,0,0,0.5)]",
         !pinned && (open ? "translate-x-0 opacity-100" : "-translate-x-full opacity-0"),
       )}
@@ -567,7 +568,15 @@ function DrawerSessionRow({
           <SessionStatusDot state={item.attention} />
         </div>
 
-        <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            "min-w-0 flex-1 transition-[padding] duration-150",
+            !isRenaming && (canArchive
+              ? "media-hover:group-hover:pr-12 media-hover:group-focus-within:pr-12"
+              : "media-hover:group-hover:pr-7 media-hover:group-focus-within:pr-7"),
+            !isRenaming && menuOpen && (canArchive ? "media-hover:pr-12" : "media-hover:pr-7"),
+          )}
+        >
           {isRenaming ? (
             <input
               value={renameDraft}
@@ -584,7 +593,7 @@ function DrawerSessionRow({
                   onCancelRename();
                 }
               }}
-              className="h-6 w-full border-b border-foreground/40 bg-transparent px-0.5 text-[12.5px] text-foreground outline-none"
+              className="h-7 w-full rounded-md border border-foreground/25 bg-background px-2 text-[12.5px] text-foreground outline-none transition-colors focus:border-foreground/50"
             />
           ) : (
             <button
@@ -615,12 +624,12 @@ function DrawerSessionRow({
           )}
         </div>
 
-        {/* Gentle hover-slide completion & menu (inline on touch, gradient-masked on desktop) */}
+        {/* Clean transparent right-aligned actions — title reserves padding on hover so zero collision */}
         {!isRenaming ? (
           <div
             className={cn(
-              "flex shrink-0 items-center gap-1 opacity-85 transition-all duration-150",
-              "media-hover:pointer-events-none media-hover:absolute media-hover:right-1.5 media-hover:top-1.5 media-hover:translate-x-1 media-hover:rounded-lg media-hover:bg-gradient-to-l media-hover:from-sidebar media-hover:via-sidebar/95 media-hover:to-transparent media-hover:py-0.5 media-hover:pl-5 media-hover:pr-0.5 media-hover:opacity-0",
+              "flex shrink-0 items-center gap-1 opacity-75 transition-all duration-150",
+              "media-hover:pointer-events-none media-hover:absolute media-hover:right-1.5 media-hover:top-1.5 media-hover:translate-x-1 media-hover:opacity-0",
               "media-hover:group-hover:pointer-events-auto media-hover:group-hover:translate-x-0 media-hover:group-hover:opacity-100",
               "media-hover:group-focus-within:pointer-events-auto media-hover:group-focus-within:translate-x-0 media-hover:group-focus-within:opacity-100",
               menuOpen && "media-hover:pointer-events-auto media-hover:translate-x-0 media-hover:opacity-100",
@@ -631,6 +640,7 @@ function DrawerSessionRow({
                 completed={completing}
                 label={isZh ? `归档：${item.title}` : `Archive: ${item.title}`}
                 onClick={onArchive}
+                className="hidden media-hover:inline-flex"
               />
             ) : null}
             <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -656,6 +666,12 @@ function DrawerSessionRow({
                   <DropdownMenuItem onSelect={onCreateTab}>
                     <PanelsTopLeft className="h-3.5 w-3.5" aria-hidden />
                     {t("workbench.createGroup")}
+                  </DropdownMenuItem>
+                ) : null}
+                {canArchive ? (
+                  <DropdownMenuItem onSelect={onArchive}>
+                    <Archive className="h-3.5 w-3.5" aria-hidden />
+                    {isZh ? "归档" : "Archive"}
                   </DropdownMenuItem>
                 ) : null}
                 <DropdownMenuSeparator />

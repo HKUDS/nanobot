@@ -139,6 +139,12 @@
   display: none;
 }
 
+/* Soft right-edge fade so overflowing horizontal tab rails never hard-clip mid-glyph. */
+.zen-scroll-fade-x {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .zen-disclosure,
   .zen-drawer-backdrop,

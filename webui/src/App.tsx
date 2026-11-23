@@ -2206,7 +2206,7 @@ function Shell({
             mobileFooterExtra={(
               <HostSwitcher
                 menuSide="top"
-                className="h-7 w-full rounded-lg px-2 text-[12px] text-muted-foreground/75 hover:bg-foreground/[0.04] hover:text-foreground"
+                className="h-7 w-full justify-start rounded-lg px-2 py-1 text-[12px] text-muted-foreground/75 hover:bg-foreground/[0.04] hover:text-foreground"
               />
             )}
           />

@@ -1443,15 +1443,21 @@ export function ThreadShell({
             className={cn(
               "flex h-8 shrink-0 items-center gap-2 border-b px-3 text-[12px] transition-colors",
               composerActive
-                ? "border-border/55 bg-background/90"
-                : "border-border/35 bg-background/65",
+                ? "border-border/45 bg-background/90 dark:border-white/[0.08]"
+                : "border-border/30 bg-background/65 dark:border-white/[0.05]",
             )}
           >
             <span
               aria-hidden
               className={cn(
                 "h-1.5 w-1.5 shrink-0 rounded-full transition-colors",
-                composerActive ? "bg-foreground/75" : "bg-foreground/15",
+                recoveryNeedsDecision
+                  ? "bg-amber-500 dark:bg-amber-400"
+                  : turnActive
+                    ? "bg-emerald-500/90 dark:bg-emerald-400"
+                    : composerActive
+                      ? "bg-foreground/45 dark:bg-white/50"
+                      : "bg-foreground/15 dark:bg-white/15",
               )}
             />
             {showPaneProject && workspaceScope?.project_name ? (

@@ -200,7 +200,15 @@ export function WorkspaceProjectPicker({ disabled, scope, defaultScope, controls
   const attachBreadcrumb = useCallback((element: HTMLElement | null) => {
     breadcrumbRef.current = element;
     // Dialog portals mount after the parent's layout effect on first open.
-    if (element) window.requestAnimationFrame(() => { if (element.isConnected) element.scrollLeft = element.scrollWidth; });
+    if (element) {
+      window.requestAnimationFrame(() => {
+        if (!element.isConnected) return;
+        element.scrollLeft = element.scrollWidth;
+        setBreadcrumbOverflowLeft(element.scrollLeft > 2);
+      });
+    } else {
+      setBreadcrumbOverflowLeft(false);
+    }
   }, []);
   const [columnsElement, setColumnsElement] = useState<HTMLDivElement | null>(null);
   const attachColumns = useCallback((element: HTMLDivElement | null) => {
@@ -505,9 +513,16 @@ export function WorkspaceProjectPicker({ disabled, scope, defaultScope, controls
     [currentPath, scope?.project_path, defaultScope?.project_path, favorites, recentProjects],
   );
   const currentDrive = windowsDriveRoot(currentPath);
+  const [breadcrumbOverflowLeft, setBreadcrumbOverflowLeft] = useState(false);
 
   useLayoutEffect(() => {
-    if (breadcrumbRef.current) breadcrumbRef.current.scrollLeft = breadcrumbRef.current.scrollWidth;
+    const nav = breadcrumbRef.current;
+    if (!nav) {
+      setBreadcrumbOverflowLeft(false);
+      return;
+    }
+    nav.scrollLeft = nav.scrollWidth;
+    setBreadcrumbOverflowLeft(nav.scrollLeft > 2);
   }, [currentPath, editingPath, open]);
 
   function editPath() {
@@ -614,8 +629,12 @@ export function WorkspaceProjectPicker({ disabled, scope, defaultScope, controls
                 else void completePath(false);
               }
             }} /> : <nav ref={attachBreadcrumb} aria-label={t("workspace.picker.location")}
+              onScroll={event => setBreadcrumbOverflowLeft(event.currentTarget.scrollLeft > 2)}
               onClick={event => { if (!pickingFolder && !(event.target as HTMLElement).closest("button")) editPath(); }}
-              className="flex h-11 min-w-0 flex-1 cursor-text items-center overflow-x-auto rounded-[var(--picker-field-radius)] sm:h-9 [scrollbar-width:none]">
+              className={cn(
+                "flex h-11 min-w-0 flex-1 cursor-text items-center overflow-x-auto rounded-[var(--picker-field-radius)] sm:h-9 [scrollbar-width:none]",
+                breadcrumbOverflowLeft && "[mask-image:linear-gradient(to_right,transparent,black_22px)]",
+              )}>
               {breadcrumbs.map((crumb, index) => <span key={crumb.path} className="flex shrink-0 items-center">
                 {index > 0 && <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/60" />}
                   <button type="button" disabled={pickingFolder} aria-current={index === breadcrumbs.length - 1 ? "location" : undefined} onClick={() => navigate(crumb.path)}
@@ -635,7 +654,7 @@ export function WorkspaceProjectPicker({ disabled, scope, defaultScope, controls
               className={cn("sidebar-scrollbar flex shrink-0 flex-col overflow-auto bg-muted p-2", compact && canBrowse ? "w-full px-[var(--picker-toolbar-inset)]" : compact && !canBrowse ? "max-h-[45%] w-full px-[var(--picker-toolbar-inset)]" : "w-[var(--picker-sidebar-width)]")}>
               {hostName && <p className="shrink-0 truncate px-3 py-1.5 text-xs leading-4 text-muted-foreground">{hostName}</p>}
               {canBrowse && windowsDrives.length > 0 ? (
-                <div className="mb-2 flex flex-wrap items-center gap-1.5 px-2.5 pt-0.5">
+                <div className="mb-2 flex flex-wrap items-center gap-1.5 px-3 pt-0.5">
                   {windowsDrives.map(drive => (
                     <button
                       key={drive}
@@ -643,10 +662,10 @@ export function WorkspaceProjectPicker({ disabled, scope, defaultScope, controls
                       disabled={pickingFolder}
                       onClick={() => navigate(drive)}
                       className={cn(
-                        "inline-flex h-7 items-center rounded-md px-2 font-mono text-xs transition-colors",
+                        "inline-flex h-7 items-center rounded-md border px-2 font-mono text-xs transition-colors",
                         currentDrive === drive
-                          ? "bg-foreground/[0.09] font-medium text-foreground"
-                          : "bg-background/70 text-muted-foreground hover:bg-background hover:text-foreground",
+                          ? "border-foreground/20 bg-foreground/[0.09] font-medium text-foreground dark:border-white/20 dark:bg-white/[0.12]"
+                          : "border-border/50 bg-background/75 text-muted-foreground hover:border-border hover:bg-background hover:text-foreground dark:border-white/[0.08]",
                       )}
                     >
                       {drive}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   ArchiveRestore,
+  Check,
   Columns2,
   MoreHorizontal,
   PanelsTopLeft,
@@ -10,8 +11,6 @@ import {
   PinOff,
   Plus,
   Search,
-  Square,
-  SquareCheckBig,
   Trash2,
   Ungroup,
   X,
@@ -358,7 +357,7 @@ export function MissionControlView({
           <div
             role="tablist"
             aria-label={isZh ? "项目" : "Projects"}
-            className="zen-no-scrollbar flex min-w-0 flex-1 items-center gap-4 overflow-x-auto pr-2 text-[13.5px] leading-5 sm:gap-5 sm:pr-0"
+            className="zen-no-scrollbar zen-scroll-fade-x flex min-w-0 flex-1 items-center gap-4 overflow-x-auto pr-7 text-[13.5px] leading-5 sm:gap-5 sm:pr-5"
           >
             <button
               type="button"
@@ -581,11 +580,14 @@ export function MissionControlView({
                     setTab("open");
                   }
                 }}
-                className="rounded-full bg-foreground/[0.07] px-3.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-foreground/[0.13] active:scale-[0.98] disabled:opacity-35"
+                className="inline-flex items-center gap-1.5 rounded-full bg-foreground px-3.5 py-1.5 text-[12.5px] font-medium text-background shadow-sm transition-all duration-150 hover:bg-foreground/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-35"
               >
-                {isZh
-                  ? `归档所选 (${selectedCleanupKeys.size})`
-                  : `Archive (${selectedCleanupKeys.size})`}
+                <Archive className="h-3.5 w-3.5" strokeWidth={1.9} aria-hidden />
+                <span>
+                  {isZh
+                    ? `归档所选 (${selectedCleanupKeys.size})`
+                    : `Archive (${selectedCleanupKeys.size})`}
+                </span>
               </button>
             </div>
 
@@ -602,13 +604,25 @@ export function MissionControlView({
                       onClick={() => toggleCleanupKey(item.session.key)}
                       aria-pressed={checked}
                       aria-label={item.title}
-                      className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground/65 transition-colors hover:text-foreground"
+                      className="group/check relative inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center before:absolute before:-inset-1.5 before:content-[''] focus-visible:outline-none"
                     >
-                      {checked ? (
-                        <SquareCheckBig className="h-4 w-4 text-foreground/85" aria-hidden />
-                      ) : (
-                        <Square className="h-4 w-4" aria-hidden />
-                      )}
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "inline-flex h-4 w-4 items-center justify-center rounded-[5px] border transition-all duration-150 group-active/check:scale-95 group-focus-visible/check:ring-2 group-focus-visible/check:ring-foreground/30 group-focus-visible/check:ring-offset-1",
+                          checked
+                            ? "border-foreground bg-foreground text-background"
+                            : "border-foreground/25 bg-transparent text-transparent group-hover/check:border-foreground/50 dark:border-white/25 dark:group-hover/check:border-white/50",
+                        )}
+                      >
+                        <Check
+                          className={cn(
+                            "h-2.5 w-2.5 transition-transform duration-150",
+                            checked ? "scale-100" : "scale-75",
+                          )}
+                          strokeWidth={2.75}
+                        />
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -617,7 +631,7 @@ export function MissionControlView({
                     >
                       <span className="min-w-0 flex-1 truncate text-foreground/90">{item.title}</span>
                       {item.cleanupReason === "quick_chat" ? (
-                        <span className="hidden shrink-0 text-[11.5px] text-muted-foreground/45 sm:inline">
+                        <span className="hidden shrink-0 rounded-md bg-foreground/[0.05] px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground/75 dark:bg-white/[0.07] sm:inline">
                           {isZh ? "短对话" : "Quick"}
                         </span>
                       ) : null}
@@ -636,7 +650,7 @@ export function MissionControlView({
           <section key="tab-done" className="zen-tab-enter space-y-5">
             <div className="flex items-center justify-between gap-3">
               <div className="relative max-w-xs flex-1">
-                <Search className="pointer-events-none absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/55" aria-hidden />
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/55" aria-hidden />
                 <input
                   value={doneFilter}
                   onChange={(event) => setDoneFilter(event.target.value)}
@@ -647,14 +661,14 @@ export function MissionControlView({
                     }
                   }}
                   placeholder={isZh ? "筛选已归档…" : "Filter archived…"}
-                  className="h-8 w-full border-b border-border/45 bg-transparent pl-6 pr-6 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/55 focus:border-foreground/40"
+                  className="h-8 w-full rounded-lg border border-border/50 bg-foreground/[0.025] pl-8 pr-7 text-[13px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/55 focus:border-foreground/30 focus:bg-background dark:border-white/[0.08] dark:bg-white/[0.03] dark:focus:border-white/25 dark:focus:bg-background"
                 />
                 {doneFilter ? (
                   <button
                     type="button"
                     aria-label={isZh ? "清除筛选" : "Clear filter"}
                     onClick={() => setDoneFilter("")}
-                    className="absolute right-0 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground/55 hover:text-foreground"
+                    className="absolute right-1.5 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground/55 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
                   >
                     <X className="h-3 w-3" aria-hidden />
                   </button>
@@ -664,7 +678,7 @@ export function MissionControlView({
                 <button
                   type="button"
                   onClick={() => onArchiveMany(filteredArchived.map((item) => item.session.key), false)}
-                  className="inline-flex shrink-0 items-center gap-1.5 text-[12px] text-muted-foreground/70 transition-colors hover:text-foreground"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-muted-foreground/70 transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
                 >
                   <ArchiveRestore className="h-3.5 w-3.5" aria-hidden />
                   <span>{isZh ? "全部恢复" : "Restore all"}</span>
@@ -757,9 +771,9 @@ function LiveTile({
       data-mission-session-row={item.session.key}
       onClick={onOpen}
       className={cn(
-        "group flex w-full flex-col gap-2 rounded-2xl bg-foreground/[0.026] px-4 py-3.5 text-left transition-all duration-200 hover:bg-foreground/[0.048] active:scale-[0.995] dark:bg-white/[0.03] dark:hover:bg-white/[0.055]",
-        isActive && "ring-1 ring-foreground/20 dark:ring-white/20",
-        isFocused && "bg-foreground/[0.045] ring-1 ring-foreground/25 dark:bg-white/[0.06] dark:ring-white/25",
+        "group flex w-full flex-col gap-2 rounded-2xl border border-border/50 bg-foreground/[0.02] px-4 py-3.5 text-left transition-all duration-200 hover:border-border/80 hover:bg-foreground/[0.035] hover:shadow-[0_2px_10px_-4px_rgba(15,23,42,0.08)] active:scale-[0.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 dark:border-white/[0.07] dark:bg-white/[0.025] dark:hover:border-white/[0.14] dark:hover:bg-white/[0.045] dark:hover:shadow-[0_4px_14px_-4px_rgba(0,0,0,0.4)]",
+        isActive && "border-foreground/20 ring-1 ring-foreground/15 dark:border-white/20 dark:ring-white/15",
+        isFocused && "border-foreground/25 bg-foreground/[0.04] ring-1 ring-foreground/20 dark:border-white/25 dark:bg-white/[0.055] dark:ring-white/20",
       )}
     >
       <div className="flex w-full items-center justify-between gap-2">
@@ -801,11 +815,11 @@ function SplitChip({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="group inline-flex items-center gap-1 rounded-full bg-foreground/[0.035] py-1 pl-3 pr-1.5 text-[12px] transition-colors hover:bg-foreground/[0.065]">
+    <div className="group inline-flex items-center gap-1 rounded-full border border-border/50 bg-foreground/[0.025] py-1 pl-3 pr-1.5 text-[12px] transition-all duration-150 hover:border-border/80 hover:bg-foreground/[0.05] dark:border-white/[0.08] dark:bg-white/[0.03] dark:hover:border-white/[0.14] dark:hover:bg-white/[0.055]">
       <button
         type="button"
         onClick={onOpen}
-        className="inline-flex items-center gap-1.5 text-foreground/85 hover:text-foreground"
+        className="inline-flex items-center gap-1.5 text-foreground/85 hover:text-foreground focus-visible:outline-none focus-visible:text-foreground"
       >
         <Columns2 className="h-3.5 w-3.5 text-muted-foreground/65" strokeWidth={1.75} aria-hidden />
         <span className="max-w-[12rem] truncate font-medium">{group.title}</span>
@@ -817,7 +831,7 @@ function SplitChip({
             <button
               type="button"
               aria-label={t("chat.actions", { title: group.title })}
-              className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/60 hover:bg-foreground/[0.06] hover:text-foreground"
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/65 opacity-60 transition-opacity hover:bg-foreground/[0.06] hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100"
             >
               <MoreHorizontal className="h-3 w-3" aria-hidden />
             </button>
@@ -896,20 +910,25 @@ function ProjectSection({
 
   return (
     <section aria-label={project.name} className="group/section space-y-1">
-      {/* Whisper-quiet Project Header — path lives in tooltip, actions appear softly on hover (always reachable on touch) */}
-      <div className="flex items-center justify-between gap-2 pb-1">
-        <HoverHint enabled={Boolean(!project.isGeneral && project.path)} content={project.path ?? ""} side="top" align="start">
-          <h2 className="truncate text-[12px] font-medium tracking-[0.02em] text-muted-foreground/80">
-            {project.name}
-          </h2>
-        </HoverHint>
+      {/* Whisper-quiet Project Header — hairline anchor, path in tooltip, calm rest opacity on touch */}
+      <div className="mb-0.5 flex items-center justify-between gap-2 border-b border-border/30 pb-1.5 dark:border-white/[0.06]">
+        <div className="flex min-w-0 items-center gap-2">
+          <HoverHint enabled={Boolean(!project.isGeneral && project.path)} content={project.path ?? ""} side="top" align="start">
+            <h2 className="truncate text-[12px] font-medium tracking-[0.02em] text-muted-foreground/80">
+              {project.name}
+            </h2>
+          </HoverHint>
+          <span className="text-[11px] tabular-nums text-muted-foreground/40">
+            {group.openSessions.length}
+          </span>
+        </div>
 
         <div
           className={cn(
             "flex shrink-0 items-center gap-1 transition-opacity duration-150",
             isFilteredProject
-              ? "opacity-80 hover:opacity-100"
-              : "media-hover:opacity-0 media-hover:group-hover/section:opacity-100 media-hover:focus-within:opacity-100 media-hover:has-[[data-state=open]]:opacity-100",
+              ? "opacity-75 hover:opacity-100"
+              : "opacity-55 media-hover:opacity-0 media-hover:group-hover/section:opacity-100 media-hover:focus-within:opacity-100 media-hover:has-[[data-state=open]]:opacity-100",
           )}
         >
           {group.cleanupCandidates.length > 0 ? (
@@ -978,8 +997,8 @@ function ProjectSection({
                   completing && "zen-completing",
                 )}
               >
-                {/* Left slot: Live dot for running/recovery; tactile Done circle for idle/updated */}
-                <div className="flex w-4 shrink-0 items-center justify-center">
+                {/* Left slot: 18px box aligns SessionStatusDot and ZenDoneCircle on the exact same optical axis */}
+                <div className="flex w-[18px] shrink-0 items-center justify-center">
                   {isLive ? (
                     <SessionStatusDot state={item.attention} />
                   ) : item.attention === "updated" && canArchive ? (
@@ -1024,7 +1043,7 @@ function ProjectSection({
                           onCancelRename();
                         }
                       }}
-                      className="h-7 w-full max-w-md border-b border-foreground/40 bg-transparent text-[14px] text-foreground outline-none"
+                      className="h-7 w-full max-w-md rounded-md border border-foreground/25 bg-background px-2 text-[14px] text-foreground outline-none transition-colors focus:border-foreground/50 dark:border-white/20 dark:focus:border-white/45"
                     />
                   ) : (
                     <button
@@ -1069,7 +1088,7 @@ function ProjectSection({
                           <button
                             type="button"
                             aria-label={t("chat.actions", { title: item.title })}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/65 hover:bg-foreground/[0.06] hover:text-foreground"
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-foreground/[0.06] hover:text-foreground media-hover:text-muted-foreground/65"
                           >
                             <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
                           </button>

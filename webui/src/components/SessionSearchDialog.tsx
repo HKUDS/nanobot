@@ -348,7 +348,7 @@ export function SessionSearchDialog({
         showCloseButton={false}
         onKeyDown={handleDialogKeyDown}
         className={cn(
-          "session-search-dialog flex max-h-[min(40rem,100%)] w-[calc(100vw-2rem)] max-w-[44rem] flex-col gap-0 overflow-hidden p-0",
+          "session-search-dialog flex max-h-[min(40rem,100%)] w-[calc(100vw-2rem)] max-w-[44rem] flex-col gap-0 overflow-hidden border border-border/55 p-0 dark:border-white/[0.08]",
         )}
       >
         <DialogTitle className="sr-only">{t("sidebar.searchAria")}</DialogTitle>
@@ -357,7 +357,7 @@ export function SessionSearchDialog({
         </DialogDescription>
 
         {/* Search Input */}
-        <div className="session-search-input flex h-[56px] shrink-0 items-center gap-3 border-b border-border/60 px-[18px]">
+        <div className="session-search-input flex h-[54px] shrink-0 items-center gap-3 border-b border-border/55 px-[18px] dark:border-white/[0.07]">
           <Search
             className="h-[17px] w-[17px] shrink-0 text-muted-foreground/75"
             aria-hidden
@@ -370,13 +370,15 @@ export function SessionSearchDialog({
             aria-label={t("sidebar.searchAria")}
             className="h-full min-w-0 flex-1 bg-transparent text-[15.5px] font-normal leading-none text-foreground outline-none placeholder:text-muted-foreground/70"
           />
-          <kbd className="hidden shrink-0 rounded-md border border-border/60 bg-muted/45 px-1.5 py-0.5 font-sans text-[10.5px] text-muted-foreground/80 sm:inline">
-            ESC
-          </kbd>
         </div>
 
         {/* Status & Project Filter Rail — single-line scrollable monochrome tabs */}
-        <div className="flex shrink-0 items-center gap-3.5 overflow-x-auto border-b border-border/40 px-[18px] text-[12px]">
+        <div
+          className={cn(
+            "flex shrink-0 items-center gap-3.5 overflow-x-auto border-b border-border/40 px-[18px] text-[12px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-white/[0.06]",
+            projectOptions.length > 2 && "pr-6 [mask-image:linear-gradient(to_right,black_calc(100%-20px),transparent)]",
+          )}
+        >
           <div
             role="tablist"
             aria-label={isZh ? "按状态筛选" : "Filter by status"}
@@ -412,7 +414,7 @@ export function SessionSearchDialog({
               <div
                 role="tablist"
                 aria-label={isZh ? "按项目筛选" : "Filter by project"}
-                className="flex shrink-0 items-center gap-3.5"
+                className="flex shrink-0 items-center gap-1.5"
               >
                 {projectOptions.slice(0, 6).map((proj) => {
                   const selected = projectFilter === proj.id;
@@ -427,9 +429,9 @@ export function SessionSearchDialog({
                         restoreInputFocus();
                       }}
                       className={cn(
-                        "max-w-[8rem] shrink-0 truncate rounded-full px-2 py-0.5 transition-colors",
+                        "max-w-[8rem] shrink-0 truncate rounded-full px-2.5 py-0.5 transition-colors",
                         selected
-                          ? "bg-foreground/[0.08] font-medium text-foreground"
+                          ? "bg-foreground/[0.11] font-medium text-foreground ring-1 ring-inset ring-foreground/15 dark:bg-white/[0.14] dark:ring-white/15"
                           : "text-muted-foreground/65 hover:bg-foreground/[0.04] hover:text-foreground",
                       )}
                     >
@@ -448,10 +450,13 @@ export function SessionSearchDialog({
           onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
           data-testid="session-search-scroll"
           aria-busy={searchPending}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2.5 scrollbar-thin scrollbar-track-transparent"
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-3 pt-2.5 scrollbar-thin scrollbar-track-transparent",
+            itemCount > 6 && "[mask-image:linear-gradient(to_bottom,black_calc(100%-16px),transparent)]",
+          )}
         >
           <section>
-            <div className="session-search-label flex items-center justify-between px-2.5 pb-1.5 pt-1 text-[11.5px] font-medium text-muted-foreground/75">
+            <div className="session-search-label flex items-center justify-between px-3 pb-1.5 pt-1 text-[11.5px] font-medium text-muted-foreground/75">
               <span>
                 {normalizedQuery || statusFilter !== "all" || projectFilter
                   ? t("sidebar.searchResults")
@@ -469,7 +474,7 @@ export function SessionSearchDialog({
                 {emptyLabel}
               </div>
             ) : (
-              <ul>
+              <ul className={cn(itemCount > 6 && "pb-3")}>
                 <li aria-hidden style={{ height: windowStart * rowHeight }} />
                 {sessionResults.slice(windowStart, windowEnd).map((result, offset) => {
                   const index = windowStart + offset;
@@ -489,8 +494,8 @@ export function SessionSearchDialog({
                         className={cn(
                           "group flex h-full w-full min-w-0 items-center gap-3 rounded-xl px-3 py-1.5 transition-colors",
                           highlighted
-                            ? "bg-foreground/[0.055] text-foreground"
-                            : "text-foreground hover:bg-foreground/[0.035]",
+                            ? "bg-foreground/[0.055] text-foreground dark:bg-white/[0.07]"
+                            : "text-foreground hover:bg-foreground/[0.035] dark:hover:bg-white/[0.04]",
                         )}
                       >
                         <SessionStatusDot state={result.attention} />
@@ -526,16 +531,27 @@ export function SessionSearchDialog({
                           ) : null}
                         </button>
 
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          {active ? (
-                            <span className="rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                              {t("common.current", { defaultValue: "Current" })}
-                            </span>
-                          ) : (
-                            <span className="text-[11.5px] tabular-nums text-muted-foreground/70">
-                              {formatCompactRelativeTime(result.updatedMs, i18n.resolvedLanguage)}
-                            </span>
-                          )}
+                        <div className="relative flex shrink-0 items-center justify-end gap-1.5">
+                          <span
+                            className={cn(
+                              "transition-opacity duration-150",
+                              canArchive && onToggleArchive && (
+                                highlighted
+                                  ? "media-hover:opacity-0"
+                                  : "media-hover:group-hover:opacity-0 media-hover:group-focus-within:opacity-0"
+                              ),
+                            )}
+                          >
+                            {active ? (
+                              <span className="rounded-full bg-foreground/[0.07] px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:bg-white/[0.10]">
+                                {isZh ? "当前打开" : "Viewing"}
+                              </span>
+                            ) : (
+                              <span className="text-[11.5px] tabular-nums text-muted-foreground/70">
+                                {formatCompactRelativeTime(result.updatedMs, i18n.resolvedLanguage)}
+                              </span>
+                            )}
+                          </span>
                           {canArchive && onToggleArchive ? (
                             <button
                               type="button"
@@ -546,9 +562,10 @@ export function SessionSearchDialog({
                               }}
                               className={cn(
                                 "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-background hover:text-foreground focus-visible:opacity-100",
+                                "media-hover:absolute media-hover:right-0",
                                 highlighted
-                                  ? "opacity-85"
-                                  : "opacity-80 media-hover:opacity-0 media-hover:group-hover:opacity-100",
+                                  ? "opacity-90 media-hover:pointer-events-auto media-hover:opacity-100"
+                                  : "opacity-80 media-hover:pointer-events-none media-hover:opacity-0 media-hover:group-hover:pointer-events-auto media-hover:group-hover:opacity-100 media-hover:group-focus-within:pointer-events-auto media-hover:group-focus-within:opacity-100",
                               )}
                             >
                               {result.archived ? (
@@ -570,18 +587,35 @@ export function SessionSearchDialog({
         </div>
 
         {/* Keyboard Hints Footer */}
-        <div className="hidden shrink-0 items-center justify-between border-t border-border/45 bg-muted/15 px-4 py-2 text-[11px] text-muted-foreground/75 sm:flex">
-          <div className="flex items-center gap-3">
-            <span>↑↓ {isZh ? "移动" : "Navigate"}</span>
-            <span>↵ {isZh ? "打开" : "Open"}</span>
+        <div className="hidden shrink-0 items-center justify-between border-t border-border/45 bg-muted/15 px-4 py-2 text-[11px] text-muted-foreground/80 dark:border-white/[0.06] sm:flex">
+          <div className="flex items-center gap-3.5">
+            <span className="inline-flex items-center gap-1.5">
+              <kbd className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border border-border/60 bg-background/80 px-1 font-sans text-[10px] font-medium text-muted-foreground shadow-[0_1px_0_rgba(0,0,0,0.04)] dark:border-white/[0.10] dark:bg-white/[0.05]">
+                ↑↓
+              </kbd>
+              <span>{isZh ? "移动" : "Navigate"}</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <kbd className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border border-border/60 bg-background/80 px-1 font-sans text-[10px] font-medium text-muted-foreground shadow-[0_1px_0_rgba(0,0,0,0.04)] dark:border-white/[0.10] dark:bg-white/[0.05]">
+                ↵
+              </kbd>
+              <span>{isZh ? "打开" : "Open"}</span>
+            </span>
             {onToggleArchive ? (
-              <span>
-                {apple ? "⌘E" : "Ctrl+E"}{" "}
-                {isZh ? "归档 / 恢复" : "Archive / Restore"}
+              <span className="inline-flex items-center gap-1.5">
+                <kbd className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border border-border/60 bg-background/80 px-1 font-sans text-[10px] font-medium text-muted-foreground shadow-[0_1px_0_rgba(0,0,0,0.04)] dark:border-white/[0.10] dark:bg-white/[0.05]">
+                  {apple ? "⌘E" : "Ctrl+E"}
+                </kbd>
+                <span>{isZh ? "归档 / 恢复" : "Archive / Restore"}</span>
               </span>
             ) : null}
           </div>
-          <span>ESC {isZh ? "关闭" : "Close"}</span>
+          <span className="inline-flex items-center gap-1.5">
+            <kbd className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border border-border/60 bg-background/80 px-1.5 font-sans text-[10px] font-medium text-muted-foreground shadow-[0_1px_0_rgba(0,0,0,0.04)] dark:border-white/[0.10] dark:bg-white/[0.05]">
+              ESC
+            </kbd>
+            <span>{isZh ? "关闭" : "Close"}</span>
+          </span>
         </div>
       </DialogContent>
     </Dialog>
