@@ -530,14 +530,16 @@ export function createSystemSettingsActions({
       payload,
       expectedOAuthPendingName,
     );
+    const reloadPending = Boolean(payload.hot_reload?.connecting?.length)
+      && !payload.hot_reload?.failed?.length;
     const actionError = payload.last_action?.ok === false
       ? payload.last_action.error || payload.last_action.message
-      : payload.hot_reload?.ok === false && !expectedOAuthPending
+      : payload.hot_reload?.ok === false && !expectedOAuthPending && !reloadPending
         ? payload.hot_reload.message
         : null;
     setMcpError(actionError || null);
     setMcpMessage(
-      actionError || !announceSuccess
+      actionError || reloadPending || !announceSuccess
         ? null
         : payload.last_action?.message ?? null,
     );

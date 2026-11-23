@@ -24,7 +24,6 @@ from nanobot.agent.tools.mcp_oauth import (
     delete_mcp_oauth_credentials,
     mcp_oauth_has_credentials,
 )
-from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.cli import CliAppManager
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.errors import ConfigLoadError
@@ -62,7 +61,7 @@ _MCP_ATTACHMENT_KEYS = (
 _DEFAULT_TEST_TIMEOUT = 20
 _DEFAULT_CUSTOM_TIMEOUT = 30
 _CUSTOM_ACTIONS = {"custom", "import", "import-cursor", "tools"}
-_MCP_RUNTIME_STATUSES = {"connecting", "connected", "failed"}
+_MCP_RUNTIME_STATUSES = {"connecting", "connecting_slow", "connected", "failed", "startup_timeout"}
 
 McpReload = Callable[[], Awaitable[dict[str, Any]]]
 McpRuntimeStatus = Callable[[], Mapping[str, str]]
@@ -729,19 +728,13 @@ def _test_timeout(cfg: MCPServerConfig) -> int:
     return max(5, min(int(raw), _DEFAULT_TEST_TIMEOUT))
 
 
-async def _close_mcp_stacks(stacks: Mapping[str, Any]) -> None:
-    for stack in stacks.values():
-        with suppress(Exception):
-            await stack.aclose()
-
-
 async def mcp_presets_test_action(
     query: QueryParams,
     *,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Connect to an enabled MCP preset and report its complete tool surface."""
-    from nanobot.agent.tools.mcp import connect_mcp_servers
+    from nanobot.agent.tools.mcp import connect_mcp_server
 
     name = (_query_first(query, "name") or "").strip()
     if not name:
@@ -813,22 +806,15 @@ async def mcp_presets_test_action(
             mcp_presets_payload, last_action=last_action, config_path=config_path,
         )
 
-    registry = ToolRegistry()
-    stacks: dict[str, Any] = {}
+    connection = None
     inspection_cfg = cfg.model_copy(update={"enabled_tools": ["*"]})
     try:
-        stacks = await asyncio.wait_for(
-            connect_mcp_servers({name: inspection_cfg}, registry, network=config.network),
+        connection = await asyncio.wait_for(
+            connect_mcp_server(name, inspection_cfg, network=config.network),
             timeout=_test_timeout(cfg),
         )
-        tool_prefix = f"mcp_{name}_"
-        tool_names = sorted(
-            tool_name
-            for tool_name in registry.tool_names
-            if tool_name.startswith(tool_prefix)
-        )
-        ok = name in stacks
-        if ok:
+        if connection is not None:
+            tool_names = sorted({tool.name for tool in connection.tools})
             last_action = {
                 "ok": True,
                 "message": (
@@ -869,7 +855,9 @@ async def mcp_presets_test_action(
             "checked_at": _checked_at(),
         }
     finally:
-        await _close_mcp_stacks(stacks)
+        if connection is not None:
+            with suppress(Exception):
+                await connection.aclose()
 
     tool_names = last_action.get("tool_names", [])
     preview = {name: tool_names} if tool_names else None

@@ -124,7 +124,7 @@ async def test_close_releases_channel_connectors() -> None:
         has_pending_work = False
 
         async def handle(self, action, query):
-            return {}
+            return None
 
         async def close(self) -> None:
             nonlocal closed
@@ -448,17 +448,17 @@ async def test_settings_shutdown_joins_browser_authorization_and_releases_admiss
     monkeypatch.setattr("nanobot.webui.mcp_oauth_api.validate_url_target", lambda _: (True, ""))
     cleanup_started, allow_cleanup = asyncio.Event(), asyncio.Event()
 
-    async def connect(_servers, _registry, *, oauth_handlers, network):
-        handlers = oauth_handlers["linear"]
+    async def connect(_name, _cfg, *, oauth_handler, network):
+        handlers = oauth_handler
         await handlers.redirect_handler("https://accounts.example/authorize?state=settings")
         try:
             await handlers.callback_handler()
         finally:
             cleanup_started.set()
             await allow_cleanup.wait()
-        return {}
+        return None
 
-    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_server", connect)
     router = _router(config_path=tmp_path / "config.json")
     path = "/api/settings/mcp-oauth/start"
     response = await _mutate(router, _mutation_request(path, {"name": "linear"}))

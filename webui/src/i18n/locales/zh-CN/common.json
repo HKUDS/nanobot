@@ -1152,6 +1152,8 @@
       "statusMissingCredentials": "需要密钥",
       "connectingAccount": "正在连接 {{name}}",
       "connectingLabel": "正在连接…",
+      "connectingSlow": "连接耗时较长，仍在尝试…",
+      "startupTimedOut": "启动超时。",
       "continueSignIn": "继续登录",
       "preparingSignIn": "正在准备安全登录…",
       "openSignInToContinue": "打开登录页面以继续。",

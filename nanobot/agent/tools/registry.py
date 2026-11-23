@@ -26,6 +26,16 @@ def is_tool_error_result(result: Any) -> bool:
     return isinstance(result, ToolResult) and result.is_error
 
 
+def _schema_sort_key(schema: dict[str, Any]) -> tuple[bool, str]:
+    fn = schema.get("function")
+    name = cast(dict[str, Any], fn).get("name") if isinstance(fn, dict) else None
+    if not isinstance(name, str):
+        name = schema.get("name")
+    if not isinstance(name, str):
+        name = ""
+    return name.startswith("mcp_"), name
+
+
 class ToolRegistry:
     """
     Registry for agent tools.
@@ -82,17 +92,6 @@ class ToolRegistry:
         """Check if a tool is registered."""
         return self.get(name) is not None
 
-    @staticmethod
-    def _schema_name(schema: dict[str, Any]) -> str:
-        """Extract a normalized tool name from either OpenAI or flat schemas."""
-        fn = schema.get("function")
-        if isinstance(fn, dict):
-            name = cast(dict[str, Any], fn).get("name")
-            if isinstance(name, str):
-                return name
-        name = schema.get("name")
-        return name if isinstance(name, str) else ""
-
     def get_definitions(self) -> list[dict[str, Any]]:
         """Get tool definitions with stable ordering for cache-friendly prompts.
 
@@ -102,18 +101,8 @@ class ToolRegistry:
         """
         if self._cached_definitions is None:
             definitions = [tool.to_schema() for tool in self._tools.values()]
-            builtins: list[dict[str, Any]] = []
-            mcp_tools: list[dict[str, Any]] = []
-            for schema in definitions:
-                name = self._schema_name(schema)
-                if name.startswith("mcp_"):
-                    mcp_tools.append(schema)
-                else:
-                    builtins.append(schema)
-
-            builtins.sort(key=self._schema_name)
-            mcp_tools.sort(key=self._schema_name)
-            self._cached_definitions = builtins + mcp_tools
+            definitions.sort(key=_schema_sort_key)
+            self._cached_definitions = definitions
 
         return self._cached_definitions
 

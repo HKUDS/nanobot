@@ -1183,6 +1183,8 @@
       "statusMissingCredentials": "Cần khóa",
       "connectingAccount": "Đang kết nối {{name}}",
       "connectingLabel": "Đang kết nối…",
+      "connectingSlow": "Kết nối đang mất nhiều thời gian hơn…",
+      "startupTimedOut": "Đã hết thời gian chờ khởi động.",
       "continueSignIn": "Tiếp tục đăng nhập",
       "preparingSignIn": "Đang chuẩn bị đăng nhập an toàn…",
       "openSignInToContinue": "Mở trang đăng nhập để tiếp tục.",

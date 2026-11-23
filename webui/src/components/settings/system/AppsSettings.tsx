@@ -607,15 +607,22 @@ function McpAppsCatalogRow({
   const configuredInstalled = preset.installed && preset.configured;
   const readyInstalled = preset.enabled ?? configuredInstalled;
   const runtimeConnected = !toggleable && preset.runtime_status === "connected";
-  const runtimeConnecting = !toggleable && preset.runtime_status === "connecting";
-  const runtimeFailed = !toggleable && preset.installed && preset.runtime_status === "failed";
+  const runtimeSlow = !toggleable && preset.runtime_status === "connecting_slow";
+  const runtimeConnecting = !toggleable && (preset.runtime_status === "connecting" || runtimeSlow);
+  const timedOut = !toggleable && preset.runtime_status === "startup_timeout";
+  const runtimeFailed = !toggleable && preset.installed && (preset.runtime_status === "failed" || timedOut);
   const connecting = Boolean(oauthFlow) || (runtimeConnecting && configuredInstalled);
   const statusLabel = toggleable
     ? preset.enabled ? tx("settings.values.enabled", "Enabled") : tx("settings.values.disabled", "Disabled")
     : runtimeConnected
       ? tx("connection.open", "Connected")
       : mcpPresetStatusLabel(preset.status, tx);
-  const failureLabel = tx("settings.mcp.connectionFailed", "Connection failed.");
+  const connectingLabel = runtimeSlow && !oauthFlow
+    ? tx("settings.mcp.connectingSlow", "Taking longer to connect…")
+    : tx("settings.mcp.connectingLabel", "Connecting…");
+  const failureLabel = timedOut
+    ? tx("settings.mcp.startupTimedOut", "Startup timed out.")
+    : tx("settings.mcp.connectionFailed", "Connection failed.");
   const failureStatusLabel = failureLabel.replace(/[.!。！]+$/u, "");
   const description = tx(
     `settings.mcp.presetDescriptions.${preset.name}`,
@@ -651,7 +658,7 @@ function McpAppsCatalogRow({
         <button
           type="button"
           aria-label={preset.display_name}
-          aria-describedby={connecting ? connectionStatusId : undefined}
+          aria-describedby={connecting || runtimeFailed ? connectionStatusId : undefined}
           onClick={() => openManagement()}
           className="flex min-w-0 flex-[1_1_6rem] items-center gap-3 rounded-control text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
@@ -680,7 +687,7 @@ function McpAppsCatalogRow({
               <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />
             ) : null}
             <span className="truncate">
-              {connecting ? tx("settings.mcp.connectingLabel", "Connecting…") : runtimeFailed ? failureLabel : detail}
+              {connecting ? connectingLabel : runtimeFailed ? failureLabel : detail}
             </span>
             {!connecting && !runtimeFailed && agentPlugin && description && preset.requires ? (
               <span className="min-w-0 truncate">{preset.requires}</span>
@@ -925,8 +932,8 @@ function McpAppsCatalogRow({
           preset={preset}
           values={values}
           actionKey={actionKey}
-          statusLabel={runtimeFailed ? failureStatusLabel : statusLabel}
-          statusTone={runtimeFailed ? "warning" : configuredInstalled ? "success" : "neutral"}
+          statusLabel={connecting ? connectingLabel : runtimeFailed ? failureStatusLabel : statusLabel}
+          statusTone={connecting ? "neutral" : runtimeFailed ? "warning" : configuredInstalled ? "success" : "neutral"}
           tab={managementTab}
           icon={<McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} compact />}
           onTabChange={setManagementTab}

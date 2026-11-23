@@ -1183,6 +1183,8 @@
       "statusMissingCredentials": "Clé requise",
       "connectingAccount": "Connexion à {{name}}",
       "connectingLabel": "Connexion…",
+      "connectingSlow": "La connexion prend plus de temps…",
+      "startupTimedOut": "Le délai de démarrage a expiré.",
       "continueSignIn": "Continuer la connexion",
       "preparingSignIn": "Préparation d’une connexion sécurisée…",
       "openSignInToContinue": "Ouvrez la page de connexion pour continuer.",

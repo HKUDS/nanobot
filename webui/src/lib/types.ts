@@ -1331,7 +1331,7 @@ export interface McpPresetInfo {
   enabled?: boolean;
   available: boolean;
   status: "not_installed" | "configured" | "missing_credentials" | "missing_dependency" | "coming_soon" | string;
-  runtime_status?: "connecting" | "connected" | "failed" | string;
+  runtime_status?: "connecting" | "connecting_slow" | "connected" | "failed" | "startup_timeout";
   logo_url?: string | null;
   brand_color?: string | null;
   required_fields: McpPresetField[];
@@ -1385,6 +1385,7 @@ export interface McpPresetsPayload {
     connected?: string[];
     configured?: string[];
     failed?: string[];
+    connecting?: string[];
     tools_removed?: number;
     requires_restart?: boolean;
   };
