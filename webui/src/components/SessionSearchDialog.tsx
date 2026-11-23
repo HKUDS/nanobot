@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import {
   AutomationProtectedBadge,
   MutedHandleBadge,
-  ProjectDot,
   SessionStatusDot,
 } from "@/components/session/SessionVisuals";
 import {
@@ -360,11 +359,11 @@ export function SessionSearchDialog({
           </kbd>
         </div>
 
-        {/* Status & Project Filter Bar */}
+        {/* Status & Project Filter Bar — Zen minimal underline / monochrome tabs */}
         <div
           role="tablist"
           aria-label={isZh ? "筛选会话" : "Filter sessions"}
-          className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border/55 bg-muted/25 px-4 py-2"
+          className="flex shrink-0 flex-wrap items-center gap-3.5 border-b border-border/45 px-[18px] py-2 text-[12px]"
         >
           {statusTabs.map((tab) => (
             <button
@@ -374,10 +373,10 @@ export function SessionSearchDialog({
               aria-selected={statusFilter === tab.id}
               onClick={() => setStatusFilter(tab.id)}
               className={cn(
-                "inline-flex h-6 items-center rounded-full px-2.5 text-[11.5px] font-medium transition-colors",
+                "transition-colors",
                 statusFilter === tab.id
-                  ? "bg-foreground text-background"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  ? "font-medium text-foreground"
+                  : "text-muted-foreground/65 hover:text-foreground",
               )}
             >
               {tab.label}
@@ -385,7 +384,7 @@ export function SessionSearchDialog({
           ))}
           {projectOptions.length > 1 ? (
             <>
-              <span aria-hidden className="mx-1 h-3.5 w-px bg-border/80" />
+              <span aria-hidden className="h-3 w-px bg-border/70" />
               {projectOptions.slice(0, 5).map((proj) => {
                 const selected = projectFilter === proj.id;
                 return (
@@ -396,14 +395,13 @@ export function SessionSearchDialog({
                     aria-selected={selected}
                     onClick={() => setProjectFilter(selected ? null : proj.id)}
                     className={cn(
-                      "inline-flex h-6 max-w-[9rem] items-center gap-1.5 rounded-full border px-2 text-[11.5px] font-medium transition-colors",
+                      "max-w-[8rem] truncate transition-colors",
                       selected
-                        ? "border-foreground/25 bg-accent text-foreground"
-                        : "border-transparent text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                        ? "font-medium text-foreground"
+                        : "text-muted-foreground/60 hover:text-foreground",
                     )}
                   >
-                    <ProjectDot color={proj.dotColor} className="h-1.5 w-1.5" />
-                    <span className="truncate">{proj.name}</span>
+                    {proj.name}
                   </button>
                 );
               })}
@@ -474,18 +472,17 @@ export function SessionSearchDialog({
                           className="min-w-0 flex-1 text-left focus-visible:outline-none"
                         >
                           <div className="flex min-w-0 items-center gap-2">
-                            <span className={cn("min-w-0 truncate text-[13.5px] font-medium leading-5", result.archived && "text-muted-foreground")}>
+                            <span className={cn("min-w-0 truncate text-[13.5px] font-medium leading-5", result.archived && "text-muted-foreground/75")}>
                               {title}
                             </span>
-                            <span className="inline-flex max-w-[7.5rem] shrink-0 items-center gap-1 rounded-md bg-background/80 px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground ring-1 ring-border/50">
-                              <ProjectDot color={result.projectDotColor} className="h-1.5 w-1.5" />
-                              <span className="truncate">{result.projectName}</span>
+                            <span className="max-w-[7rem] shrink-0 truncate text-[11.5px] text-muted-foreground/60">
+                              {result.projectName}
                             </span>
-                            <MutedHandleBadge handle={session.handle} className="hidden sm:inline-flex" />
+                            <MutedHandleBadge handle={session.handle} className="hidden sm:inline" />
                             <AutomationProtectedBadge count={result.automationCount} compact />
                             {result.archived ? (
-                              <span className="shrink-0 rounded-full bg-muted-foreground/15 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                                {isZh ? "已结单" : "Done"}
+                              <span className="shrink-0 text-[11px] text-muted-foreground/60">
+                                · {isZh ? "已结单" : "Done"}
                               </span>
                             ) : null}
                           </div>

@@ -1,12 +1,8 @@
 import { useState } from "react";
 import {
-  AlertTriangle,
   ArrowRight,
   ArrowUpCircle,
   Check,
-  ChevronRight,
-  Columns2,
-  LayoutGrid,
   PanelLeft,
   Plus,
 } from "lucide-react";
@@ -23,8 +19,8 @@ import { HostSwitcher } from "@/components/remote/HostSwitcher";
 import {
   LiveElapsedBadge,
   MutedHandleBadge,
-  ProjectDot,
   SessionStatusDot,
+  ZenDoneCircle,
   useLiveClock,
 } from "@/components/session/SessionVisuals";
 import { Button } from "@/components/ui/button";
@@ -122,18 +118,37 @@ export function WorkspaceTopBar({
   const overviewLabel = isZh ? "工作台" : "Overview";
   const drawerLabel = isZh ? "在办抽屉" : "Active drawer";
   const doneLabel = isZh ? "结单" : "Done";
+  const inChat = view === "chat";
+
+  // Calm single-line summary for the pulse whisper button
+  const pulseSummary = (() => {
+    const parts: string[] = [];
+    if (runningCount > 0) parts.push(isZh ? `${runningCount} 运行` : `${runningCount} running`);
+    if (recoveryCount > 0) parts.push(isZh ? `${recoveryCount} 待确认` : `${recoveryCount} waiting`);
+    if (updatedCount > 0) parts.push(isZh ? `${updatedCount} 新结果` : `${updatedCount} ready`);
+    return parts.join(" · ");
+  })();
+
+  const primaryPulseState = recoveryCount > 0
+    ? "recovery"
+    : runningCount > 0
+      ? "running"
+      : updatedCount > 0
+        ? "updated"
+        : "idle";
 
   return (
     <header
       data-testid="workspace-top-bar"
       data-theme-surface
       className={cn(
-        "relative z-30 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-background/92 px-3 backdrop-blur-md",
+        "group/topbar relative z-30 flex h-12 shrink-0 items-center justify-between gap-3 bg-background/85 px-4 backdrop-blur-md transition-colors",
+        !inChat && "border-b border-border/35",
         hostChromeInset && "pl-[4.75rem]",
       )}
     >
-      {/* Left: Brand/Overview + Drawer toggle + Host + Contextual Breadcrumb */}
-      <div className="flex min-w-0 flex-1 items-center gap-1">
+      {/* Left: Quiet Brand / Overview + Drawer + Minimal Breadcrumb */}
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <HoverHint
           side="bottom"
           content={
@@ -151,10 +166,10 @@ export function WorkspaceTopBar({
             aria-current={view === "overview" ? "page" : undefined}
             onClick={() => onOpenOverview(null)}
             className={cn(
-              "host-no-drag inline-flex h-8 shrink-0 items-center gap-2 rounded-control px-2 text-[13px] font-medium transition-colors",
+              "host-no-drag inline-flex h-8 shrink-0 items-center gap-2 rounded-lg px-1.5 text-[13px] transition-colors",
               view === "overview"
-                ? "bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.7)]"
-                : "text-muted-foreground hover:bg-accent/65 hover:text-foreground",
+                ? "font-medium text-foreground"
+                : "text-muted-foreground/80 hover:bg-foreground/[0.04] hover:text-foreground",
             )}
           >
             <span className="relative h-5 w-5 shrink-0">
@@ -195,75 +210,62 @@ export function WorkspaceTopBar({
             aria-pressed={drawerOpen || drawerPinned}
             onClick={onToggleDrawer}
             className={cn(
-              "host-no-drag h-8 w-8 shrink-0 rounded-control",
+              "host-no-drag h-7 w-7 shrink-0 rounded-lg transition-colors",
               drawerOpen || drawerPinned
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground",
+                ? "bg-foreground/[0.07] text-foreground"
+                : "text-muted-foreground/65 hover:bg-foreground/[0.04] hover:text-foreground",
             )}
           >
-            <PanelLeft className="h-4 w-4" aria-hidden />
+            <PanelLeft className="h-[15px] w-[15px]" strokeWidth={1.75} aria-hidden />
           </Button>
         </HoverHint>
 
-        <span aria-hidden className="mx-0.5 hidden h-4 w-px shrink-0 bg-border/75 sm:block" />
-
-        <div className="hidden shrink-0 sm:flex sm:items-center">
-          <HostSwitcher menuSide="bottom" className="h-7 rounded-control px-2 text-[12px] text-muted-foreground hover:bg-accent/65 hover:text-foreground" />
-        </div>
-
-        {/* Contextual Breadcrumb when viewing a chat or split workbench */}
-        {view === "chat" && (activeSession || activeTemporaryTitle) ? (
+        {/* Contextual Breadcrumb in Chat — quiet editorial slashes, no pill noise */}
+        {inChat && (activeSession || activeTemporaryTitle) ? (
           <nav
             aria-label={isZh ? "当前上下文" : "Current context"}
-            className="hidden min-w-0 items-center gap-1 md:flex"
+            className="hidden min-w-0 items-center gap-1.5 pl-1 text-[12.5px] md:flex"
           >
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" aria-hidden />
+            <span aria-hidden className="text-foreground/18">/</span>
             {activeSession ? (
               <>
                 <button
                   type="button"
                   onClick={() => onOpenOverview(activeSession.project.id)}
-                  className="host-no-drag inline-flex max-w-[10rem] shrink-0 items-center gap-1.5 rounded-control px-2 py-1 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-accent/65 hover:text-foreground"
+                  className="host-no-drag max-w-[9rem] shrink-0 truncate rounded-md px-1.5 py-0.5 text-muted-foreground/80 transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
                 >
-                  <ProjectDot color={activeSession.project.dotColor} />
-                  <span className="truncate">{activeSession.project.name}</span>
+                  {activeSession.project.name}
                 </button>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" aria-hidden />
+                <span aria-hidden className="text-foreground/18">/</span>
                 {activeWorkbenchGroup && activeWorkbenchGroup.panes.length > 1 ? (
                   <div className="flex min-w-0 items-center gap-1">
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-muted/75 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-                      <Columns2 className="h-3 w-3" aria-hidden />
-                      <span className="max-w-[7rem] truncate">{activeWorkbenchGroup.title}</span>
-                    </span>
-                    <div className="hidden items-center gap-1 xl:flex">
-                      {activeWorkbenchGroup.panes.map((pane) => {
-                        const paneActive = pane.session.key === activeSession.session.key;
-                        return (
+                    {activeWorkbenchGroup.panes.map((pane, idx) => {
+                      const paneActive = pane.session.key === activeSession.session.key;
+                      return (
+                        <span key={pane.session.key} className="inline-flex min-w-0 items-center gap-1">
+                          {idx > 0 ? <span aria-hidden className="text-foreground/15">·</span> : null}
                           <button
-                            key={pane.session.key}
                             type="button"
                             onClick={() => onSelectSession(pane.session.key)}
                             className={cn(
-                              "host-no-drag inline-flex max-w-[10rem] items-center gap-1.5 rounded-control px-2 py-0.5 text-[12px] transition-colors",
+                              "host-no-drag inline-flex max-w-[11rem] items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors",
                               paneActive
-                                ? "bg-accent font-medium text-foreground"
-                                : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                                ? "font-medium text-foreground"
+                                : "text-muted-foreground/70 hover:text-foreground",
                             )}
                           >
                             {pane.attention !== "idle" ? (
                               <SessionStatusDot state={pane.attention} size="sm" />
-                            ) : (
-                              <ProjectDot color={pane.project.dotColor} className="h-1.5 w-1.5" />
-                            )}
+                            ) : null}
                             <span className="truncate">{pane.title}</span>
                           </button>
-                        );
-                      })}
-                    </div>
+                        </span>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="flex min-w-0 items-center gap-2 px-1">
-                    <span className="max-w-[15rem] truncate text-[13px] font-medium text-foreground">
+                    <span className="max-w-[18rem] truncate font-medium text-foreground/90">
                       {activeSession.title}
                     </span>
                     <MutedHandleBadge handle={activeSession.session.handle} />
@@ -271,108 +273,78 @@ export function WorkspaceTopBar({
                 )}
               </>
             ) : (
-              <span className="max-w-[14rem] truncate px-1.5 text-[13px] font-medium text-foreground">
+              <span className="max-w-[16rem] truncate px-1 font-medium text-foreground/90">
                 {activeTemporaryTitle}
               </span>
             )}
           </nav>
-        ) : null}
+        ) : (
+          <div className="hidden pl-1 sm:flex sm:items-center">
+            <HostSwitcher
+              menuSide="bottom"
+              className="h-7 rounded-lg px-2 text-[12px] text-muted-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground"
+            />
+          </div>
+        )}
       </div>
 
-      {/* Right: Cross-Project Live Pulse + Quick Done + New + Search + System Controls */}
-      <div className="flex shrink-0 items-center gap-1.5">
+      {/* Right: Quiet Live Pulse + Subtle Actions (recede during chat focus, awaken on hover) */}
+      <div className="flex shrink-0 items-center gap-1">
         <Popover open={pulseOpen} onOpenChange={setPulseOpen}>
           <PopoverTrigger asChild>
             <button
               type="button"
               data-testid="live-pulse-trigger"
               className={cn(
-                "host-no-drag inline-flex h-8 items-center gap-2 rounded-full border px-2.5 text-[12px] font-medium transition-all",
+                "host-no-drag inline-flex h-8 items-center gap-2 rounded-full px-2.5 text-[12px] transition-all duration-150",
                 attentionCount > 0
-                  ? "border-border/80 bg-card text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:bg-accent/70"
-                  : "border-transparent bg-muted/55 text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                  ? "bg-foreground/[0.035] font-medium text-foreground/85 hover:bg-foreground/[0.065]"
+                  : "text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground",
               )}
             >
-              {recoveryCount > 0 ? (
-                <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                  <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2.1} aria-hidden />
-                  <span className="tabular-nums">
-                    {isZh ? `${recoveryCount} 待确认` : `${recoveryCount} waiting`}
-                  </span>
-                </span>
-              ) : null}
-              {runningCount > 0 ? (
-                <span className="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300">
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500/45 motion-safe:animate-ping" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                  </span>
-                  <span className="tabular-nums">
-                    {isZh ? `${runningCount} 运行中` : `${runningCount} running`}
-                  </span>
-                </span>
-              ) : null}
-              {updatedCount > 0 ? (
-                <span className="inline-flex items-center gap-1.5 text-foreground/85">
-                  <span className="h-2 w-2 rounded-full bg-[#ff8a3d]" aria-hidden />
-                  <span className="tabular-nums">
-                    {isZh ? `${updatedCount} 新结果` : `${updatedCount} ready`}
-                  </span>
-                </span>
-              ) : null}
-              {attentionCount === 0 ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/45" aria-hidden />
-                  <span>{isZh ? "全部就绪" : "All quiet"}</span>
-                </span>
-              ) : null}
+              <SessionStatusDot state={primaryPulseState} size="sm" />
+              <span className="tabular-nums">
+                {attentionCount > 0 ? pulseSummary : (isZh ? "静默" : "Quiet")}
+              </span>
             </button>
           </PopoverTrigger>
 
           <PopoverContent
             align="end"
-            sideOffset={8}
-            className="w-[min(25rem,calc(100vw-1.5rem))] overflow-hidden p-0"
+            sideOffset={10}
+            className="w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-border/60 bg-popover/96 p-0 shadow-[0_16px_48px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:shadow-[0_16px_48px_rgba(0,0,0,0.45)]"
           >
-            <div className="flex items-center justify-between border-b border-border/60 px-3.5 py-2.5">
-              <div className="flex items-center gap-2">
-                <span className="text-[13px] font-semibold text-foreground">
-                  {isZh ? "跨项目实时动态" : "Live across projects"}
-                </span>
-                {attentionCount > 0 ? (
-                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
-                    {attentionCount}
-                  </span>
-                ) : null}
-              </div>
+            <div className="flex items-center justify-between px-4 pb-2.5 pt-3.5">
+              <span className="text-[12.5px] font-medium text-foreground/85">
+                {isZh ? "跨项目实时动态" : "Live across workspaces"}
+              </span>
               <button
                 type="button"
                 onClick={() => {
                   setPulseOpen(false);
                   onOpenOverview(null);
                 }}
-                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
               >
-                <span>{isZh ? "打开工作台" : "Overview"}</span>
+                <span>{isZh ? "全部总览" : "Overview"}</span>
                 <ArrowRight className="h-3 w-3" aria-hidden />
               </button>
             </div>
 
-            <div className="max-h-[24rem] overflow-y-auto overscroll-contain p-2">
+            <div className="max-h-[24rem] overflow-y-auto overscroll-contain px-2 pb-2.5">
               {attentionCount === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-1.5 py-8 text-center">
-                  <LayoutGrid className="h-5 w-5 text-muted-foreground/50" aria-hidden />
-                  <p className="text-[13px] font-medium text-foreground/85">
-                    {isZh ? "当前没有运行中或待处理的会话" : "No running or pending sessions"}
+                <div className="px-4 py-8 text-center">
+                  <p className="text-[13px] text-foreground/80">
+                    {isZh ? "此刻风平浪静" : "Everything is quiet"}
                   </p>
-                  <p className="text-[12px] text-muted-foreground">
+                  <p className="mt-1 text-[12px] text-muted-foreground/75">
                     {isZh
-                      ? `共有 ${intelligence.open.length} 个在办会话分布在 ${intelligence.projects.filter((p) => p.openSessions.length > 0).length} 个工作区`
-                      : `${intelligence.open.length} open sessions across ${intelligence.projects.filter((p) => p.openSessions.length > 0).length} workspaces`}
+                      ? `${intelligence.open.length} 项在办分布在 ${intelligence.projects.filter((p) => p.openSessions.length > 0).length} 个工作区`
+                      : `${intelligence.open.length} open across ${intelligence.projects.filter((p) => p.openSessions.length > 0).length} workspaces`}
                   </p>
                 </div>
               ) : (
-                <ul className="space-y-1">
+                <ul className="space-y-0.5">
                   {intelligence.attention.map((item) => {
                     const isCurrent = activeSession?.session.key === item.session.key;
                     const canDone = item.attention === "updated" && item.session.projectLocked !== false;
@@ -380,11 +352,11 @@ export function WorkspaceTopBar({
                       <li key={item.session.key}>
                         <div
                           className={cn(
-                            "group flex items-start gap-2.5 rounded-xl px-2.5 py-2 transition-colors hover:bg-accent/70",
-                            isCurrent && "bg-accent/60",
+                            "group flex items-start gap-2.5 rounded-xl px-2.5 py-2.5 transition-colors hover:bg-foreground/[0.04]",
+                            isCurrent && "bg-foreground/[0.045]",
                           )}
                         >
-                          <div className="mt-1 shrink-0">
+                          <div className="mt-[3px] shrink-0">
                             <SessionStatusDot state={item.attention} />
                           </div>
                           <button
@@ -395,30 +367,22 @@ export function WorkspaceTopBar({
                             }}
                             className="min-w-0 flex-1 text-left"
                           >
-                            <div className="flex items-center gap-1.5">
-                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
-                                <ProjectDot color={item.project.dotColor} className="h-1.5 w-1.5" />
-                                <span className="max-w-[8rem] truncate">{item.project.name}</span>
-                              </span>
-                              <span className="text-[10.5px] text-muted-foreground/60">·</span>
-                              <span className="text-[11px] text-muted-foreground">
+                            <p className="line-clamp-2 text-[13px] font-medium leading-[1.4] text-foreground">
+                              {item.title}
+                            </p>
+                            <div className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted-foreground/75">
+                              <span className="max-w-[8rem] truncate">{item.project.name}</span>
+                              <span aria-hidden className="opacity-45">·</span>
+                              <span>
                                 {item.attention === "recovery"
-                                  ? (isZh ? "等待你确认" : "Needs attention")
+                                  ? (isZh ? "等你确认" : "Needs attention")
                                   : item.attention === "running"
-                                    ? (isZh ? "运行中" : "Running")
+                                    ? (isZh ? "推进中" : "Running")
                                     : formatCompactRelativeTime(item.updatedMs, i18n.resolvedLanguage, nowMs)}
                               </span>
                             </div>
-                            <p className="mt-0.5 line-clamp-2 text-[13px] font-medium leading-snug text-foreground">
-                              {item.title}
-                            </p>
-                            {item.preview ? (
-                              <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
-                                {item.preview}
-                              </p>
-                            ) : null}
                           </button>
-                          <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">
+                          <div className="flex shrink-0 items-center gap-2 pt-0.5">
                             {item.attention === "running" ? (
                               <LiveElapsedBadge
                                 startedAtSec={item.session.runStartedAt}
@@ -426,20 +390,11 @@ export function WorkspaceTopBar({
                               />
                             ) : null}
                             {canDone ? (
-                              <HoverHint content={isZh ? "标记结单并归档" : "Mark done & archive"} side="left">
-                                <button
-                                  type="button"
-                                  aria-label={isZh ? `结单：${item.title}` : `Done: ${item.title}`}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    onDoneSession(item.session.key);
-                                  }}
-                                  className="inline-flex h-6 items-center gap-1 rounded-md border border-border/70 bg-background px-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground"
-                                >
-                                  <Check className="h-3 w-3" aria-hidden />
-                                  <span>{doneLabel}</span>
-                                </button>
-                              </HoverHint>
+                              <ZenDoneCircle
+                                label={isZh ? `结单：${item.title}` : `Done: ${item.title}`}
+                                onClick={() => onDoneSession(item.session.key)}
+                                className="opacity-65 transition-opacity group-hover:opacity-100"
+                              />
                             ) : null}
                           </div>
                         </div>
@@ -453,95 +408,35 @@ export function WorkspaceTopBar({
         </Popover>
 
         {canMarkActiveDone && activeSession ? (
-          <HoverHint content={isZh ? "结单当前会话（归档，可撤销）" : "Mark current session done (archive)"} side="bottom">
+          <HoverHint content={isZh ? "结单当前会话（归档，可撤销）" : "Mark current session done"} side="bottom">
             <Button
               type="button"
               variant="ghost"
               size="sm"
               data-testid="topbar-done-button"
               onClick={() => onDoneSession(activeSession.session.key)}
-              className="host-no-drag h-8 gap-1.5 rounded-control px-2.5 text-[12.5px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="host-no-drag h-7 gap-1.5 rounded-lg px-2 text-[12px] font-normal text-muted-foreground/75 transition-colors hover:bg-foreground/[0.045] hover:text-foreground"
             >
-              <Check className="h-3.5 w-3.5" aria-hidden />
+              <Check className="h-3.5 w-3.5" strokeWidth={1.9} aria-hidden />
               <span className="hidden lg:inline">{doneLabel}</span>
             </Button>
           </HoverHint>
         ) : null}
 
-        <HoverHint
-          side="bottom"
-          content={
-            <span className="flex items-center gap-3">
-              <span>{t("sidebar.newChat")}</span>
-              <kbd className="font-sans text-muted-foreground">
-                {sidebarShortcutLabel("newChat", apple)}
-              </kbd>
-            </span>
-          }
+        {/* Quiet utility controls — gently recessed during active reading/chat */}
+        <div
+          className={cn(
+            "flex items-center gap-0.5 transition-opacity duration-200",
+            inChat && "opacity-60 hover:opacity-100 focus-within:opacity-100 group-hover/topbar:opacity-100",
+          )}
         >
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            data-testid="topbar-new-chat-button"
-            aria-label={t("sidebar.newChat")}
-            onClick={onNewChat}
-            className="host-no-drag h-8 w-8 rounded-control text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <Plus className="h-4 w-4" aria-hidden />
-          </Button>
-        </HoverHint>
-
-        <HoverHint
-          side="bottom"
-          content={
-            <span className="flex items-center gap-3">
-              <span>{t("sidebar.searchAria")}</span>
-              <kbd className="font-sans text-muted-foreground">
-                {sidebarShortcutLabel("search", apple)}
-              </kbd>
-            </span>
-          }
-        >
-          <button
-            type="button"
-            data-testid="topbar-search-button"
-            aria-label={t("sidebar.searchAria")}
-            onClick={onOpenSearch}
-            className="host-no-drag inline-flex h-8 items-center gap-1.5 rounded-control border border-border/65 bg-muted/40 px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <SearchIcon className="h-3.5 w-3.5" />
-            <kbd className="hidden font-sans text-[11px] sm:inline">
-              {sidebarShortcutLabel("search", apple)}
-            </kbd>
-          </button>
-        </HoverHint>
-
-        <span aria-hidden className="mx-0.5 hidden h-4 w-px shrink-0 bg-border/75 sm:block" />
-
-        {availableUpdate && onOpenUpdates ? (
-          <HoverHint content={t("update.available", { version: availableUpdate.version, defaultValue: `Update ${availableUpdate.version}` })} side="bottom">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={t("update.available", { version: availableUpdate.version, defaultValue: `Update ${availableUpdate.version}` })}
-              onClick={availableUpdate.onRequestUpdate ?? onOpenUpdates}
-              className="host-no-drag h-8 w-8 rounded-control text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400"
-            >
-              <ArrowUpCircle className="h-4 w-4" aria-hidden />
-            </Button>
-          </HoverHint>
-        ) : null}
-
-        <div className="hidden items-center gap-0.5 sm:flex">
           <HoverHint
             side="bottom"
             content={
               <span className="flex items-center gap-3">
-                <span>{t("sidebar.apps")}</span>
+                <span>{t("sidebar.newChat")}</span>
                 <kbd className="font-sans text-muted-foreground">
-                  {sidebarShortcutLabel("apps", apple)}
+                  {sidebarShortcutLabel("newChat", apple)}
                 </kbd>
               </span>
             }
@@ -550,17 +445,12 @@ export function WorkspaceTopBar({
               type="button"
               variant="ghost"
               size="icon"
-              aria-label={t("sidebar.apps")}
-              aria-current={view === "apps" ? "page" : undefined}
-              onClick={onOpenApps}
-              className={cn(
-                "host-no-drag h-8 w-8 rounded-control",
-                view === "apps"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
+              data-testid="topbar-new-chat-button"
+              aria-label={t("sidebar.newChat")}
+              onClick={onNewChat}
+              className="host-no-drag h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
             >
-              <AppsIcon className="h-4 w-4" />
+              <Plus className="h-4 w-4" strokeWidth={1.75} aria-hidden />
             </Button>
           </HoverHint>
 
@@ -568,9 +458,9 @@ export function WorkspaceTopBar({
             side="bottom"
             content={
               <span className="flex items-center gap-3">
-                <span>{t("sidebar.automations", { defaultValue: "Automations" })}</span>
+                <span>{t("sidebar.searchAria")}</span>
                 <kbd className="font-sans text-muted-foreground">
-                  {sidebarShortcutLabel("automations", apple)}
+                  {sidebarShortcutLabel("search", apple)}
                 </kbd>
               </span>
             }
@@ -579,63 +469,150 @@ export function WorkspaceTopBar({
               type="button"
               variant="ghost"
               size="icon"
-              aria-label={t("sidebar.automations", { defaultValue: "Automations" })}
-              aria-current={view === "automations" ? "page" : undefined}
-              onClick={onOpenAutomations}
-              className={cn(
-                "host-no-drag h-8 w-8 rounded-control",
-                view === "automations"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
+              data-testid="topbar-search-button"
+              aria-label={t("sidebar.searchAria")}
+              onClick={onOpenSearch}
+              className="host-no-drag h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
             >
-              <AutomationsIcon className="h-4 w-4" />
+              <SearchIcon className="h-[15px] w-[15px]" />
             </Button>
           </HoverHint>
 
-          <HoverHint
-            side="bottom"
-            content={
-              <span className="flex items-center gap-3">
-                <span>{t("sidebar.settings")}</span>
-                <kbd className="font-sans text-muted-foreground">
-                  {sidebarShortcutLabel("settings", apple)}
-                </kbd>
-              </span>
-            }
-          >
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={t("sidebar.settings")}
-              aria-current={view === "settings" ? "page" : undefined}
-              onClick={onOpenSettings}
-              onPointerEnter={onSettingsIntent}
-              onFocus={onSettingsIntent}
-              className={cn(
-                "host-no-drag h-8 w-8 rounded-control",
-                view === "settings"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
+          {availableUpdate && onOpenUpdates ? (
+            <HoverHint
+              content={t("update.available", {
+                version: availableUpdate.version,
+                defaultValue: `Update ${availableUpdate.version}`,
+              })}
+              side="bottom"
             >
-              <SettingsIcon className="h-4 w-4" />
-            </Button>
-          </HoverHint>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("update.available", {
+                  version: availableUpdate.version,
+                  defaultValue: `Update ${availableUpdate.version}`,
+                })}
+                onClick={availableUpdate.onRequestUpdate ?? onOpenUpdates}
+                className="host-no-drag h-7 w-7 rounded-lg text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400"
+              >
+                <ArrowUpCircle className="h-[15px] w-[15px]" aria-hidden />
+              </Button>
+            </HoverHint>
+          ) : null}
 
-          <HoverHint content={t("thread.header.toggleTheme")} side="bottom">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={t("thread.header.toggleTheme")}
-              onClick={onToggleTheme}
-              className="host-no-drag h-8 w-8 rounded-control text-muted-foreground hover:text-foreground"
+          <div className="hidden items-center gap-0.5 sm:flex">
+            {inChat ? (
+              <HostSwitcher
+                collapsed
+                menuSide="bottom"
+                className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+              />
+            ) : null}
+
+            <HoverHint
+              side="bottom"
+              content={
+                <span className="flex items-center gap-3">
+                  <span>{t("sidebar.apps")}</span>
+                  <kbd className="font-sans text-muted-foreground">
+                    {sidebarShortcutLabel("apps", apple)}
+                  </kbd>
+                </span>
+              }
             >
-              <ThemeToggleIcon theme={theme} />
-            </Button>
-          </HoverHint>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("sidebar.apps")}
+                aria-current={view === "apps" ? "page" : undefined}
+                onClick={onOpenApps}
+                className={cn(
+                  "host-no-drag h-7 w-7 rounded-lg",
+                  view === "apps"
+                    ? "bg-foreground/[0.07] text-foreground"
+                    : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+                )}
+              >
+                <AppsIcon className="h-[15px] w-[15px]" />
+              </Button>
+            </HoverHint>
+
+            <HoverHint
+              side="bottom"
+              content={
+                <span className="flex items-center gap-3">
+                  <span>{t("sidebar.automations", { defaultValue: "Automations" })}</span>
+                  <kbd className="font-sans text-muted-foreground">
+                    {sidebarShortcutLabel("automations", apple)}
+                  </kbd>
+                </span>
+              }
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("sidebar.automations", { defaultValue: "Automations" })}
+                aria-current={view === "automations" ? "page" : undefined}
+                onClick={onOpenAutomations}
+                className={cn(
+                  "host-no-drag h-7 w-7 rounded-lg",
+                  view === "automations"
+                    ? "bg-foreground/[0.07] text-foreground"
+                    : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+                )}
+              >
+                <AutomationsIcon className="h-[15px] w-[15px]" />
+              </Button>
+            </HoverHint>
+
+            <HoverHint
+              side="bottom"
+              content={
+                <span className="flex items-center gap-3">
+                  <span>{t("sidebar.settings")}</span>
+                  <kbd className="font-sans text-muted-foreground">
+                    {sidebarShortcutLabel("settings", apple)}
+                  </kbd>
+                </span>
+              }
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("sidebar.settings")}
+                aria-current={view === "settings" ? "page" : undefined}
+                onClick={onOpenSettings}
+                onPointerEnter={onSettingsIntent}
+                onFocus={onSettingsIntent}
+                className={cn(
+                  "host-no-drag h-7 w-7 rounded-lg",
+                  view === "settings"
+                    ? "bg-foreground/[0.07] text-foreground"
+                    : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+                )}
+              >
+                <SettingsIcon className="h-[15px] w-[15px]" />
+              </Button>
+            </HoverHint>
+
+            <HoverHint content={t("thread.header.toggleTheme")} side="bottom">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("thread.header.toggleTheme")}
+                onClick={onToggleTheme}
+                className="host-no-drag h-7 w-7 rounded-lg text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+              >
+                <ThemeToggleIcon theme={theme} />
+              </Button>
+            </HoverHint>
+          </div>
         </div>
       </div>
     </header>

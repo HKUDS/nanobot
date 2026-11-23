@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Clock, Columns2, Pin } from "lucide-react";
+import { Check, Clock, Columns2, Pin } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { HoverHint } from "@/components/ui/hover-hint";
@@ -9,6 +9,7 @@ import {
 } from "@/lib/session-intelligence";
 import type { SessionHandle } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import "./session-zen.css";
 
 /** Shared 1-second ticker only mounted when at least one running session is visible. */
 export function useLiveClock(active: boolean, intervalMs = 1000): number {
@@ -22,6 +23,13 @@ export function useLiveClock(active: boolean, intervalMs = 1000): number {
   return now;
 }
 
+/**
+ * Single Point of Light: the ONLY chromatic signal in the workspace.
+ * - recovery: warm amber steady glow
+ * - running: serene breathing emerald halo (2.8s sine wave, never frantic ping)
+ * - updated: soft warm terracotta dot
+ * - idle: whisper-quiet neutral ink point
+ */
 export function SessionStatusDot({
   state,
   size = "sm",
@@ -32,6 +40,7 @@ export function SessionStatusDot({
   className?: string;
 }) {
   const { t } = useTranslation();
+  const box = size === "md" ? "h-4 w-4" : "h-3.5 w-3.5";
 
   if (state === "recovery") {
     const label = t("chat.activity.recovery", {
@@ -42,13 +51,19 @@ export function SessionStatusDot({
         <span
           role="img"
           aria-label={label}
-          className={cn(
-            "inline-flex shrink-0 items-center justify-center text-amber-500 dark:text-amber-400",
-            size === "md" ? "h-4 w-4" : "h-3.5 w-3.5",
-            className,
-          )}
+          className={cn("relative inline-flex shrink-0 items-center justify-center", box, className)}
         >
-          <AlertTriangle className={size === "md" ? "h-4 w-4" : "h-3.5 w-3.5"} strokeWidth={2.1} aria-hidden />
+          <span
+            aria-hidden
+            className="zen-breathe-halo absolute h-3 w-3 rounded-full bg-amber-500/25 dark:bg-amber-400/25"
+          />
+          <span
+            aria-hidden
+            className={cn(
+              "relative rounded-full bg-amber-500 dark:bg-amber-400",
+              size === "md" ? "h-2 w-2" : "h-[7px] w-[7px]",
+            )}
+          />
         </span>
       </HoverHint>
     );
@@ -61,23 +76,16 @@ export function SessionStatusDot({
         <span
           role="img"
           aria-label={label}
-          className={cn(
-            "relative inline-flex shrink-0 items-center justify-center",
-            size === "md" ? "h-4 w-4" : "h-3.5 w-3.5",
-            className,
-          )}
+          className={cn("relative inline-flex shrink-0 items-center justify-center", box, className)}
         >
           <span
             aria-hidden
-            className={cn(
-              "absolute rounded-full bg-emerald-500/35 motion-safe:animate-ping",
-              size === "md" ? "h-3 w-3" : "h-2.5 w-2.5",
-            )}
+            className="zen-breathe-halo absolute h-3 w-3 rounded-full bg-emerald-500/25 dark:bg-emerald-400/25"
           />
           <span
             aria-hidden
             className={cn(
-              "relative rounded-full bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.18)]",
+              "relative rounded-full bg-emerald-500/90 dark:bg-emerald-400",
               size === "md" ? "h-2 w-2" : "h-[7px] w-[7px]",
             )}
           />
@@ -93,17 +101,13 @@ export function SessionStatusDot({
         <span
           role="img"
           aria-label={label}
-          className={cn(
-            "inline-flex shrink-0 items-center justify-center",
-            size === "md" ? "h-4 w-4" : "h-3.5 w-3.5",
-            className,
-          )}
+          className={cn("inline-flex shrink-0 items-center justify-center", box, className)}
         >
           <span
             aria-hidden
             className={cn(
-              "rounded-full bg-[#ff8a3d] shadow-[0_0_0_2px_rgba(255,138,61,0.18)]",
-              size === "md" ? "h-2 w-2" : "h-[7px] w-[7px]",
+              "rounded-full bg-[#d97742] dark:bg-[#ea8c55]",
+              size === "md" ? "h-[7px] w-[7px]" : "h-1.5 w-1.5",
             )}
           />
         </span>
@@ -114,17 +118,56 @@ export function SessionStatusDot({
   return (
     <span
       aria-hidden
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center",
-        size === "md" ? "h-4 w-4" : "h-3.5 w-3.5",
-        className,
-      )}
+      className={cn("inline-flex shrink-0 items-center justify-center", box, className)}
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30" />
+      <span className="h-[5px] w-[5px] rounded-full bg-foreground/18" />
     </span>
   );
 }
 
+/** Tactile circular completion button inspired by Things 3 — crisp feedback on hover & completion. */
+export function ZenDoneCircle({
+  completed = false,
+  label,
+  onClick,
+  className,
+}: {
+  completed?: boolean;
+  label: string;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <HoverHint content={label} side="top">
+      <button
+        type="button"
+        aria-label={label}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+        className={cn(
+          "group/done inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border transition-all duration-150",
+          completed
+            ? "scale-105 border-emerald-500 bg-emerald-500 text-white"
+            : "border-foreground/25 bg-transparent text-transparent hover:border-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground/75",
+          className,
+        )}
+      >
+        <Check
+          className={cn(
+            "h-2.5 w-2.5 transition-transform duration-150",
+            completed ? "scale-100" : "scale-75 group-hover/done:scale-100",
+          )}
+          strokeWidth={2.75}
+          aria-hidden
+        />
+      </button>
+    </HoverHint>
+  );
+}
+
+/** Calm tabular elapsed time — pure typography without loud pill chrome. */
 export function LiveElapsedBadge({
   startedAtSec,
   nowMs,
@@ -139,7 +182,7 @@ export function LiveElapsedBadge({
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 font-mono text-[11px] font-medium tabular-nums text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+        "shrink-0 font-mono text-[11px] font-normal tabular-nums text-emerald-700/90 dark:text-emerald-300/90",
         className,
       )}
     >
@@ -148,26 +191,22 @@ export function LiveElapsedBadge({
   );
 }
 
+/** Ultra-quiet neutral project mark (keeps chromatic budget strictly for runtime states). */
 export function ProjectDot({
-  color,
   className,
 }: {
-  color: string;
+  color?: string;
   className?: string;
 }) {
   return (
     <span
       aria-hidden
-      className={cn("inline-block h-2 w-2 shrink-0 rounded-full opacity-85", className)}
-      style={{ backgroundColor: color }}
+      className={cn("inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/25", className)}
     />
   );
 }
 
-/**
- * De-noised @handle presentation: subtle neutral monospace token without loud colored underlines,
- * reserving saturated colors strictly for actionable session states.
- */
+/** Watermark-quiet @handle without background boxes or loud underlines. */
 export function MutedHandleBadge({
   handle,
   className,
@@ -179,7 +218,7 @@ export function MutedHandleBadge({
   return (
     <span
       className={cn(
-        "inline-flex max-w-28 shrink-0 items-center truncate rounded-md bg-muted/80 px-1.5 py-0.5 font-mono text-[10.5px] font-medium leading-none text-muted-foreground",
+        "max-w-24 shrink-0 truncate font-mono text-[11px] font-normal text-muted-foreground/55",
         className,
       )}
     >
@@ -199,16 +238,16 @@ export function AutomationProtectedBadge({
   if (count <= 0) return null;
   const isZh = Boolean(i18n.resolvedLanguage?.startsWith("zh"));
   const label = isZh
-    ? `绑定了 ${count} 个定时任务`
+    ? `定时任务守护（${count} 个）`
     : `${count} linked automation${count > 1 ? "s" : ""}`;
   return (
     <HoverHint content={label} side="top">
       <span
         aria-label={label}
-        className="inline-flex shrink-0 items-center gap-1 rounded-md bg-muted/70 px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground"
+        className="inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted-foreground/65"
       >
-        <Clock className="h-3 w-3 shrink-0" aria-hidden />
-        {!compact && <span className="tabular-nums">{count}</span>}
+        <Clock className="h-3 w-3 shrink-0" strokeWidth={1.75} aria-hidden />
+        {!compact && count > 1 ? <span className="tabular-nums">{count}</span> : null}
       </span>
     </HoverHint>
   );
@@ -216,7 +255,6 @@ export function AutomationProtectedBadge({
 
 export function SplitGroupBadge({
   title,
-  compact = false,
 }: {
   title: string | null;
   compact?: boolean;
@@ -224,15 +262,14 @@ export function SplitGroupBadge({
   const { i18n } = useTranslation();
   if (!title) return null;
   const isZh = Boolean(i18n.resolvedLanguage?.startsWith("zh"));
-  const label = isZh ? `分屏组：${title}` : `Split group: ${title}`;
+  const label = isZh ? `分屏：${title}` : `Split: ${title}`;
   return (
     <HoverHint content={label} side="top">
       <span
         aria-label={label}
-        className="inline-flex max-w-32 shrink-0 items-center gap-1 truncate rounded-md bg-muted/70 px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground"
+        className="inline-flex shrink-0 items-center text-muted-foreground/55"
       >
-        <Columns2 className="h-3 w-3 shrink-0" aria-hidden />
-        {!compact && <span className="truncate">{title}</span>}
+        <Columns2 className="h-3 w-3 shrink-0" strokeWidth={1.75} aria-hidden />
       </span>
     </HoverHint>
   );
@@ -241,7 +278,8 @@ export function SplitGroupBadge({
 export function SubtlePinMark() {
   return (
     <Pin
-      className="h-3 w-3 shrink-0 text-muted-foreground/75"
+      className="h-3 w-3 shrink-0 text-muted-foreground/50"
+      strokeWidth={1.75}
       aria-hidden
     />
   );

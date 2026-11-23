@@ -1,9 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle,
   ArchiveRestore,
-  ArrowRight,
-  Check,
   ChevronDown,
   Columns2,
   MoreHorizontal,
@@ -13,7 +10,6 @@ import {
   PinOff,
   Plus,
   Search,
-  Sparkles,
   Square,
   SquareCheckBig,
   Trash2,
@@ -26,13 +22,12 @@ import {
   AutomationProtectedBadge,
   LiveElapsedBadge,
   MutedHandleBadge,
-  ProjectDot,
   SessionStatusDot,
   SplitGroupBadge,
   SubtlePinMark,
+  ZenDoneCircle,
   useLiveClock,
 } from "@/components/session/SessionVisuals";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,7 +36,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { HoverHint } from "@/components/ui/hover-hint";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   formatCompactRelativeTime,
   type DecoupledWorkbenchGroup,
@@ -50,6 +44,7 @@ import {
   type SessionIntelligenceSnapshot,
 } from "@/lib/session-intelligence";
 import { cn } from "@/lib/utils";
+import "./session-zen.css";
 
 export type MissionControlTab = "open" | "done";
 
@@ -101,6 +96,13 @@ export function MissionControlView({
   const [doneFilter, setDoneFilter] = useState("");
   const [renamingKey, setRenamingKey] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [completingKeys, setCompletingKeys] = useState<Set<string>>(() => new Set());
+  const [focusedKey, setFocusedKey] = useState<string | null>(null);
+  const completionTimersRef = useRef<number[]>([]);
+
+  useEffect(() => () => {
+    for (const id of completionTimersRef.current) window.clearTimeout(id);
+  }, []);
 
   useEffect(() => {
     setTab(initialTab);
@@ -159,6 +161,64 @@ export function MissionControlView({
     setSelectedCleanupKeys(new Set(filteredCleanup.map((item) => item.session.key)));
   }, [filteredCleanup]);
 
+  const navigableKeys = useMemo(
+    () => visibleProjects.flatMap((group) => group.openSessions.map((item) => item.session.key)),
+    [visibleProjects],
+  );
+
+  // Tactile completion ritual: brief check & gentle slide before archiving
+  const completeSessionWithRitual = useCallback((key: string) => {
+    if (completingKeys.has(key)) return;
+    setCompletingKeys((current) => new Set(current).add(key));
+    const timer = window.setTimeout(() => {
+      onArchiveMany([key], true);
+      setCompletingKeys((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }, 180);
+    completionTimersRef.current.push(timer);
+  }, [completingKeys, onArchiveMany]);
+
+  // Smooth keyboard navigation (j/k or ArrowDown/ArrowUp, Enter to open, e to complete)
+  useEffect(() => {
+    if (tab !== "open" || renamingKey !== null) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      if (navigableKeys.length === 0) return;
+
+      if (event.key === "ArrowDown" || event.key === "j") {
+        event.preventDefault();
+        setFocusedKey((current) => {
+          const idx = current ? navigableKeys.indexOf(current) : -1;
+          return navigableKeys[(idx + 1) % navigableKeys.length];
+        });
+      } else if (event.key === "ArrowUp" || event.key === "k") {
+        event.preventDefault();
+        setFocusedKey((current) => {
+          const idx = current ? navigableKeys.indexOf(current) : 0;
+          return navigableKeys[(idx - 1 + navigableKeys.length) % navigableKeys.length];
+        });
+      } else if (event.key === "Enter" && focusedKey && navigableKeys.includes(focusedKey)) {
+        event.preventDefault();
+        onSelectSession(focusedKey);
+      } else if (event.key === "e" && focusedKey && navigableKeys.includes(focusedKey)) {
+        const item = intelligence.byKey.get(focusedKey);
+        if (item && item.session.projectLocked !== false) {
+          event.preventDefault();
+          completeSessionWithRitual(focusedKey);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [completeSessionWithRitual, focusedKey, intelligence.byKey, navigableKeys, onSelectSession, renamingKey, tab]);
+
   const projectPills = useMemo(
     () => intelligence.projects.filter((group) =>
       tab === "open" ? group.openSessions.length > 0 : group.archivedSessions.length > 0,
@@ -190,86 +250,94 @@ export function MissionControlView({
     });
   };
 
-  const activeProjectCount = intelligence.projects.filter((p) => p.openSessions.length > 0).length;
+  const summaryLine = useMemo(() => {
+    const parts: string[] = [];
+    if (intelligence.running.length > 0) {
+      parts.push(isZh ? `${intelligence.running.length} 项推进中` : `${intelligence.running.length} running`);
+    }
+    if (intelligence.recovery.length > 0) {
+      parts.push(isZh ? `${intelligence.recovery.length} 项等你确认` : `${intelligence.recovery.length} waiting for you`);
+    }
+    if (intelligence.updated.length > 0) {
+      parts.push(isZh ? `${intelligence.updated.length} 项待验收` : `${intelligence.updated.length} ready`);
+    }
+    if (parts.length === 0) {
+      return isZh
+        ? `共 ${intelligence.open.length} 项在办，此刻一切平静`
+        : `${intelligence.open.length} open · all quiet right now`;
+    }
+    return parts.join(" · ");
+  }, [intelligence.open.length, intelligence.recovery.length, intelligence.running.length, intelligence.updated.length, isZh]);
 
   return (
     <div
       data-testid="mission-control-view"
-      className="relative h-full min-h-0 w-full overflow-y-auto overscroll-contain bg-background [background-image:radial-gradient(ellipse_75%_38%_at_50%_-8%,hsl(var(--foreground)/0.032),transparent)]"
+      className="relative h-full min-h-0 w-full overflow-y-auto overscroll-contain bg-background"
     >
-      <div className="mx-auto flex w-full max-w-[1060px] flex-col gap-7 px-5 py-7 sm:px-8 sm:py-9">
-        {/* Header */}
+      <div className="mx-auto flex w-full max-w-[900px] flex-col gap-9 px-6 py-9 sm:px-10 sm:py-12">
+        {/* Serene Editorial Header */}
         <header className="flex flex-wrap items-end justify-between gap-4">
-          <div className="min-w-0 space-y-1">
-            <h1 className="text-[22px] font-semibold tracking-tight text-foreground">
-              {isZh ? "工作台" : "Mission Control"}
+          <div className="min-w-0 space-y-1.5">
+            <h1 className="text-[24px] font-medium tracking-[-0.02em] text-foreground">
+              {isZh ? "工作台" : "Workspace"}
             </h1>
-            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
-              {intelligence.running.length > 0 ? (
-                <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-300">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
-                  {isZh ? `${intelligence.running.length} 个运行中` : `${intelligence.running.length} running`}
-                </span>
-              ) : null}
-              {intelligence.recovery.length > 0 ? (
-                <span className="inline-flex items-center gap-1 font-medium text-amber-600 dark:text-amber-400">
-                  <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
-                  {isZh ? `${intelligence.recovery.length} 个待确认` : `${intelligence.recovery.length} waiting`}
-                </span>
-              ) : null}
-              <span>
-                {isZh
-                  ? `${intelligence.open.length} 个在办 · ${activeProjectCount} 个工作区`
-                  : `${intelligence.open.length} open · ${activeProjectCount} workspaces`}
-              </span>
+            <p className="text-[13px] text-muted-foreground/80">
+              {summaryLine}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            <SegmentedControl<MissionControlTab>
-              value={tab}
-              onChange={setTab}
-              mode="tabs"
-              ariaLabel={isZh ? "会话状态切换" : "Session lifecycle view"}
-              options={[
-                {
-                  value: "open",
-                  label: (
-                    <span className="inline-flex items-center gap-1.5">
-                      <span>{isZh ? "在办" : "Open"}</span>
-                      <span className="tabular-nums opacity-70">{intelligence.open.length}</span>
-                    </span>
-                  ),
-                },
-                {
-                  value: "done",
-                  label: (
-                    <span className="inline-flex items-center gap-1.5">
-                      <span>{isZh ? "已结单" : "Done"}</span>
-                      <span className="tabular-nums opacity-70">{intelligence.archived.length}</span>
-                    </span>
-                  ),
-                },
-              ]}
-            />
-            <Button
+          <div className="flex items-center gap-4">
+            {/* Minimal text tabs for Open / Done */}
+            <div role="tablist" aria-label={isZh ? "会话状态" : "Session state"} className="flex items-center gap-4 text-[13px]">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "open"}
+                onClick={() => setTab("open")}
+                className={cn(
+                  "relative pb-1 transition-colors",
+                  tab === "open"
+                    ? "font-medium text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-[1.5px] after:bg-foreground"
+                    : "text-muted-foreground/70 hover:text-foreground",
+                )}
+              >
+                {isZh ? "在办" : "Open"}
+                <span className="ml-1.5 text-[11.5px] tabular-nums opacity-55">{intelligence.open.length}</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "done"}
+                onClick={() => setTab("done")}
+                className={cn(
+                  "relative pb-1 transition-colors",
+                  tab === "done"
+                    ? "font-medium text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-[1.5px] after:bg-foreground"
+                    : "text-muted-foreground/70 hover:text-foreground",
+                )}
+              >
+                {isZh ? "已结单" : "Done"}
+                <span className="ml-1.5 text-[11.5px] tabular-nums opacity-55">{intelligence.archived.length}</span>
+              </button>
+            </div>
+
+            <button
               type="button"
-              size="sm"
               onClick={onNewChat}
-              className="h-9 gap-1.5 rounded-control px-3.5 text-[13px] font-medium"
+              className="inline-flex h-8 items-center gap-1.5 rounded-full bg-foreground/[0.06] px-3.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-foreground/[0.11]"
             >
-              <Plus className="h-4 w-4" aria-hidden />
+              <Plus className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
               <span>{t("sidebar.newChat")}</span>
-            </Button>
+            </button>
           </div>
         </header>
 
-        {/* Project Filter Strip */}
+        {/* Quiet Underline Project Filter Bar */}
         {projectPills.length > 1 ? (
           <div
             role="tablist"
             aria-label={isZh ? "按项目筛选" : "Filter by project"}
-            className="-mt-2 flex flex-wrap items-center gap-1.5"
+            className="-mt-4 flex items-center gap-5 overflow-x-auto border-b border-border/45 text-[13px]"
           >
             <button
               type="button"
@@ -277,17 +345,19 @@ export function MissionControlView({
               aria-selected={projectFilter === null}
               onClick={() => setProjectFilter(null)}
               className={cn(
-                "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-medium transition-colors",
+                "relative shrink-0 pb-2.5 transition-colors",
                 projectFilter === null
-                  ? "border-foreground/20 bg-foreground text-background"
-                  : "border-border/70 bg-card/60 text-muted-foreground hover:bg-accent hover:text-foreground",
+                  ? "font-medium text-foreground after:absolute after:inset-x-0 after:bottom-[-1px] after:h-[1.5px] after:bg-foreground"
+                  : "text-muted-foreground/70 hover:text-foreground",
               )}
             >
-              <span>{isZh ? "全部项目" : "All projects"}</span>
+              {isZh ? "全部" : "All"}
             </button>
             {projectPills.map((group) => {
               const selected = projectFilter === group.project.id;
               const count = tab === "open" ? group.openSessions.length : group.archivedSessions.length;
+              const hasRecovery = tab === "open" && group.recoveryCount > 0;
+              const hasRunning = tab === "open" && group.runningCount > 0;
               return (
                 <button
                   key={group.project.id}
@@ -296,20 +366,19 @@ export function MissionControlView({
                   aria-selected={selected}
                   onClick={() => setProjectFilter(selected ? null : group.project.id)}
                   className={cn(
-                    "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-medium transition-colors",
+                    "relative inline-flex shrink-0 items-center gap-1.5 pb-2.5 transition-colors",
                     selected
-                      ? "border-foreground/20 bg-foreground text-background"
-                      : "border-border/70 bg-card/60 text-muted-foreground hover:bg-accent hover:text-foreground",
+                      ? "font-medium text-foreground after:absolute after:inset-x-0 after:bottom-[-1px] after:h-[1.5px] after:bg-foreground"
+                      : "text-muted-foreground/70 hover:text-foreground",
                   )}
                 >
-                  <ProjectDot color={group.project.dotColor} className={selected ? "ring-1 ring-background/40" : undefined} />
-                  <span className="max-w-[11rem] truncate">{group.project.name}</span>
-                  <span className="tabular-nums opacity-70">{count}</span>
-                  {tab === "open" && group.recoveryCount > 0 ? (
+                  {hasRecovery ? (
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
-                  ) : tab === "open" && group.runningCount > 0 ? (
+                  ) : hasRunning ? (
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
                   ) : null}
+                  <span className="max-w-[11rem] truncate">{group.project.name}</span>
+                  <span className="text-[11.5px] tabular-nums opacity-50">{count}</span>
                 </button>
               );
             })}
@@ -318,34 +387,30 @@ export function MissionControlView({
 
         {tab === "open" ? (
           <>
-            {/* Section 1: Cross-Project Attention Deck */}
+            {/* Section 1: Monochrome Quiet Attention Surface */}
             {filteredAttention.length > 0 ? (
-              <section aria-labelledby="mc-attention-heading" className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2
-                    id="mc-attention-heading"
-                    className="text-[12px] font-semibold uppercase tracking-[0.04em] text-muted-foreground"
-                  >
-                    {isZh ? "需要关注 · 跨项目实时状态" : "Needs attention · Live across projects"}
-                  </h2>
-                  <span className="text-[12px] tabular-nums text-muted-foreground">
-                    {filteredAttention.length}
-                  </span>
-                </div>
+              <section aria-labelledby="mc-attention-heading" className="space-y-3.5">
+                <h2
+                  id="mc-attention-heading"
+                  className="text-[11.5px] font-medium tracking-[0.04em] text-muted-foreground/70"
+                >
+                  {isZh ? "此刻进行" : "Active now"}
+                </h2>
 
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {filteredAttention.map((item) => (
                     <AttentionCard
                       key={item.session.key}
                       item={item}
                       isActive={item.session.key === activeKey}
+                      completing={completingKeys.has(item.session.key)}
                       nowMs={nowMs}
                       isZh={isZh}
                       locale={i18n.resolvedLanguage}
                       onOpen={() => onSelectSession(item.session.key)}
                       onDone={
                         item.attention === "updated" && item.session.projectLocked !== false
-                          ? () => onArchiveMany([item.session.key], true)
+                          ? () => completeSessionWithRitual(item.session.key)
                           : undefined
                       }
                     />
@@ -354,20 +419,15 @@ export function MissionControlView({
               </section>
             ) : null}
 
-            {/* Section 2: Decoupled Split Workspaces */}
+            {/* Section 2: Decoupled Split Workspaces — calm horizontal strip */}
             {filteredWorkbenchGroups.length > 0 ? (
               <section aria-labelledby="mc-splits-heading" className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2
-                    id="mc-splits-heading"
-                    className="text-[12px] font-semibold uppercase tracking-[0.04em] text-muted-foreground"
-                  >
-                    {isZh ? "分屏工作区" : "Split workspaces"}
-                  </h2>
-                  <span className="text-[12px] text-muted-foreground">
-                    {isZh ? "独立于项目树，保留各窗格原项目归属" : "Decoupled from project groups"}
-                  </span>
-                </div>
+                <h2
+                  id="mc-splits-heading"
+                  className="text-[11.5px] font-medium tracking-[0.04em] text-muted-foreground/70"
+                >
+                  {isZh ? "分屏组合" : "Split workspaces"}
+                </h2>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   {filteredWorkbenchGroups.map((group) => (
                     <SplitWorkspaceCard
@@ -384,159 +444,143 @@ export function MissionControlView({
               </section>
             ) : null}
 
-            {/* Section 3: Smart Hygiene / Cleanup Suggestion Strip */}
+            {/* Section 3: Gentle Hygiene Whisper (borderless editorial strip + smooth accordion) */}
             {filteredCleanup.length > 0 ? (
               <section
                 aria-label={isZh ? "智能清理建议" : "Smart cleanup suggestions"}
-                className="overflow-hidden rounded-2xl border border-border/70 bg-muted/35"
+                className="rounded-2xl bg-foreground/[0.025] px-4 py-3 dark:bg-white/[0.025]"
               >
-                <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground shadow-sm ring-1 ring-border/60">
-                      <Sparkles className="h-3.5 w-3.5" aria-hidden />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-medium text-foreground">
-                        {isZh
-                          ? `发现 ${filteredCleanup.length} 条可能不再需要的会话`
-                          : `${filteredCleanup.length} sessions look ready to wrap up`}
-                      </p>
-                      <p className="text-[12px] text-muted-foreground">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-foreground/85">
+                      {isZh
+                        ? `有 ${filteredCleanup.length} 条会话已沉睡多日`
+                        : `${filteredCleanup.length} quiet sessions look ready to archive`}
+                      <span className="ml-2 text-[12px] text-muted-foreground/70">
                         {isZh
                           ? [
-                              staleCount > 0 ? `${staleCount} 条超 7 天未活跃` : null,
-                              quickCount > 0 ? `${quickCount} 条一次性短对话` : null,
-                              "已自动跳过运行中、钉住和含定时任务的会话",
+                              staleCount > 0 ? `${staleCount} 条超 7 天未动` : null,
+                              quickCount > 0 ? `${quickCount} 条短对话` : null,
                             ].filter(Boolean).join(" · ")
                           : [
-                              staleCount > 0 ? `${staleCount} inactive 7d+` : null,
-                              quickCount > 0 ? `${quickCount} quick one-offs` : null,
-                              "Running, pinned & automated sessions are protected",
+                              staleCount > 0 ? `${staleCount} idle 7d+` : null,
+                              quickCount > 0 ? `${quickCount} quick chats` : null,
                             ].filter(Boolean).join(" · ")}
-                      </p>
-                    </div>
+                      </span>
+                    </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Button
+                  <div className="flex shrink-0 items-center gap-3 text-[12.5px]">
+                    <button
                       type="button"
-                      variant="ghost"
-                      size="sm"
                       onClick={() => setCleanupExpanded((open) => !open)}
-                      className="h-8 gap-1 rounded-control px-2.5 text-[12.5px] text-muted-foreground hover:text-foreground"
+                      className="inline-flex items-center gap-1 text-muted-foreground/80 transition-colors hover:text-foreground"
                     >
-                      <span>{cleanupExpanded ? (isZh ? "收起明细" : "Hide list") : (isZh ? "预览明细" : "Review")}</span>
+                      <span>{cleanupExpanded ? (isZh ? "收起" : "Hide") : (isZh ? "查看明细" : "Review")}</span>
                       <ChevronDown
-                        className={cn("h-3.5 w-3.5 transition-transform", cleanupExpanded && "rotate-180")}
+                        className={cn("h-3.5 w-3.5 transition-transform duration-200", cleanupExpanded && "rotate-180")}
                         aria-hidden
                       />
-                    </Button>
-                    <Button
+                    </button>
+                    <button
                       type="button"
-                      variant="outline"
-                      size="sm"
                       onClick={() => {
                         onArchiveMany(filteredCleanup.map((item) => item.session.key), true);
                         setCleanupExpanded(false);
                       }}
-                      className="h-8 gap-1.5 rounded-control px-3 text-[12.5px] font-medium"
+                      className="font-medium text-foreground/85 transition-colors hover:text-foreground"
                     >
-                      <Check className="h-3.5 w-3.5" aria-hidden />
-                      <span>{isZh ? "全部结单归档" : "Archive all"}</span>
-                    </Button>
+                      {isZh ? "全部结单归档" : "Archive all"}
+                    </button>
                   </div>
                 </div>
 
-                {cleanupExpanded ? (
-                  <div className="border-t border-border/60 bg-background/60 px-4 py-3">
-                    <ul className="max-h-64 divide-y divide-border/40 overflow-y-auto">
-                      {filteredCleanup.map((item) => {
-                        const checked = selectedCleanupKeys.has(item.session.key);
-                        return (
-                          <li key={item.session.key} className="flex items-center gap-3 py-2">
-                            <button
-                              type="button"
-                              onClick={() => toggleCleanupKey(item.session.key)}
-                              aria-pressed={checked}
-                              className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
-                            >
-                              {checked ? (
-                                <SquareCheckBig className="h-4 w-4 text-primary" aria-hidden />
-                              ) : (
-                                <Square className="h-4 w-4" aria-hidden />
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onSelectSession(item.session.key)}
-                              className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                            >
-                              <ProjectDot color={item.project.dotColor} />
-                              <span className="shrink-0 text-[12px] text-muted-foreground">
-                                {item.project.name}
+                <div className="zen-disclosure" data-collapsed={!cleanupExpanded}>
+                  <div className="zen-disclosure-inner">
+                    <div className="mt-3 border-t border-border/35 pt-2.5">
+                      <ul className="max-h-56 divide-y divide-border/25 overflow-y-auto">
+                        {filteredCleanup.map((item) => {
+                          const checked = selectedCleanupKeys.has(item.session.key);
+                          return (
+                            <li key={item.session.key} className="flex items-center gap-3 py-2 text-[13px]">
+                              <button
+                                type="button"
+                                onClick={() => toggleCleanupKey(item.session.key)}
+                                aria-pressed={checked}
+                                className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground/70 transition-colors hover:text-foreground"
+                              >
+                                {checked ? (
+                                  <SquareCheckBig className="h-3.5 w-3.5 text-foreground/85" aria-hidden />
+                                ) : (
+                                  <Square className="h-3.5 w-3.5" aria-hidden />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onSelectSession(item.session.key)}
+                                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                              >
+                                <span className="shrink-0 text-[12px] text-muted-foreground/65">
+                                  {item.project.name}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate text-foreground/90">
+                                  {item.title}
+                                </span>
+                              </button>
+                              <span className="shrink-0 text-[11.5px] text-muted-foreground/65">
+                                {item.cleanupReason === "stale"
+                                  ? (isZh ? "久未活跃" : "7d+ idle")
+                                  : (isZh ? "短对话" : "Quick")}
                               </span>
-                              <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-                                {item.title}
+                              <span className="w-14 shrink-0 text-right text-[11.5px] tabular-nums text-muted-foreground/60">
+                                {formatCompactRelativeTime(item.updatedMs, i18n.resolvedLanguage, nowMs)}
                               </span>
-                            </button>
-                            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-                              {item.cleanupReason === "stale"
-                                ? (isZh ? "7天+未活跃" : "7d+ idle")
-                                : (isZh ? "一次性短对话" : "Quick chat")}
-                            </span>
-                            <span className="w-16 shrink-0 text-right text-[11.5px] tabular-nums text-muted-foreground">
-                              {formatCompactRelativeTime(item.updatedMs, i18n.resolvedLanguage, nowMs)}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    <div className="mt-3 flex items-center justify-end gap-2 border-t border-border/50 pt-3">
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={selectedCleanupKeys.size === 0}
-                        onClick={() => {
-                          onArchiveMany(Array.from(selectedCleanupKeys), true);
-                          setCleanupExpanded(false);
-                        }}
-                        className="h-8 gap-1.5 rounded-control px-3 text-[12.5px]"
-                      >
-                        <Check className="h-3.5 w-3.5" aria-hidden />
-                        <span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      <div className="mt-2.5 flex items-center justify-between pt-2 text-[12px] text-muted-foreground/70">
+                        <span>{isZh ? "运行中、钉住和含定时任务的会话已自动跳过" : "Running, pinned & automated sessions are protected"}</span>
+                        <button
+                          type="button"
+                          disabled={selectedCleanupKeys.size === 0}
+                          onClick={() => {
+                            onArchiveMany(Array.from(selectedCleanupKeys), true);
+                            setCleanupExpanded(false);
+                          }}
+                          className="rounded-full bg-foreground/[0.08] px-3 py-1 font-medium text-foreground transition-colors hover:bg-foreground/[0.14] disabled:opacity-35"
+                        >
                           {isZh
                             ? `归档所选 (${selectedCleanupKeys.size})`
                             : `Archive selected (${selectedCleanupKeys.size})`}
-                        </span>
-                      </Button>
+                        </button>
+                      </div>
                     </div>
                   </div>
-                ) : null}
+                </div>
               </section>
             ) : null}
 
-            {/* Section 4: Projects & Open Sessions */}
+            {/* Section 4: Borderless Editorial Project Lists */}
             {visibleProjects.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/80 bg-card/30 px-6 py-16 text-center">
-                <p className="text-[15px] font-medium text-foreground">
-                  {isZh ? "所有在办会话都已清空" : "Inbox zero — all sessions wrapped up"}
+              <div className="flex flex-col items-center justify-center gap-2.5 py-20 text-center">
+                <p className="text-[15px] font-medium text-foreground/85">
+                  {isZh ? "一切清朗，暂无待办" : "Clear horizon"}
                 </p>
-                <p className="max-w-sm text-[13px] text-muted-foreground">
+                <p className="max-w-xs text-[13px] text-muted-foreground/75">
                   {isZh
-                    ? "开启一个新话题，或切换到「已结单」随时回看历史记录。"
-                    : "Start a fresh conversation or switch to Done to browse archived history."}
+                    ? "随时开启一段新对话，或切到「已结单」回看沉淀。"
+                    : "Start a fresh conversation or revisit completed work in Done."}
                 </p>
-                <Button type="button" size="sm" onClick={onNewChat} className="mt-1 gap-1.5 rounded-control">
-                  <Plus className="h-4 w-4" aria-hidden />
-                  <span>{t("sidebar.newChat")}</span>
-                </Button>
               </div>
             ) : (
-              <div className="space-y-6 pb-8">
+              <div className="space-y-9 pb-12">
                 {visibleProjects.map((group) => (
                   <ProjectSection
                     key={group.project.id}
                     group={group}
                     activeKey={activeKey}
+                    focusedKey={focusedKey}
+                    completingKeys={completingKeys}
                     nowMs={nowMs}
                     isZh={isZh}
                     locale={i18n.resolvedLanguage}
@@ -550,6 +594,7 @@ export function MissionControlView({
                     onNewChatInProject={onNewChatInProject}
                     onNewChat={onNewChat}
                     onTogglePin={onTogglePin}
+                    onCompleteSession={completeSessionWithRitual}
                     onArchiveMany={onArchiveMany}
                     onRequestDeleteMany={onRequestDeleteMany}
                     onRequestRenameProject={onRequestRenameProject}
@@ -560,96 +605,89 @@ export function MissionControlView({
             )}
           </>
         ) : (
-          /* Done / Archived Tab */
-          <section className="space-y-4 pb-8">
+          /* Serene Done / Archived View */
+          <section className="space-y-5 pb-12">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="relative min-w-[14rem] flex-1 max-w-sm">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <div className="relative min-w-[14rem] max-w-xs flex-1">
+                <Search className="pointer-events-none absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" aria-hidden />
                 <input
                   value={doneFilter}
                   onChange={(event) => setDoneFilter(event.target.value)}
-                  placeholder={isZh ? "筛选已结单会话..." : "Filter archived sessions..."}
-                  className="h-9 w-full rounded-control border border-border/75 bg-card/70 pl-9 pr-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/30"
+                  placeholder={isZh ? "筛选已结单..." : "Filter completed..."}
+                  className="h-8 w-full border-b border-border/55 bg-transparent pl-6 pr-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-foreground/45"
                 />
               </div>
               {filteredArchived.length > 0 ? (
-                <Button
+                <button
                   type="button"
-                  variant="ghost"
-                  size="sm"
                   onClick={() => onArchiveMany(filteredArchived.map((item) => item.session.key), false)}
-                  className="h-8 gap-1.5 rounded-control text-[12.5px] text-muted-foreground hover:text-foreground"
+                  className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground/75 transition-colors hover:text-foreground"
                 >
                   <ArchiveRestore className="h-3.5 w-3.5" aria-hidden />
                   <span>{isZh ? `全部恢复 (${filteredArchived.length})` : `Restore all (${filteredArchived.length})`}</span>
-                </Button>
+                </button>
               ) : null}
             </div>
 
             {filteredArchived.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border/75 py-14 text-center">
-                <p className="text-[14px] font-medium text-foreground/85">
-                  {isZh ? "没有已结单的会话" : "No archived sessions"}
-                </p>
-                <p className="text-[12.5px] text-muted-foreground">
-                  {isZh ? "完成任务后点击「结单」，它会安静地收在这里。" : "Mark finished conversations Done to keep your workspace calm."}
+              <div className="py-16 text-center">
+                <p className="text-[14px] text-foreground/75">
+                  {isZh ? "暂无已结单的会话" : "Nothing archived yet"}
                 </p>
               </div>
             ) : (
-              <div className="overflow-hidden rounded-2xl border border-border/60 bg-card/45 divide-y divide-border/45">
+              <ul className="divide-y divide-border/35">
                 {filteredArchived.map((item) => (
-                  <div
+                  <li
                     key={item.session.key}
-                    className="group flex items-center gap-3.5 px-4 py-3 transition-colors hover:bg-accent/45"
+                    className="group flex items-center gap-3.5 py-3 transition-colors"
                   >
                     <button
                       type="button"
                       onClick={() => onSelectSession(item.session.key)}
                       className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
                     >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-muted/70 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-                          <ProjectDot color={item.project.dotColor} className="h-1.5 w-1.5" />
-                          <span className="max-w-[8rem] truncate">{item.project.name}</span>
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span className="shrink-0 text-[12px] text-muted-foreground/60">
+                          {item.project.name}
                         </span>
-                        <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-foreground/80">
+                        <span className="min-w-0 flex-1 truncate text-[13.5px] text-foreground/75 transition-colors group-hover:text-foreground">
                           {item.title}
                         </span>
                         <MutedHandleBadge handle={item.session.handle} />
                         <AutomationProtectedBadge count={item.automationCount} />
                       </div>
                       {item.preview ? (
-                        <p className="truncate text-[12px] text-muted-foreground/80">{item.preview}</p>
+                        <p className="truncate text-[12px] text-muted-foreground/60">{item.preview}</p>
                       ) : null}
                     </button>
-                    <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground group-hover:hidden">
-                      {formatCompactRelativeTime(item.updatedMs, i18n.resolvedLanguage, nowMs)}
-                    </span>
-                    <div className="hidden shrink-0 items-center gap-1 group-hover:flex group-focus-within:flex">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onArchiveMany([item.session.key], false)}
-                        className="h-7 gap-1 rounded-control px-2 text-[12px] text-muted-foreground hover:text-foreground"
-                      >
-                        <ArchiveRestore className="h-3.5 w-3.5" aria-hidden />
-                        <span>{isZh ? "恢复" : "Restore"}</span>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={t("chat.delete")}
-                        onClick={() => onRequestDeleteMany([{ key: item.session.key, label: item.title }])}
-                        className="h-7 w-7 rounded-control text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                      </Button>
+
+                    <div className="relative flex shrink-0 items-center">
+                      <span className="text-[12px] tabular-nums text-muted-foreground/60 transition-opacity duration-150 group-hover:opacity-0">
+                        {formatCompactRelativeTime(item.updatedMs, i18n.resolvedLanguage, nowMs)}
+                      </span>
+                      <div className="pointer-events-none absolute right-0 flex translate-x-1 items-center gap-1 opacity-0 transition-all duration-150 group-hover:pointer-events-auto group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-x-0 group-focus-within:opacity-100">
+                        <button
+                          type="button"
+                          onClick={() => onArchiveMany([item.session.key], false)}
+                          className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                        >
+                          <ArchiveRestore className="h-3.5 w-3.5" aria-hidden />
+                          <span>{isZh ? "恢复" : "Restore"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={t("chat.delete")}
+                          onClick={() => onRequestDeleteMany([{ key: item.session.key, label: item.title }])}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
           </section>
         )}
@@ -658,9 +696,15 @@ export function MissionControlView({
   );
 }
 
+/**
+ * Pure Monochrome Zen Attention Card:
+ * Zero colored card fills, zero redundant buttons — the entire card is a calm tactile surface
+ * illuminated only by a single point of semantic light.
+ */
 function AttentionCard({
   item,
   isActive,
+  completing,
   nowMs,
   isZh,
   locale,
@@ -669,49 +713,38 @@ function AttentionCard({
 }: {
   item: EnrichedSession;
   isActive: boolean;
+  completing: boolean;
   nowMs: number;
   isZh: boolean;
   locale?: string;
   onOpen: () => void;
   onDone?: () => void;
 }) {
-  const toneClass = item.attention === "recovery"
-    ? "border-amber-500/30 bg-amber-500/[0.045] hover:border-amber-500/50 dark:bg-amber-400/[0.07]"
-    : item.attention === "running"
-      ? "border-emerald-500/25 bg-emerald-500/[0.035] hover:border-emerald-500/45 dark:bg-emerald-400/[0.06]"
-      : "border-orange-400/25 bg-orange-500/[0.03] hover:border-orange-400/45 dark:bg-orange-400/[0.05]";
-
   const statusText = item.attention === "recovery"
-    ? (isZh ? "需要确认" : "Needs attention")
+    ? (isZh ? "等你确认" : "Waiting")
     : item.attention === "running"
       ? (isZh ? "运行中" : "Running")
-      : (isZh ? "新结果待验收" : "Ready to review");
-
-  const statusTextClass = item.attention === "recovery"
-    ? "text-amber-700 dark:text-amber-300"
-    : item.attention === "running"
-      ? "text-emerald-700 dark:text-emerald-300"
-      : "text-orange-700 dark:text-orange-300";
+      : (isZh ? "新结果" : "Ready");
 
   return (
     <article
       className={cn(
-        "group relative flex flex-col justify-between gap-3 rounded-2xl border p-4 transition-all duration-150 hover:-translate-y-px hover:shadow-[0_6px_20px_rgba(15,23,42,0.06)] dark:hover:shadow-[0_6px_24px_rgba(0,0,0,0.28)]",
-        toneClass,
-        isActive && "ring-1 ring-foreground/20",
+        "group relative flex flex-col justify-between gap-3 rounded-2xl bg-foreground/[0.024] p-4 ring-1 ring-border/45 transition-all duration-200 hover:bg-foreground/[0.042] hover:ring-border/80 dark:bg-white/[0.028] dark:hover:bg-white/[0.048]",
+        isActive && "ring-foreground/25",
+        completing && "zen-completing",
       )}
     >
       <div className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-center justify-between gap-2 text-[11.5px]">
+          <span className="inline-flex items-center gap-1.5 text-muted-foreground/85">
             <SessionStatusDot state={item.attention} />
-            <span className={cn("text-[11.5px] font-semibold", statusTextClass)}>
-              {statusText}
-            </span>
-          </div>
-          <span className="inline-flex max-w-[9.5rem] items-center gap-1.5 rounded-full bg-background/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border/50">
-            <ProjectDot color={item.project.dotColor} className="h-1.5 w-1.5" />
-            <span className="truncate">{item.project.name}</span>
+            <span className="font-medium text-foreground/80">{statusText}</span>
+            {item.attention === "running" ? (
+              <LiveElapsedBadge startedAtSec={item.session.runStartedAt} nowMs={nowMs} className="ml-0.5" />
+            ) : null}
+          </span>
+          <span className="max-w-[8.5rem] truncate text-muted-foreground/65">
+            {item.project.name}
           </span>
         </div>
 
@@ -720,50 +753,37 @@ function AttentionCard({
           onClick={onOpen}
           className="block w-full text-left focus-visible:outline-none"
         >
-          <h3 className="line-clamp-2 text-[14px] font-semibold leading-snug text-foreground group-hover:text-foreground">
+          <h3 className="line-clamp-2 text-[14px] font-medium leading-[1.45] text-foreground">
             {item.title}
           </h3>
           {item.preview ? (
-            <p className="mt-1 line-clamp-1 text-[12px] text-muted-foreground">
+            <p className="mt-1 line-clamp-1 text-[12px] leading-relaxed text-muted-foreground/75">
               {item.preview}
             </p>
           ) : null}
         </button>
       </div>
 
-      <div className="flex items-center justify-between gap-2 pt-1">
-        <div className="flex min-w-0 items-center gap-1.5">
-          {item.attention === "running" ? (
-            <LiveElapsedBadge startedAtSec={item.session.runStartedAt} nowMs={nowMs} />
-          ) : (
-            <span className="text-[11.5px] tabular-nums text-muted-foreground">
+      <div className="flex h-5 items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          {item.attention !== "running" ? (
+            <span className="text-[11.5px] tabular-nums text-muted-foreground/60">
               {formatCompactRelativeTime(item.updatedMs, locale, nowMs)}
             </span>
-          )}
+          ) : null}
           <MutedHandleBadge handle={item.session.handle} />
           <AutomationProtectedBadge count={item.automationCount} compact />
         </div>
 
-        <div className="flex shrink-0 items-center gap-1.5">
-          {onDone ? (
-            <button
-              type="button"
+        {onDone ? (
+          <div className="opacity-55 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+            <ZenDoneCircle
+              completed={completing}
+              label={isZh ? `结单：${item.title}` : `Done: ${item.title}`}
               onClick={onDone}
-              className="inline-flex h-7 items-center gap-1 rounded-control border border-border/75 bg-background/90 px-2 text-[11.5px] font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
-            >
-              <Check className="h-3 w-3" aria-hidden />
-              <span>{isZh ? "结单" : "Done"}</span>
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onOpen}
-            className="inline-flex h-7 items-center gap-1 rounded-control bg-background/85 px-2.5 text-[11.5px] font-medium text-foreground ring-1 ring-border/70 transition-colors hover:bg-background"
-          >
-            <span>{isZh ? "进入" : "Open"}</span>
-            <ArrowRight className="h-3 w-3" aria-hidden />
-          </button>
-        </div>
+            />
+          </div>
+        ) : null}
       </div>
     </article>
   );
@@ -785,70 +805,61 @@ function SplitWorkspaceCard({
   onDissolve?: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-border/65 bg-card/65 p-4 transition-colors hover:border-border">
+    <div className="group flex flex-col gap-2.5 rounded-2xl bg-foreground/[0.022] p-4 ring-1 ring-border/45 transition-all duration-200 hover:bg-foreground/[0.038] hover:ring-border/75 dark:bg-white/[0.025]">
       <div className="flex items-center justify-between gap-2">
         <button
           type="button"
           onClick={onOpen}
           className="flex min-w-0 items-center gap-2 text-left"
         >
-          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-            <Columns2 className="h-3.5 w-3.5" aria-hidden />
+          <Columns2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground/65" strokeWidth={1.75} aria-hidden />
+          <span className="truncate text-[13.5px] font-medium text-foreground">{group.title}</span>
+          <span className="text-[11.5px] text-muted-foreground/60">
+            {isZh ? `${group.panes.length} 栏` : `${group.panes.length} panes`}
           </span>
-          <div className="min-w-0">
-            <p className="truncate text-[13.5px] font-semibold text-foreground">{group.title}</p>
-            <p className="text-[11.5px] text-muted-foreground">
-              {isZh ? `${group.panes.length} 个并排会话` : `${group.panes.length} side-by-side panes`}
-            </p>
-          </div>
         </button>
 
-        <div className="flex shrink-0 items-center gap-1">
-          <Button type="button" variant="ghost" size="sm" onClick={onOpen} className="h-7 rounded-control px-2.5 text-[12px]">
-            {isZh ? "打开分屏" : "Open split"}
-          </Button>
-          {onRename || onDissolve ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-control text-muted-foreground">
-                  <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-40">
-                {onRename ? (
-                  <DropdownMenuItem onSelect={onRename}>
-                    <Pencil className="h-3.5 w-3.5" aria-hidden />
-                    {isZh ? "重命名分屏组" : "Rename split"}
-                  </DropdownMenuItem>
-                ) : null}
-                {onDissolve ? (
-                  <DropdownMenuItem onSelect={onDissolve}>
-                    <Ungroup className="h-3.5 w-3.5" aria-hidden />
-                    {isZh ? "拆分为独立会话" : "Dissolve split"}
-                  </DropdownMenuItem>
-                ) : null}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : null}
-        </div>
+        {onRename || onDissolve ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={group.title}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-opacity hover:bg-foreground/[0.05] hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              {onRename ? (
+                <DropdownMenuItem onSelect={onRename}>
+                  <Pencil className="h-3.5 w-3.5" aria-hidden />
+                  {isZh ? "重命名分屏组" : "Rename split"}
+                </DropdownMenuItem>
+              ) : null}
+              {onDissolve ? (
+                <DropdownMenuItem onSelect={onDissolve}>
+                  <Ungroup className="h-3.5 w-3.5" aria-hidden />
+                  {isZh ? "拆分为独立会话" : "Dissolve split"}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-col gap-1">
         {group.panes.map((pane) => (
           <button
             key={pane.session.key}
             type="button"
             onClick={() => onSelectPane(pane.session.key)}
-            className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border/60 bg-background/75 px-2.5 py-1 text-[12px] transition-colors hover:bg-accent"
+            className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-left text-[12.5px] transition-colors hover:bg-foreground/[0.04]"
           >
-            {pane.attention !== "idle" ? (
-              <SessionStatusDot state={pane.attention} size="sm" />
-            ) : (
-              <ProjectDot color={pane.project.dotColor} className="h-1.5 w-1.5" />
-            )}
-            <span className="shrink-0 text-[11px] text-muted-foreground">{pane.project.name}</span>
-            <span className="text-muted-foreground/50">/</span>
-            <span className="max-w-[12rem] truncate font-medium text-foreground">{pane.title}</span>
+            <SessionStatusDot state={pane.attention} size="sm" />
+            <span className="shrink-0 text-[11.5px] text-muted-foreground/65">{pane.project.name}</span>
+            <span aria-hidden className="text-foreground/15">/</span>
+            <span className="min-w-0 flex-1 truncate text-foreground/85">{pane.title}</span>
           </button>
         ))}
       </div>
@@ -859,6 +870,8 @@ function SplitWorkspaceCard({
 function ProjectSection({
   group,
   activeKey,
+  focusedKey,
+  completingKeys,
   nowMs,
   isZh,
   locale,
@@ -872,6 +885,7 @@ function ProjectSection({
   onNewChatInProject,
   onNewChat,
   onTogglePin,
+  onCompleteSession,
   onArchiveMany,
   onRequestDeleteMany,
   onRequestRenameProject,
@@ -879,6 +893,8 @@ function ProjectSection({
 }: {
   group: ProjectWorkspaceGroup;
   activeKey: string | null;
+  focusedKey: string | null;
+  completingKeys: ReadonlySet<string>;
   nowMs: number;
   isZh: boolean;
   locale?: string;
@@ -892,6 +908,7 @@ function ProjectSection({
   onNewChatInProject: (projectPath: string, projectName: string) => void;
   onNewChat: () => void;
   onTogglePin: (key: string) => void;
+  onCompleteSession: (key: string) => void;
   onArchiveMany: (keys: string[], archive: boolean) => void;
   onRequestDeleteMany: (items: SidebarDeleteItem[]) => void;
   onRequestRenameProject: (projectKey: string, label: string) => void;
@@ -901,89 +918,74 @@ function ProjectSection({
   const { project } = group;
 
   return (
-    <section aria-label={project.name} className="space-y-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+    <section aria-label={project.name} className="group/section space-y-1.5">
+      {/* Hairline Editorial Project Header */}
+      <div className="flex items-center justify-between gap-2 border-b border-border/40 pb-2">
         <div className="flex min-w-0 items-center gap-2.5">
-          <ProjectDot color={project.dotColor} className="h-2.5 w-2.5" />
-          <h2 className="truncate text-[14.5px] font-semibold tracking-tight text-foreground">
+          <h2 className="truncate text-[13.5px] font-semibold tracking-[-0.01em] text-foreground/90">
             {project.name}
           </h2>
-          <span className="text-[12px] tabular-nums text-muted-foreground">
+          <span className="text-[12px] tabular-nums text-muted-foreground/55">
             {group.openSessions.length}
           </span>
           {!project.isGeneral && project.path ? (
-            <span className="hidden max-w-[20rem] truncate font-mono text-[11px] text-muted-foreground/65 md:inline">
+            <span className="hidden max-w-[18rem] truncate font-mono text-[11px] text-muted-foreground/45 md:inline">
               {project.path}
             </span>
           ) : null}
-          {/* Rollup live status pills on the project header */}
-          <div className="flex items-center gap-1.5">
-            {group.recoveryCount > 0 ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
-                <AlertTriangle className="h-3 w-3" aria-hidden />
-                {group.recoveryCount}
-              </span>
-            ) : null}
-            {group.runningCount > 0 ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
-                {group.runningCount}
-              </span>
-            ) : null}
-            {group.updatedCount > 0 ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/12 px-2 py-0.5 text-[11px] font-medium text-orange-700 dark:text-orange-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#ff8a3d]" aria-hidden />
-                {group.updatedCount}
-              </span>
-            ) : null}
-          </div>
+          {group.recoveryCount > 0 ? (
+            <span className="inline-flex items-center gap-1 text-[11.5px] text-amber-600/90 dark:text-amber-400/90">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+              <span className="tabular-nums">{group.recoveryCount}</span>
+            </span>
+          ) : null}
+          {group.runningCount > 0 ? (
+            <span className="inline-flex items-center gap-1 text-[11.5px] text-emerald-700/90 dark:text-emerald-300/90">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+              <span className="tabular-nums">{group.runningCount}</span>
+            </span>
+          ) : null}
         </div>
 
-        <div className="flex shrink-0 items-center gap-1">
+        {/* Quiet Project Actions — awaken gently on section hover */}
+        <div className="flex shrink-0 items-center gap-2 opacity-65 transition-opacity duration-150 group-hover/section:opacity-100 focus-within:opacity-100">
           {group.cleanupCandidates.length > 0 ? (
-            <Button
+            <button
               type="button"
-              variant="ghost"
-              size="sm"
               onClick={() => onArchiveMany(group.cleanupCandidates.map((item) => item.session.key), true)}
-              className="h-7 gap-1 rounded-control px-2 text-[11.5px] font-medium text-muted-foreground hover:text-foreground"
+              className="text-[11.5px] text-muted-foreground/75 transition-colors hover:text-foreground"
             >
-              <Sparkles className="h-3 w-3" aria-hidden />
-              <span>
-                {isZh
-                  ? `清理空闲 (${group.cleanupCandidates.length})`
-                  : `Clean idle (${group.cleanupCandidates.length})`}
-              </span>
-            </Button>
+              {isZh
+                ? `清理空闲 (${group.cleanupCandidates.length})`
+                : `Clean idle (${group.cleanupCandidates.length})`}
+            </button>
           ) : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              if (!project.isGeneral && project.path) {
-                onNewChatInProject(project.path, project.name);
-              } else {
-                onNewChat();
-              }
-            }}
-            className="h-7 gap-1 rounded-control px-2 text-[12px] text-muted-foreground hover:text-foreground"
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden />
-            <span>{isZh ? "新建" : "New"}</span>
-          </Button>
+          <HoverHint content={isZh ? `在 ${project.name} 新建` : `New in ${project.name}`} side="top">
+            <button
+              type="button"
+              aria-label={isZh ? `在 ${project.name} 新建` : `New in ${project.name}`}
+              onClick={() => {
+                if (!project.isGeneral && project.path) {
+                  onNewChatInProject(project.path, project.name);
+                } else {
+                  onNewChat();
+                }
+              }}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/75 transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          </HoverHint>
           {!project.isGeneral && project.key ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button
+                <button
                   type="button"
-                  variant="ghost"
-                  size="icon"
                   aria-label={t("chat.actions", { title: project.name })}
-                  className="h-7 w-7 rounded-control text-muted-foreground hover:text-foreground"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/75 transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
-                </Button>
+                </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-44">
                 <DropdownMenuItem onSelect={() => onRequestRenameProject(project.key!, project.name)}>
@@ -999,7 +1001,6 @@ function ProjectSection({
                       true,
                     )}
                   >
-                    <Check className="h-3.5 w-3.5" aria-hidden />
                     {isZh ? "归档本项目全部会话" : "Archive all in project"}
                   </DropdownMenuItem>
                 ) : null}
@@ -1009,153 +1010,142 @@ function ProjectSection({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-border/60 bg-card/65 divide-y divide-border/45">
+      {/* Borderless Editorial Rows */}
+      <ul className="space-y-0.5 pt-1">
         {group.openSessions.map((item) => {
           const isCurrent = item.session.key === activeKey;
+          const isFocused = item.session.key === focusedKey;
           const isRenaming = renamingKey === item.session.key;
+          const completing = completingKeys.has(item.session.key);
           const canArchive = item.session.projectLocked !== false;
 
           return (
-            <div
-              key={item.session.key}
-              data-mission-session-row={item.session.key}
-              className={cn(
-                "group relative flex items-center gap-3.5 px-4 py-3 transition-colors hover:bg-accent/50",
-                isCurrent && "bg-accent/45",
-              )}
-            >
-              <SessionStatusDot state={item.attention} />
-
-              <div className="min-w-0 flex-1">
-                {isRenaming ? (
-                  <input
-                    value={renameDraft}
-                    autoFocus
-                    onChange={(event) => onRenameDraftChange(event.target.value)}
-                    onBlur={() => { void onCommitRename(item.session.key); }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void onCommitRename(item.session.key);
-                      } else if (event.key === "Escape") {
-                        event.preventDefault();
-                        onCancelRename();
-                      }
-                    }}
-                    className="h-7 w-full max-w-md rounded-md border border-border bg-background px-2 text-[13.5px] font-medium text-foreground outline-none focus:ring-2 focus:ring-ring/40"
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onSelectSession(item.session.key)}
-                    className="block w-full min-w-0 text-left focus-visible:outline-none"
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="min-w-0 truncate text-[13.5px] font-medium leading-5 text-foreground">
-                        {item.title}
-                      </span>
-                      {item.pinned ? <SubtlePinMark /> : null}
-                      <MutedHandleBadge handle={item.session.handle} />
-                      <AutomationProtectedBadge count={item.automationCount} />
-                      <SplitGroupBadge title={item.workbenchTabTitle} compact />
-                      {item.cleanupReason ? (
-                        <span className="hidden shrink-0 rounded-full bg-muted/75 px-1.5 py-0.5 text-[10.5px] text-muted-foreground sm:inline">
-                          {item.cleanupReason === "stale"
-                            ? (isZh ? "久未活跃" : "Idle")
-                            : (isZh ? "短对话" : "Quick")}
-                        </span>
-                      ) : null}
-                    </div>
-                    {item.preview && item.preview !== item.title ? (
-                      <p className="mt-0.5 truncate text-[12px] leading-4 text-muted-foreground">
-                        {item.preview}
-                      </p>
-                    ) : null}
-                  </button>
+            <li key={item.session.key}>
+              <div
+                data-mission-session-row={item.session.key}
+                className={cn(
+                  "group relative -mx-3 flex items-center gap-3.5 rounded-xl px-3 py-3 transition-all duration-150 hover:bg-foreground/[0.032] dark:hover:bg-white/[0.035]",
+                  isCurrent && "bg-foreground/[0.038]",
+                  isFocused && "ring-1 ring-foreground/20",
+                  completing && "zen-completing",
                 )}
-              </div>
+              >
+                <SessionStatusDot state={item.attention} />
 
-              {/* Right: Time/Elapsed at rest, crisp quick actions on hover */}
-              {!isRenaming ? (
-                <div className="relative flex shrink-0 items-center gap-1.5">
-                  <div className="flex items-center gap-2 group-hover:hidden group-focus-within:hidden">
-                    {item.attention === "running" ? (
-                      <LiveElapsedBadge startedAtSec={item.session.runStartedAt} nowMs={nowMs} />
-                    ) : (
-                      <span className="text-[12px] tabular-nums text-muted-foreground">
-                        {formatCompactRelativeTime(item.updatedMs, locale, nowMs)}
-                      </span>
-                    )}
-                  </div>
+                <div className="min-w-0 flex-1">
+                  {isRenaming ? (
+                    <input
+                      value={renameDraft}
+                      autoFocus
+                      onChange={(event) => onRenameDraftChange(event.target.value)}
+                      onBlur={() => { void onCommitRename(item.session.key); }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void onCommitRename(item.session.key);
+                        } else if (event.key === "Escape") {
+                          event.preventDefault();
+                          onCancelRename();
+                        }
+                      }}
+                      className="h-7 w-full max-w-md border-b border-foreground/40 bg-transparent px-0.5 text-[14px] font-medium text-foreground outline-none"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onSelectSession(item.session.key)}
+                      className="block w-full min-w-0 text-left focus-visible:outline-none"
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 truncate text-[14px] font-normal leading-snug text-foreground group-hover:text-foreground">
+                          {item.title}
+                        </span>
+                        {item.pinned ? <SubtlePinMark /> : null}
+                        <MutedHandleBadge handle={item.session.handle} />
+                        <AutomationProtectedBadge count={item.automationCount} />
+                        <SplitGroupBadge title={item.workbenchTabTitle} />
+                      </div>
+                      {item.preview && item.preview !== item.title ? (
+                        <p className="mt-0.5 truncate text-[12px] leading-relaxed text-muted-foreground/65">
+                          {item.preview}
+                        </p>
+                      ) : null}
+                    </button>
+                  )}
+                </div>
 
-                  <div className="hidden items-center gap-1 group-hover:flex group-focus-within:flex">
-                    {canArchive ? (
-                      <HoverHint content={isZh ? "结单归档" : "Mark done"} side="top">
+                {/* Smooth cross-fade between calm timestamp and tactile Done circle + menu */}
+                {!isRenaming ? (
+                  <div className="relative flex h-7 shrink-0 items-center">
+                    <div className="flex items-center gap-2 transition-opacity duration-150 group-hover:opacity-0 group-focus-within:opacity-0">
+                      {item.attention === "running" ? (
+                        <LiveElapsedBadge startedAtSec={item.session.runStartedAt} nowMs={nowMs} />
+                      ) : (
+                        <span className="text-[12px] tabular-nums text-muted-foreground/55">
+                          {formatCompactRelativeTime(item.updatedMs, locale, nowMs)}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="pointer-events-none absolute right-0 flex translate-x-1.5 items-center gap-1.5 opacity-0 transition-all duration-150 group-hover:pointer-events-auto group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-x-0 group-focus-within:opacity-100">
+                      {canArchive ? (
+                        <ZenDoneCircle
+                          completed={completing}
+                          label={isZh ? `结单：${item.title}` : `Done: ${item.title}`}
+                          onClick={() => onCompleteSession(item.session.key)}
+                        />
+                      ) : null}
+
+                      <HoverHint content={item.pinned ? t("chat.unpin") : t("chat.pin")} side="top">
                         <button
                           type="button"
-                          aria-label={isZh ? `结单：${item.title}` : `Done: ${item.title}`}
-                          onClick={() => onArchiveMany([item.session.key], true)}
-                          className="inline-flex h-7 items-center gap-1 rounded-control border border-border/75 bg-background px-2 text-[11.5px] font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                          aria-label={item.pinned ? t("chat.unpin") : t("chat.pin")}
+                          onClick={() => onTogglePin(item.session.key)}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
                         >
-                          <Check className="h-3 w-3" aria-hidden />
-                          <span>{isZh ? "结单" : "Done"}</span>
+                          {item.pinned ? <PinOff className="h-3.5 w-3.5" aria-hidden /> : <Pin className="h-3.5 w-3.5" aria-hidden />}
                         </button>
                       </HoverHint>
-                    ) : null}
 
-                    <HoverHint content={item.pinned ? t("chat.unpin") : t("chat.pin")} side="top">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={item.pinned ? t("chat.unpin") : t("chat.pin")}
-                        onClick={() => onTogglePin(item.session.key)}
-                        className="h-7 w-7 rounded-control text-muted-foreground hover:text-foreground"
-                      >
-                        {item.pinned ? <PinOff className="h-3.5 w-3.5" aria-hidden /> : <Pin className="h-3.5 w-3.5" aria-hidden />}
-                      </Button>
-                    </HoverHint>
-
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          aria-label={t("chat.actions", { title: item.title })}
-                          className="h-7 w-7 rounded-control text-muted-foreground hover:text-foreground"
-                        >
-                          <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-44">
-                        <DropdownMenuItem onSelect={() => onBeginRename(item)}>
-                          <Pencil className="h-3.5 w-3.5" aria-hidden />
-                          {t("chat.rename")}
-                        </DropdownMenuItem>
-                        {onCreateTab && !item.workbenchTabKey ? (
-                          <DropdownMenuItem onSelect={() => onCreateTab(item.session.key)}>
-                            <PanelsTopLeft className="h-3.5 w-3.5" aria-hidden />
-                            {t("workbench.createGroup")}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label={t("chat.actions", { title: item.title })}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+                          >
+                            <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuItem onSelect={() => onBeginRename(item)}>
+                            <Pencil className="h-3.5 w-3.5" aria-hidden />
+                            {t("chat.rename")}
                           </DropdownMenuItem>
-                        ) : null}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          tone="destructive"
-                          onSelect={() => onRequestDeleteMany([{ key: item.session.key, label: item.title }])}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                          {t("chat.delete")}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                          {onCreateTab && !item.workbenchTabKey ? (
+                            <DropdownMenuItem onSelect={() => onCreateTab(item.session.key)}>
+                              <PanelsTopLeft className="h-3.5 w-3.5" aria-hidden />
+                              {t("workbench.createGroup")}
+                            </DropdownMenuItem>
+                          ) : null}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            tone="destructive"
+                            onSelect={() => onRequestDeleteMany([{ key: item.session.key, label: item.title }])}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                            {t("chat.delete")}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
-                </div>
-              ) : null}
-            </div>
+                ) : null}
+              </div>
+            </li>
           );
         })}
-      </div>
+      </ul>
     </section>
   );
 }

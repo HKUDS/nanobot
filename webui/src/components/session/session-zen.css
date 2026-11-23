@@ -1,0 +1,68 @@
+/* Calm, tactile motion primitives for Mission Control & Active Drawer. */
+
+@keyframes zen-breathe {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.38);
+  }
+}
+
+.zen-breathe-halo {
+  animation: zen-breathe 2.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zen-breathe-halo {
+    animation: none;
+    opacity: 0.35;
+  }
+}
+
+/* Smooth accordion disclosure for project groups & cleanup list. */
+.zen-disclosure {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 200ms ease-out;
+}
+
+.zen-disclosure[data-collapsed="true"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.zen-disclosure > .zen-disclosure-inner {
+  overflow: hidden;
+}
+
+/* Floating drawer enter/exit slide + backdrop fade. */
+.zen-drawer-backdrop {
+  transition: opacity 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.zen-drawer-panel {
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease-out;
+  will-change: transform;
+}
+
+/* Row completion ritual: gentle settle before archiving. */
+.zen-completing {
+  opacity: 0.35;
+  transform: translateX(6px);
+  transition: opacity 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zen-disclosure,
+  .zen-drawer-backdrop,
+  .zen-drawer-panel,
+  .zen-completing {
+    transition: none;
+  }
+}
