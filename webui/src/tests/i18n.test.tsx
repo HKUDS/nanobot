@@ -9,7 +9,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { StartupSkeleton } from "@/components/StartupSkeleton";
-import { MessageBubble } from "@/components/MessageBubble";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { resources, setAppLanguage } from "@/i18n";
@@ -424,13 +423,6 @@ describe("webui i18n", () => {
         expect(notice?.textContent).toBe(copy.reasons[reason][phase]);
         expect(notice).toHaveAttribute("aria-busy", String(phase === "started"));
       }
-    }
-    for (const compactReply of ["empty", "failed"] as const) {
-      rerender(<MessageBubble message={{
-        id: "reply", role: "assistant", content: "original command reply",
-        compactReply, createdAt: 1,
-      }} />);
-      expect(screen.getByText(copy[compactReply])).toBeInTheDocument();
     }
   });
 

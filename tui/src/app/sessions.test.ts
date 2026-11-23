@@ -418,7 +418,7 @@ describe("NanobotTui session navigation", () => {
       expect(sentOptions.at(-1)?.systemCommand).toBe(true)
       app.accept({
         event: "message", chat_id: "chat", turn_id: "webui-system:picker", side_channel: true,
-        text: "Fallback", command_result: {
+        text: "Missing provider key", command_result: {
           command: "/model", parts: [{ key: "model.failed", values: { error: "Missing provider key" } }],
         },
       })

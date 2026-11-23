@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import i18n from "@/i18n";
-import { createLoadedMessageSearch } from "@/lib/loaded-message-search";
+import { findLoadedMessagePreview } from "@/lib/loaded-message-search";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { ThreadTranscript } from "@/lib/thread-transcript";
 import type { UIMessage } from "@/lib/types";
-
-const findLoadedMessagePreview = createLoadedMessageSearch("en", (key) => i18n.t(key));
 
 function message(content: string, role: UIMessage["role"] = "assistant"): UIMessage {
   return { id: content, role, content, createdAt: 1 };

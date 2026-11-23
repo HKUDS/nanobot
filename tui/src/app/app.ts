@@ -20,7 +20,6 @@ import {
 
 import { switchedModelPreset } from "../../../packages/client-events/model-selection"
 import { isSystemCommandTurnId } from "../../../packages/client-events/system-command"
-import { terminalMessageText } from "../platform/locale"
 import {
   NanobotClient,
   connectionEndpoint,
@@ -779,7 +778,7 @@ export class NanobotTui {
           const lifecycle = this.commandTurns.get(event.turn_id)
           if (lifecycle !== "agent_turn") {
             this.commandTurns.delete(event.turn_id)
-            this.transcript.assistant(terminalMessageText(event), event.render_as)
+            this.transcript.assistant(event.text, event.render_as)
             if (!this.activeTurn) this.status.content = "Ready"
             return
           }
@@ -790,7 +789,7 @@ export class NanobotTui {
           this.transcript.progress(event.text, event.tool_events)
           this.setActive(true)
         } else if (event.side_channel === true || event.render_as === "text") {
-          this.transcript.assistant(terminalMessageText(event), event.render_as)
+          this.transcript.assistant(event.text, event.render_as)
         } else {
           this.finalMessage = event.text
         }

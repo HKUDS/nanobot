@@ -20,7 +20,7 @@ describe("NanobotTui transcript", () => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const help = {
       event: "message", chat_id: "chat", turn_id: "help", side_channel: true, render_as: "text",
-      text: "Server fallback", command_result: { command: "/help", parts: [
+      text: "Commandes nanobot :\n/model [preset]\n/dream-prompt [init]", command_result: { command: "/help", parts: [
         { key: "help.title", values: {} }, { text: "/model [preset]" }, { text: "/dream-prompt [init]" },
       ] },
     } as const
@@ -44,7 +44,7 @@ describe("NanobotTui transcript", () => {
       await waitUntil(() => (app as unknown as { ready: boolean }).ready)
       await setup.flush()
       const replay = setup.captureCharFrame()
-      expect(replay).toContain("nanobot 指令")
+      expect(replay).toContain("Commandes nanobot")
       expect(replay).toContain("/model [preset]")
       expect(replay).toContain("/dream-prompt [init]")
     } finally {
@@ -126,7 +126,7 @@ describe("NanobotTui transcript", () => {
       setup = await createRenderer({ width: 100, height: 26, screenMode: "alternate-screen" })
       const app = mount(setup)
       app.accept({ event: "delta", chat_id: "chat", turn_id: "agent", text: "Beginning" })
-      app.accept({ event: "message", chat_id: "chat", text: "Fallback", side_channel: true, turn_id: "notice",
+      app.accept({ event: "message", chat_id: "chat", text: "Modèle actuel : `{preset}`\nRaw {model}", side_channel: true, turn_id: "notice",
         command_result: { command: "/model", parts: [{ key: "model.current", values: { model: "{preset}" } }, { text: "Raw {model}" }] } })
       app.accept({ event: "context_compaction", chat_id: "chat", compaction_id: "manual", phase: "succeeded" })
       app.accept({ event: "delta", chat_id: "chat", turn_id: "agent", text: " to end" })

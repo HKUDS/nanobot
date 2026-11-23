@@ -134,7 +134,7 @@ All frames are JSON text. Each message has an `event` field.
 
 `media` and `reply_to` are only present when applicable.
 
-Slash command replies may include `command_result` for localization. Translate known keys, preserve values and literal text, and use the frame’s `text` if the result is absent or unsupported.
+WebUI and TUI can send `locale` with a slash command. Display the reply’s `text` as sent; `command_result` can carry state changes such as a confirmed model switch.
 
 **`delta`** — streaming text chunk (only when `streaming: true`):
 

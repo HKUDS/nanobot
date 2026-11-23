@@ -59,18 +59,18 @@ test("preserves literal shell output and leaves ordinary replies as Markdown", a
   ])
 })
 
-test("replays command results in the current terminal locale alongside an uninterrupted stream", async () => {
+test("replays command results in their original language alongside an uninterrupted stream", async () => {
   const lang = process.env.LC_ALL
   process.env.LC_ALL = "fr_FR.UTF-8"
   try {
     respond([
       { event: "delta", text: "A", turn_id: "agent" },
-      { event: "message", text: "Fallback", side_channel: true, turn_id: "notice",
+      { event: "message", text: "Stopped 2 tasks.\nRaw {count}", side_channel: true, turn_id: "notice",
         command_result: { command: "/stop", parts: [{ key: "stop.done", values: { count: 2 } }, { text: "Raw {count}" }] } },
       { event: "stream_end", text: "AB", turn_id: "agent" },
     ])
     expect((await fetchHistory("http://fixture", "token", "chat")).messages.map(row => row.content)).toEqual([
-      "AB", "Tâches arrêtées : 2.\nRaw {count}",
+      "AB", "Stopped 2 tasks.\nRaw {count}",
     ])
   } finally {
     if (lang === undefined) delete process.env.LC_ALL
@@ -83,11 +83,11 @@ test("replays a failed picker receipt and a typed switch without inventing picke
   const failure = { command: "/model", parts: [{ key: "model.failed", values: { error: "Missing provider key" } }] }
   respond([
     { event: "user_message", starts_turn: false, text: "/model fast", turn_id: "webui-system:one" },
-    { event: "message", side_channel: true, text: "fallback", command_result: success, turn_id: "webui-system:one" },
+    { event: "message", side_channel: true, text: "Switched to fast", command_result: success, turn_id: "webui-system:one" },
     { event: "user_message", starts_turn: false, text: "/model broken", turn_id: "webui-system:two" },
-    { event: "message", side_channel: true, text: "fallback", command_result: failure, turn_id: "webui-system:two" },
+    { event: "message", side_channel: true, text: "Missing provider key", command_result: failure, turn_id: "webui-system:two" },
     { event: "user_message", starts_turn: false, text: "/model fast", turn_id: "typed" },
-    { event: "message", side_channel: true, text: "fallback", command_result: success, turn_id: "typed" },
+    { event: "message", side_channel: true, text: "Switched to fast", command_result: success, turn_id: "typed" },
   ])
   const { messages } = await fetchHistory("http://fixture", "token", "chat")
   expect(messages.map((row) => [row.role, row.content])).toEqual([

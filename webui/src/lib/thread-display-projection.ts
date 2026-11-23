@@ -7,7 +7,6 @@ import type { UIMessage } from "@/lib/types";
 interface PreparedMessage {
   message: UIMessage;
   hidden: boolean;
-  compact: boolean;
 }
 
 const preparedMessages = new WeakMap<UIMessage, PreparedMessage>();
@@ -20,19 +19,12 @@ function prepareMessage(original: UIMessage): PreparedMessage {
   const prepared = {
     message,
     hidden: isSystemCommandTurnId(message.turnId),
-    compact: message.role === "user" && message.content.trim().toLowerCase() === "/compact",
   };
   preparedMessages.set(original, prepared);
   return prepared;
 }
 
 export function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
-  const compactTurns = new Set<string>();
-  for (const original of messages) {
-    const { message, hidden, compact } = prepareMessage(original);
-    if (message.role !== "user" || !message.turnId) continue;
-    if (compact && !hidden) compactTurns.add(message.turnId);
-  }
   const visible: UIMessage[] = [];
   const starts = new Map<string, number>();
   let latestStart: number | undefined;
@@ -43,13 +35,6 @@ export function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
     if (message.role === "user" && Number.isFinite(message.createdAt)) {
       latestStart = message.createdAt;
       if (message.turnId) starts.set(message.turnId, message.createdAt);
-    }
-    if (message.role === "assistant" && message.renderAs !== "text" && message.commandResult === undefined && !message.kind && !message.isStreaming
-      && message.turnId && compactTurns.has(message.turnId)) {
-      if (message.content === "Nothing to compact.") message = { ...message, compactReply: "empty" };
-      if (message.content === "Unable to compact context. Check the logs and try again.") {
-        message = { ...message, compactReply: "failed" };
-      }
     }
     // Replay latency starts at the user prompt, not the first assistant output.
     if (message.role === "assistant" && message.kind !== "trace"
@@ -87,9 +72,9 @@ export function historyContentSnapshot(messages: UIMessage[], forkBoundaryMessag
     messages: filterThreadDisplayUnits(projectActivityTimeline(projectWebuiThreadMessages(messages)))
     .flatMap((unit) => unit.type === "message" ? [unit.message] : unit.messages)
     .map(({ role, kind, renderAs, commandResult, activityKind, content, reasoning, images, media, traces,
-      toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage }) =>
+      toolEvents, fileEdits, traceDetail, compaction, cliApps, mcpPresets, sessionMentions, sessionMessage }) =>
       ({ role, kind, renderAs, commandResult, activityKind, content, reasoning, images, media, traces,
-        toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage })) };
+        toolEvents, fileEdits, traceDetail, compaction, cliApps, mcpPresets, sessionMentions, sessionMessage })) };
 }
 
 // Display payloads are JSON values. Shared tool results and media need no byte-by-byte serialization.

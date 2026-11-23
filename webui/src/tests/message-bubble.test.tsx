@@ -185,8 +185,8 @@ describe("MessageBubble", () => {
     }
   });
 
-  it.each(["live", "history"])("redisplays %s command receipts when the reader changes language", async (source) => {
-    const event = { event: "message", chat_id: "commands", text: "Fallback", turn_id: "switch", side_channel: true,
+  it.each(["live", "history"])("keeps %s command receipts in the language they were sent in", async (source) => {
+    const event = { event: "message", chat_id: "commands", text: "Switched model preset to `{count}`.\nRaw {preset}", turn_id: "switch", side_channel: true,
       command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "{count}" } }, { text: "Raw {preset}" }] },
     } as const;
     const transcript = new ThreadTranscript();
@@ -204,7 +204,7 @@ describe("MessageBubble", () => {
     expect(answer).toHaveTextContent("Switched model preset to {count}.");
     await act(() => setAppLanguage("zh-CN"));
     expect(answer).toHaveTextContent("{count}");
-    expect(answer).toHaveTextContent("已切换");
+    expect(answer).toHaveTextContent("Switched model preset to {count}.");
     expect(answer).toHaveTextContent("Raw {preset}");
   });
 
@@ -283,7 +283,7 @@ describe("MessageBubble", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: description })).not.toBeInTheDocument());
   });
 
-  it("copies the localized compact reply instead of the stored English text", async () => {
+  it("copies the original compact reply after switching language", async () => {
     await setAppLanguage("zh-CN");
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
@@ -292,12 +292,12 @@ describe("MessageBubble", () => {
     });
     const { container } = render(<ThreadMessages messages={[{
       id: "compact-empty", role: "assistant", content: "Nothing to compact.",
-      compactReply: "empty", createdAt: 1,
+      createdAt: 1,
     }]} />);
-    expect(screen.getByText("无需压缩上下文")).toBeInTheDocument();
-    expect(container).toHaveTextContent("无需压缩上下文");
+    expect(screen.getByText("Nothing to compact.")).toBeInTheDocument();
+    expect(container).toHaveTextContent("Nothing to compact.");
     fireEvent.click(screen.getByRole("button", { name: "复制" }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("无需压缩上下文"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Nothing to compact."));
   });
 
   it("renders a compacted context notice", () => {

@@ -1,7 +1,6 @@
 import { isRecoveryState } from "../../../packages/client-events/notifications"
 
 import { switchedModelPreset } from "../../../packages/client-events/model-selection"
-import { terminalMessageText } from "../platform/locale"
 import { isSystemCommandTurnId } from "../../../packages/client-events/system-command"
 import type {
   ApiReauthenticator,
@@ -232,7 +231,7 @@ export async function fetchHistory(
           })
         } else if (event.side_channel === true) {
           if (isSystemCommandTurnId(event.turn_id) && switchedModelPreset(event.command_result)) break
-          messages.push({ role: "assistant", content: terminalMessageText(event), forkIndex: userIndex,
+          messages.push({ role: "assistant", content: event.text, forkIndex: userIndex,
             ...(event.render_as === "text" ? { renderAs: event.render_as } : {}) })
         } else {
           // A final message can repeat the answer already saved by stream_end.

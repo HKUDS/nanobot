@@ -254,7 +254,7 @@ def _record_for_append(obj: dict[str, Any]) -> dict[str, Any]:
 
 
 def command_receipt_fits(event: dict[str, Any], record: dict[str, Any]) -> bool:
-    """Keep optional localization only if both the live frame and the history fact fit."""
+    """Keep optional command facts only if both the live frame and the history record fit."""
     if len(json.dumps(event, ensure_ascii=False).encode("utf-8")) > MAX_HISTORY_FACT_BYTES:
         return False
     try:

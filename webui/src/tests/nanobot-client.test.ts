@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { currentLocale, setAppLanguage } from "@/i18n";
 import { NanobotClient } from "@/lib/nanobot-client";
 import type { SidebarStatePayload } from "@/lib/types";
 
@@ -85,6 +86,25 @@ describe("NanobotClient", () => {
     client.sendMessage("chat", "keep saved options");
     expect(JSON.parse(socket.sent.at(-1)!)).not.toHaveProperty("model_options");
     client.close();
+  });
+
+  it("sends the current language with each slash command on the same connection", async () => {
+    const original = currentLocale();
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    try {
+      for (const locale of ["fr", "zh-CN"] as const) {
+        await setAppLanguage(locale);
+        client.sendMessage("chat", "/help");
+        expect(JSON.parse(socket.sent.at(-1)!)).toMatchObject({ content: "/help", locale });
+      }
+    } finally {
+      client.close();
+      await setAppLanguage(original);
+    }
   });
 
   it("omits model options for Temporary Chats and shell commands", async () => {

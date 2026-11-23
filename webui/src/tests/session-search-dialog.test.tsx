@@ -172,7 +172,7 @@ describe("SessionSearchDialog", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("searches and previews the same loaded receipt in the reader's current language", async () => {
+  it("searches and previews the same loaded receipt in its original language", async () => {
     const cache = new ThreadMessageCache(() => false);
     cache.setLoadedMessages("chat-1", [[{
       id: "answer", role: "assistant", createdAt: 1, renderAs: "text", content: "Model preset `typo` not found.",
@@ -184,10 +184,10 @@ describe("SessionSearchDialog", () => {
     fireEvent.change(input, { target: { value: "typo" } });
     expect(screen.getByText("Model preset `typo` not found.")).toBeVisible();
     await act(() => setAppLanguage("zh-CN"));
-    expect(screen.getByText("找不到模型预设 `typo`。")).toBeVisible();
-    fireEvent.change(input, { target: { value: "not found" } });
-    expect(screen.queryByText("Chat 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Model preset `typo` not found.")).toBeVisible();
     fireEvent.change(input, { target: { value: "找不到模型预设" } });
+    expect(screen.queryByText("Chat 1")).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "not found" } });
     expect(screen.getByText("Chat 1")).toBeVisible();
   });
 

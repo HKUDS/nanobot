@@ -332,9 +332,10 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             await _recv_until(ws, "turn_end")
 
             await ws.send(json.dumps({
-                "type": "message", "chat_id": chat_id, "content": "/help", "webui": True, "turn_id": "help-turn",
+                "type": "message", "chat_id": chat_id, "content": "/help", "webui": True, "turn_id": "help-turn", "locale": "fr",
             }))
             help_reply = await _recv_until(ws, "message")
+            assert "Commandes nanobot" in help_reply["text"]
             assert help_reply["command_result"]["command"] == "/help"
             assert "/model [preset]" in help_reply["text"] and "/dream-prompt [init]" in help_reply["text"]
             assert help_reply["render_as"] == "text"
@@ -376,6 +377,7 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         assert shell["text"] in contents
         [help_history] = [event for event in thread["events"] if event.get("event") == "message"
                           and event.get("turn_id") == "help-turn"]
+        assert help_history["text"] == help_reply["text"]
         assert help_history["render_as"] == "text"
         assert help_history["command_result"] == help_reply["command_result"]
         [shell_history] = [event for event in thread["events"] if event.get("event") == "message"

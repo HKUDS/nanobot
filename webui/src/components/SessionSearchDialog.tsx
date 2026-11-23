@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { deriveTitle, visibleSessionPreview } from "@/lib/format";
-import { createLoadedMessageSearch } from "@/lib/loaded-message-search";
+import { findLoadedMessagePreview } from "@/lib/loaded-message-search";
 import type { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { cn } from "@/lib/utils";
 import type { ChatSummary } from "@/lib/types";
@@ -44,9 +44,7 @@ export function SessionSearchDialog({
   onOpenChange,
   onSelect,
 }: SessionSearchDialogProps) {
-  const { t, i18n } = useTranslation();
-  const locale = i18n.resolvedLanguage ?? i18n.language;
-  const findLoadedMessagePreview = useMemo(() => createLoadedMessageSearch(locale, t), [locale, t]);
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -79,7 +77,7 @@ export function SessionSearchDialog({
       );
       return preview === undefined ? [] : [{ session, preview }];
     });
-  }, [searchQuery, open, sessions, searchableSessions, messageCache, searchRevision, findLoadedMessagePreview]);
+  }, [searchQuery, open, sessions, searchableSessions, messageCache, searchRevision]);
   const itemCount = sessionResults.length;
   const rowHeight = 64;
   const windowStart = Math.max(0, Math.min(itemCount - 1, Math.floor(scrollTop / rowHeight) - 4));

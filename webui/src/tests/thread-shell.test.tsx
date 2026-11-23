@@ -2847,7 +2847,7 @@ describe("ThreadShell", () => {
       client._emitChat("chat-new", {
         event: "message",
         chat_id: "chat-new", turn_id: turnId, turn_seq: 2,
-        text: "English fallback",
+        text: "- Current model: `Ring-2.6-1T`",
         side_channel: true,
         render_as: "text",
         command_result: { command: "/model", parts: [{ key: "model.current", values: { model: "Ring-2.6-1T" } }] },

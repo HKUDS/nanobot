@@ -784,6 +784,9 @@ class WebUICommandRouter:
         }
         if envelope.get("webui") is True:
             metadata["webui"] = True
+            locale = envelope.get("locale")
+            if content.lstrip().startswith("/") and isinstance(locale, str) and 0 < len(locale) <= 64:
+                metadata["locale"] = locale
             metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
         trusted_webui = metadata.get("webui") is True and connection in self._webui_connections
         # The settings Restart button uses the existing silent command protocol.

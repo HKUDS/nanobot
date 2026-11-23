@@ -11,7 +11,6 @@ import {
 } from "react";
 import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Info, Quote, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { messageDisplayText } from "@/lib/message-display-text";
 import { DisclosureContent } from "@/components/ui/disclosure";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
@@ -117,8 +116,7 @@ function useMessageCopy(content: string) {
 }
 
 export function MessageCopyButton({ message, className }: { message: UIMessage; className?: string }) {
-  const { t, i18n } = useTranslation();
-  const content = messageDisplayText(message, t, i18n.resolvedLanguage ?? i18n.language);
+  const content = message.content;
   const { copied, label, onCopy } = useMessageCopy(content);
   if (!content.trim()) return null;
   return <HoverHint content={label} side="top" align="center"><button type="button" data-message-block-copy-action
@@ -156,9 +154,9 @@ export function MessageBlockMenuActions({
   activity,
   sheet = false,
 }: MessageBlockMenuActionsProps) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const content = messageDisplayText(message, t, i18n.resolvedLanguage ?? i18n.language);
+  const content = message.content;
   const hasText = content.trim().length > 0;
   const showFork = message.role === "assistant"
     && !message.isStreaming
@@ -394,7 +392,7 @@ export function MessageBubble({
   onOpenFilePreview,
   contextMenu,
 }: MessageBubbleProps) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const mentionCliApps = useMemo(
     () => mergeCliMentionApps(cliApps, message.cliApps),
     [cliApps, message.cliApps],
@@ -518,7 +516,7 @@ export function MessageBubble({
     );
   }
 
-  const assistantContent = messageDisplayText(message, t, i18n.resolvedLanguage ?? i18n.language);
+  const assistantContent = message.content;
   const empty = assistantContent.trim().length === 0;
   const media = message.media ?? [];
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
