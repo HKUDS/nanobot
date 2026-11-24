@@ -177,8 +177,8 @@ export function MessageBlockMenuActions({
   const fallbackSources = (
     <FallbackResponseSources
       sources={message.role === "assistant" ? message.responseSources : undefined}
-      className="min-h-[var(--message-block-control-size)] gap-1"
-      badgeClassName="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
+      className={cn("min-h-[var(--message-block-control-size)] gap-1", !sheet && "min-w-8 max-w-24 flex-nowrap overflow-x-auto")}
+      badgeClassName={cn("h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]", !sheet && "min-w-8 gap-0.5 px-0")}
     />
   );
   const automation = automationSourceLabel && `${t("message.automationTriggered")} ${automationSourceLabel}`;
@@ -203,8 +203,9 @@ export function MessageBlockMenuActions({
   );
   return (
     <div className={sheet ? "flex w-full flex-col gap-1" : "flex min-w-0 flex-col items-start"}>
-      <div className={sheet ? "flex flex-col items-stretch gap-1" : "flex max-w-full flex-wrap"}>
-        {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
+      <div className={sheet ? "flex flex-col items-stretch gap-1" : "flex max-w-full items-center"}>
+        {!sheet && hasText ? <MessageCopyButton message={message} className="shrink-0" /> : null}
+        {!sheet && fallbackSources}
         {showFork ? (
           <HoverHint content={t("message.forkFromHere")}>
             <button type="button" onClick={onForkFromHere}
@@ -217,7 +218,6 @@ export function MessageBlockMenuActions({
           </HoverHint>
         ) : null}
         {activityAction && !sheet ? <HoverHint content={activity.label}>{activityAction}</HoverHint> : activityAction}
-        {!sheet && fallbackSources}
       </div>
       {sheet && fallbackSources}
       {(time || automation) && (
