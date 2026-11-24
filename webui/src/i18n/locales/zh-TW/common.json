@@ -1247,7 +1247,7 @@
     },
     "observability": {
       "title": "執行追蹤", "configured": "nanobot 已偵測到追蹤憑證。",
-      "environment": "設定 LANGFUSE_SECRET_KEY 和 LANGFUSE_PUBLIC_KEY 後重新啟動 nanobot。", "enable": "啟用追蹤"
+      "environment": "設定 LANGFUSE_SECRET_KEY 和 LANGFUSE_PUBLIC_KEY 後重新啟動 nanobot。", "allow": "允許 Langfuse 追蹤", "install": "安裝追蹤套件"
     },
     "legal": {
       "thirdPartyBrands": "產品名稱、Logo 與品牌均為各自擁有者的財產。僅供識別之用，不代表任何形式的背書。"

@@ -948,7 +948,7 @@ async def test_runtime_config_requires_websocket_and_tracks_restart(tmp_path):
 
     path = "/api/settings/runtime-config/update"
     config_path = tmp_path / "config.json"
-    request = _mutation_request(path, {"values": {"tools.exec.timeout": 19}})
+    request = _mutation_request(path, {"values": {"tools.exec.timeout": 19, "agents.defaults.langfuse_enabled": False}})
     router = _router(config_path=config_path)
     http_request = SimpleNamespace(path=path, headers=Headers())
     assert (await router.dispatch(None, http_request, path)).status_code == 405
@@ -958,9 +958,12 @@ async def test_runtime_config_requires_websocket_and_tracks_restart(tmp_path):
     assert not config_path.exists()
     result = await _mutate(router, request)
     assert result.status_code == 200
-    assert load_config(config_path).tools.exec.timeout == 19
+    saved = load_config(config_path)
+    assert saved.tools.exec.timeout == 19
+    assert saved.agents.defaults.langfuse_enabled is False
     body = result.result
     assert body["runtime_config"]["tools.exec.timeout"] == 19
+    assert body["runtime_config"]["agents.defaults.langfuse_enabled"] is False
     assert body["restart_required_sections"] == ["runtime"]
     refreshed = await router.dispatch(None, SimpleNamespace(path="/api/settings", headers=Headers()), "/api/settings")
     assert json.loads(refreshed.body)["restart_required_sections"] == ["runtime"]

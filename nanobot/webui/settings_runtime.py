@@ -23,6 +23,7 @@ RUNTIME_CONFIG_PATHS = (
     "agents.defaults.max_concurrent_subagents",
     "agents.defaults.max_tool_result_chars",
     "agents.defaults.provider_retry_mode",
+    "agents.defaults.langfuse_enabled",
     "agents.defaults.tool_hint_max_length",
     "agents.defaults.dream.enabled",
     "gateway.host",

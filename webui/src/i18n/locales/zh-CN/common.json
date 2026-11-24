@@ -1432,7 +1432,8 @@
       "title": "运行追踪",
       "configured": "nanobot 已检测到追踪凭证。",
       "environment": "设置 LANGFUSE_SECRET_KEY 和 LANGFUSE_PUBLIC_KEY 后重启 nanobot。",
-      "enable": "启用追踪"
+      "allow": "允许 Langfuse 追踪",
+      "install": "安装追踪组件"
     },
     "apps": {
       "allTypes": "全部",

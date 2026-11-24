@@ -191,6 +191,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 200
     max_concurrent_subagents: int = Field(default=4, ge=1)
     max_tool_result_chars: int = 16_000
+    langfuse_enabled: bool = True  # Allow tracing with the service's environment credentials.
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
     tool_hint_max_length: int = Field(
         default=40,

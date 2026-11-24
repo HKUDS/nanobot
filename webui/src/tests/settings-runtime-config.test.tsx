@@ -42,6 +42,23 @@ describe("Runtime configuration settings", () => {
     expect([...paths, visibilityOnly].sort()).toEqual([...runtimeConfigKeys].sort());
   });
 
+  it("saves Langfuse tracing permission independently of environment credentials", async () => {
+    const payload = runtimeSettings();
+    payload.runtime_config["agents.defaults.langfuse_enabled"] = true;
+    requestMutationMock.mockResolvedValue({ ...payload, requires_restart: true,
+      runtime_config: { ...payload.runtime_config, "agents.defaults.langfuse_enabled": false } });
+    renderSettingsView({ initialSection: "runtime", initialSettings: payload });
+
+    const permission = screen.getByRole("switch", { name: "Allow Langfuse tracing" });
+    expect(permission).toBeChecked(); // The fixture has no environment credentials.
+    fireEvent.click(permission);
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "agents.defaults.langfuse_enabled": false } }, 20_000,
+    ));
+    expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
+    expect(permission).not.toBeChecked();
+  });
+
   it("keeps chat permissions and local services available when tool families are disabled", () => {
     const payload = runtimeSettings();
     renderSettingsView({ initialSection: "advanced", initialSettings: {

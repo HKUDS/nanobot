@@ -1247,7 +1247,7 @@
     },
     "observability": {
       "title": "Trazas de ejecución", "configured": "Las credenciales de trazas están disponibles para nanobot.",
-      "environment": "Configura LANGFUSE_SECRET_KEY y LANGFUSE_PUBLIC_KEY y reinicia nanobot.", "enable": "Activar trazas"
+      "environment": "Configura LANGFUSE_SECRET_KEY y LANGFUSE_PUBLIC_KEY y reinicia nanobot.", "allow": "Permitir trazas de Langfuse", "install": "Instalar soporte para trazas"
     },
     "legal": {
       "thirdPartyBrands": "Los nombres, logotipos y marcas de productos pertenecen a sus respectivos propietarios. Su uso es solo identificativo y no implica respaldo."

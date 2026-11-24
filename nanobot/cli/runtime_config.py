@@ -110,6 +110,7 @@ def _load_config_for_cli(
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     from nanobot.config.loader import set_config_path
+    from nanobot.providers import langfuse
 
     config_path = None
     if config:
@@ -124,6 +125,7 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     if workspace:
         loaded.agents.defaults.workspace = workspace
     _validate_session_storage(loaded, workspace_override=workspace)
+    langfuse.enabled = loaded.agents.defaults.langfuse_enabled
     return loaded
 
 

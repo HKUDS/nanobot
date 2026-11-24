@@ -1432,7 +1432,8 @@
       "title": "Run tracing",
       "configured": "Tracing credentials are available to nanobot.",
       "environment": "Set LANGFUSE_SECRET_KEY and LANGFUSE_PUBLIC_KEY, then restart nanobot.",
-      "enable": "Enable tracing"
+      "allow": "Allow Langfuse tracing",
+      "install": "Install tracing support"
     },
     "apps": {
       "allTypes": "All",

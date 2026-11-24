@@ -1252,7 +1252,8 @@
       "title": "Rastreamento de execução",
       "configured": "As credenciais de rastreamento estão disponíveis para o nanobot.",
       "environment": "Defina LANGFUSE_SECRET_KEY e LANGFUSE_PUBLIC_KEY e reinicie o nanobot.",
-      "enable": "Ativar rastreamento"
+      "allow": "Permitir rastreamento com Langfuse",
+      "install": "Instalar suporte ao rastreamento"
     },
     "apps": {
       "allTypes": "Todos",

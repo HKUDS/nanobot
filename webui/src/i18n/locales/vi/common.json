@@ -1247,7 +1247,7 @@
     },
     "observability": {
       "title": "Theo dõi chạy", "configured": "nanobot đã có thông tin xác thực để ghi lại quá trình xử lý.",
-      "environment": "Đặt LANGFUSE_SECRET_KEY và LANGFUSE_PUBLIC_KEY rồi khởi động lại nanobot.", "enable": "Bật theo dõi"
+      "environment": "Đặt LANGFUSE_SECRET_KEY và LANGFUSE_PUBLIC_KEY rồi khởi động lại nanobot.", "allow": "Cho phép theo dõi bằng Langfuse", "install": "Cài gói hỗ trợ theo dõi"
     },
     "legal": {
       "thirdPartyBrands": "Tên sản phẩm, logo và thương hiệu thuộc về chủ sở hữu tương ứng. Việc sử dụng chỉ nhằm nhận diện và không ngụ ý được xác nhận."

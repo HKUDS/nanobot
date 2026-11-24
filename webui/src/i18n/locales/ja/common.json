@@ -1247,7 +1247,7 @@
     },
     "observability": {
       "title": "実行の追跡", "configured": "nanobot がトレース認証情報を利用できます。",
-      "environment": "LANGFUSE_SECRET_KEY と LANGFUSE_PUBLIC_KEY を設定して nanobot を再起動してください。", "enable": "追跡を有効化"
+      "environment": "LANGFUSE_SECRET_KEY と LANGFUSE_PUBLIC_KEY を設定して nanobot を再起動してください。", "allow": "Langfuse による追跡を許可", "install": "追跡用パッケージをインストール"
     },
     "legal": {
       "thirdPartyBrands": "製品名、ロゴ、ブランドはそれぞれの所有者に帰属します。使用は識別のみを目的とし、承認を意味するものではありません。"

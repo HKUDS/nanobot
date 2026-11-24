@@ -247,7 +247,7 @@ Internal variables such as `NANOBOT_RESTART_*` and `NANOBOT_PATH_*` are set by n
 
 ## Langfuse Observability
 
-Use Langfuse to trace OpenAI-compatible model calls and Codex OAuth calls. Configure it with environment variables, not `config.json`.
+Use Langfuse to trace OpenAI-compatible model calls and Codex OAuth calls. Keep the credentials and service URL in the environment. In WebUI Settings → System, turn Langfuse off and restart nanobot to stop sending model inputs and outputs without removing the keys. Turn it back on and restart to resume. The switch defaults to on for existing environment-based setups.
 
 Install the optional package in the same Python environment that runs nanobot:
 
@@ -271,7 +271,7 @@ $env:LANGFUSE_PUBLIC_KEY = "pk-lf-..."
 $env:LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
 ```
 
-When `LANGFUSE_SECRET_KEY` is set and the `langfuse` package is installed, tracing is enabled for OpenAI-compatible providers and the Codex OAuth provider (`openai_codex`). If the package is missing, nanobot logs a warning and model calls continue without tracing.
+With the switch on, `LANGFUSE_SECRET_KEY` set, and the `langfuse` package installed, tracing is enabled for OpenAI-compatible providers and the Codex OAuth provider (`openai_codex`). If the package is missing, nanobot logs a warning and model calls continue without tracing.
 
 Use the Langfuse region or self-hosted URL that matches your project. The [Langfuse OpenAI SDK docs](https://langfuse.com/integrations/model-providers/openai-py) use `LANGFUSE_BASE_URL` for cloud regions and self-hosted instances.
 

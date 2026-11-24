@@ -1247,7 +1247,7 @@
     },
     "observability": {
       "title": "Pelacakan eksekusi", "configured": "Kredensial pelacakan sudah tersedia untuk nanobot.",
-      "environment": "Atur LANGFUSE_SECRET_KEY dan LANGFUSE_PUBLIC_KEY, lalu mulai ulang nanobot.", "enable": "Aktifkan pelacakan"
+      "environment": "Atur LANGFUSE_SECRET_KEY dan LANGFUSE_PUBLIC_KEY, lalu mulai ulang nanobot.", "allow": "Izinkan pelacakan Langfuse", "install": "Instal dukungan pelacakan"
     },
     "legal": {
       "thirdPartyBrands": "Nama produk, logo, dan merek adalah milik pemiliknya masing-masing. Penggunaan hanya untuk identifikasi dan tidak menyiratkan dukungan."

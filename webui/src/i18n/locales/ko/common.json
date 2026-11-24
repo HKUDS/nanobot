@@ -1247,7 +1247,7 @@
     },
     "observability": {
       "title": "실행 추적", "configured": "nanobot이 추적 인증 정보을 사용할 수 있습니다.",
-      "environment": "LANGFUSE_SECRET_KEY와 LANGFUSE_PUBLIC_KEY를 설정한 뒤 nanobot을 다시 시작하세요.", "enable": "추적 활성화"
+      "environment": "LANGFUSE_SECRET_KEY와 LANGFUSE_PUBLIC_KEY를 설정한 뒤 nanobot을 다시 시작하세요.", "allow": "Langfuse 추적 허용", "install": "추적 패키지 설치"
     },
     "legal": {
       "thirdPartyBrands": "제품 이름, 로고 및 브랜드는 각 소유자의 자산입니다. 사용은 식별 목적일 뿐 보증이나 제휴를 의미하지 않습니다."

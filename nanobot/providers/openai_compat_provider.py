@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
+from nanobot.providers import langfuse as tracing
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -542,10 +543,11 @@ class OpenAICompatProvider(LLMProvider):
                 return self._client
             global AsyncOpenAI
             if AsyncOpenAI is None:
-                if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
+                trace = tracing.requested()
+                if trace and importlib.util.find_spec("langfuse"):
                     from langfuse.openai import AsyncOpenAI as _AsyncOpenAI
                 else:
-                    if os.environ.get("LANGFUSE_SECRET_KEY"):
+                    if trace:
                         logger.warning(
                             "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
                             "run `nanobot plugins enable langfuse` to enable tracing"

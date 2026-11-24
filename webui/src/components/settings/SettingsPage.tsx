@@ -471,6 +471,7 @@ export function SettingsPage({
             {runtimeConfiguration("runtime")}
             <RuntimeSettings
               form={modelState.form}
+              runtimeConfig={controller.runtimeConfigState}
               settings={settings}
               onRestart={showSidebar ? undefined : restartViaSettingsSurface}
               isRestarting={restartInProgress}
