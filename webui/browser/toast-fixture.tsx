@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -43,9 +43,25 @@ function ToastActions({ stack, longTitle, modal }: { stack: boolean; longTitle: 
   </main>;
 }
 
+function ArchivePreview() {
+  const { t } = useTranslation();
+  const show = useToast();
+  useEffect(() => {
+    show?.({
+      message: t("toast.archivedSingle"),
+      detail: "查找 Shell 完整命令",
+      tone: "success",
+      persistent: true,
+      dedupeKey: "archive-preview",
+      action: { label: t("toast.undo"), run: () => {} },
+    });
+  }, [show, t]);
+  return null;
+}
+
 export function ToastFixture({ parameters }: { parameters: URLSearchParams }) {
   document.documentElement.classList.toggle("dark", parameters.has("dark"));
   return <ToastProvider>
-    <ToastActions stack={parameters.get("scene") === "stack"} longTitle={parameters.has("long-title")} modal={parameters.has("modal")} />
+    {parameters.get("scene") === "archive" ? <ArchivePreview /> : <ToastActions stack={parameters.get("scene") === "stack"} longTitle={parameters.has("long-title")} modal={parameters.has("modal")} />}
   </ToastProvider>;
 }
