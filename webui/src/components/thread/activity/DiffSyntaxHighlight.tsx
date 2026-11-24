@@ -1,3 +1,5 @@
+import "./file-diff.css";
+
 import { Suspense, lazy, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 

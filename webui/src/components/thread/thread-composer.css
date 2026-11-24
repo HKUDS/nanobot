@@ -1,0 +1,299 @@
+.thread-composer-stack {
+  --composer-content-width: var(--content-column-width);
+}
+
+.thread-composer-stack.is-hero {
+  --composer-content-width: 58rem;
+}
+
+.subagent-task-dock {
+  --subagent-handle-inset: var(--radius-panel);
+  width: calc(100% - 0.5rem - 2 * var(--subagent-handle-inset));
+  max-width: calc(var(--composer-content-width, 49.5rem) - 2 * var(--subagent-handle-inset));
+}
+
+.thread-composer-stack.is-hero .subagent-task-dock {
+  --subagent-handle-inset: var(--radius-prominent);
+  width: calc(100% - 2 * var(--subagent-handle-inset));
+}
+
+.subagent-task-dock + .thread-composer-form {
+  padding-top: 0;
+}
+
+.thread-composer-notice {
+  width: calc(100% - 0.5rem);
+  max-width: var(--composer-content-width, 49.5rem);
+  margin-inline: auto;
+}
+
+.thread-composer-stack.is-hero .thread-composer-notice {
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .thread-composer-notice {
+    width: 100%;
+  }
+  .subagent-task-dock {
+    width: calc(100% - 2 * var(--subagent-handle-inset));
+  }
+}
+
+@layer utilities {
+  .thread-composer-dock {
+    background: hsl(var(--background));
+  }
+
+  @keyframes composer-status-strip-enter {
+    0% {
+      max-height: 0;
+      opacity: 0;
+      transform: translateY(10px) scale(0.985);
+    }
+    72% {
+      max-height: var(--composer-strip-max-height, 46px);
+      opacity: 1;
+      transform: translateY(-1px) scale(1.004);
+    }
+    100% {
+      max-height: var(--composer-strip-max-height, 46px);
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  .composer-status-strip {
+    transform-origin: bottom center;
+    will-change: max-height, opacity, transform;
+  }
+  .composer-status-strip[data-state="enter"] {
+    animation: composer-status-strip-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .composer-status-strip {
+      will-change: auto;
+    }
+    .composer-status-strip[data-state] {
+      animation: none;
+    }
+  }
+}
+
+.composer-primary-action {
+  transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out;
+}
+
+.composer-action-icons {
+  transition: transform 120ms ease-out;
+}
+
+.composer-primary-action:active:not(:disabled) .composer-action-icons {
+  transform: scale(0.94);
+}
+
+.composer-action-glyph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.72);
+  transition: opacity 140ms ease-out, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.composer-action-glyph[data-active] {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.composer-action-icons[data-state="stop"] [data-action-icon="send"] {
+  transform: translateY(-3px) scale(0.8);
+}
+
+.composer-action-glyph:not([data-active]) .loading-ring-arc {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-primary-action,
+  .composer-action-icons,
+  .composer-primary-action:active:not(:disabled) .composer-action-icons {
+    transition: none;
+    transform: none;
+  }
+  .composer-action-icons[data-state] .composer-action-glyph {
+    transform: none;
+    transition: opacity 80ms linear;
+  }
+}
+
+.thread-composer-surface {
+  transition: var(--theme-paint-transition, background-color 160ms ease-out, box-shadow 160ms ease-out), opacity 160ms ease-out;
+  container-name: thread-composer;
+  container-type: inline-size;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-composer-surface { transition: var(--theme-paint-transition, none); }
+}
+
+@media (forced-colors: active) {
+  .thread-composer-surface:focus-within { outline: 2px solid Highlight; }
+}
+
+.thread-composer-footer-actions {
+  flex: 0 1 auto;
+  max-width: 58%;
+}
+
+.thread-composer-meta {
+  padding-inline-start: calc(var(--composer-footer-inset) + var(--composer-action-margin) + (var(--composer-action-size) - 0.875rem) / 2 - 0.5rem);
+}
+
+@media (pointer: coarse) {
+  .thread-composer-form { --composer-action-size: 2.75rem; }
+}
+
+/* Compact composers keep their primary actions on a stable 44px touch grid. */
+.thread-composer-form[data-compact-controls] {
+  --composer-action-size: 2.25rem;
+  --composer-action-margin: 0.25rem;
+  --composer-footer-inset: 0.5rem;
+}
+[data-compact-controls] .thread-composer-footer {
+  column-gap: 0.25rem;
+  padding: 0 0.5rem 0.5rem;
+}
+[data-compact-controls] .thread-composer-footer-primary,
+[data-compact-controls] .thread-composer-footer-actions {
+  gap: 0.25rem;
+}
+[data-compact-controls] .thread-composer-footer-actions {
+  max-width: 50%;
+}
+[data-compact-controls] .thread-composer-action.touch-target {
+  flex: none;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+[data-compact-controls] .thread-composer-model-badge {
+  max-width: 100%;
+  min-height: 2.75rem;
+  align-items: center;
+}
+
+/* Keep a 44px hit area around the quieter 36px attachment/send controls.
+ * The transparent pseudo-element belongs to the button, including its disabled
+ * state; margins reserve its space so adjacent controls never overlap it. */
+[data-compact-controls] .thread-composer-round-action.touch-target {
+  position: relative;
+  width: var(--composer-action-size);
+  height: var(--composer-action-size);
+  min-width: var(--composer-action-size);
+  min-height: var(--composer-action-size);
+  margin: var(--composer-action-margin);
+}
+[data-compact-controls] .thread-composer-round-action::before {
+  content: "";
+  position: absolute;
+  inset: -0.3125rem;
+  border-radius: inherit;
+}
+[data-compact-controls] .composer-model-pill {
+  height: 2.25rem;
+}
+
+@media (pointer: coarse) {
+  .thread-composer-meta .touch-target {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
+}
+
+@layer components {
+  .thread-composer-collapsible-layout {
+    container: composer-layout / inline-size;
+  }
+  .thread-composer-input[data-expandable] {
+    --composer-edit-room: max(6rem, calc(var(--app-viewport-height, 100dvh) - 11rem));
+    --composer-input-limit: min(260px, calc(var(--composer-edit-room) * 0.7));
+  }
+  .thread-composer-input[data-expanded] {
+    --composer-input-limit: min(38rem, var(--composer-edit-room));
+  }
+  .thread-composer-input:is([data-overflowing], [data-expanded]) {
+    margin-block: 0.375rem;
+  }
+  .thread-composer-input > textarea {
+    max-height: var(--composer-input-limit, 260px);
+    overflow-y: auto;
+  }
+  /* A wrapped placeholder must not resize the empty composer. */
+  .thread-composer-input textarea:placeholder-shown {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .thread-composer-collapsible[data-compact] .thread-composer-input > :is(textarea, [aria-hidden]) {
+    display: block;
+    block-size: 3.125rem !important;
+  }
+  @container composer-layout (min-width: 40rem) {
+    .thread-composer-collapsible .thread-composer-input {
+      inline-size: 100%;
+    }
+    .thread-composer-collapsible .thread-composer-input > :is(textarea, [aria-hidden]) {
+      display: block;
+      min-block-size: 3.5rem;
+      padding-block: 1.125rem;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-input {
+      inline-size: max(0px, calc(100% - var(--composer-compact-controls-width, 15rem) - 1.5rem));
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-input > :is(textarea, [aria-hidden]) {
+      display: block;
+      block-size: 3.5rem !important;
+      min-block-size: 3.5rem;
+      padding-block: 1.125rem;
+    }
+    .thread-composer-collapsible .thread-composer-footer {
+      min-block-size: 3.5rem;
+      margin-block-start: 0;
+      padding: 0.5rem;
+      pointer-events: none;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-footer {
+      margin-block-start: -3.5rem;
+    }
+    .thread-composer-collapsible .thread-composer-footer-primary {
+      flex: 1 0 auto;
+      margin-inline-start: auto;
+      pointer-events: auto;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-footer-primary {
+      flex-grow: 0;
+    }
+    .thread-composer-collapsible .thread-composer-footer-actions {
+      max-inline-size: none;
+      margin-inline-start: 0;
+      pointer-events: auto;
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .thread-composer-collapsible .thread-composer-input {
+        transition: inline-size 220ms ease-out;
+      }
+      .thread-composer-collapsible .thread-composer-footer {
+        transition: margin-block-start 220ms ease-out;
+      }
+      .thread-composer-collapsible .thread-composer-footer-primary {
+        transition: flex-grow 220ms ease-out;
+      }
+    }
+  }
+}
+
+html[data-custom-background] .thread-composer-dock {
+  background: transparent;
+}

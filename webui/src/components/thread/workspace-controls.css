@@ -1,0 +1,46 @@
+.workspace-picker-favorite {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.workspace-picker-row:hover .workspace-picker-favorite,
+.workspace-picker-row:focus-within .workspace-picker-favorite,
+.workspace-picker-row[data-keyboard-active] .workspace-picker-favorite {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .workspace-picker-favorite {
+    pointer-events: auto;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-picker-favorite {
+    transition: none;
+  }
+}
+
+.workspace-directory-loading {
+  position: relative;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .workspace-directory-loading::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.045), transparent);
+    transform: translateX(-100%);
+    animation: workspace-directory-shimmer 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes workspace-directory-shimmer {
+  to { transform: translateX(100%); }
+}

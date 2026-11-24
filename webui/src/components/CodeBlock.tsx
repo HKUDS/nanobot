@@ -1,3 +1,5 @@
+import "./code-content.css";
+
 import { Component, Suspense, lazy, memo, startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";

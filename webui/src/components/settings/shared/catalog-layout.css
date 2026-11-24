@@ -60,3 +60,10 @@
   .apps-catalog-layout { grid-template-columns: minmax(0, 1fr) 24.5rem; }
   .apps-catalog-layout .catalog-controls { grid-column: 2; }
 }
+
+@supports (content-visibility: auto) {
+  .apps-catalog-row {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 4.25rem;
+  }
+}

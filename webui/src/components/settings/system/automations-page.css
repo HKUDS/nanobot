@@ -1,0 +1,37 @@
+@layer components {
+  .automations-page {
+    --settings-inset: 1rem;
+    container: automations / inline-size;
+  }
+  .automation-create-composer .thread-composer-surface {
+    max-inline-size: none;
+  }
+  .automation-create-composer .thread-composer-input > :is(textarea, [aria-hidden]) {
+    padding-inline: var(--settings-inset);
+  }
+  .automation-view-switch .segmented-control button {
+    padding-inline: calc(var(--settings-inset) - 0.5rem);
+  }
+  .automation-panel-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    min-block-size: 4rem;
+    padding-block: 0.75rem;
+    padding-inline: 0.75rem 0.25rem;
+  }
+  .automation-create-composer .thread-composer-collapsible-layout {
+    padding-block-start: 0;
+    padding-inline: 0;
+  }
+  .automation-run-at-picker {
+    container: automation-run-at / inline-size;
+  }
+  @container automation-run-at (min-width: 18rem) {
+    .automation-run-at-fields { grid-template-columns: minmax(0, 1fr) 7rem; }
+  }
+  .automation-panel-filters {
+    margin-inline-start: auto;
+  }
+}

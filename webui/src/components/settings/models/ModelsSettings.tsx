@@ -1,3 +1,5 @@
+import "./preset-name.css";
+
 import { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
 import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
 import { useAutomaticModelAPI } from "@/components/settings/models/useAutomaticModelAPI";

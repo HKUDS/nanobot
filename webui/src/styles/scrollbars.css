@@ -1,0 +1,86 @@
+@layer base {
+  * {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+    scrollbar-width: thin;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border-radius: var(--radius-pill);
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.4);
+    border-radius: var(--radius-pill);
+  }
+  .scrollbar-track-transparent {
+    scrollbar-gutter: stable;
+  }
+  .scrollbar-track-transparent::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* Keep the native drag target wider than the visible thumb. */
+  @media (forced-colors: none) {
+    @supports selector(::-webkit-scrollbar) {
+      html:not(.native-host) .inset-scrollbar {
+        scrollbar-width: auto;
+        scrollbar-color: auto;
+      }
+      html:not(.native-host) .inset-scrollbar::-webkit-scrollbar {
+        width: 14px;
+      }
+      html:not(.native-host) .inset-scrollbar::-webkit-scrollbar-button {
+        display: none;
+      }
+      html:not(.native-host) .inset-scrollbar::-webkit-scrollbar-track {
+        margin-block: 6px;
+        background: transparent;
+      }
+      html:not(.native-host) .inset-scrollbar::-webkit-scrollbar-thumb {
+        min-height: 28px;
+        border-inline: 4px solid transparent;
+        border-inline-end-width: 6px;
+        border-radius: 999px;
+        background: var(--scrollbar-thumb) padding-box;
+      }
+      html:not(.native-host) .inset-scrollbar::-webkit-scrollbar-thumb:hover,
+      html:not(.native-host) .inset-scrollbar::-webkit-scrollbar-thumb:active {
+        background-color: var(--scrollbar-thumb-hover);
+      }
+    }
+  }
+  @media (forced-colors: active) {
+    html:not(.native-host) .inset-scrollbar {
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+    }
+  }
+}
