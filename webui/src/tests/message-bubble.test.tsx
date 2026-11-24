@@ -8,7 +8,7 @@ import { ToastProvider } from "@/components/ui/toast";
 import { setAppLanguage } from "@/i18n";
 import { parseWebuiThreadPayload } from "@/lib/api";
 import * as clipboard from "@/lib/clipboard";
-import { fmtDateTime, formatMessageEndTime } from "@/lib/format-time";
+import { formatMessageEndTime } from "@/lib/format-time";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { ThreadTranscript } from "@/lib/thread-transcript";
@@ -105,8 +105,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
 ];
 
-function openTimeDetails(timestamp: number) {
-  fireEvent.click(screen.getByRole("button", { name: fmtDateTime(timestamp) }));
+function openSourceDetails(name: string | RegExp) {
+  fireEvent.click(screen.getByRole("button", { name }));
   return screen.getByRole("dialog");
 }
 
@@ -220,16 +220,15 @@ describe("MessageBubble", () => {
     expect(screen.queryByTestId("plain-code-fallback")).not.toBeInTheDocument();
   });
 
-  it.each([false, undefined])("keeps normal sources out of the timestamp details (fallback: %s)", (fallback) => {
+  it.each([false, undefined])("omits source details for normal responses (fallback: %s)", (fallback) => {
     const message: UIMessage = { id: "primary", role: "assistant", content: "Hello", createdAt: 1,
       responseSources: [{ provider: "openai_codex", model: "gpt", preset: "codex", fallback }] };
     render(<MessageBlockMenuActions message={message} />);
     expect(screen.getByRole("button", { name: "Copy" })).toBeVisible();
-    const details = openTimeDetails(message.createdAt);
-    expect(within(details).queryByRole("button", { name: /fallback/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /fallback/i })).not.toBeInTheDocument();
   });
 
-  it("keeps fallback sources visible live and moves them into the completed timestamp details", () => {
+  it("keeps fallback sources visible live and moves them into the completed message's source details", () => {
     const message: UIMessage = { id: "actual", role: "assistant", content: "Hello", createdAt: 1,
       isStreaming: true, responseSources: [
         { provider: "openai_codex", model: "gpt", preset: "codex", fallback: false },
@@ -244,7 +243,7 @@ describe("MessageBubble", () => {
     expect(screen.getByText("grok")).toBeVisible();
     rerender(<ThreadMessages messages={[{ ...message, isStreaming: false }]} />);
     expect(screen.queryByText("grok")).not.toBeInTheDocument();
-    const details = openTimeDetails(message.createdAt);
+    const details = openSourceDetails(/fallback model.*grok/i);
     expect(within(details).getByText("grok")).toBeVisible();
     expect(screen.getAllByText("grok")).toHaveLength(1);
     rerender(<ThreadMessages messages={[{ ...message, isStreaming: false, responseSources: undefined }]} />);
@@ -268,7 +267,7 @@ describe("MessageBubble", () => {
       id: "fallback-info", role: "assistant", content: "你好", createdAt: 1,
       responseSources: [{ provider: "xai", model: "grok", preset: "grok", fallback: true }],
     }} />);
-    const details = openTimeDetails(1);
+    const details = openSourceDetails(description);
     const trigger = within(details).getByRole("button", { name: description });
     const metadata = details.querySelector("[data-message-block-metadata]")!;
     expect(trigger.compareDocumentPosition(metadata) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -771,10 +770,10 @@ describe("MessageBubble", () => {
     expect(onForkFromHere).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps assistant completion time in the timestamp details", () => {
+  it("keeps assistant completion time in the action sheet", () => {
     const completedAt = Date.UTC(2026, 6, 25, 12, 34, 56);
     render(
-      <MessageBlockMenuActions
+      <MessageBlockMenuActions sheet
         message={{
           id: "a-completed-at",
           role: "assistant",
@@ -786,7 +785,8 @@ describe("MessageBubble", () => {
       />,
     );
 
-    const time = openTimeDetails(completedAt).querySelector("[data-assistant-completed-at]");
+    const time = screen.getByRole("time");
+    expect(time).toHaveAttribute("data-assistant-completed-at");
     expect(time).toHaveTextContent(formatMessageEndTime(completedAt));
     expect(time).toHaveAttribute("dateTime", new Date(completedAt).toISOString());
     expect(time).toHaveClass("tabular-nums");
@@ -795,7 +795,7 @@ describe("MessageBubble", () => {
   it("falls back to the assistant creation time when replay has no completion time", () => {
     const createdAt = Date.UTC(2026, 6, 25, 12, 34, 56);
     render(
-      <MessageBlockMenuActions
+      <MessageBlockMenuActions sheet
         message={{
           id: "a-created-at",
           role: "assistant",
@@ -805,7 +805,7 @@ describe("MessageBubble", () => {
       />,
     );
 
-    const time = openTimeDetails(createdAt).querySelector("[data-message-timestamp]");
+    const time = screen.getByRole("time");
     expect(time).toHaveTextContent(formatMessageEndTime(createdAt));
     expect(time).toHaveAttribute("dateTime", new Date(createdAt).toISOString());
     expect(time).not.toHaveAttribute("data-assistant-completed-at");
@@ -814,7 +814,7 @@ describe("MessageBubble", () => {
   it("renders the creation time for user messages", () => {
     const createdAt = Date.UTC(2026, 6, 25, 12, 34, 56);
     render(
-      <MessageBlockMenuActions
+      <MessageBlockMenuActions sheet
         message={{
           id: "u-created-at",
           role: "user",
@@ -824,7 +824,8 @@ describe("MessageBubble", () => {
       />,
     );
 
-    const time = openTimeDetails(createdAt).querySelector("[data-message-created-at]");
+    const time = screen.getByRole("time");
+    expect(time).toHaveAttribute("data-message-created-at");
     expect(time).toHaveTextContent(formatMessageEndTime(createdAt));
     expect(time).toHaveAttribute("dateTime", new Date(createdAt).toISOString());
     expect(time).not.toHaveAttribute("title");
@@ -836,7 +837,7 @@ describe("MessageBubble", () => {
     const createdAt = Date.UTC(2026, 6, 25, 12, 34, 0);
     const latencyMs = 13_000;
     render(
-      <MessageBlockMenuActions
+      <MessageBlockMenuActions sheet
         message={{
           id: "a-replayed-completion",
           role: "assistant",
@@ -847,11 +848,9 @@ describe("MessageBubble", () => {
       />,
     );
 
-    const details = openTimeDetails(createdAt);
-    expect(details.querySelector("[data-assistant-completed-at]")).not.toBeInTheDocument();
-    expect(details.querySelector("[data-message-timestamp]")).toHaveTextContent(
-      formatMessageEndTime(createdAt),
-    );
+    const time = screen.getByRole("time");
+    expect(time).not.toHaveAttribute("data-assistant-completed-at");
+    expect(time).toHaveTextContent(formatMessageEndTime(createdAt));
   });
 
   it("preserves punctuation-separated session links and capability mentions in sent messages", () => {
@@ -917,7 +916,7 @@ describe("MessageBubble", () => {
 
     render(<MessageBlockMenuActions message={message} />);
 
-    const details = openTimeDetails(completedAt);
+    const details = openSourceDetails("drink water");
     const timestamp = details.querySelector("[data-message-timestamp]")!;
     const automation = details.querySelector("[data-automation-trigger]")!;
     expect(timestamp).toHaveTextContent(formatMessageEndTime(completedAt));
@@ -1179,11 +1178,11 @@ describe("MessageBubble", () => {
 
   it("keeps timestamp metadata available for a media-only message", () => {
     const createdAt = Date.UTC(2026, 6, 25, 12, 34, 56);
-    render(<MessageBlockMenuActions
+    render(<MessageBlockMenuActions sheet
       message={{ id: "a-file", role: "assistant", content: "", createdAt,
         media: [{ kind: "file", name: "report.csv", url: "/api/media/report.csv" }] }}
     />);
-    const time = within(openTimeDetails(createdAt)).getByRole("time");
+    const time = screen.getByRole("time");
     expect(time).toHaveTextContent(formatMessageEndTime(createdAt));
     expect(time).toHaveAttribute("datetime", new Date(createdAt).toISOString());
   });

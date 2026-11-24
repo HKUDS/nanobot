@@ -93,6 +93,11 @@ for (const theme of ["light", "dark"] as const) {
           expect(Math.abs(firstLineOffset)).toBeLessThan(1);
           expect(Math.abs(timestampIndent)).toBeLessThan(1);
         }
+        const time = side.getByRole("time");
+        await time.hover();
+        await expect(page.getByRole("tooltip")).toBeVisible();
+        await time.click();
+        await expect(page.getByRole("dialog")).toHaveCount(0);
         await copy.hover();
       }
       await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);

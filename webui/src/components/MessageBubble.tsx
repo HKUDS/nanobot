@@ -213,7 +213,7 @@ export function MessageBlockMenuActions({
     ) : null}
   </>;
   const fallback = message.responseSources?.find((source) => source.fallback);
-  const detailsLabel = fmtDateTime(timestamp) || automationSourceLabel
+  const detailsLabel = automationSourceLabel
     || (fallback ? t("message.fallbackResponse", { preset: fallback.preset }) : "");
   const activityAction = activity && (
     <button type="button" data-message-block-activity-action onClick={activity.onToggle}
@@ -241,20 +241,31 @@ export function MessageBlockMenuActions({
         ) : null}
         {activityAction && !sheet ? <HoverHint content={activity.label}>{activityAction}</HoverHint> : activityAction}
       </div>
-      {sheet ? details : detailsLabel ? (
-        <Popover open={detailsOpen} onOpenChange={setDetailsOpen}>
-          <HoverHint content={detailsLabel} enabled={!detailsOpen}>
-            <PopoverTrigger asChild>
-              <button type="button" aria-label={detailsLabel}
-                className="ms-[calc((var(--message-block-action-width)-0.875rem)/2)] rounded-mark text-start text-[10px] leading-4 tabular-nums text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                {timestampLabel ? <time data-message-hover-time dateTime={new Date(timestamp).toISOString()}>{formatMessageHoverTime(timestamp)}</time>
-                  : <Info className="h-3.5 w-3.5" aria-hidden />}
-              </button>
-            </PopoverTrigger>
-          </HoverHint>
-          <PopoverContent side="bottom" collisionPadding={12} className="w-max max-w-64 [--message-block-control-size:1.75rem]">{details}</PopoverContent>
-        </Popover>
-      ) : null}
+      {sheet ? details : (timestampLabel || detailsLabel) && (
+        <div className="ms-[calc((var(--message-block-action-width)-0.875rem)/2)] flex items-center gap-1 text-muted-foreground">
+          {timestampLabel && (
+            <HoverHint content={fmtDateTime(timestamp)}>
+              <time data-message-hover-time dateTime={new Date(timestamp).toISOString()} tabIndex={0}
+                className="rounded-mark text-[10px] leading-4 tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {formatMessageHoverTime(timestamp)}
+              </time>
+            </HoverHint>
+          )}
+          {detailsLabel && (
+            <Popover open={detailsOpen} onOpenChange={setDetailsOpen}>
+              <HoverHint content={detailsLabel} enabled={!detailsOpen}>
+                <PopoverTrigger asChild>
+                  <button type="button" aria-label={detailsLabel}
+                    className="rounded-mark hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </button>
+                </PopoverTrigger>
+              </HoverHint>
+              <PopoverContent side="bottom" collisionPadding={12} className="w-max max-w-64 [--message-block-control-size:1.75rem]">{details}</PopoverContent>
+            </Popover>
+          )}
+        </div>
+      )}
     </div>
   );
 }

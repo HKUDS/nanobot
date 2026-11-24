@@ -7,7 +7,7 @@ vi.mock("@/components/MarkdownText", () => ({ MarkdownText: ({ children }: { chi
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("desktop hover timestamp", () => {
-  it("uses user creation / assistant completion time and names the details button with the full date", async () => {
+  it("shows user creation / assistant completion time without opening a panel on click", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 8, 24, 16));
     const createdAt = new Date(2026, 8, 23, 12).getTime();
@@ -21,15 +21,11 @@ describe("desktop hover timestamp", () => {
     expect(times[0]).toHaveTextContent("9/23");
     expect(times[1]).toHaveTextContent("14:32");
     expect(times[1]).toHaveAttribute("datetime", new Date(completedAt).toISOString());
-    const button = screen.getByRole("button", { name: fmtDateTime(completedAt) });
-    expect(button).toContainElement(times[1]);
-    fireEvent.focus(button);
+    fireEvent.click(times[1]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(times[1]).toHaveAttribute("tabindex", "0");
+    fireEvent.focus(times[1]);
     expect(await screen.findByRole("tooltip")).toHaveTextContent(fmtDateTime(completedAt));
-    expect(button).not.toHaveAttribute("title");
-    fireEvent.click(button);
-    const details = await screen.findByRole("dialog");
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    expect(within(details).getByRole("time")).toHaveAttribute("datetime", new Date(completedAt).toISOString());
   });
 
   it("refreshes the short date when hovering again after midnight", () => {

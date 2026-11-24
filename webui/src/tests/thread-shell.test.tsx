@@ -1944,7 +1944,7 @@ describe("ThreadShell", () => {
     });
     expect(screen.getByText("Default")).toBeInTheDocument();
     const actions = await findSideActions("Reply from the actual provider");
-    fireEvent.click(actions.querySelector("time[data-message-hover-time]")!);
+    fireEvent.click(within(actions).getByRole("button", { name: /fallback model.*backup/i }));
     expect(await screen.findByText("backup")).toBeInTheDocument();
   });
 
