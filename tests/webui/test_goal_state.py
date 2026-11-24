@@ -65,7 +65,7 @@ def test_goal_state_ws_blob_preserves_blocked_state_for_host_attention():
     }
 
 
-def test_goal_state_ws_truncation_is_display_only_for_legacy_json():
+def test_goal_state_ws_preserves_full_text_from_legacy_json():
     objective = "x" * 598 + "  " + "finish the objective"
     summary = "s" * 130
     recap = "r" * 250
@@ -80,9 +80,9 @@ def test_goal_state_ws_truncation_is_display_only_for_legacy_json():
     assert goal_state_ws_blob(metadata) == {
         "active": True,
         "status": "active",
-        "objective": "x" * 598 + "…",
-        "ui_summary": summary[:120],
-        "recap": recap[:240],
+        "objective": objective,
+        "ui_summary": summary,
+        "recap": recap,
     }
     assert metadata["thread_goal"] == legacy_goal
     assert goal_state_runtime_lines(metadata) == [
@@ -100,7 +100,7 @@ async def test_long_goal_uses_same_display_snapshot_for_live_end_and_reconnect(t
     key = "websocket:goal-view"
     objective = "x" * 700
     metadata = {GOAL_STATE_KEY: {"status": "active", "objective": objective}}
-    expected = {"active": True, "status": "active", "objective": "x" * 600 + "…"}
+    expected = {"active": True, "status": "active", "objective": objective}
     try:
         await sessions.state.get(key)
         await sessions.state.update_metadata(key, metadata)
