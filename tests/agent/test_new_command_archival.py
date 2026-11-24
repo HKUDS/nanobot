@@ -67,7 +67,7 @@ class TestNewCommandArchival:
         response = await loop._process_message(new_msg, runtime=expected_runtime)
 
         assert response is not None
-        assert response.event.parts[0]["key"] == "new.done"
+        assert response.event.outcome == "session_reset"
 
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(session_after.messages) == 0

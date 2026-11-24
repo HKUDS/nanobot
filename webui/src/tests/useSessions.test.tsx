@@ -435,11 +435,31 @@ describe("useSessions", () => {
     expect(result.current.sessions[0]?.workspaceScope).toEqual(workspaceScope);
   });
 
+  it.each(["host", "project", "access"])("does not reuse a failed draft after a %s change", async (change) => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    const local = fakeClient();
+    const remote = fakeClient();
+    local.newChat.mockResolvedValueOnce("failed").mockResolvedValueOnce("other-scope");
+    remote.newChat.mockResolvedValue("other-host");
+    local.sendSystemCommand.mockRejectedValue(new Error("Rejected"));
+    remote.sendSystemCommand.mockRejectedValue(new Error("Rejected"));
+    let owner = local;
+    const { result, rerender } = renderHook(() => useSessions(), { wrapper: (props) => wrap(owner)(props) });
+    const scope = { project_path: "/project", access_mode: "restricted" as const };
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await expect(result.current.createChat(scope, "fast")).rejects.toThrow("Rejected");
+    if (change === "host") { owner = remote; rerender(); }
+    const nextScope = change === "project" ? { ...scope, project_path: "/another" }
+      : change === "access" ? { ...scope, access_mode: "full" as const } : scope;
+    await expect(result.current.createChat(nextScope, "fast")).rejects.toThrow("Rejected");
+    expect(owner.sendSystemCommand).toHaveBeenLastCalledWith(change === "host" ? "other-host" : "other-scope", "/model fast");
+  });
+
   it("stores the confirmed model preset when creating a chat", async () => {
     vi.mocked(api.listSessions).mockResolvedValue([]);
     const client = fakeClient();
     client.newChat.mockResolvedValue("chat-fast");
-    client.sendSystemCommand.mockResolvedValue({ command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "fast" } }] } });
+    client.sendSystemCommand.mockResolvedValue({ command_result: { command: "/model", switched_preset: "fast" } });
 
     const { result } = renderHook(() => useSessions(), {
       wrapper: wrap(client),

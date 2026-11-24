@@ -119,7 +119,7 @@ export interface UIMessage {
   content: string;
   /** Literal output bypasses Markdown and content-based reply recognition. */
   renderAs?: "text";
-  commandResult?: unknown;
+  sideChannel?: true;
   /** Invocation-time snapshots, never resolved from today's model presets. */
   responseSources?: ResponseSource[];
   /** Stable input identity, independent of its arrival or execution turn. */
@@ -1611,7 +1611,7 @@ export type InboundEvent =
       chat_id: string;
       text: string;
       side_channel?: true;
-      command_result?: unknown;
+      command_result?: { command: "/model"; switched_preset: string };
       render_as?: "text";
       reply_to?: string;
       media?: string[];

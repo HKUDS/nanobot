@@ -14,11 +14,12 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket.runtime import WebSocketChannel
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.runtime_context import public_history_message
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import clear_websocket_turns
+from nanobot.webui.session_list_index import list_webui_sessions
 
 
 class _Provider(LLMProvider):
@@ -53,11 +54,11 @@ class _Runtime:
     connection: _Connection
     provider: _Provider
 
-    async def message(self, chat_id: str, text: str = "hello") -> InboundMessage:
+    async def message(self, chat_id: str, text: str = "hello", *, turn_id: str | None = None) -> InboundMessage:
         await self.channel._dispatch_envelope(
             self.connection,
             "webui-client",
-            {"type": "message", "chat_id": chat_id, "content": text, "webui": True},
+            {"type": "message", "chat_id": chat_id, "content": text, "webui": True, "turn_id": turn_id},
         )
         return await self.bus.consume_inbound()
 
@@ -79,7 +80,7 @@ async def runtime(tmp_path: Path) -> AsyncIterator[_Runtime]:
     provider = _Provider()
     loop = AgentLoop(
         bus=bus, provider=provider, workspace=workspace,
-        session_manager=sessions,
+        session_manager=sessions, model_presets={"default": ModelPresetConfig(model=provider.get_default_model())},
     )
     manager = ChannelManager(
         config, bus, session_manager=sessions, webui_static_dist=False,
@@ -112,6 +113,40 @@ async def test_webui_admission_executes_with_the_routed_session(runtime: _Runtim
                 if record["role"] == "user"] == ["hello"]
         assert session.metadata["webui"] is True
     assert runtime.provider.calls == 2
+
+
+async def test_preset_draft_appears_in_history_only_after_the_first_prompt(runtime: _Runtime) -> None:
+    async def send(text: str, turn_id: str) -> list[str]:
+        message = await runtime.message("draft", text, turn_id=turn_id)
+        await runtime.execute(message)
+        return [row["key"] for row in list_webui_sessions(runtime.sessions)]
+
+    assert await send("/model missing", "webui-system:attempt") == []
+    assert await send("/model default", "webui-system:retry") == []
+    assert runtime.provider.calls == 0
+    assert await send("hello", "first-prompt") == ["websocket:draft"]
+    assert runtime.provider.calls == 1
+    assert await send("/model missing", "webui-system:existing") == ["websocket:draft"]
+
+
+async def test_existing_session_preview_ignores_picker_but_includes_typed_model_command(runtime: _Runtime) -> None:
+    chat = "existing"
+    key = f"websocket:{chat}"
+    await runtime.sessions.state.get(key)
+
+    async def switch(turn_id: str) -> str:
+        msg = await runtime.message(chat, "/model default", turn_id=turn_id)
+        await runtime.execute(msg)
+        while runtime.bus.outbound_size:
+            await runtime.channel.send(await runtime.bus.consume_outbound())
+        assert any(event.get("turn_id") == turn_id and event.get("command_result") == {
+            "command": "/model", "switched_preset": "default",
+        } for event in runtime.connection.sent), runtime.connection.sent
+        row, = list_webui_sessions(runtime.sessions)
+        return row["preview"]
+
+    assert await switch("webui-system:picker") == ""
+    assert await switch("typed") == "/model default"
 
 
 @pytest.mark.parametrize("operation", ["reset", "delete"])

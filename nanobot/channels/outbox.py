@@ -7,7 +7,7 @@ import time
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Literal
 
@@ -67,7 +67,8 @@ class DeliveryOutbox:
         if msg.delivery_id is not None:
             return
         delivery_id = uuid.uuid4().hex
-        data = asdict(msg)
+        data = asdict(replace(msg, sent=None))
+        data.pop("sent")  # A send acknowledgement belongs only to the current process.
         data["delivery_id"] = delivery_id
         # Cron prompt audit data is already in the run record, not routing context.
         data["metadata"] = {key: value for key, value in msg.metadata.items()

@@ -71,9 +71,9 @@ export function historyContentSnapshot(messages: UIMessage[], forkBoundaryMessag
   return { forkBoundary: forkBoundaryMessageCount !== null && forkBoundaryMessageCount > 0,
     messages: filterThreadDisplayUnits(projectActivityTimeline(projectWebuiThreadMessages(messages)))
     .flatMap((unit) => unit.type === "message" ? [unit.message] : unit.messages)
-    .map(({ role, kind, renderAs, commandResult, activityKind, content, reasoning, images, media, traces,
+    .map(({ role, kind, renderAs, sideChannel, activityKind, content, reasoning, images, media, traces,
       toolEvents, fileEdits, traceDetail, compaction, cliApps, mcpPresets, sessionMentions, sessionMessage }) =>
-      ({ role, kind, renderAs, commandResult, activityKind, content, reasoning, images, media, traces,
+      ({ role, kind, renderAs, sideChannel, activityKind, content, reasoning, images, media, traces,
         toolEvents, fileEdits, traceDetail, compaction, cliApps, mcpPresets, sessionMentions, sessionMessage })) };
 }
 

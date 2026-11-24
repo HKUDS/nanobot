@@ -13,7 +13,7 @@ from loguru import logger
 
 from nanobot import __version__
 from nanobot.agent.model_presets import UnknownModelPresetError
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import INBOUND_META_MODEL_CONTROL, OutboundMessage
 from nanobot.bus.outbound_events import CommandLine
 from nanobot.command.results import command_reply, line, render
 from nanobot.command.router import CommandContext, CommandRouter
@@ -30,6 +30,7 @@ from nanobot.utils.workspace_prompts import initialize_workspace_prompt
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
 
+_RESTART_ACK_TIMEOUT_S = 10.0
 USER_SHELL_COMMAND = "/__shell"
 # Both graphical and terminal chat composers provide the $ skill picker.
 CHAT_UI_COMMAND_REPLACEMENTS = {"/skill": "$"}
@@ -91,20 +92,20 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     msg = ctx.msg
     await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
-    return command_reply(msg, "/stop", line("stop.done"))
+    return command_reply(msg, "/stop", line("stop.done"), outcome="stopped")
 
 
 async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
     """Restart the process."""
     msg = ctx.msg
-    set_restart_notice_to_env(
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-        metadata=dict(msg.metadata or {}),
-    )
 
-    async def _do_restart():
-        await asyncio.sleep(1)
+    def _do_restart(confirmed: bool) -> None:
+        if deadline.cancelled():
+            return
+        deadline.cancel()
+        if not confirmed:
+            logger.warning("Restarting without send confirmation after {}s", _RESTART_ACK_TIMEOUT_S)
+        set_restart_notice_to_env(channel=msg.channel, chat_id=msg.chat_id, metadata=msg.metadata)
         argv = [sys.executable, "-m", "nanobot"] + sys.argv[1:]
         mode = ctx.loop.restart_mode or "auto"
         if mode == "auto":
@@ -119,8 +120,16 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
             subprocess.Popen(argv, **kwargs)
         os._exit(0)
 
-    asyncio.create_task(_do_restart())
-    return command_reply(msg, "/restart", line("restart.started"))
+    def on_confirmation(sent: asyncio.Future[None]) -> None:
+        if not sent.cancelled() and sent.exception() is None:
+            _do_restart(True)
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.call_later(_RESTART_ACK_TIMEOUT_S, _do_restart, False)
+    reply = command_reply(msg, "/restart", line("restart.started"))
+    reply.sent = loop.create_future()
+    reply.sent.add_done_callback(on_confirmation)
+    return reply
 
 
 async def cmd_status(ctx: CommandContext) -> OutboundMessage:
@@ -191,7 +200,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
 
     await shield_and_drain(reset_and_schedule_archive())
     ctx.record_exchange = False
-    return command_reply(ctx.msg, "/new", line("new.done"))
+    return command_reply(ctx.msg, "/new", line("new.done"), outcome="session_reset")
 
 
 async def cmd_compact(ctx: CommandContext) -> OutboundMessage | None:
@@ -234,10 +243,13 @@ def _command_error_message(exc: Exception) -> str:
 
 
 async def cmd_model(ctx: CommandContext) -> OutboundMessage:
+    if ctx.msg.metadata.get(INBOUND_META_MODEL_CONTROL) is True:
+        ctx.record_exchange = False
     loop = ctx.loop
     name = ctx.args.strip()
     available = line("model.options", names=_format_preset_names(_model_preset_names(loop)))
     parts: list[str | CommandLine]
+    switched_preset = None
     if not name:
         session = ctx.session or await loop.sessions.state.get(ctx.key)
         try:
@@ -256,10 +268,11 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
         except (KeyError, ValueError) as exc:
             parts = [line("model.failed", error=_command_error_message(exc)), "", available]
         else:
-            parts = [line("model.switched", preset=runtime.model_preset or "default"), line("model.scope"),
+            switched_preset = runtime.model_preset or "default"
+            parts = [line("model.switched", preset=switched_preset), line("model.scope"),
                      line("model.name", model=runtime.model), line("model.window", tokens=runtime.context_window_tokens),
                      line("model.max", tokens=runtime.generation.max_tokens)]
-    return command_reply(ctx.msg, "/model", *parts)
+    return command_reply(ctx.msg, "/model", *parts, switched_preset=switched_preset)
 
 
 async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
@@ -512,6 +525,8 @@ def _help_parts(specs: tuple[BuiltinCommandSpec, ...]) -> list[CommandLine | str
 
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     specs = ctx.loop.commands.specs
+    if ctx.msg.channel == "websocket" and ctx.msg.metadata.get("webui") is True:
+        specs = tuple(spec for spec in specs if spec.command not in CHAT_UI_COMMAND_REPLACEMENTS)
     return command_reply(ctx.msg, "/help", *_help_parts(specs))
 
 

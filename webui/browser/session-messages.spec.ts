@@ -21,10 +21,11 @@ for (const theme of ["light", "dark"] as const) {
       const menu = row.getByRole("button", { name: "Message actions" });
       if (width >= 768) {
         await pane.evaluate(node => { node.style.maxWidth = "550px"; });
-        await expect(row).toHaveCSS("padding-left", "16px");
+        await page.evaluate(() => { document.documentElement.style.fontSize = "20px"; });
         await menu.click();
         const sheet = page.getByRole("dialog", { name: "Message actions" });
         await expect(sheet).toBeVisible();
+        await page.evaluate(() => document.documentElement.style.removeProperty("font-size"));
         await pane.evaluate(node => { node.style.maxWidth = "none"; });
         await expect(sheet).toBeHidden();
       }

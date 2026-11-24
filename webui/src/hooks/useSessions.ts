@@ -43,6 +43,9 @@ export function useSessions(): {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef(token);
+  const failedDraftRef = useRef<{
+    client: typeof client; scope?: WorkspaceScopePayload | null; chatId: string;
+  } | null>(null);
   const optimisticKeysRef = useRef<Set<string>>(new Set());
   const refreshPendingRef = useRef(false);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
@@ -121,8 +124,17 @@ export function useSessions(): {
     workspaceScope?: WorkspaceScopePayload | null,
     modelPreset?: string | null,
   ): Promise<string> => {
-    const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
-    const preset = modelPreset ? await switchModelPreset(client, chatId, modelPreset) : null;
+    // Claim the draft for one retry; a concurrent creation must get its own ID.
+    const draft = failedDraftRef.current;
+    failedDraftRef.current = null;
+    const chatId = modelPreset && draft?.client === client
+      && draft.scope?.project_path === workspaceScope?.project_path
+      && draft.scope?.access_mode === workspaceScope?.access_mode
+      ? draft.chatId : await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
+    const preset = modelPreset ? await switchModelPreset(client, chatId, modelPreset).catch((error: unknown) => {
+      if (client.status === "open") failedDraftRef.current = { client, scope: workspaceScope, chatId };
+      throw error;
+    }) : null;
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
     // Optimistic insert; a subsequent refresh will replace it with the

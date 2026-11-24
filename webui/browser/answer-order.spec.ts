@@ -181,6 +181,7 @@ test.describe("answer order", () => {
       { event: "stream_end", ...base, stream_id: "empty", turn_seq: 1, text: "", resuming: true },
     ];
     const { emit, errors } = await openThread(page, history);
+    await page.evaluate(() => { document.documentElement.style.fontSize = "20px"; });
     const answer = page.getByRole("paragraph").filter({ hasText: /^Previous automation answer$/ });
     await expect(answer).toBeVisible();
     const answerLeft = (await answer.boundingBox())!.x;

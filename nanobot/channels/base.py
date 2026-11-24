@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from loguru import logger
 
@@ -73,8 +73,8 @@ class BaseChannel(ABC):
             self.logger.exception("Audio transcription failed")
             return ""
 
-    async def send_command_result(self, msg: OutboundMessage) -> None:
-        """Present a command receipt. Text channels use the request locale by default."""
+    async def send_command_result(self, msg: OutboundMessage) -> Literal["queued"] | None:
+        """Present a command receipt. Buffered adapters return 'queued' and confirm after writing."""
         await self.send(as_text_message(msg))
 
     async def login(self, force: bool = False) -> bool:

@@ -260,12 +260,15 @@ async def test_legacy_broadcast_has_independent_targets_and_no_foreign_thread_me
 async def test_queue_acceptance_survives_restart_but_inflight_is_unknown(tmp_path):
     manager = make_manager(tmp_path)
     pending, inflight = message(), message(content="second")
+    pending.sent = asyncio.get_running_loop().create_future()
     inflight.chat_id = "other-destination"
     await manager.bus.publish_outbound(pending)
     await manager.bus.publish_outbound(inflight)
     assert manager._outbox.claim(inflight)
     restarted = DeliveryOutbox(manager._outbox.path)
-    assert [msg.delivery_id for msg in restarted.ready()] == [pending.delivery_id]
+    [restored] = restarted.ready()
+    assert restored.delivery_id == pending.delivery_id
+    assert restored.sent is None and not pending.sent.done()
     assert [row["status"] for row in rows(restarted)] == ["pending", "unknown"]
 
 

@@ -20,7 +20,7 @@ export function FileEditPathFixture() {
           approximate: false, binary: false, status: "done", pending: false,
           diff: { format: "unified", text: "--- a/file\n+++ b/file\n@@ -1 +1 @@\n-old\n+new\n" },
         };
-        return <FileEditGroup key={path} edits={[edit]} displayMode="collapsed_diff" onOpenFilePreview={setOpened} />;
+        return <FileEditGroup key={path} edits={[edit]} displayMode="collapsed_diff" onOpenFilePreview={index === 1 ? undefined : setOpened} />;
       })}
     </section>
     <output aria-label="Opened file">{opened}</output>

@@ -1,4 +1,6 @@
+import asyncio
 import json
+import re
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,12 +40,14 @@ def _channel(tmp_path: Path, *, allowed: bool = True, sessions=None):
     return sessions, bus, channel, connection
 
 
-async def _acknowledge_restart(message, monkeypatch):
-    with monkeypatch.context() as patch:
-        patch.setattr("nanobot.command.builtin.asyncio", SimpleNamespace(create_task=lambda coro: coro.close()))
-        return await cmd_restart(CommandContext(
-            msg=message, session=None, key=message.session_key, raw=message.content, loop=MagicMock(),
-        ))
+async def _send_restart_acknowledgement(channel, message, monkeypatch):
+    restarted = asyncio.Event()
+    monkeypatch.setattr("nanobot.command.builtin.os.execv", lambda *_: restarted.set())
+    reply = await cmd_restart(CommandContext(
+        msg=message, session=None, key=message.session_key, raw=message.content, loop=MagicMock(restart_mode="exec"),
+    ))
+    await ChannelManager._send_once(channel, reply)
+    await asyncio.wait_for(restarted.wait(), 2)
 
 
 @pytest.mark.parametrize("scenario", ["typed", "settings", "reset", "busy", "reset_during_retry"])
@@ -59,7 +63,7 @@ async def test_restart_completion_after_gateway_start(history, tmp_path, monkeyp
         "type": "message", "chat_id": chat_id, "content": "/restart", "webui": True, "turn_id": turn_id,
     })
     message = bus.publish_inbound.await_args.args[0]
-    await channel.send(await _acknowledge_restart(message, monkeypatch))
+    await _send_restart_acknowledgement(channel, message, monkeypatch)
     await channel._cleanup_connection(connection)
 
     fresh = SessionManager(sessions.workspace)
@@ -116,15 +120,12 @@ async def test_restart_completion_after_gateway_start(history, tmp_path, monkeyp
         assert completed["event"] == "message"
         assert completed["side_channel"] is True
         assert completed["turn_id"] != turn_id
-        assert completed["command_result"]["command"] == "/restart"
-        part, = completed["command_result"]["parts"]
-        assert part["key"] == "restart.elapsed"
-        assert completed["text"] == f"Restart completed in {part['values']['seconds']}s."
+        assert re.fullmatch(r"Restart completed in \d+(?:\.\d+)?s\.", completed["text"])
         replay = [e for e in history.build(message.session_key)["events"] if e["event"] == "message"]
         ack, result = replay
         assert ack["turn_id"] == turn_id
-        assert ack["command_result"]["parts"][0]["key"] == "restart.started"
-        for key in ("turn_id", "turn_seq", "text", "side_channel", "command_result"):
+        assert ack["text"] == "Restarting..."
+        for key in ("turn_id", "turn_seq", "text", "side_channel"):
             assert result[key] == completed[key]
     finally:
         await fresh.state.aclose()
@@ -160,7 +161,7 @@ async def test_settings_restart_does_not_create_or_change_chat_history(history, 
         await channel._dispatch_envelope(connection, "browser", envelope)
         message = bus.publish_inbound.await_args.args[0]
         assert message.metadata[WEBUI_RESTART_CONTROL_METADATA_KEY] is True
-        await channel.send(await _acknowledge_restart(message, monkeypatch))
+        await _send_restart_acknowledgement(channel, message, monkeypatch)
         calls = bus.publish_inbound.await_count
         await channel._dispatch_envelope(connection, "browser", envelope)
         assert bus.publish_inbound.await_count == calls
@@ -184,7 +185,7 @@ async def test_settings_restart_does_not_create_or_change_chat_history(history, 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("text", "turn_id"), [
     ("/restart", "normal-user-turn"),
-    ("/model fast", "webui-system:model-switch"),
+    ("/model fast", "typed-model-switch"),
     ("/restart later", "webui-system:not-a-restart"),
     ("ordinary message", "webui-system:not-a-command"),
 ])

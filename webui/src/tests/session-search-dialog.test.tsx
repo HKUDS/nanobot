@@ -113,11 +113,11 @@ describe("SessionSearchDialog", () => {
     });
     expect(dialog).toHaveClass("max-h-[min(40rem,100%)]");
     expect(screen.getByTestId("session-search-scroll")).toHaveClass("overflow-y-auto");
-    expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
+    expect(screen.getByText("/model fast")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Search" }), {
       target: { value: "model fast" },
     });
-    expect(screen.queryByText("Model chat")).not.toBeInTheDocument();
+    expect(screen.getByText("Model chat")).toBeInTheDocument();
   });
 
   it("finds loaded session handles with or without @ and selects the matching session without requests", () => {
@@ -176,7 +176,7 @@ describe("SessionSearchDialog", () => {
     const cache = new ThreadMessageCache(() => false);
     cache.setLoadedMessages("chat-1", [[{
       id: "answer", role: "assistant", createdAt: 1, renderAs: "text", content: "Model preset `typo` not found.",
-      commandResult: { command: "/model", parts: [{ key: "model.notFound", values: { preset: "typo" } }] },
+      sideChannel: true,
     }]]);
     render(<SessionSearchDialog open sessions={[session(1)]} activeKey={null} loading={false}
       messageCache={cache} onOpenChange={() => {}} onSelect={() => {}} />);

@@ -57,32 +57,17 @@ class TestRestartCommand:
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
-        async def _fast_sleep(_delay: float) -> None:
-            return None
-
-        scheduled: list[asyncio.Task] = []
-
-        def _capture_task(coro):
-            task = asyncio.create_task(coro)
-            scheduled.append(task)
-            return task
-
-        fake_asyncio = SimpleNamespace(
-            sleep=_fast_sleep,
-            create_task=_capture_task,
-        )
-
         with patch.dict(os.environ, {}, clear=False), \
-             patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
              patch("nanobot.command.builtin.os.execv") as mock_execv:
             out = await cmd_restart(ctx)
             assert "Restarting" in message_text(out)
+            mock_execv.assert_not_called()
+            out.confirm_sent()
+            await asyncio.sleep(0)
             assert os.environ.get(RESTART_NOTIFY_CHANNEL_ENV) == "cli"
             assert os.environ.get(RESTART_NOTIFY_CHAT_ID_ENV) == "direct"
             assert os.environ.get(RESTART_STARTED_AT_ENV)
 
-            assert scheduled
-            await scheduled[0]
             mock_execv.assert_called_once()
 
     @pytest.mark.asyncio
@@ -94,23 +79,14 @@ class TestRestartCommand:
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
-        async def _fast_sleep(_delay: float) -> None:
-            return None
-
-        scheduled: list[asyncio.Task] = []
-        fake_asyncio = SimpleNamespace(
-            sleep=_fast_sleep,
-            create_task=lambda coro: scheduled.append(asyncio.create_task(coro)) or scheduled[-1],
-        )
-
-        with patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
+        with patch.dict(os.environ), \
              patch("nanobot.command.builtin.sys.platform", "win32"), \
              patch("nanobot.command.builtin.subprocess.CREATE_NEW_PROCESS_GROUP", 512, create=True), \
              patch("nanobot.command.builtin.subprocess.Popen") as mock_popen, \
              patch("nanobot.command.builtin.os._exit") as mock_exit, \
              patch("nanobot.command.builtin.os.execv") as mock_execv:
-            await cmd_restart(ctx)
-            await scheduled[0]
+            (await cmd_restart(ctx)).confirm_sent()
+            await asyncio.sleep(0)
 
         mock_popen.assert_called_once_with(
             [sys.executable, "-m", "nanobot"] + sys.argv[1:],
@@ -129,21 +105,12 @@ class TestRestartCommand:
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
-        async def _fast_sleep(_delay: float) -> None:
-            return None
-
-        scheduled: list[asyncio.Task] = []
-        fake_asyncio = SimpleNamespace(
-            sleep=_fast_sleep,
-            create_task=lambda coro: scheduled.append(asyncio.create_task(coro)) or scheduled[-1],
-        )
-
-        with patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
+        with patch.dict(os.environ), \
              patch("nanobot.command.builtin.subprocess.Popen") as mock_popen, \
              patch("nanobot.command.builtin.os._exit") as mock_exit, \
              patch("nanobot.command.builtin.os.execv") as mock_execv:
-            await cmd_restart(ctx)
-            await scheduled[0]
+            (await cmd_restart(ctx)).confirm_sent()
+            await asyncio.sleep(0)
 
         mock_exit.assert_called_once_with(0)
         mock_popen.assert_not_called()
@@ -155,24 +122,10 @@ class TestRestartCommand:
         loop.restart_mode = "exec"
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/restart")
 
-        async def _fast_sleep(_delay: float) -> None:
-            return None
-
-        scheduled: list[asyncio.Task] = []
-
-        def _capture_task(coro):
-            task = asyncio.create_task(coro)
-            scheduled.append(task)
-            return task
-
-        fake_asyncio = SimpleNamespace(
-            sleep=_fast_sleep,
-            create_task=_capture_task,
-        )
+        from nanobot.channels.manager import ChannelManager
 
         with patch.object(loop, "_enqueue_session_message", new_callable=MagicMock) as mock_dispatch, \
-             patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
-             patch("nanobot.command.builtin.os.execv"):
+             patch.dict(os.environ), patch("nanobot.command.builtin.os.execv") as mock_execv:
             await bus.publish_inbound(msg)
 
             loop._running = True
@@ -187,8 +140,40 @@ class TestRestartCommand:
 
             mock_dispatch.assert_not_called()
             assert "Restarting" in message_text(out)
-            assert scheduled
-            await scheduled[0]
+            mock_execv.assert_not_called()
+            channel = AsyncMock()
+            channel.send_command_result.return_value = None
+            await ChannelManager._send_once(channel, out)
+            channel.send_command_result.assert_awaited_once_with(out)
+            await asyncio.sleep(0)
+            mock_execv.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", ["disconnected", "cancelled", "failed"])
+    async def test_unconfirmed_restart_falls_back_once(self, monkeypatch, failure):
+        from nanobot.command.builtin import cmd_restart
+        from nanobot.command.router import CommandContext
+
+        loop, _ = _make_loop()
+        loop.restart_mode = "exec"
+        msg = InboundMessage("telegram", "user", "chat", "/restart")
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw=msg.content, loop=loop)
+        restarted = asyncio.Event()
+        monkeypatch.setattr("nanobot.command.builtin._RESTART_ACK_TIMEOUT_S", 0.05)
+        with patch.dict(os.environ), \
+             patch("nanobot.command.builtin.os.execv", side_effect=lambda *_: restarted.set()) as execv:
+            out = await cmd_restart(ctx)
+            assert out.sent is not None
+            if failure == "cancelled":
+                out.sent.cancel()
+            elif failure == "failed":
+                out.sent.set_exception(OSError("send failed"))
+            await asyncio.sleep(0)
+            execv.assert_not_called()
+            await asyncio.wait_for(restarted.wait(), 1)
+            out.confirm_sent()  # A write can finish after the deadline.
+            await asyncio.sleep(0)
+            execv.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_status_intercepted_in_run_loop(self):

@@ -3573,12 +3573,44 @@ async def test_deferred_dream_reply_is_delivered_and_replayed_after_command_turn
     assert ack["turn_id"] == "dream-turn"
     assert completed["text"].startswith("Dream completed")
     assert completed["turn_id"] != ack["turn_id"]
+    assert completed["turn_seq"] == 1
+    assert (chat_id, completed["turn_id"]) not in channel.gateway.transcripts._turn_sequences
     for reply, replay in zip(replies, replayed, strict=True):
         assert reply["side_channel"] is True
-        assert reply["command_result"]["command"] == "/dream"
-        assert reply["command_result"]["parts"]
-        for key in ("turn_id", "turn_seq", "side_channel", "text", "command_result"):
+        for key in ("turn_id", "turn_seq", "side_channel", "text"):
             assert replay[key] == reply[key]
+
+
+@pytest.mark.asyncio
+async def test_restart_waits_for_websocket_confirmation_write(monkeypatch) -> None:
+    from nanobot.channels.manager import ChannelManager
+    from nanobot.command.builtin import cmd_restart
+
+    writing, release, restarted = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def slow_send(raw):
+        assert json.loads(raw)["text"] == "Restarting..."
+        writing.set()
+        await release.wait()
+
+    monkeypatch.setattr("nanobot.command.builtin.os.execv", lambda *_: restarted.set())
+    monkeypatch.setattr("nanobot.command.builtin.set_restart_notice_to_env", lambda **_: None)
+    channel = _ch(MessageBus())
+    socket = AsyncMock()
+    socket.send.side_effect = slow_send
+    channel._attach(socket, "control")
+    msg = InboundMessage("websocket", "user", "control", "/restart")
+    context = CommandContext(msg=msg, session=None, key=msg.session_key, raw=msg.content,
+                             loop=cast(Any, SimpleNamespace(restart_mode="exec")))
+    try:
+        await ChannelManager._send_once(channel, await cmd_restart(context))
+        await asyncio.wait_for(writing.wait(), 2)
+        # The old timer fired even when the writer was still blocked on this frame.
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(restarted.wait(), 1.1)
+    finally:
+        release.set()
+    await asyncio.wait_for(restarted.wait(), 2)
 
 
 @pytest.mark.asyncio

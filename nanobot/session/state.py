@@ -631,10 +631,13 @@ class SessionState:
         *,
         expected_generation: str | None = None,
         validate_existing: Callable[[Mapping[str, Any]], None] | None = None,
+        on_create: Mapping[str, Any] | None = None,
+        remove: tuple[str, ...] = (),
     ) -> tuple[str, bool]:
         """Open one generation and atomically validate and attach admission metadata."""
         values = deepcopy(dict(updates))
-        if _RESERVED_KEYS.intersection(values):
+        initial = deepcopy(dict(on_create or {}))
+        if _RESERVED_KEYS.intersection((*values, *initial, *remove)):
             raise ValueError("turn state must be changed through turn operations")
 
         def open_session() -> tuple[str, bool]:
@@ -646,7 +649,7 @@ class SessionState:
                         raise SessionConflictError("session does not exist")
                     with self._cache_lock:
                         self._retired.discard(key)
-                    session = Session(key=key)
+                    session = Session(key=key, metadata=initial)
                 elif (
                     expected_generation is not None
                     and session.generation != expected_generation
@@ -654,6 +657,8 @@ class SessionState:
                     raise SessionConflictError("session admission belongs to a replaced session")
                 if not created and validate_existing is not None:
                     validate_existing(session.metadata)
+                for name in remove:
+                    session.metadata.pop(name, None)
                 session.metadata.update(values)
                 header_only = session.policy.persist and session.persisted
                 if header_only:

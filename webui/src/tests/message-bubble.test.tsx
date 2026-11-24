@@ -182,7 +182,6 @@ describe("MessageBubble", () => {
 
   it.each(["live", "history"])("keeps %s command receipts in the language they were sent in", async (source) => {
     const event = { event: "message", chat_id: "commands", text: "Switched model preset to `{count}`.\nRaw {preset}", turn_id: "switch", side_channel: true,
-      command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: "{count}" } }, { text: "Raw {preset}" }] },
     } as const;
     const transcript = new ThreadTranscript();
     if (source === "history") {
