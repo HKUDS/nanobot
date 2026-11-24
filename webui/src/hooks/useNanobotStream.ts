@@ -357,14 +357,7 @@ export function useNanobotStream(
       setExecSourceMessages(nextMessages);
       return nextMessages;
     });
-
-    if (!client.getRunState(chatId).active) {
-      transcriptRef.current.projection = {
-        ...transcriptRef.current.projection,
-        suppressUntilTurnEnd: false,
-      };
-    }
-  }, [chatId, client, discardStreamEvents, setMessages]);
+  }, [chatId, discardStreamEvents, setMessages]);
 
   useEffect(() => client.onError(applyStreamError), [applyStreamError, client]);
 
@@ -690,7 +683,7 @@ export function useNanobotStream(
         || ev.event === "stream_end"
       ) setRetryStatus(null);
       if (ev.event === "delta") {
-        if (transcriptRef.current.projection.suppressUntilTurnEnd || transcriptRef.current.represented(ev)) return;
+        if (transcriptRef.current.represented(ev)) return;
         const chunk = typeof ev.text === "string" ? ev.text : "";
         if (!chunk) return;
         enqueueStreamEvent({
@@ -706,7 +699,7 @@ export function useNanobotStream(
       }
 
       if (ev.event === "reasoning_delta") {
-        if (transcriptRef.current.projection.suppressUntilTurnEnd || transcriptRef.current.represented(ev)) return;
+        if (transcriptRef.current.represented(ev)) return;
         const chunk = ev.text;
         if (!chunk) return;
         enqueueStreamEvent({
@@ -721,7 +714,6 @@ export function useNanobotStream(
       if (ev.event === "stream_end") {
         if (transcriptRef.current.represented(ev)) return;
         flushPendingStreamEvents(ev);
-        if (transcriptRef.current.projection.suppressUntilTurnEnd) return;
         if (ev.resuming) {
           return;
         }
@@ -734,7 +726,6 @@ export function useNanobotStream(
       flushPendingStreamEvents();
 
       if (ev.event === "reasoning_end") {
-        if (transcriptRef.current.projection.suppressUntilTurnEnd) return;
         applyProjectionEvent(ev);
         return;
       }

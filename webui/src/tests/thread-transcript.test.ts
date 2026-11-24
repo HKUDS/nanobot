@@ -79,6 +79,22 @@ describe("ThreadTranscript admission", () => {
     }
   });
 
+  it("replays an attachment and its separate answer from a completed stream snapshot", () => {
+    const thread = new ThreadTranscript();
+    const media = { kind: "image" as const, url: "/api/media/route", name: "route.png" };
+    const page = history([
+      input("route", "Send the map and explain where to start."),
+      { ...at("route", 2), event: "message", text: "Route map", media_urls: [media] },
+      { ...at("route", 4), event: "stream_end", stream_id: "directions", text: "Start at the blue square.", text_from_seq: 3 },
+      { ...at("route", 5), event: "turn_end" },
+    ], { completed_turn_ids: ["route"] });
+    expect(thread.accept(page, thread.begin("initial"))).toBe(true);
+    expect(thread.messages.filter((row) => row.role === "assistant")).toMatchObject([
+      { content: "Route map", media: [media] },
+      { content: "Start at the blue square." },
+    ]);
+  });
+
   it("updates a represented live input's final image URL without duplicating it", () => {
     const thread = new ThreadTranscript();
     const first: ThreadProjectionEvent = { ...at("upload", 1), event: "user_message", text: "look", starts_turn: true,
