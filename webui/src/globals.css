@@ -1059,7 +1059,15 @@
 
 .message-side-actions[data-side="left"] {
   right: calc(100% + 0.25rem);
-  max-width: var(--message-actions-width);
+  width: max-content;
+  max-width: calc(var(--message-actions-width) + 0.5rem);
+}
+
+@container thread-viewport (width > 59rem) {
+  .message-side-actions[data-side="left"] {
+    /* Leave the prompt rail and the gap before the reply clear. */
+    max-width: max(calc(var(--message-actions-width) + 0.25rem), calc((100cqw - var(--content-column-width)) / 2 - 4.25rem));
+  }
 }
 
 [data-user-text-bubble] > .message-side-actions,
