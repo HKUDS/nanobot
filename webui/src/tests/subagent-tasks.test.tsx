@@ -621,6 +621,9 @@ describe("session-owned task UI", () => {
     expect(reads).toBe(2);
     emitTask(task({ revision: 4, iteration: 4 }));
     await waitFor(() => expect(reads).toBe(3));
+    const detail = within(screen.getByRole("dialog"));
+    expect(detail.getByText("Latest child response")).toBeVisible();
+    expect(detail.queryByLabelText("Loading earlier messages…")).not.toBeInTheDocument();
     const oldSignal = readSignals.at(-1);
     view.rerender(layout({ historyEnabled: true, sessionKey: "websocket:b" }));
     expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveAttribute("aria-expanded", "false");
