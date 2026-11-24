@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import "./toast.css";
 
 const TOAST_NOTICE_MS = 3_000;
@@ -46,7 +47,9 @@ const ToastHostContext = createContext<{ localPortal: HTMLElement | null; unavai
 const ThreadToastEntries = createContext<ReactNode>(null);
 
 function ToastViewport({ children, local = false }: { children: ReactNode; local?: boolean }) {
-  const [unavailable, setUnavailable] = useState(false);
+  const threadVisible = useThreadVisibility();
+  const [hostHidden, setHostHidden] = useState(false);
+  const unavailable = hostHidden || (local && !threadVisible);
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const host = useMemo(() => ({ localPortal: local ? viewport : null, unavailable }), [local, viewport, unavailable]);
   useLayoutEffect(() => {
@@ -54,7 +57,7 @@ function ToastViewport({ children, local = false }: { children: ReactNode; local
     if (!viewport) return;
     for (let node: HTMLElement | null = viewport; node; node = node.parentElement) visibilityTree.push(node);
     // Radix dialogs/sheets hide the surrounding tree; inactive remote hosts are inert.
-    const update = () => setUnavailable(document.visibilityState === "hidden" || visibilityTree.some((node) => (
+    const update = () => setHostHidden(document.visibilityState === "hidden" || visibilityTree.some((node) => (
       node.getAttribute("aria-hidden") === "true" || node.hasAttribute("inert")
     )));
     const observer = new MutationObserver(update);
