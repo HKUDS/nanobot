@@ -12,6 +12,7 @@ import { sameHistoryRowIdentity, type HistoryRowIdentity, type HistoryRowSource 
 import { ThreadDivider } from "@/components/thread/ThreadDivider";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useFloatingPortal } from "@/components/ui/floating-portal";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { leadingDisplayNoopCount, projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
@@ -444,6 +445,7 @@ function MessageBlockMenu({
   activity,
 }: MessageBlockMenuProps) {
   const { t } = useTranslation();
+  const portal = useFloatingPortal();
   const label = t("message.actions");
   const actions = <MessageBlockMenuActions
     message={message}
@@ -462,7 +464,8 @@ function MessageBlockMenu({
             <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} aria-hidden />
           </button>
         </DialogTrigger>
-        <DialogContent placement="bottom" aria-describedby={undefined}
+        <DialogContent placement="bottom" portalContainer={portal} aria-describedby={undefined}
+          overlayClassName={portal ? "pointer-events-auto bg-black/25 backdrop-blur-[8px]" : undefined}
           data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
           className="gap-2 p-4 pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] outline-none"
           onCloseAutoFocus={(event) => { if (activity?.expanded) event.preventDefault(); }}>
