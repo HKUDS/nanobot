@@ -97,7 +97,6 @@ def render_notes(root: Path, *, source: str, version: str) -> str:
 def plan(root: Path, *, source: str, base: str, channel: str, sequence: int, scheduled: bool) -> dict[str, str]:
     if not re.fullmatch(r"[0-9a-f]{40}", source):
         raise ValueError("Use an exact full source commit SHA")
-    # Both channels require a final base. Keep the candidate workflow's existing sequence.
     parsed = Version(release_version(base))
     if parsed.is_prerelease or parsed.is_postrelease or sequence < 1:
         raise ValueError("Use a final base and a positive candidate sequence")

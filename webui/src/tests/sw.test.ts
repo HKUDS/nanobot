@@ -533,8 +533,6 @@ describe("service worker", () => {
     await sw.fire("fetch", onlineEvent);
     const onlineResponse = (await onlineEvent.respondWith.mock.calls[0][0]) as Response;
     expect(await onlineResponse.text()).toContain("assets/index-v3.js");
-    // The prune is fire-and-forget; give its microtasks a chance to settle.
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v1.js`)).toBe(false);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v2.js`)).toBe(false);

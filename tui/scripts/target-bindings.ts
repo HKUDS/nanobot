@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MPL-2.0
-// Target-specific replacement for resvg-js 2.6.2's generated binding loader.
 import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
 import type { BunPlugin } from "bun"

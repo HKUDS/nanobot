@@ -99,8 +99,7 @@ class Nanobot:
         """Create a Nanobot instance from a config file.
 
         Args:
-            config_path: Path to ``config.json``.  Defaults to
-                ``~/.nanobot/config.json``.
+            config_path: Path to ``config.json``. Defaults to the active instance's config.
             workspace: Override the workspace directory from config.
             model: Override the instance default model.
             model_preset: Override the instance default model preset.

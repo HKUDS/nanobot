@@ -28,7 +28,6 @@ interface ThreadMessagesProps {
   afterUserMessage?: (message: UIMessage) => ReactNode;
   afterMessages?: ReactNode;
   temporary?: boolean;
-  /** When true, agent turn still in flight — keeps activity timeline expanded. */
   isStreaming?: boolean;
   activeTurnId?: string | null;
   /** Optimistic or canonical active-turn start, in unix seconds. */

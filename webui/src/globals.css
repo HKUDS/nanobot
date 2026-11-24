@@ -90,7 +90,7 @@
   initial-value: -20%;
 }
 
-/* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
+/* Design tokens based on shadcn/ui's "neutral" palette. */
 @layer base {
   :root {
     color-scheme: light;

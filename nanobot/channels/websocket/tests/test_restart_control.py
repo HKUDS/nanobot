@@ -113,7 +113,7 @@ async def test_restart_completion_after_gateway_start(history, tmp_path, monkeyp
             assert history.read(message.session_key) == []
             return
         completed, = frames
-        assert completed["event"] == "message"  # Not a recovery transition or turn_end.
+        assert completed["event"] == "message"
         assert completed["side_channel"] is True
         assert completed["turn_id"] != turn_id
         assert completed["command_result"]["command"] == "/restart"

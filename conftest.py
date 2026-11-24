@@ -46,8 +46,7 @@ def _isolate_runtime_stores(
     import nanobot.session.location as session_location
     from nanobot.webui import star_prompt
 
-    # A sibling of tmp_path stays outside any test's agent workspace. mkdir is
-    # deferred until a store is used and remains safe for concurrent callers.
+    # Keep lazy per-test stores outside the test workspace.
     data_root = tmp_path_factory.getbasetemp() / "runtime-data" / uuid4().hex
 
     def data_dir() -> Path:

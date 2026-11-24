@@ -262,10 +262,6 @@ def test_deepseek_full_history_body_keeps_reasoning_content_as_array(provider):
 
 
 def test_deepseek_replay_body_keeps_reasoning_content_as_array(provider):
-    # Replay/consolidation fixture: after token consolidation clears
-    # provider_state the next turn converts full history on top of the
-    # replayed prior items. Both replayed and converted reasoning items must
-    # keep list content on the wire.
     _deepseek_provider(provider)
 
     prior_items = [

@@ -1,8 +1,6 @@
 """Pairing store for DM sender approval.
 
-Persistent storage at ``~/.nanobot/pairing.json`` keeps approved senders
-and pending pairing codes per channel.  The store is designed for
-private-assistant scale: small JSON file, simple locking, no external DB.
+Each instance stores approved senders and pending codes per channel in ``pairing.json``.
 """
 
 from __future__ import annotations
@@ -21,9 +19,7 @@ from loguru import logger
 from nanobot.config.paths import get_data_dir
 from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPrivateUsage]
 
-# threading.Lock is used so store functions remain callable from both sync CLI
-# and async channel handlers.  At private-assistant scale (small JSON file,
-# sub-millisecond operations) the brief block is acceptable.
+# Both synchronous CLI calls and async channel handlers use this store.
 _LOCK = threading.Lock()
 _ALPHABET = string.ascii_uppercase + string.digits
 _CODE_LENGTH = 8

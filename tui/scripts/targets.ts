@@ -10,7 +10,7 @@ type TargetSpec = Readonly<{
 
 const MiB = 1024 * 1024
 // Wheels cannot select CPU features: every x64 target uses Bun's baseline runtime.
-// Unmeasured arm64/macOS targets retain the existing 150 MiB archive limit.
+// Unmeasured arm64/macOS targets retain the 150 MiB executable limit.
 const targets = {
   "darwin-arm64": {
     platform: "darwin", bunTarget: "bun-darwin-arm64", executableBudgetBytes: 150 * MiB,

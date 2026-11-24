@@ -923,8 +923,7 @@ class SignalChannel(BaseChannel):
         if len(buffer) <= 1:
             return ""
 
-        # Format all messages except the last one (which is the current message)
-        # We want to show context BEFORE the mention
+        # The last buffered message is the mention itself, not its context.
         context_messages = list(buffer)[:-1]
 
         lines: list[str] = []
