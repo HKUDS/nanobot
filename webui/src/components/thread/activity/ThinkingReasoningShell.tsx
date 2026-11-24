@@ -122,7 +122,7 @@ export function ThinkingReasoningShell({
               <span
                 data-contextual-activity-guide
                 aria-hidden
-                className="pointer-events-none absolute inset-y-1 start-[7px] w-px rounded-full bg-border"
+                className="pointer-events-none absolute inset-y-1 start-[0.4375rem] w-px rounded-full bg-border"
               />
             ) : null}
             <div

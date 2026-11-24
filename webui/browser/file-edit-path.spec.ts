@@ -32,6 +32,11 @@ for (const width of [360, 1024]) {
     expect(tail.left).toBeGreaterThanOrEqual(tail.clipLeft - 1);
     expect(tail.right).toBeLessThanOrEqual(tail.clipRight + 1);
     await page.screenshot({ path: testInfo.outputPath("summary.png") });
+    const marker = page.getByRole("img", { name: "Edited", exact: true }).first();
+    await marker.hover();
+    await expect(page.getByRole("tooltip")).toHaveText("Edited");
+    await references.nth(1).hover();
+    await expect(page.getByRole("tooltip")).toHaveText("src/verify.py");
     await longPath.hover();
     await expect(filename).toHaveCSS("color", "rgb(7, 89, 133)");
     const hint = page.getByRole("tooltip");

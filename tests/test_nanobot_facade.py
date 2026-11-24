@@ -1125,28 +1125,27 @@ async def test_run_rejects_multiple_model_selectors(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_user_hooks_still_fire_alongside_capture(tmp_path):
-    from nanobot.agent.hook import AgentHook, AgentHookContext
+async def test_run_captures_snapshot_before_user_hook(tmp_path):
+    from nanobot.agent.hook import AgentHook, AgentRunHookContext
     from nanobot.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    seen_iterations: list[int] = []
-
     class UserHook(AgentHook):
-        async def after_iteration(self, context: AgentHookContext) -> None:
-            seen_iterations.append(context.iteration)
+        async def after_run(self, context: AgentRunHookContext) -> None:
+            context.messages.clear()
 
     async def fake_process_direct(message, *, session_key, hooks):
-        ctx = AgentHookContext(iteration=7, messages=[])
-        for h in hooks:
-            await h.after_iteration(ctx)
+        ctx = AgentRunHookContext(messages=[{"role": "assistant", "content": "ok"}])
+        for hook in hooks:
+            await hook.after_run(ctx)
+        assert ctx.messages == []
         return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
     bot._loop.process_direct = fake_process_direct
-    await bot.run("x", hooks=[UserHook()])
-    assert seen_iterations == [7]
+    result = await bot.run("x", hooks=[UserHook()])
+    assert result.messages == [{"role": "assistant", "content": "ok"}]
 
 
 @pytest.mark.asyncio
