@@ -251,7 +251,7 @@ class TestRestartCommand:
         assert response is not None
         assert "Model: test-model" in message_text(response)
         assert "Tokens: 0 in / 0 out" in message_text(response)
-        assert "Context: 20500/200000 (10% of input budget)" in message_text(response)
+        assert "Context: ≈20500/200000 (≈10%)" in message_text(response)
         assert "Session: 3 messages" in message_text(response)
         assert "Uptime: 0:02:05" in message_text(response)
         assert "Tasks: 0 active" in message_text(response)
@@ -314,14 +314,15 @@ class TestRestartCommand:
         assert second.usage == LLMUsage.estimated(input_tokens=123, output_tokens=7)
 
     @pytest.mark.parametrize(
-        "estimate_error", [None, RuntimeError("cannot build prompt")], ids=["zero", "error"]
+        "recorded_window, expected", [(204_800, "Context (last request): 80000/204800 (39%)"),
+                                      (None, "Context: unavailable (last recorded request: 80000 tokens)")]
     )
     @pytest.mark.asyncio
-    async def test_status_labels_previous_context_when_estimate_is_unavailable(
-        self, estimate_error: RuntimeError | None
+    async def test_status_uses_request_context_after_model_switch(
+        self, recorded_window: int | None, expected: str
     ):
         loop, _bus = _make_loop()
-        loop.set_runtime_context_window(204_800)
+        loop.set_runtime_context_window(128_000)
         session = Session("telegram:c1")
         session.add_message("user", "Hello")
         usage = LLMUsage.reported(input_tokens=82_000, output_tokens=500)
@@ -329,10 +330,10 @@ class TestRestartCommand:
             usage += LLMUsage.reported(input_tokens=82_000, output_tokens=500)
         usage += LLMUsage.reported(input_tokens=80_000, output_tokens=500)
         session.metadata["_last_usage"] = usage.to_dict()
+        if recorded_window is not None:
+            session.metadata["_last_usage_window"] = recorded_window
         loop.sessions.state.get = AsyncMock(return_value=session)
-        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
-            return_value=(0, "none"), side_effect=estimate_error
-        )
+        loop.consolidator.estimate_session_prompt_tokens = MagicMock(side_effect=RuntimeError("unavailable"))
 
         response = await loop._process_message(
             InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
@@ -340,7 +341,9 @@ class TestRestartCommand:
 
         assert response is not None
         assert "Tokens: 1474000 in / 9000 out" in message_text(response)
-        assert "Context: unavailable (last recorded request: 80000 tokens)" in message_text(response)
+        assert expected in message_text(response)
+        if recorded_window is not None:
+            loop.consolidator.estimate_session_prompt_tokens.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_direct_preserves_render_metadata(self):

@@ -211,7 +211,7 @@ class TestBuildStatusContentWithSearchUsage:
         last_usage=LLMUsage.reported(input_tokens=1000, output_tokens=200),
         context_window_tokens=65536,
         session_msg_count=5,
-        context_tokens_estimate=3000,
+        context_tokens=3000,
     )
 
     def test_no_search_usage_unchanged(self):
