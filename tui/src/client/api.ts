@@ -255,8 +255,9 @@ export async function fetchHistory(
         })
         break
       case "turn_end":
-        if (event.outcome === "failed" && event.failure_kind === "model" && event.failure_error_kind === "empty_final_response") {
-          messages.push({ role: "error", content: emptyFinalResponseLine() })
+        if (event.outcome === "failed" && event.failure_kind === "model") {
+          const notice = emptyFinalResponseLine(event.failure_error_kind)
+          if (notice) messages.push({ role: "error", content: notice })
         }
         stream = null
         lastAnswer = null

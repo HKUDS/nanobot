@@ -2348,6 +2348,10 @@
     "automationTriggered": "Dipicu otomatis"
   },
   "recovery": {
+    "details": "Detail",
+    "restart": "Gateway dimulai ulang sebelum tugas selesai.",
+    "uncertainTool": "Alat mungkin sudah dijalankan.",
+    "interruptedAgain": "Tugas terhenti lagi.",
     "actionFailed": "Pemulihan gagal. Coba lagi.",
     "interrupted": "Tugas terputus",
     "completed": "Tugas selesai",
@@ -2506,6 +2510,7 @@
       "imageInputTitle": "Input gambar dinonaktifkan untuk preset ini",
       "imageRequestRejectedTitle": "Model menolak permintaan yang berisi gambar",
       "imageInputBody": "Permintaan ini berisi gambar. Periksa preset ini atau gunakan preset yang mendukung gambar.",
+      "emptyFinalResponseLength": "Model mencapai batas keluaran sebelum memberikan jawaban akhir.",
       "emptyFinalResponse": "Model tidak memberikan jawaban akhir.",
       "unknownTitle": "Permintaan ke penyedia model gagal",
       "bodyWithAttempt": "Dihentikan setelah {{attempts}} percobaan. Coba lagi nanti atau pilih model lain.",

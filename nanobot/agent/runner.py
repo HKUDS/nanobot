@@ -868,6 +868,7 @@ class AgentRunner:
                     had_injections = True
                     length_recovery_parts.clear()
                     continue
+                failure_error_kind = "empty_final_response_length" if response.finish_reason == "length" else stop_reason
                 break
 
             if length_recovery_parts:
@@ -904,6 +905,7 @@ class AgentRunner:
             if terminal_content is None:
                 if goal_overrun and spec.finalize_on_max_iterations:
                     stop_reason = "empty_final_response"
+                    failure_error_kind = stop_reason
                     error = stop_reason
                 else:
                     terminal_content = self._max_iterations_fallback(spec)
@@ -925,7 +927,7 @@ class AgentRunner:
             round_usages=round_usages,
             stop_reason=stop_reason,
             error=error,
-            failure_error_kind=stop_reason if stop_reason == "empty_final_response" else failure_error_kind,
+            failure_error_kind=failure_error_kind,
             tool_events=tool_events,
             had_injections=had_injections,
             pending_stream_content=pending_stream_content,

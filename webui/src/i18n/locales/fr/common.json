@@ -2348,6 +2348,10 @@
     "automationTriggered": "Déclenché automatiquement"
   },
   "recovery": {
+    "details": "Détails",
+    "restart": "La passerelle a redémarré avant la fin de la tâche.",
+    "uncertainTool": "Un outil a peut-être déjà été exécuté.",
+    "interruptedAgain": "La tâche a de nouveau été interrompue.",
     "actionFailed": "La récupération a échoué. Réessayez.",
     "interrupted": "Tâche interrompue",
     "completed": "Tâche terminée",
@@ -2506,6 +2510,7 @@
       "imageInputTitle": "L’entrée d’images est désactivée pour ce préréglage",
       "imageRequestRejectedTitle": "Le modèle a rejeté la requête avec image",
       "imageInputBody": "Cette requête contient des images. Vérifiez le préréglage ou utilisez-en un qui accepte les images.",
+      "emptyFinalResponseLength": "Le modèle a atteint sa limite de sortie avant de fournir une réponse finale.",
       "emptyFinalResponse": "Le modèle n’a pas fourni de réponse finale.",
       "unknownTitle": "Échec de la requête au fournisseur du modèle",
       "bodyWithAttempt": "Arrêt après {{attempts}} tentatives. Réessayez plus tard ou choisissez un autre modèle.",

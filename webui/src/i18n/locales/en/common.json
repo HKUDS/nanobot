@@ -2531,6 +2531,10 @@
     }
   },
   "recovery": {
+    "details": "Details",
+    "restart": "The gateway restarted before the task finished.",
+    "uncertainTool": "A tool may already have run.",
+    "interruptedAgain": "The task was interrupted again.",
     "actionFailed": "Recovery action failed. Try again.",
     "interrupted": "Task interrupted",
     "completed": "Task completed",
@@ -2689,6 +2693,7 @@
       "imageInputTitle": "Image input is off for this preset",
       "imageRequestRejectedTitle": "The model rejected the image request",
       "imageInputBody": "This request includes images. Check the preset or use one that supports images.",
+      "emptyFinalResponseLength": "The model reached its output limit before giving a final reply.",
       "emptyFinalResponse": "The model did not return a final reply.",
       "unknownTitle": "Model provider request failed",
       "bodyWithAttempt": "Stopped after {{attempts}} attempts. Try again later or choose another model.",

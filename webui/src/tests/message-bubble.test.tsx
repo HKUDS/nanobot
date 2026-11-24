@@ -180,24 +180,6 @@ describe("MessageBubble", () => {
     }
   });
 
-  it("replays an empty-final notice in the current language, not as an answer", async () => {
-    const events: ThreadProjectionEvent[] = [
-      { event: "user_message", chat_id: "chat", starts_turn: true, text: "Hello", turn_id: "turn", turn_seq: 1 },
-      { event: "turn_end", chat_id: "chat", turn_id: "turn", turn_seq: 2, outcome: "failed", failure_kind: "model", failure_error_kind: "empty_final_response" },
-    ];
-    const transcript = new ThreadTranscript();
-    transcript.accept(parseWebuiThreadPayload({ schemaVersion: 3, projection: "events", events }), transcript.begin("initial"));
-    const { container } = render(<ThreadMessages messages={projectWebuiThreadMessages(transcript.messages)} />);
-    expect(screen.getByText("The model did not return a final reply.")).toBeVisible();
-    try {
-      await act(() => setAppLanguage("zh-CN"));
-      expect(screen.getByText("模型未返回最终答复。")).toBeVisible();
-      expect(container.querySelector("[data-assistant-message]")).toBeNull();
-    } finally {
-      await act(() => setAppLanguage("en"));
-    }
-  });
-
   it.each(["live", "history"])("keeps %s command receipts in the language they were sent in", async (source) => {
     const event = { event: "message", chat_id: "commands", text: "Switched model preset to `{count}`.\nRaw {preset}", turn_id: "switch", side_channel: true,
     } as const;

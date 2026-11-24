@@ -184,7 +184,7 @@ class TestMessageToolSuppressLogic:
         assert result is not None and result.content == ""
         assert isinstance(result.event, TurnEndEvent)
         assert [(e.outcome, e.failure_kind, e.failure_error_kind) for e in completed] == [
-            ("failed", "model", "empty_final_response"),
+            ("failed", "model", "empty_final_response_length"),
         ]
         # The WebSocket coordinator projects the lifecycle completion; other channels get the routed event.
         routed = [loop.bus.outbound.get_nowait() for _ in range(loop.bus.outbound_size)]

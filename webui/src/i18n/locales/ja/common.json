@@ -2348,6 +2348,10 @@
     "automationTriggered": "自動実行"
   },
   "recovery": {
+    "details": "詳細",
+    "restart": "タスクが完了する前にゲートウェイが再起動しました。",
+    "uncertainTool": "ツールはすでに実行された可能性があります。",
+    "interruptedAgain": "タスクが再び中断されました。",
     "actionFailed": "復元操作に失敗しました。もう一度お試しください。",
     "interrupted": "タスクが中断されました",
     "completed": "タスクが完了しました",
@@ -2506,6 +2510,7 @@
       "imageInputTitle": "このプリセットでは画像入力がオフです",
       "imageRequestRejectedTitle": "モデルが画像付きのリクエストを拒否しました",
       "imageInputBody": "このリクエストには画像が含まれています。プリセットを確認するか、画像対応のプリセットを使用してください。",
+      "emptyFinalResponseLength": "モデルが出力上限に達したため、最終回答を生成できませんでした。",
       "emptyFinalResponse": "モデルから最終回答が返されませんでした。",
       "unknownTitle": "モデルプロバイダーへのリクエストに失敗しました",
       "bodyWithAttempt": "{{attempts}} 回試行して停止しました。後でもう一度試すか、別のモデルを選んでください。",

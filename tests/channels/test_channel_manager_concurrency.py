@@ -25,10 +25,16 @@ def make_manager(*, config_path=None):
 
 
 @pytest.mark.parametrize("destination", ["telegram", "websocket"])
-async def test_empty_final_failure_reaches_each_channel_once_in_its_native_form(tmp_path, destination):
+@pytest.mark.parametrize(("error_kind", "notice"), [
+    ("empty_final_response", "The model didn't return a final answer. Please try again."),
+    ("empty_final_response_length", "The model reached its output limit before returning a final answer."),
+])
+async def test_empty_final_failure_reaches_each_channel_once_in_its_native_form(
+    tmp_path, destination, error_kind, notice,
+):
     manager, channel = make_manager(config_path=tmp_path / "config.json")
     manager.channels[destination] = channel
-    end = TurnEndEvent(outcome="failed", failure_kind="model", failure_error_kind="empty_final_response")
+    end = TurnEndEvent(outcome="failed", failure_kind="model", failure_error_kind=error_kind)
     await manager.bus.publish_event(end, channel=destination, chat_id="chat", metadata={"message_thread_id": 42})
     manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
     try:
@@ -40,7 +46,7 @@ async def test_empty_final_failure_reaches_each_channel_once_in_its_native_form(
             assert msg.event is end
             assert msg.content == ""
         else:
-            assert msg.content == "The model didn't return a final answer. Please try again."
+            assert msg.content == notice
     finally:
         await manager.stop_all()
 

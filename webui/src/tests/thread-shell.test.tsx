@@ -6,7 +6,7 @@ import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
-import { ToastProvider } from "@/components/ui/toast";
+import { ToastProvider, useToast } from "@/components/ui/toast";
 import i18n from "@/i18n";
 import { useSessions } from "@/hooks/useSessions";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
@@ -5771,7 +5771,7 @@ describe("ThreadShell", () => {
     }));
 
     const toast = await screen.findByRole("alert");
-    expect(toast.closest('[data-toast-tone="error"]')).not.toBeNull();
+    expect(toast.closest('.thread-viewport [data-toast-tone="error"]')).not.toBeNull();
     expect(toast).toHaveTextContent(toastTitle);
     expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View preset" }));
@@ -5779,22 +5779,45 @@ describe("ThreadShell", () => {
     expect(inspectPreset).toHaveBeenCalledWith("test-vision");
   });
 
-  it("keeps the empty-final notice in the transcript when recovery offers continuation", async () => {
-    const client = makeClient();
+  it.each([
+    ["empty_final_response", "The model did not return a final reply."],
+    ["empty_final_response_length", "The model reached its output limit before giving a final reply."],
+  ])("shows one scoped %s toast for the live failure and the attached recovery", async (errorKind, message) => {
+    const client = { ...makeClient(), requestMutation: vi.fn().mockResolvedValue({}) };
     const chatId = "empty-final";
-    render(wrap(client, <ThreadShell session={session(chatId)} title="Empty reply" onToggleSidebar={() => {}} />));
+    function GlobalAction() {
+      const show = useToast();
+      return <button onClick={() => show?.({ message: "Topic removed", tone: "pending", action: { label: "Undo", run: () => {} } })}>Remove topic</button>;
+    }
+    const scene = (id: string | null) => wrap(client, <ToastProvider>
+      <GlobalAction />
+      {id && <ThreadShell session={session(id)} title={id} onToggleSidebar={() => {}} />}
+    </ToastProvider>);
+    const { rerender } = render(scene(chatId));
+    fireEvent.click(screen.getByRole("button", { name: "Remove topic" }));
     await act(async () => {});
     act(() => client._emitChat(chatId, {
       event: "turn_end", chat_id: chatId, turn_id: "turn", turn_seq: 2,
-      outcome: "failed", failure_kind: "model", failure_error_kind: "empty_final_response",
+      outcome: "failed", failure_kind: "model", failure_error_kind: errorKind,
     }));
-    expect(await screen.findByText("The model did not return a final reply.")).toBeVisible();
-    act(() => client._emitChat(chatId, {
-      event: "recovery_state", chat_id: chatId, recovery_id: "recovery", status: "awaiting_user",
-      reason: "model_request_failed", failure_error_kind: "empty_final_response",
-    }));
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+    const recovery = { recovery_id: "recovery", status: "awaiting_user" as const, reason: "model_request_failed", failure_error_kind: errorKind };
+    act(() => client._emitChat(chatId, { event: "recovery_state", chat_id: chatId, ...recovery }));
+    expect(screen.getByText(message).closest(".thread-viewport [data-toast-viewport=thread]")).not.toBeNull();
+    expect(screen.getByText(message).closest(".toast-card")).toHaveAttribute("data-toast-timed", "false");
     expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
-    expect(screen.getByText("The model did not return a final reply.")).toBeVisible();
+    await act(async () => rerender(scene("another-chat")));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await act(async () => rerender(scene(null)));
+    expect(screen.getByRole("button", { name: "Undo" }).closest("[data-toast-viewport=global]")).not.toBeNull();
+    await act(async () => rerender(scene(chatId)));
+    act(() => client._emitChat(chatId, { event: "attached", chat_id: chatId, recovery_state: recovery }));
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+    const action = errorKind === "empty_final_response" ? "dismiss" : "continue";
+    fireEvent.click(screen.getByRole("button", { name: action === "dismiss" ? "Dismiss" : "Continue" }));
+    expect(client.requestMutation).toHaveBeenCalledWith(`recovery.${action}`, { chat_id: chatId, recovery_id: "recovery" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it.each([false, true])("keeps one terminal model failure visible until the next user action (recovery: %s)", async (recoverable) => {
