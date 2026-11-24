@@ -1,13 +1,16 @@
 import json
 import time
+from datetime import UTC, datetime
 
 import pytest
 from websockets.datastructures import Headers
 from websockets.http11 import Request
 
+from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.session.manager import SessionManager
+from nanobot.session.message_metadata import input_history_metadata
 from nanobot.webui import transcript
 from nanobot.webui.client_contract import webui_contract
 from nanobot.webui.gateway_services import build_gateway_services
@@ -217,8 +220,12 @@ async def test_recovered_public_index_and_page_validators_include_canonical_time
     key = "websocket:canonical-revision"
     manager = history.sessions
     session = manager.get_or_create(key)
+    admission = InboundMessage(channel="websocket", sender_id="user", chat_id="canonical-revision", content="guidance")
+    metadata = input_history_metadata(admission)
+    instant = datetime.fromtimestamp(admission.timestamp.timestamp(), UTC)
+    assert datetime.fromisoformat(metadata["timestamp"]) == instant
     session.messages = [
-        {"role": "user", "content": "guidance", "webui_turn_id": "input", "timestamp": "2026-06-02T10:00:00+00:00"},
+        {"role": "user", "content": admission.content, "webui_turn_id": "input", **metadata},
         {"role": "assistant", "content": "answer"},
     ]
     manager.save(session)
@@ -242,6 +249,9 @@ async def test_recovered_public_index_and_page_validators_include_canonical_time
             Request(path, Headers([*auth, ("If-None-Match", response.headers["ETag"])])), path,
         )
         assert unchanged.status_code == 304
+    events = json.loads(initial[base].body)["events"]
+    user = next(event for event in events if event["event"] == "user_message")
+    assert user["created_at_ms"] == int(instant.timestamp() * 1000)
     session = await manager.state.get(key)
     session.messages[0]["timestamp"] = "2026-06-02T10:01:00+00:00"
     await manager.state.finish_turn(session)
