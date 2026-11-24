@@ -15,7 +15,7 @@ import json
 import mimetypes
 import re
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
@@ -28,6 +28,7 @@ from websockets.http11 import Response
 
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.agent.subagent_status import SubagentSessionError
+from nanobot.agent.tools.mcp_metadata import MCPRuntimeSnapshot
 from nanobot.command.application import builtin_command_palette
 from nanobot.context_graph import ContextGraph
 from nanobot.runtime_admission import RuntimeMaintenanceError
@@ -348,7 +349,7 @@ class GatewayHTTPHandler:
         automation_routes: WebUIAutomationRoutes,
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
-        mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
+        mcp_runtime_snapshot: Callable[[], MCPRuntimeSnapshot] | None = None,
         mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         image_generation_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         skill_state_action: Callable[[set[str]], None] | None = None,
@@ -404,7 +405,7 @@ class GatewayHTTPHandler:
             runtime_capabilities=self._capabilities,
             channel_feature_action=channel_feature_action,
             channel_runtime_status=channel_runtime_status,
-            mcp_runtime_status=mcp_runtime_status,
+            mcp_runtime_snapshot=mcp_runtime_snapshot,
             mcp_reload=mcp_reload,
             image_generation_reload=image_generation_reload,
             mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,

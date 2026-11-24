@@ -807,7 +807,7 @@
       "currentModel": "새 답변에 사용됩니다.",
       "selectedModelProvider": "선택한 모델에 의해 설정됩니다.",
       "selectedModelValue": "선택한 모델에 의해 설정됩니다.",
-      "brandLogos": "설정에 제공업체와 앱 로고를 표시합니다.\n\n설정에서 타사 제공업체와 CLI 로고를 표시합니다.",
+      "brandLogos": "설정과 채팅 활동에 브랜드 로고를 표시합니다.\n\nMCP 활동에는 서버가 제공하는 아이콘이 있으면 표시합니다.",
       "browserNotifications": "페이지가 백그라운드에 있을 때 작업 상태를 알립니다.",
       "notificationSound": "응답이 끝나면 백그라운드에서도 알림음을 재생합니다.",
       "cliAppsCatalog": "nanobot용 CLI 도구를 설치합니다. 데스크톱 앱은 변경되지 않습니다.\n\nnanobot이 이 컴퓨터에서 사용할 수 있는 명령줄 도구를 설치합니다. 데스크톱 앱은 변경하지 않습니다.",

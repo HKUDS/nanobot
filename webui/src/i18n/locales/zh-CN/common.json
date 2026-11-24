@@ -1031,7 +1031,7 @@
       "activityMode": "选择处理过程的默认展示方式",
       "fileEditDisplay": "默认显示行数或展开修改内容",
       "codeWrap": "长代码自动换行，方便阅读",
-      "brandLogos": "在设置中显示提供商与应用图标\n\n在设置中显示提供商和命令行应用的品牌图标。",
+      "brandLogos": "在设置和聊天活动中显示品牌图标\n\nMCP 活动优先显示服务提供的图标。",
       "browserNotifications": "页面在后台时提醒任务状态。",
       "notificationSound": "回复结束时播放提示音，后台也会播放。",
       "maxResults": "每次搜索最多显示多少条结果",

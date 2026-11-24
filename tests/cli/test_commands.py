@@ -17,6 +17,7 @@ from typer.testing import CliRunner
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools.mcp_metadata import MCPRuntimeSnapshot
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -3972,8 +3973,8 @@ def test_gateway_failure_exits_nonzero_after_cleanup(
         async def aclose(self) -> None:
             self.close_tasks.append(asyncio.current_task())
 
-        def runtime_status(self) -> dict[str, str]:
-            return {}
+        def runtime_snapshot(self):
+            return MCPRuntimeSnapshot({})
 
         async def reload(self) -> dict[str, object]:
             return {"ok": True}

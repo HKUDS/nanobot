@@ -79,6 +79,18 @@ describe("tools catalog cache", () => {
     expect(cache.mcpFresh()).toBe(true);
   });
 
+  it("cools down failed background MCP reads only on the affected gateway", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    const cache = getToolsCatalog({}, "token");
+    await expect(cache.loadMcpPresets()).rejects.toThrow("offline");
+    await cache.requestMcpPresets(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await expect(getToolsCatalog({}, "token").requestMcpPresets(false)).rejects.toThrow("offline");
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + TOOLS_CATALOG_TTL_MS);
+    await expect(cache.requestMcpPresets(false)).rejects.toThrow("offline");
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it("does not surface an older GET failure after a mutation has succeeded", async () => {
     const cache = getToolsCatalog({}, "token");
     let reject!: (reason: Error) => void;

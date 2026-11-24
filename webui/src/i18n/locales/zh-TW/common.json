@@ -807,7 +807,7 @@
       "currentModel": "用於新的回覆",
       "selectedModelProvider": "由選取的模型決定。",
       "selectedModelValue": "由選取的模型決定。",
-      "brandLogos": "在設定中顯示提供商與應用圖示\n\n在設定中顯示提供商和命令列應用的品牌圖示。",
+      "brandLogos": "在設定與聊天活動中顯示品牌圖示\n\nMCP 活動會優先顯示伺服器提供的圖示。",
       "browserNotifications": "頁面在背景時提醒任務狀態。",
       "notificationSound": "回覆結束時播放音效，背景也會播放。",
       "cliAppsCatalog": "安裝 CLI 工具，不改桌面應用\n\n安裝供 nanobot 使用的命令列工具，不會安裝或修改對應的桌面應用。",

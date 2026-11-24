@@ -51,7 +51,6 @@ import {
   fetchFilePreview,
   fetchFileReferenceMetadata,
   fetchInstalledCliApps,
-  fetchMcpPresets,
   fetchSettings,
   fetchWorkspaces,
   fetchWorkspaceDirectories,
@@ -62,11 +61,9 @@ import {
   installedCliAppsFromPayload,
   isCliAppsPayload,
 } from "@/lib/cli-app-events";
-import {
-  MCP_PRESETS_CHANGED_EVENT,
-  installedMcpPresetsFromPayload,
-  isMcpPresetsPayload,
-} from "@/lib/mcp-preset-events";
+import { McpCatalogContext, useMcpPresetCatalog } from "@/hooks/useMcpPresetCatalog";
+import { installedMcpPresetsFromPayload } from "@/lib/mcp-preset-events";
+import { getToolsCatalog } from "@/lib/tools-catalog-cache";
 import type { StreamError } from "@/lib/nanobot-client";
 import { isLocalAttachment } from "../../../../packages/client-events/attachments";
 import type {
@@ -458,14 +455,9 @@ export function ThreadShell({
     isPayload: isCliAppsPayload,
     selectItems: installedCliAppsFromPayload,
   });
-  const mcpPresets = useInstalledSettingItems({
-    requestCount: mentionCatalogRequestCount,
-    getToken,
-    eventName: MCP_PRESETS_CHANGED_EVENT,
-    fetchPayload: fetchMcpPresets,
-    isPayload: isMcpPresetsPayload,
-    selectItems: installedMcpPresetsFromPayload,
-  });
+  const toolsCatalog = getToolsCatalog(client, token);
+  const mcpPayload = useMcpPresetCatalog(toolsCatalog, mentionCatalogRequestCount, true);
+  const mcpPresets = useMemo(() => mcpPayload ? installedMcpPresetsFromPayload(mcpPayload) : [], [mcpPayload]);
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
   const [modelFallback, setModelFallback] = useState<{
     chatId: string;
@@ -1444,6 +1436,7 @@ export function ThreadShell({
           resolve={previewSessionKey ? resolveFilePreviewAvailability : undefined}
         >
           <FileActionsProvider value={previewSessionKey ? fileActions : undefined}>
+          <McpCatalogContext.Provider value={toolsCatalog}>
           <ExecSessionCommandsContext.Provider value={sessionCommands}>
           <ThreadViewport
             ref={viewportRef}
@@ -1483,6 +1476,7 @@ export function ThreadShell({
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
           </ExecSessionCommandsContext.Provider>
+          </McpCatalogContext.Provider>
           </FileActionsProvider>
         </FilePreviewAvailabilityProvider>
       </div>

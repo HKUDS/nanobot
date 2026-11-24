@@ -255,8 +255,8 @@ function fetchEvent(url: string, init?: RequestInit) {
   return { event, respondWith };
 }
 
-function imageRequest(url: string): Request {
-  const request = new Request(url);
+function imageRequest(url: string, init?: RequestInit): Request {
+  const request = new Request(url, init);
   Object.defineProperty(request, "destination", { value: "image" });
   return request;
 }
@@ -349,6 +349,13 @@ describe("service worker", () => {
     await sw.fire("fetch", crossEvent);
     expect(cross).not.toHaveBeenCalled();
     expect(sw.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("leaves referrerless remote icons to the HTTP cache even at /favicon.ico", async () => {
+    const sw = loadSw();
+    const event = { request: imageRequest("https://docs.example/favicon.ico", { referrerPolicy: "no-referrer" }), respondWith: vi.fn() };
+    await sw.fire("fetch", event);
+    expect(event.respondWith).not.toHaveBeenCalled();
   });
 
   it.each([

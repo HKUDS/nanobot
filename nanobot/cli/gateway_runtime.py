@@ -741,7 +741,7 @@ def _run_claimed_gateway(
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
-        webui_mcp_runtime_status=mcp_provider.runtime_status,
+        webui_mcp_runtime_snapshot=mcp_provider.runtime_snapshot,
         webui_mcp_reload=mcp_provider.reload,
         webui_image_generation_reload=_webui_image_generation_reload,
         webui_skill_state_action=_webui_skill_state_action,

@@ -11,6 +11,8 @@ function createToolsCatalog(token: string) {
   let mcpUpdated = 0;
   let cliRevision = 0;
   let mcpRevision = 0;
+  let mcpRetryAfter = 0;
+  let pendingRecheckAfter = 0;
   let cliRequest: Promise<void> | null = null;
   let mcpRequest: Promise<void> | null = null;
   const listeners = new Set<() => void>();
@@ -23,10 +25,26 @@ function createToolsCatalog(token: string) {
   };
   const setMcpPresets = (mcpPresets: McpPresetsPayload) => {
     mcpRevision++;
+    mcpRetryAfter = 0;
     mcpUpdated = Date.now();
     snapshot = { ...snapshot, mcpPresets };
     publish();
   };
+  const mcpFresh = () => snapshot.mcpPresets !== null && Date.now() - mcpUpdated < TOOLS_CATALOG_TTL_MS;
+  function loadMcpPresets(): Promise<void> {
+    if (mcpRequest) return mcpRequest;
+    const revision = mcpRevision;
+    const request = fetchMcpPresets(token).then(payload => {
+      if (revision === mcpRevision) setMcpPresets(payload);
+    }, error => {
+      if (revision === mcpRevision) {
+        mcpRetryAfter = Date.now() + TOOLS_CATALOG_TTL_MS;
+        throw error;
+      }
+    }).finally(() => { if (mcpRequest === request) mcpRequest = null; });
+    mcpRequest = request;
+    return request;
+  }
   return {
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {
@@ -37,6 +55,7 @@ function createToolsCatalog(token: string) {
     setMcpPresets,
     invalidate() {
       cliUpdated = mcpUpdated = -Infinity;
+      pendingRecheckAfter = mcpRetryAfter = 0;
       cliRevision++;
       mcpRevision++;
       cliRequest = mcpRequest = null;
@@ -45,13 +64,14 @@ function createToolsCatalog(token: string) {
     },
     invalidateMcpPresets() {
       mcpUpdated = -Infinity;
+      pendingRecheckAfter = mcpRetryAfter = 0;
       mcpRevision++;
       mcpRequest = null;
       snapshot = { ...snapshot, invalidation: snapshot.invalidation + 1 };
       publish();
     },
     cliFresh: () => snapshot.cliApps !== null && Date.now() - cliUpdated < TOOLS_CATALOG_TTL_MS,
-    mcpFresh: () => snapshot.mcpPresets !== null && Date.now() - mcpUpdated < TOOLS_CATALOG_TTL_MS,
+    mcpFresh,
     loadCliApps(): Promise<void> {
       if (cliRequest) return cliRequest;
       const revision = cliRevision;
@@ -64,16 +84,20 @@ function createToolsCatalog(token: string) {
       cliRequest = request;
       return request;
     },
-    loadMcpPresets(): Promise<void> {
+    loadMcpPresets,
+    async requestMcpPresets(userRequested: boolean): Promise<void> {
       if (mcpRequest) return mcpRequest;
-      const revision = mcpRevision;
-      const request = fetchMcpPresets(token).then(payload => {
-        if (revision === mcpRevision) setMcpPresets(payload);
-      }, error => {
-        if (revision === mcpRevision) throw error;
-      }).finally(() => { if (mcpRequest === request) mcpRequest = null; });
-      mcpRequest = request;
-      return request;
+      const now = Date.now();
+      if (!userRequested && now < mcpRetryAfter) return;
+      if (mcpFresh()) {
+        // A settings/history read can precede the handshake. On the next tool
+        // call allow one early recheck, not a poll for every unbranded server.
+        if (userRequested || now < pendingRecheckAfter || !snapshot.mcpPresets?.presets.some(
+          preset => preset.runtime_status === "connecting" && !preset.icons?.length,
+        )) return;
+        pendingRecheckAfter = now + TOOLS_CATALOG_TTL_MS;
+      }
+      return loadMcpPresets();
     },
   };
 }

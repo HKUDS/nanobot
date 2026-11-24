@@ -26,7 +26,9 @@ For local interactive setup:
 2. Choose a known MCP server preset, or add a custom stdio, HTTP, or SSE server. For a custom OAuth server, choose **OAuth** under **Authentication**, save it, and click **Connect**. Presets such as Xmind, Notion, and Linear go straight to **Connect**. Approve access in the browser window. HTTPS and localhost WebUIs return automatically. From a remote plain-HTTP WebUI, copy the complete localhost callback URL from the browser address bar and paste it into nanobot.
 3. Limit the enabled tools when the server exposes more than the task needs.
 4. Save and restart when prompted.
-5. Mention the connected MCP server with `@` in the next message and ask for a small test action.
+5. Ask the agent to perform a small action using the connected server. An `@` mention is optional.
+
+With **Brand logos** enabled, the chat activity row can display a server icon advertised in the MCP initialization response (`serverInfo.icons`). This works for custom servers as well as presets. For a stdio server, supply a small base64-encoded raster image such as a PNG. An HTTPS server can also advertise an image on its own origin; use normal HTTP cache headers to avoid repeated downloads. When no usable icon is available or brand logos are turned off, the row shows a generic MCP icon.
 
 <details>
 <summary>Manual configuration</summary>

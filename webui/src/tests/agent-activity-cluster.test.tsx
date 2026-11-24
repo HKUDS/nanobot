@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
 import { preloadMarkdownText } from "@/components/MarkdownText";
+import { McpCatalogContext } from "@/hooks/useMcpPresetCatalog";
+import { getToolsCatalog } from "@/lib/tools-catalog-cache";
 import { setAppLanguage } from "@/i18n";
 import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
@@ -49,7 +51,7 @@ const BROWSERBASE_MCP: McpPresetInfo = {
   configured: true,
   available: true,
   status: "configured",
-  logo_url: "https://example.invalid/browserbase.svg",
+  icons: [{ src: "https://example.invalid/browserbase.svg" }],
   brand_color: "#111827",
   required_fields: [],
   connection_summary: "https://mcp.browserbase.com/mcp",
@@ -1606,8 +1608,34 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByLabelText("Opening example.com, Browserbase")).toBeInTheDocument();
     expect(screen.queryByText("Using")).not.toBeInTheDocument();
     expect(screen.queryByText(/browser_navigate/)).not.toBeInTheDocument();
-    expect(screen.getByTestId("activity-mcp-logo-browserbase")).toBeInTheDocument();
+    const mark = screen.getByTestId("activity-mcp-logo-browserbase");
+    expect(mark.querySelector("img")).toHaveAttribute("src", BROWSERBASE_MCP.icons![0].src);
+    act(() => writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, brandLogos: false }));
+    expect(mark.querySelector("svg")).toBeInTheDocument();
+    expect(mark.querySelector("img")).toBeNull();
     expect(screen.queryByText(/mcp_browserbase_browser_navigate/)).not.toBeInTheDocument();
+  });
+
+  it("rechecks connecting MCP metadata on activity demand and observes subsequent settings updates", async () => {
+    const catalog = getToolsCatalog({}, "token");
+    const preset = { ...BROWSERBASE_MCP, name: "team_docs", icons: [], runtime_status: "connecting" };
+    catalog.setMcpPresets({ installed_count: 1, presets: [preset] });
+    const connected = { ...preset, runtime_status: "connected", icons: [{ src: "https://docs.example/mark.png" }] };
+    const fetch = vi.spyOn(window, "fetch").mockResolvedValue(Response.json({ installed_count: 1, presets: [connected] }));
+    try {
+      const message: UIMessage = { id: "lookup", role: "tool", kind: "trace", content: "mcp_team_docs_find_page({})", createdAt: 1 };
+      const cluster = <AgentActivityCluster messages={[message]} isTurnStreaming hasBodyBelow={false} />;
+      render(<McpCatalogContext.Provider value={catalog}>{cluster}{cluster}</McpCatalogContext.Provider>);
+      const marks = () => screen.getAllByTestId("activity-mcp-logo-team_docs");
+      await waitFor(() => expect(marks().every(mark => mark.querySelector("img")?.src === connected.icons[0].src)).toBe(true));
+      expect(fetch).toHaveBeenCalledTimes(1);
+      act(() => catalog.setMcpPresets({ installed_count: 1, presets: [{ ...connected, icons: [] }] }));
+      expect(marks().every(mark => mark.querySelector('[data-product-icon="mcp"]'))).toBe(true);
+      await catalog.requestMcpPresets(false);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      fetch.mockRestore();
+    }
   });
 
   it("renders public web fetch traces with the site favicon", () => {

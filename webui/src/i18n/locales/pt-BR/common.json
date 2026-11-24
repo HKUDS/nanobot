@@ -851,7 +851,7 @@
       "activityMode": "Escolha a exibição padrão dos detalhes da atividade.",
       "fileEditDisplay": "Mostre por padrão a contagem de linhas ou as alterações completas.",
       "codeWrap": "Quebre linhas longas de código para facilitar a leitura.",
-      "brandLogos": "Mostre logos de provedores e apps nos Ajustes.\n\nMostra logotipos de provedores terceiros e de CLIs em Configurações.",
+      "brandLogos": "Mostra logotipos nas configurações e na atividade do chat.\n\nA atividade do MCP usa o ícone fornecido pelo servidor, quando disponível.",
       "browserNotifications": "Receba avisos sobre o estado das tarefas com esta página em segundo plano.",
       "notificationSound": "Toca um som ao terminar uma resposta, mesmo em segundo plano.",
       "maxResults": "Máximo de resultados por busca.",
