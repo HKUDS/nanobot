@@ -789,11 +789,11 @@ function ThreadShellContent({
     ? () => onInspectImagePreset(activeModelPreset)
     : onOpenModelSettings, [activeModelPreset, onInspectImagePreset, onOpenModelSettings]);
   const emptyFinalKey = streamError?.kind === "model_request_failed" && emptyFinalMessageKey(streamError.errorKind);
-  const imageRequestError = messagesReady && streamError?.kind === "model_request_failed" && isImageRequestFailure(streamError.errorKind)
+  const imageRequestError = streamError?.kind === "model_request_failed" && isImageRequestFailure(streamError.errorKind)
     ? streamError
     : null;
   useEffect(() => {
-    if (!imageRequestError) return;
+    if (!messagesReady || !imageRequestError) return;
     showToast?.({
       message: resolveModelRequestFailureCopy(imageRequestError, t).title,
       tone: "error",
@@ -801,7 +801,7 @@ function ThreadShellContent({
       action: inspectImagePreset ? { label: t("settings.models.viewPreset"), run: inspectImagePreset } : undefined,
     });
     dismissStreamError();
-  }, [dismissStreamError, imageRequestError, inspectImagePreset, showToast, t]);
+  }, [dismissStreamError, imageRequestError, inspectImagePreset, messagesReady, showToast, t]);
   useEffect(() => {
     setModelFallback(null);
     if (!chatId) return;
