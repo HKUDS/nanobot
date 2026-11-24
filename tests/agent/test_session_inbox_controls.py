@@ -492,22 +492,25 @@ async def test_cancelled_session_completes_queued_automation_waiters(loop):
 async def test_stopped_followups_are_not_recovered_but_shutdown_preserves_them(
     loop,
     tmp_path,
+    monkeypatch,
     followup_still_queued,
     shutdown,
 ):
     started = asyncio.Event()
 
-    async def chat(**kwargs):
+    async def hold_turn(_msg, **_kwargs):
         started.set()
         await asyncio.Event().wait()
 
-    loop.provider.chat_stream_with_retry = chat
+    # Only the inbox owner must be busy. Keep the real journal, cancellation and
+    # restart scan without making this test depend on prompt or provider startup.
+    monkeypatch.setattr(loop, "_process_message", hold_turn)
     key = "websocket:test"
-    (await loop._enqueue_session_message(InboundMessage(
+    await loop._enqueue_session_message(InboundMessage(
         channel="websocket", sender_id="u", chat_id="test", content="first",
         metadata={"webui": True},
-    )))
-    await asyncio.wait_for(started.wait(), timeout=3)
+    ))
+    await asyncio.wait_for(started.wait(), timeout=30)
     (await loop._enqueue_session_message(InboundMessage(
         channel="websocket", sender_id="u", chat_id="test", content="cancel me",
         metadata={"webui": True},
