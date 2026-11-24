@@ -91,6 +91,18 @@ for (const width of [1440, 390]) {
       expect(stopBounds.height).toBeGreaterThanOrEqual(44);
     }
     await headerTitle.locator("..").screenshot({ path: info.outputPath("running-detail-header-stop.png") });
+    const detailBounds = (await detail.boundingBox())!;
+    const more = detail.getByRole("button", { name: "Message actions" }).first();
+    await more.click();
+    const actions = page.getByRole("dialog", { name: "Message actions" });
+    await expect(actions).toBeVisible();
+    await settledMotion(actions);
+    const backdrop = page.locator("[data-dialog-backdrop]").filter({ has: actions });
+    expect(await backdrop.boundingBox()).toEqual(detailBounds);
+    const sheet = (await actions.boundingBox())!;
+    expect(sheet.y + sheet.height).toBeCloseTo(detailBounds.y + detailBounds.height, 0);
+    await backdrop.click({ position: { x: 24, y: 24 } });
+    await expect(more).toBeFocused();
     await detail.getByRole("button", { name: "Close", exact: true }).click();
     await expect(detail).toHaveCount(0);
     await expect(tree).toBeVisible();
