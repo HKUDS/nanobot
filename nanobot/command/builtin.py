@@ -138,11 +138,12 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     session = ctx.session or await loop.sessions.state.get(ctx.key)
     runtime = ctx.runtime or await loop.runtime_for_session(session)
     last_usage = LLMUsage.from_dict(session.metadata.get("_last_usage"))
-    last_window = session.metadata.get("_last_usage_window")
-    context_tokens = last_usage.context_tokens if last_usage else None
-    if context_tokens is not None and type(last_window) is int and last_window > 0:
-        recorded = True
-        window = last_window
+    snapshot = await loop.sessions.state.project_history(
+        ctx.key, lambda history: history.latest_context_usage(session.generation),
+    )
+    if snapshot is not None:
+        context_tokens, window, estimated = snapshot
+        recorded = not estimated
     else:
         recorded = False
         window = runtime.context_window_tokens

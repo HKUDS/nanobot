@@ -2318,7 +2318,6 @@ class AgentLoop:
         )
         if ctx.usage is not None and not ctx.ephemeral:
             session.metadata["_last_usage"] = ctx.usage.to_dict()
-            session.metadata["_last_usage_window"] = ctx.require_runtime().context_window_tokens
         if ctx.kind is TurnKind.USER and not ctx.ephemeral:
             turn_continuation.record_iteration_limit(
                 session.metadata, ctx.stop_reason,

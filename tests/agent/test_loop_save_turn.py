@@ -1999,9 +1999,9 @@ async def test_turn_usage_is_persisted_with_the_saved_session(tmp_path: Path) ->
     )
 
     loop.sessions.invalidate("cli:usage")
-    metadata = loop.sessions.get_or_create("cli:usage").metadata
-    assert metadata["_last_usage"] == turn_usage.to_dict()
-    assert metadata["_last_usage_window"] == loop.context_window_tokens
+    assert loop.sessions.get_or_create("cli:usage").metadata["_last_usage"] == (
+        turn_usage.to_dict()
+    )
 
 
 @pytest.mark.asyncio

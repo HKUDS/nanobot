@@ -34,6 +34,7 @@ def _make_loop():
         mock_sessions.return_value.state = MagicMock(spec=SessionState)
         mock_sessions.return_value.state.get = AsyncMock(side_effect=lambda key: Session(key))
         mock_sessions.return_value.state.peek.return_value = None
+        mock_sessions.return_value.state.project_history = AsyncMock(return_value=None)
         mock_sub_mgr.return_value.close = AsyncMock()
         mock_sub_mgr.return_value.get_running_count_by_session.return_value = 0
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
@@ -314,36 +315,49 @@ class TestRestartCommand:
         assert second.usage == LLMUsage.estimated(input_tokens=123, output_tokens=7)
 
     @pytest.mark.parametrize(
-        "recorded_window, expected", [(204_800, "Context (last request): 80000/204800 (39%)"),
-                                      (None, "Context: unavailable (last recorded request: 80000 tokens)")]
+        "has_request_history, expected", [
+            (True, "Context (last request): 80000/204800 (39%)"),
+            (False, "Context: unavailable (last recorded request: 80000 tokens)"),
+        ]
     )
     @pytest.mark.asyncio
     async def test_status_uses_request_context_after_model_switch(
-        self, recorded_window: int | None, expected: str
+        self, tmp_path, has_request_history: bool, expected: str
     ):
+        from nanobot.session.display_history import HistoryFact, HistoryKind
+        from nanobot.session.manager import SessionManager
+
         loop, _bus = _make_loop()
         loop.set_runtime_context_window(128_000)
-        session = Session("telegram:c1")
+        channel = "websocket" if has_request_history else "telegram"
+        session = Session(f"{channel}:c1")
         session.add_message("user", "Hello")
         usage = LLMUsage.reported(input_tokens=82_000, output_tokens=500)
         for _ in range(16):
             usage += LLMUsage.reported(input_tokens=82_000, output_tokens=500)
         usage += LLMUsage.reported(input_tokens=80_000, output_tokens=500)
         session.metadata["_last_usage"] = usage.to_dict()
-        if recorded_window is not None:
-            session.metadata["_last_usage_window"] = recorded_window
+        sessions = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
+        sessions.save(session)
+        if has_request_history:
+            await sessions.state.append_history(session.key, [HistoryFact(HistoryKind.MODEL_REQUEST, {
+                "phase": "completed", "request_usage": {"context_tokens": 80_000},
+                "usage": usage.to_turn_dict(), "context_window_tokens": 204_800,
+            })], expected_generation=session.generation)
+        loop.sessions.state.project_history = sessions.state.project_history
         loop.sessions.state.get = AsyncMock(return_value=session)
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(side_effect=RuntimeError("unavailable"))
 
         response = await loop._process_message(
-            InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
+            InboundMessage(channel=channel, sender_id="u1", chat_id="c1", content="/status")
         )
 
         assert response is not None
         assert "Tokens: 1474000 in / 9000 out" in message_text(response)
         assert expected in message_text(response)
-        if recorded_window is not None:
+        if has_request_history:
             loop.consolidator.estimate_session_prompt_tokens.assert_not_called()
+        await sessions.state.aclose()
 
     @pytest.mark.asyncio
     async def test_process_direct_preserves_render_metadata(self):
