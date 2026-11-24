@@ -132,7 +132,7 @@ function makeClient() {
     },
     sendMessage,
     sendSystemCommand: vi.fn().mockImplementation(async (_chatId: string, command: string) => command.startsWith("/model ")
-      ? { command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset: command.slice(7) } }] } }
+      ? { command_result: { command: "/model", switched_preset: command.slice(7) } }
       : undefined),
     newChat: vi.fn(),
     forkChat: vi.fn(),
@@ -1812,7 +1812,7 @@ describe("ThreadShell", () => {
 
     const badge = await screen.findByRole("button", { name: "Default" });
     expect(badge).toHaveTextContent("Default");
-    client.sendSystemCommand.mockResolvedValueOnce({ command_result: { command: "/model", parts: [{ key: "model.failed", values: { error: "Preset unavailable" } }] } });
+    client.sendSystemCommand.mockResolvedValueOnce({ text: "Preset unavailable" });
     fireEvent.click(badge);
     fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Preset unavailable");
@@ -2518,11 +2518,12 @@ describe("ThreadShell", () => {
     const client = makeClient();
     const settings = settingsWithFastPreset();
     settings.model_call_order = ["fast"];
-    client.newChat.mockResolvedValue("chat-new");
-    client.sendSystemCommand.mockResolvedValueOnce({ command_result: { command: "/model", parts: [{ key: "model.failed", values: { error: "Preset unavailable" } }] } });
+    let allocations = 0;
+    client.newChat.mockImplementation(async () => `draft-${++allocations}`);
+    client.sendSystemCommand.mockResolvedValueOnce({ text: "Preset unavailable" });
     function Chat() {
       const { createChat, sessions } = useSessions();
-      const current = sessions.find((row) => row.chatId === "chat-new") ?? null;
+      const current = sessions[0] ?? null;
       return <ThreadShell session={current} title="New chat" onToggleSidebar={() => {}} settingsSnapshot={settings}
         onCreateChat={(scope, _message, preset) => createChat(scope, preset)} />;
     }
@@ -2542,7 +2543,8 @@ describe("ThreadShell", () => {
     expect(screen.getByLabelText("Message input")).toHaveValue("use the selected model");
     expect(client.sendMessage).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expectSendMessageWithTurn(client, "chat-new", "use the selected model"));
+    await waitFor(() => expectSendMessageWithTurn(client, "draft-1", "use the selected model"));
+    expect(client.newChat).toHaveBeenCalledTimes(1);
     fireEvent.focus(await screen.findByLabelText("fast"));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-5.5 OpenAI Codex");
     fireEvent.blur(screen.getByLabelText("fast"));
@@ -2777,7 +2779,6 @@ describe("ThreadShell", () => {
         text: "- Current model: `Ring-2.6-1T`",
         side_channel: true,
         render_as: "text",
-        command_result: { command: "/model", parts: [{ key: "model.current", values: { model: "Ring-2.6-1T" } }] },
       });
       client._emitChat("chat-new", {
         event: "message",

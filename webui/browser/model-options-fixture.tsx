@@ -147,7 +147,7 @@ export function ModelOptionsFixture() {
       queueMicrotask(() => {
         const preset = frame.content.startsWith("/model ") ? frame.content.slice(7) : null;
         preview.receive({ event: "message", chat_id: frame.chat_id, turn_id: frame.turn_id, text: "Fixture message accepted.",
-          ...(preset && { side_channel: true, command_result: { command: "/model", parts: [{ key: "model.switched", values: { preset } }] } }),
+          ...(preset && { side_channel: true, command_result: { command: "/model", switched_preset: preset } }),
         });
         preview.receive({ event: "turn_end", chat_id: frame.chat_id, turn_id: frame.turn_id });
       });

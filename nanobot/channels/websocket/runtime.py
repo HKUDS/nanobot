@@ -7,11 +7,11 @@ import json
 import socket
 import ssl
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Self, TypeGuard, cast
+from typing import Any, Literal, Self, TypeGuard, cast
 from urllib.parse import urlsplit, urlunsplit
 from weakref import WeakSet
 
@@ -325,6 +325,7 @@ class _OutboundFrame:
     raw: str
     utf8_bytes: int
     label: str
+    on_sent: Callable[[], None] | None = None
 
 
 @dataclass(slots=True)
@@ -416,8 +417,9 @@ class WebSocketChannel(BaseChannel):
         raw: str,
         *,
         label: str = "",
+        on_sent: Callable[[], None] | None = None,
     ) -> None:
-        await self._safe_send_to(connection, raw, label=label)
+        await self._safe_send_to(connection, raw, label=label, on_sent=on_sent)
 
     async def webui_dispatch_message(
         self,
@@ -995,6 +997,9 @@ class WebSocketChannel(BaseChannel):
                         close_reason="outbound send failed",
                     )
                     return
+                else:
+                    if frame.on_sent is not None:
+                        frame.on_sent()
                 finally:
                     state.buffered_bytes = max(0, state.buffered_bytes - frame.utf8_bytes)
         finally:
@@ -1062,6 +1067,7 @@ class WebSocketChannel(BaseChannel):
         raw: str,
         *,
         label: str = "",
+        on_sent: Callable[[], None] | None = None,
     ) -> None:
         state = self._connection_outbound.get(connection)
         if state is None or state.closing:
@@ -1084,7 +1090,7 @@ class WebSocketChannel(BaseChannel):
             await asyncio.sleep(0)
             return
         try:
-            state.queue.put_nowait(_OutboundFrame(raw, utf8_bytes, label))
+            state.queue.put_nowait(_OutboundFrame(raw, utf8_bytes, label, on_sent))
         except asyncio.QueueFull:
             self._schedule_connection_retirement(
                 connection,
@@ -1100,8 +1106,9 @@ class WebSocketChannel(BaseChannel):
         # Give an idle writer a chance to start without waiting for physical I/O.
         await asyncio.sleep(0)
 
-    async def send_command_result(self, msg: OutboundMessage) -> None:
+    async def send_command_result(self, msg: OutboundMessage) -> Literal["queued"]:
         await self._outbound.send(msg)
+        return "queued"
 
     async def send(self, msg: OutboundMessage) -> None:
         await self._outbound.send(msg)

@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
@@ -17,6 +18,7 @@ OUTBOUND_META_AGENT_UI = "_agent_ui"
 INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
 INBOUND_META_USER_SHELL = "_user_shell"
 INBOUND_META_MODEL_OPTIONS = "_model_options"
+INBOUND_META_MODEL_CONTROL = "_model_control"
 RUNTIME_CONTROL_SESSION_DISCARD = "session_discard"
 
 # Transport-provided turn correlation; the persisted spelling is retained for clients.
@@ -72,3 +74,9 @@ class OutboundMessage:
     event: "AgentEvent | None" = None
     delivery: DeliveryRequest | None = None
     delivery_id: str | None = None
+    # Process-local acknowledgement; queue admission is not a completed send.
+    sent: asyncio.Future[None] | None = field(default=None, repr=False, compare=False)
+
+    def confirm_sent(self) -> None:
+        if self.sent is not None and not self.sent.done():
+            self.sent.set_result(None)

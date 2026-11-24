@@ -2424,8 +2424,7 @@ class FeishuChannel(BaseChannel):
 
             if (
                 isinstance(msg.event, CommandResultEvent)
-                and msg.event.command == "/new"
-                and any(part.get("key") == "new.done" for part in msg.event.parts)
+                and msg.event.outcome == "session_reset"
                 and msg.metadata.get("chat_type") == "p2p"
                 and not msg.media
                 and not msg.buttons

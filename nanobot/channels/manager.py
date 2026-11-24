@@ -787,6 +787,7 @@ class ChannelManager:
         if (
             pending is not None
             and msg.delivery_id is None
+            and msg.sent is None and pending[-1].sent is None
             and len(pending) < _OUTBOUND_BATCH_LIMIT
             and channel.can_batch_send(pending[-1], msg) is True
         ):
@@ -1074,7 +1075,8 @@ class ChannelManager:
         elif isinstance(event, StreamEndEvent):
             await ChannelManager._send_stream_event(channel, msg, event)
         elif isinstance(event, CommandResultEvent):
-            await channel.send_command_result(msg)
+            if await channel.send_command_result(msg) != "queued":
+                msg.confirm_sent()
         elif not isinstance(event, StreamedResponseEvent):
             await channel.send(msg)
 

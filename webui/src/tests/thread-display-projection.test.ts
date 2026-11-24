@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveTitle, isModelCommandText, visibleSessionPreview } from "@/lib/format";
+import { deriveTitle, visibleSessionPreview } from "@/lib/format";
 import { historyContentSnapshot, projectWebuiThreadMessages, sameHistoryContent } from "@/lib/thread-display-projection";
 import type { UIMessage } from "@/lib/types";
 
@@ -48,12 +48,8 @@ describe("command display projection", () => {
     expect(visible.map(({ content }) => content)).toEqual([
       "/model fast", "Switched model preset to fast.", "This unrelated reply stays visible.",
     ]);
-    expect([
-      isModelCommandText("/MODEL@nanobot fast"),
-      isModelCommandText("/modelish"),
-    ]).toEqual([true, false]);
-    expect(visibleSessionPreview("Switched model preset to `fast`.")).toBe("");
-    expect(deriveTitle("## Model\n- Current model: `gpt-5.5`", "New chat")).toBe("New chat");
+    expect(visibleSessionPreview("Switched model preset to `fast`.")).toBe("Switched model preset to `fast`.");
+    expect(deriveTitle("## Model\n- Current model: `gpt-5.5`", "New chat")).toBe("## Model - Current model: `gpt-5.5`");
   });
 });
 

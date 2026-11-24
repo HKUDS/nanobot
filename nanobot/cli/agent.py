@@ -375,6 +375,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                                 render_markdown=markdown,
                                 metadata=msg.metadata,
                             )
+                            msg.confirm_sent()
 
                     except asyncio.TimeoutError:
                         continue
@@ -442,6 +443,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                                     metadata=meta,
                                     **print_kwargs,
                                 )
+                                response_msg.confirm_sent()
                         elif renderer and not renderer.streamed:
                             await renderer.close()
                     except KeyboardInterrupt:

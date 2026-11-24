@@ -35,6 +35,16 @@ beforeEach(() => {
   });
 });
 
+it("lists explicit model commands but not the preset picker's silent turn", async () => {
+  vi.mocked(api.fetchPromptIndex).mockResolvedValue({ prompts: [
+    { ...index[0], preview: "/model fast", turnId: "webui-system:switch" },
+    { ...index[1], preview: "/model fast" },
+  ] });
+  const { result } = renderHook(() => usePromptHistory("a", 1, []), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts.map(({ label }) => label)).toEqual(["/model fast"]));
+  expect(result.current.prompts[0].id).toBe(index[1].id);
+});
+
 it("loads the complete index without bodies, reads bounded windows and leaves live history alone", async () => {
   const { result, rerender } = renderHook(({ messages }) => usePromptHistory("a", 1, messages), {
     wrapper: wrapper(), initialProps: { messages: latest },

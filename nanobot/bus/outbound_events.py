@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.command_copy import command_text
@@ -75,6 +75,7 @@ class LiteralLine(TypedDict):
 
 
 CommandPart = CommandLine | LiteralLine
+CommandOutcome = Literal["stopped", "session_reset"]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -83,6 +84,8 @@ class CommandResultEvent(SideChannelReplyEvent):
 
     command: str
     parts: tuple[CommandPart, ...]
+    outcome: CommandOutcome | None = None
+    switched_preset: str | None = None
 
 
 @dataclass(frozen=True)
