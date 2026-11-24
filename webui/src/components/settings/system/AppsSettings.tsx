@@ -1,3 +1,5 @@
+import "./apps-settings.css";
+
 import {
   ImportIcon,
   UpdateIcon,

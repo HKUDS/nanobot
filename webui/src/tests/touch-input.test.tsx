@@ -21,7 +21,7 @@ describe("touch form typography", () => {
   });
 
   it("emits the baseline after compact utilities, only for opted-in touch fields", async () => {
-    const css = await compiledGlobalCss();
+    const css = await compiledGlobalCss('class="touch-text-input text-xs text-sm text-ui-body text-[13px] text-[19px]"');
     let baseline = -1;
     let index = 0;
     const compact: number[] = [];
@@ -35,5 +35,5 @@ describe("touch form typography", () => {
     });
     expect(compact).toHaveLength(4);
     expect(baseline).toBeGreaterThan(Math.max(...compact));
-  }, 20_000);
+  });
 });

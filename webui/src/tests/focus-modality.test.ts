@@ -87,7 +87,9 @@ describe("focus modality", () => {
   });
 
   it("gates Tailwind focus-visible variants and base outlines on pointer modality while exempting text inputs", async () => {
-    const css = await compiledGlobalCss();
+    const css = await compiledGlobalCss(
+      'class="focus-visible:ring-2 group-focus-visible:ring-2 peer-focus-visible:ring-2 has-focus-visible:ring-2"',
+    );
     const selectors: string[] = [];
     css.walkRules((rule) => {
       if (rule.selector.includes("focus-visible")) selectors.push(rule.selector);
@@ -112,5 +114,5 @@ describe("focus modality", () => {
       selector: expect.stringContaining("textarea"),
       nodes: expect.arrayContaining([expect.objectContaining({ prop: "outline", value: "none" })]),
     });
-  }, 20_000);
+  });
 });

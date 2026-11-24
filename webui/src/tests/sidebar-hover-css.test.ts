@@ -10,7 +10,7 @@ import { compiledGlobalCss } from "./compiled-global-css";
 
 describe("sidebar touch hover isolation", () => {
   it("shows sidebar actions with roomy targets only for coarse pointers", async () => {
-    const css = await compiledGlobalCss();
+    const css = await compiledGlobalCss('class="sidebar-action-trigger touch-target opacity-0 h-6 w-6"');
     let hiddenIndex = -1;
     let visibleIndex = -1;
     let index = 0;
@@ -37,7 +37,7 @@ describe("sidebar touch hover isolation", () => {
     expect(hiddenIndex).toBeGreaterThan(0);
     expect(visibleIndex).toBeGreaterThan(hiddenIndex);
     expect(touchTarget).toBe(true);
-  }, 20_000);
+  });
 
   it("gates ordinary and named-group hover CSS without gating keyboard focus", async () => {
     const config = loadConfig(resolve(process.cwd(), "tailwind.config.js"));

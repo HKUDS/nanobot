@@ -1,9 +1,4 @@
 @layer utilities {
-  .activity-current,
-  .streaming-text-sheen {
-    --activity-animation: 2.8s ease-in-out infinite;
-  }
-
   @keyframes streaming-text-sheen-ltr {
     0% {
       background-position: 140% 50%;

@@ -62,6 +62,7 @@
     --automation-view-track: hsl(0 0% 91%);
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.26);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
+    --activity-animation: 2.8s ease-in-out infinite;
   }
 
   :root, .reading-typography {

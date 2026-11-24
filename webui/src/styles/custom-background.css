@@ -24,11 +24,6 @@ html[data-custom-background] .bg-settings-canvas {
   background-color: transparent;
 }
 
-html[data-custom-background] .file-edit-diff-surface {
-  background-color: hsl(var(--background) / 0.78);
-  backdrop-filter: blur(12px);
-}
-
 html[data-custom-background] .bg-settings-surface,
 html[data-custom-background] .thread-composer-surface,
 html[data-custom-background] .user-message-surface,
