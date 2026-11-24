@@ -483,7 +483,7 @@ async def test_search_fills_from_remaining_candidates_after_resets(
             assert [(item["message_index"], item["content"]) for item in row["excerpts"]] == [
                 (1, "Straße stable 0"),
             ]
-    assert calls == scans == 2  # One handle lookup and one header scan per execution.
+    assert calls == scans == 2
 
 
 @pytest.mark.asyncio

@@ -311,7 +311,7 @@ export class NanobotClient {
     return `${url.protocol}//${url.host}${url.pathname}`;
   }
 
-  /** Swap the URL (e.g. after fetching a fresh token) then reconnect. */
+  /** Set the URL and optional socket factory for the next connection. */
   updateUrl(url: string, socketFactory?: (url: string) => WebSocket): void {
     this.currentUrl = url;
     if (socketFactory) {
@@ -1252,15 +1252,11 @@ export class NanobotClient {
   }
 
   private emitError(error: StreamError): void {
-    // Isolate subscribers so a throwing handler cannot abort the surrounding
-    // ``handleClose`` flow (which still owes us a reconnect decision + status
-    // update). We deliberately swallow here: error reporting is best-effort
-    // and must never be allowed to compound the failure it's reporting.
     for (const handler of this.errorHandlers) {
       try {
         handler(error);
       } catch {
-        // best-effort: subscriber fault must not stall transport bookkeeping
+        // A failing subscriber must not prevent reconnect after handleClose.
       }
     }
   }

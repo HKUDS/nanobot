@@ -182,8 +182,6 @@ def _init_prompt_session() -> None:
     _prompt_session = PromptSession(
         history=SafeFileHistory(str(history_file)),
         enable_open_in_editor=False,
-        # Multiline-capable buffer; Enter still submits via the custom key
-        # bindings, while Alt+Enter adds a newline.
         multiline=True,
         key_bindings=_build_cli_key_bindings(),
     )

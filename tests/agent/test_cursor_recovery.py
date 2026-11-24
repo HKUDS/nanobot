@@ -162,10 +162,6 @@ class TestCursorValidationInvariant:
         first int seen from the tail, so the returned cursor is strictly
         greater than every legitimate cursor already on disk.
         """
-        # Tail is corrupt → recovery scan runs.  Valid cursors are 100
-        # and 5, in that order on disk; a naive "first int from the tail"
-        # recovery would return 6, which would then silently collide with
-        # the existing cursor 100.  ``max`` is the only safe choice.
         store.history_file.write_text(
             '{"cursor": 100, "timestamp": "2026-04-01 10:00", "content": "high"}\n'
             '{"cursor": 5,   "timestamp": "2026-04-01 10:01", "content": "out of order"}\n'

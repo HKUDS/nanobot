@@ -188,10 +188,6 @@ def test_quoted_content_is_none_for_unknown_message():
     assert _quoted_content_for(_FakeMessage("never-seen")) is None
 
 
-# --- End-to-end: capture -> lookup -> content ------------------------------
-# These exercise the real botpy message classes, so they are skipped wherever
-# the optional QQ dependency is absent (same gate as the other QQ test modules).
-
 from types import SimpleNamespace  # noqa: E402
 from unittest.mock import AsyncMock  # noqa: E402
 

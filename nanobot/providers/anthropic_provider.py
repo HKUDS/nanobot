@@ -475,7 +475,6 @@ class AnthropicProvider(LLMProvider):
         # Recovery for rule 2: if stripping removed every turn, reroute the
         # last popped assistant as a user turn so upstream code still gets a
         # valid request instead of a secondary "messages array empty" 400.
-        # Skip when the message carried ``tool_use`` blocks (see _has_tool_use).
         if (
             not merged
             and last_popped is not None

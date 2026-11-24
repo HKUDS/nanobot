@@ -544,7 +544,6 @@ async def test_stop_waits_for_reaction_already_draining(monkeypatch, cleanup_kin
 
 @pytest.mark.asyncio
 async def test_on_message_ignores_self_messages() -> None:
-    # Self-loop guard: messages from this bot's own account must be dropped (#3217).
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     channel._bot_user_id = "999"
     handled: list[dict] = []
@@ -557,7 +556,6 @@ async def test_on_message_ignores_self_messages() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_accepts_messages_from_other_bots() -> None:
-    # Multi-agent setups: messages from OTHER bots must be processed, not dropped (#3217).
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     channel._bot_user_id = "999"
     handled: list[dict] = []

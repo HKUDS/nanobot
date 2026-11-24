@@ -317,7 +317,7 @@ def _markdown_to_telegram_html(text: str) -> str:
     if not text:
         return ""
 
-    # 1. Extract and protect code blocks (preserve content from other processing)
+    # Keep code out of the Markdown substitutions below.
     code_blocks: list[str] = []
     def save_code_block(code: str) -> str:
         code_blocks.append(code)
@@ -358,9 +358,7 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     text = _escape_telegram_html(text)
 
-    # 6. Links [text](url) - must be before bold/italic to handle nested cases.
-    # Park the URL in a placeholder so later inline-formatting passes cannot
-    # rewrite it (e.g. ``__init__.py`` must not become ``<b>init</b>.py``).
+    # Format the link label, but not the URL: e.g. __init__.py must stay literal.
     link_urls: list[str] = []
     def save_link(m: re.Match[str]) -> str:
         link_urls.append(m.group(2).replace('"', "&quot;"))
@@ -371,7 +369,7 @@ def _markdown_to_telegram_html(text: str) -> str:
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
 
-    # 8. Italic _text_ (avoid matching inside words like some_var_name)
+    # Underscores inside identifiers such as some_var_name are not emphasis.
     text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'<i>\1</i>', text)
 
     text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
@@ -1232,7 +1230,6 @@ class TelegramChannel(BaseChannel):
             text = msg.content
             if msg.metadata.get("render_as") == "text":
                 text = _telegram_command_text(text)
-            # Fallback: no native keyboard → splice labels into the message so the choices survive.
             if buttons and reply_markup is None:
                 text = f"{text}\n\n{self._buttons_as_text(buttons)}"
 

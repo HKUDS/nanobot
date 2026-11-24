@@ -96,7 +96,6 @@ def package_skill(skill_path: str | Path, output_dir: str | Path | None = None) 
                 print(f"[ERROR] File escapes skill root: {file_path}")
                 _cleanup_partial_archive(skill_filename)
                 return None
-            # If output lives under skill_path, avoid writing archive into itself.
             if resolved_file == resolved_archive:
                 print(f"[WARN] Skipping output archive: {file_path}")
                 continue

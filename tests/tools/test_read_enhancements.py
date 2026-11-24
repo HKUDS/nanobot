@@ -436,14 +436,8 @@ class TestFileStateHashFallback:
         assert "unchanged" not in second.lower()
 
 
-# Line-ending normalization
-# ReadFileTool normalizes CRLF -> LF before line-splitting. This primarily
-# helps Windows users whose checkouts carry CRLF line endings and whose
-# subsequent StrReplace edits would otherwise miss on `\r` boundaries. The
-# normalization applies on all platforms; these tests lock that in so the
-# behavior is intentional and discoverable, not accidental.
-
 class TestReadFileLineEndingNormalization:
+    """Edits must match text read from Windows checkouts."""
 
     @pytest.fixture()
     def tool(self, tmp_path):

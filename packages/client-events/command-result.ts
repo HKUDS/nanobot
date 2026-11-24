@@ -27,7 +27,7 @@ export function commandLabel(command: string, field: 'title' | 'description', lo
   return template(`palette.${command.replace(/^\//, '')}.${field}`, locale)
 }
 
-/** Unknown or malformed receipts retain their server-rendered text. Values are never interpreted as templates. */
+/** Returns undefined for malformed or unknown receipts. Values are never interpreted as templates. */
 export function renderCommandResult(result: unknown, locale: string): string | undefined {
   if (!record(result) || typeof result.command !== 'string' || !Array.isArray(result.parts)) return undefined
   const lines: string[] = []

@@ -1,11 +1,7 @@
 #!/bin/sh
 dir="$HOME/.nanobot"
 
-# Drop privileges whenever the container starts as root. Render mounts the
-# persistent disk root-owned, and a plain `docker run` also defaults to root now,
-# so this covers both. Chown the data dir so the non-root user can write it, then
-# re-exec as nanobot. Fail closed: if the privilege drop cannot be performed,
-# exit rather than run the agent as root.
+# Never fall through to the agent as root if the privilege drop fails.
 if [ "$(id -u)" = "0" ]; then
     chown -R nanobot:nanobot "$dir" 2>/dev/null || echo "[entrypoint] warning: chown $dir failed"
     if setpriv --reuid=nanobot --regid=nanobot --init-groups true 2>/dev/null; then

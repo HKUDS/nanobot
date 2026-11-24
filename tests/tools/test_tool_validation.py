@@ -766,14 +766,7 @@ async def test_completed_exec_returns_exit_code() -> None:
 
 async def test_exec_head_tail_truncation(tmp_path) -> None:
     tool = ExecTool()
-    # Generate output that exceeds _MAX_OUTPUT (10_000 chars).
-    # Use a temp script file so the output-generating logic lives in a file
-    # (Windows cmd.exe has finicky rules for quoting `-c` payloads with
-    # embedded newlines). ExecTool runs via create_subprocess_shell, so we
-    # must quote *both* the interpreter path and the script path — tmp_path
-    # on some CI runners and on many local Windows installs contains spaces
-    # (e.g. C:\Users\John Doe\AppData\...) which would otherwise break the
-    # shell's argv split.
+    # Use a script to avoid cmd.exe multiline quoting; either path may contain spaces.
     script_file = tmp_path / "gen_output.py"
     script_file.write_text("print('A' * 6000 + chr(10) + 'B' * 6000)", encoding="utf-8")
     if sys.platform == "win32":

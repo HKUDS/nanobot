@@ -5,8 +5,8 @@ EXTENDS Naturals, FiniteSets, Sequences, TLC
 \* independent-producer OVERAPPROXIMATION: concrete sharing/abort is partitioned
 \* into SharedRequests, not asserted equivalent. A counterexample needs mapping.
 \* Full pages contain all bounded persisted IDs; no fragment-gap bridging proof.
-\* Effect setup starts history (useNanobotStream:551) before transcript subscribe
-\* (:682 onward), so selected alone does not imply hasTranscript.
+\* useNanobotStream starts fetchLatestWebuiThread before client.onTranscript,
+\* so selected alone does not imply hasTranscript.
 CONSTANTS NChats, NTurns, MaxOutages, MaxSwitches
 Chats == 1..NChats
 Turns == 1..NTurns

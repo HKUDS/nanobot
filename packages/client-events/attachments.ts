@@ -1,4 +1,3 @@
-/** Preview bodies upload over HTTP; borrowed paths never upload file bytes. */
 export interface LocalAttachment {
   path: string;
   name: string;
@@ -86,6 +85,7 @@ export function uploadCapability(value: unknown): UploadCapability | null {
     ? { path: row.path, token: row.token } : null;
 }
 
+/** Preview bodies upload over HTTP; borrowed paths never upload file bytes. */
 export async function uploadAttachments(
   drafts: readonly DraftAttachment[], capability: UploadCapability | null,
   baseUrl: string, stillConnected: () => boolean,

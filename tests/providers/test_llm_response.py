@@ -37,8 +37,6 @@ class TestShouldExecuteTools:
     def test_tool_calls_with_stop_reason_executes(self) -> None:
         # Some compliant providers emit "stop" together with tool_calls; the
         # guard must accept this to avoid breaking real tool-calling flows.
-        # See openai_compat_provider.py:~633,678 where ("tool_calls", "stop")
-        # are both treated as terminal tool-call states.
         resp = _response("stop")
         assert resp.should_execute_tools is True
 

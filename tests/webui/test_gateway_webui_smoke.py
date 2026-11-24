@@ -303,7 +303,6 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             ready = await _recv_until(ws, "ready")
             assert ready["client_id"] == "smoke"
 
-            # An old WebUI can still connect, but cannot start the retired listener.
             await ws.send(json.dumps({
                 "type": "webui_request", "request_id": "old-api-start",
                 "action": "settings.api_service.start",
