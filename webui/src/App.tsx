@@ -534,7 +534,7 @@ function Shell({
   const [settingsLoading, setSettingsLoading] = useState(true);
   const settingsSnapshotRef = useRef(settingsSnapshot);
   settingsSnapshotRef.current = settingsSnapshot;
-  const settingsOwnsSnapshot = view !== "chat" && view !== "remote";
+  const settingsOwnsSnapshot = view === "settings" || view === "apps" || view === "automations";
   const settingsRefreshGenerationRef = useRef(0);
   const [pendingAutomationMessage, setPendingAutomationMessage] = useState<{
     id: string;
@@ -2173,9 +2173,9 @@ function Shell({
           onNewChat={onNewChat}
           onDoneSession={(key) => onArchiveMany([key], true)}
           onOpenSearch={onOpenSessionSearch}
-          onOpenApps={onOpenApps}
-          onOpenAutomations={onOpenAutomations}
-          onOpenSettings={() => onOpenSettings()}
+          onOpenApps={() => (!managingConnections && view === "apps" ? onBackToChat() : onOpenApps())}
+          onOpenAutomations={() => (!managingConnections && view === "automations" ? onBackToChat() : onOpenAutomations())}
+          onOpenSettings={() => (!managingConnections && view === "settings" ? onBackToChat() : onOpenSettings())}
           onOpenUpdates={() => onOpenSettings("about")}
           onSettingsIntent={onSettingsIntent}
           onToggleTheme={toggle}
@@ -2186,6 +2186,7 @@ function Shell({
           <ActiveSessionDrawer
             open={drawerOpen}
             pinned={effectiveDrawerPinned && showMainSidebar}
+            loading={sidebarStateLoading}
               intelligence={sessionIntelligence}
               temporarySessions={sidebarStateLoading ? [] : temporarySessionList}
               activeKey={!managingConnections && view === "chat" ? activeKey : null}

@@ -40,7 +40,7 @@ import {
   type EnrichedSession,
   type SessionIntelligenceSnapshot,
 } from "@/lib/session-intelligence";
-import { sidebarShortcutLabel } from "@/lib/sidebar-shortcuts";
+import { sidebarShortcutAria, sidebarShortcutLabel } from "@/lib/sidebar-shortcuts";
 import type { UpdateMethod } from "@/lib/api";
 import type { ShellView } from "@/shell-route";
 import { cn } from "@/lib/utils";
@@ -181,6 +181,7 @@ export function WorkspaceTopBar({
             type="button"
             data-testid="topbar-overview-button"
             aria-label={homeHintLabel}
+            aria-keyshortcuts={sidebarShortcutAria("overview")}
             aria-current={view === "overview" ? "page" : undefined}
             onClick={() => onOpenOverview(null)}
             className={cn(
@@ -223,6 +224,7 @@ export function WorkspaceTopBar({
             type="button"
             data-testid="topbar-drawer-toggle"
             aria-label={drawerLabel}
+            aria-keyshortcuts={sidebarShortcutAria("drawer")}
             aria-pressed={drawerOpen || drawerPinned}
             onClick={onToggleDrawer}
             className={cn(
@@ -528,6 +530,7 @@ export function WorkspaceTopBar({
               size="icon"
               data-testid="topbar-new-chat-button"
               aria-label={t("sidebar.newChat")}
+              aria-keyshortcuts={sidebarShortcutAria("newChat")}
               onClick={onNewChat}
               className={cn(
                 "host-no-drag h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
@@ -555,6 +558,7 @@ export function WorkspaceTopBar({
               size="icon"
               data-testid="topbar-search-button"
               aria-label={t("sidebar.searchAria")}
+              aria-keyshortcuts={sidebarShortcutAria("search")}
               onClick={onOpenSearch}
               className="host-no-drag h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
             >
@@ -659,6 +663,7 @@ export function WorkspaceTopBar({
                 variant="ghost"
                 size="icon"
                 aria-label={t("sidebar.apps")}
+                aria-keyshortcuts={sidebarShortcutAria("apps")}
                 aria-current={view === "apps" ? "page" : undefined}
                 onClick={onOpenApps}
                 onPointerEnter={onSettingsIntent}
@@ -690,6 +695,7 @@ export function WorkspaceTopBar({
                 variant="ghost"
                 size="icon"
                 aria-label={t("sidebar.automations", { defaultValue: "Automations" })}
+                aria-keyshortcuts={sidebarShortcutAria("automations")}
                 aria-current={view === "automations" ? "page" : undefined}
                 onClick={onOpenAutomations}
                 onPointerEnter={onSettingsIntent}
@@ -721,6 +727,7 @@ export function WorkspaceTopBar({
                 variant="ghost"
                 size="icon"
                 aria-label={t("sidebar.settings")}
+                aria-keyshortcuts={sidebarShortcutAria("settings")}
                 aria-current={view === "settings" ? "page" : undefined}
                 onClick={onOpenSettings}
                 onPointerEnter={onSettingsIntent}

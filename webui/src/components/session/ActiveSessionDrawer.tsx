@@ -48,6 +48,7 @@ import "./session-zen.css";
 export interface ActiveSessionDrawerProps {
   open: boolean;
   pinned: boolean;
+  loading?: boolean;
   intelligence: SessionIntelligenceSnapshot;
   temporarySessions: ChatSummary[];
   activeKey: string | null;
@@ -71,6 +72,7 @@ export interface ActiveSessionDrawerProps {
 export function ActiveSessionDrawer({
   open,
   pinned,
+  loading = false,
   intelligence,
   temporarySessions,
   activeKey,
@@ -93,9 +95,15 @@ export function ActiveSessionDrawer({
   const { t, i18n } = useTranslation();
   const isZh = Boolean(i18n.resolvedLanguage?.startsWith("zh"));
   const visible = open || pinned;
+  const [hasOpened, setHasOpened] = useState(visible);
+  useEffect(() => {
+    if (visible) setHasOpened(true);
+  }, [visible]);
+  const [projectLimits, setProjectLimits] = useState<Record<string, number>>({});
   const nowMs = useLiveClock(visible && intelligence.running.length > 0, 1000);
   const [renamingKey, setRenamingKey] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
   const [completingKeys, setCompletingKeys] = useState<Set<string>>(() => new Set());
   const timersRef = useRef<number[]>([]);
 
@@ -213,9 +221,15 @@ export function ActiveSessionDrawer({
         </div>
       </div>
 
-      {/* Scrollable Body */}
+      {/* Scrollable Body — defer initial mount until first open, then keep mounted for smooth close transitions */}
       <div className="sidebar-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-3 pb-4 pt-1">
-        {isEmpty ? (
+        {hasOpened ? (
+          <>
+        {loading ? (
+          <div className="flex items-center justify-center py-16 text-[12.5px] text-muted-foreground/70">
+            {t("chat.loading")}
+          </div>
+        ) : isEmpty ? (
           <div className="flex flex-col items-center justify-center gap-2.5 py-16 text-center">
             <p className="text-[12.5px] text-muted-foreground/70">
               {isZh ? "暂无会话" : "No active sessions"}
@@ -418,43 +432,86 @@ export function ActiveSessionDrawer({
                   {...(collapsed ? { inert: "" } : {})}
                 >
                   <div className="zen-disclosure-inner">
-                    <ul className="space-y-0.5 pt-0.5">
-                      {group.drawerSessions.map((item) => (
-                        <DrawerSessionRow
-                          key={item.session.key}
-                          item={item}
-                          isCurrent={item.session.key === activeKey}
-                          completing={completingKeys.has(item.session.key)}
-                          isZh={isZh}
-                          locale={i18n.resolvedLanguage}
-                          nowMs={nowMs}
-                          isRenaming={renamingKey === item.session.key}
-                          renameDraft={renameDraft}
-                          onRenameDraftChange={setRenameDraft}
-                          onBeginRename={() => {
-                            setRenamingKey(item.session.key);
-                            setRenameDraft(item.title);
-                          }}
-                          onCommitRename={async () => {
-                            const trimmed = renameDraft.trim();
-                            setRenamingKey(null);
-                            if (trimmed) await onRequestRename(item.session.key, trimmed).catch(() => {});
-                          }}
-                          onCancelRename={() => setRenamingKey(null)}
-                          onSelect={() => handleSelect(item.session.key)}
-                          onArchive={() => completeWithRitual(item.session.key)}
-                          onTogglePin={() => onTogglePinSession(item.session.key)}
-                          onCreateTab={onCreateTab ? () => onCreateTab(item.session.key) : undefined}
-                          onDelete={() => onRequestDeleteMany([{ key: item.session.key, label: item.title }])}
-                        />
-                      ))}
-                    </ul>
+                    {(() => {
+                      const limit = projectLimits[group.project.id] ?? 30;
+                      const visibleRows = group.drawerSessions.slice(0, limit);
+                      const remaining = Math.max(0, group.drawerSessions.length - visibleRows.length);
+                      return (
+                        <>
+                          <ul className="space-y-0.5 pt-0.5">
+                            {visibleRows.map((item) => (
+                              <DrawerSessionRow
+                                key={item.session.key}
+                                item={item}
+                                isCurrent={item.session.key === activeKey}
+                                completing={completingKeys.has(item.session.key)}
+                                isZh={isZh}
+                                locale={i18n.resolvedLanguage}
+                                nowMs={nowMs}
+                                isRenaming={renamingKey === item.session.key}
+                                renameDraft={renameDraft}
+                                renameError={renamingKey === item.session.key ? renameError : null}
+                                onRenameDraftChange={(value) => {
+                                  setRenameDraft(value);
+                                  setRenameError(null);
+                                }}
+                                onBeginRename={() => {
+                                  setRenamingKey(item.session.key);
+                                  setRenameDraft(item.title);
+                                  setRenameError(null);
+                                }}
+                                onCommitRename={async () => {
+                                  const trimmed = renameDraft.trim();
+                                  if (!trimmed) {
+                                    setRenamingKey(null);
+                                    setRenameError(null);
+                                    return;
+                                  }
+                                  try {
+                                    await onRequestRename(item.session.key, trimmed);
+                                    setRenamingKey(null);
+                                    setRenameError(null);
+                                  } catch {
+                                    setRenameError(t("chat.renameFailed"));
+                                  }
+                                }}
+                                onCancelRename={() => {
+                                  setRenamingKey(null);
+                                  setRenameError(null);
+                                }}
+                                onSelect={() => handleSelect(item.session.key)}
+                                onArchive={() => completeWithRitual(item.session.key)}
+                                onTogglePin={() => onTogglePinSession(item.session.key)}
+                                onCreateTab={onCreateTab ? () => onCreateTab(item.session.key) : undefined}
+                                onDelete={() => onRequestDeleteMany([{ key: item.session.key, label: item.title }])}
+                              />
+                            ))}
+                          </ul>
+                          {remaining > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => setProjectLimits((current) => ({
+                                ...current,
+                                [group.project.id]: limit + 30,
+                              }))}
+                              className="mt-1 inline-flex h-7 items-center rounded-lg px-2 text-[11.5px] text-muted-foreground/70 transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                            >
+                              {isZh
+                                ? `显示更多（剩余 ${remaining}）`
+                                : `Show ${Math.min(30, remaining)} more`}
+                            </button>
+                          ) : null}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               </section>
             );
           })}
         </div>
+          </>
+        ) : null}
       </div>
 
       {/* Quiet Footer */}
@@ -520,6 +577,7 @@ function DrawerSessionRow({
   nowMs,
   isRenaming,
   renameDraft,
+  renameError,
   onRenameDraftChange,
   onBeginRename,
   onCommitRename,
@@ -538,6 +596,7 @@ function DrawerSessionRow({
   nowMs: number;
   isRenaming: boolean;
   renameDraft: string;
+  renameError: string | null;
   onRenameDraftChange: (value: string) => void;
   onBeginRename: () => void;
   onCommitRename: () => Promise<void>;
@@ -550,6 +609,7 @@ function DrawerSessionRow({
 }) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const composingRef = useRef(false);
   const canArchive = item.session.projectLocked !== false;
 
   return (
@@ -578,23 +638,37 @@ function DrawerSessionRow({
           )}
         >
           {isRenaming ? (
-            <input
-              value={renameDraft}
-              autoFocus
-              onChange={(event) => onRenameDraftChange(event.target.value)}
-              onBlur={() => { void onCommitRename(); }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void onCommitRename();
-                } else if (event.key === "Escape") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onCancelRename();
-                }
-              }}
-              className="h-7 w-full rounded-md border border-foreground/25 bg-background px-2 text-[12.5px] text-foreground outline-none transition-colors focus:border-foreground/50"
-            />
+            <div className="space-y-1">
+              <input
+                value={renameDraft}
+                autoFocus
+                aria-label={t("chat.renamePlaceholder")}
+                aria-invalid={renameError ? true : undefined}
+                onCompositionStart={() => { composingRef.current = true; }}
+                onCompositionEnd={() => { composingRef.current = false; }}
+                onChange={(event) => onRenameDraftChange(event.target.value)}
+                onBlur={() => {
+                  if (!renameError) void onCommitRename();
+                }}
+                onKeyDown={(event) => {
+                  if (composingRef.current || event.nativeEvent.isComposing) return;
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void onCommitRename();
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onCancelRename();
+                  }
+                }}
+                className="h-7 w-full rounded-md border border-foreground/25 bg-background px-2 text-[12.5px] text-foreground outline-none transition-colors focus:border-foreground/50"
+              />
+              {renameError ? (
+                <p role="alert" className="px-0.5 text-[11px] text-destructive">
+                  {renameError}
+                </p>
+              ) : null}
+            </div>
           ) : (
             <button
               type="button"
@@ -643,7 +717,7 @@ function DrawerSessionRow({
                 className="hidden media-hover:inline-flex"
               />
             ) : null}
-            <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenu modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"

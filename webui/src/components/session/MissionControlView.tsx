@@ -907,6 +907,9 @@ function ProjectSection({
 }) {
   const { t } = useTranslation();
   const { project } = group;
+  const [visibleLimit, setVisibleLimit] = useState(40);
+  const visibleSessions = group.openSessions.slice(0, visibleLimit);
+  const remainingCount = Math.max(0, group.openSessions.length - visibleSessions.length);
 
   return (
     <section aria-label={project.name} className="group/section space-y-1">
@@ -955,7 +958,7 @@ function ProjectSection({
             <Plus className="h-3.5 w-3.5" aria-hidden />
           </button>
           {!project.isGeneral && project.key ? (
-            <DropdownMenu>
+            <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
@@ -978,7 +981,7 @@ function ProjectSection({
 
       {/* Pure Single-Line Rows (Things 3 left-circle completion) */}
       <ul>
-        {group.openSessions.map((item) => {
+        {visibleSessions.map((item) => {
           const isCurrent = item.session.key === activeKey;
           const isFocused = item.session.key === focusedKey;
           const isRenaming = renamingKey === item.session.key;
@@ -1083,7 +1086,7 @@ function ProjectSection({
                           {item.pinned ? <PinOff className="h-3.5 w-3.5" aria-hidden /> : <Pin className="h-3.5 w-3.5" aria-hidden />}
                         </button>
                       </HoverHint>
-                      <DropdownMenu>
+                      <DropdownMenu modal={false}>
                         <DropdownMenuTrigger asChild>
                           <button
                             type="button"
@@ -1136,6 +1139,19 @@ function ProjectSection({
           );
         })}
       </ul>
+      {remainingCount > 0 ? (
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={() => setVisibleLimit((limit) => limit + 40)}
+            className="inline-flex h-8 items-center rounded-lg px-2 text-[12px] text-muted-foreground/75 transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+          >
+            {isZh
+              ? `显示更多（剩余 ${remainingCount}）`
+              : `Show ${Math.min(40, remainingCount)} more`}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
