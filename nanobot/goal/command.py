@@ -13,13 +13,7 @@ from nanobot.command.builtin import cmd_stop
 from nanobot.command.results import command_reply, line
 from nanobot.command.router import CommandContext, CommandExpansion, CommandInput, CommandRouter
 from nanobot.command.spec import BuiltinCommandSpec
-from nanobot.session.goal_state import (
-    GOAL_COMMAND,
-    GOAL_STATE_KEY,
-    discard_legacy_goal_state_key,
-    goal_state_raw,
-    parse_goal_state,
-)
+from nanobot.session.goal_state import GOAL_COMMAND, GOAL_STATE_KEY, read_goal_state
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.utils.cancellation import shield_and_drain
@@ -72,7 +66,7 @@ async def cmd_cancel_goal(ctx: CommandContext) -> OutboundMessage:
         return reply("goal.none")
     if ctx.msg.session_generation is not None and ctx.msg.session_generation != session.generation:
         return reply("goal.changed")
-    goal = parse_goal_state(goal_state_raw(session.metadata))
+    goal = read_goal_state(session.metadata)
     if goal is None or goal.get("status") not in {"active", "blocked"}:
         return reply("goal.none")
 
@@ -81,14 +75,13 @@ async def cmd_cancel_goal(ctx: CommandContext) -> OutboundMessage:
 
     async def cancel_and_publish() -> bool:
         def cancel(metadata: dict[str, Any]) -> bool:
-            current = parse_goal_state(goal_state_raw(metadata))
+            current = read_goal_state(metadata)
             if current is None or current.get("status") not in {"active", "blocked"}:
                 return False
             metadata[GOAL_STATE_KEY] = {
                 **current, "status": "cancelled", "ended_at": datetime.now().isoformat(),
                 "recap": "Cancelled by user.",
             }
-            discard_legacy_goal_state_key(metadata)
             return True
 
         changed, metadata = await ctx.loop.sessions.state.mutate_metadata(

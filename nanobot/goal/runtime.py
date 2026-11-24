@@ -5,13 +5,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from nanobot.agent.goal_permission import GoalInputScope
-from nanobot.session.goal_state import goal_state_runtime_lines, sustained_goal_active
+from nanobot.session.goal_state import (
+    GOAL_STATE_KEY,
+    goal_state_runtime_lines,
+    sustained_goal_active,
+)
 
 if TYPE_CHECKING:
     from nanobot.session.state import SessionState
 
 GOAL_GENERATION_VOLATILE_KEYS = frozenset({
-    "goal_state", "thread_goal", "_sustained_goal_continuation_rounds",
+    GOAL_STATE_KEY, "_sustained_goal_continuation_rounds",
 })
 
 
