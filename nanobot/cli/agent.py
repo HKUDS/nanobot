@@ -134,12 +134,13 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
     from nanobot.agent.tools.mcp import MCPProvider
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.bus.outbound_events import (
+        EmptyFinalResponseNotice,
         StreamDeltaEvent,
         StreamedResponseEvent,
         StreamEndEvent,
     )
     from nanobot.bus.queue import MessageBus
-    from nanobot.channels.turn_notices import turn_failure_notice
+    from nanobot.channels.turn_notices import empty_final_notice_text
     from nanobot.cli import terminal as cli_terminal
     from nanobot.cli.stream import ThinkingSpinner
     from nanobot.command.results import as_text_message
@@ -269,9 +270,9 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                     on_stream=renderer.on_delta,
                     on_stream_end=renderer.on_end,
                 )
-                if response is not None and (notice := turn_failure_notice(response.event)):
+                if response is not None and isinstance(response.event, EmptyFinalResponseNotice):
                     await renderer.close()
-                    console.print(notice)
+                    console.print(empty_final_notice_text(response.event))
                 elif not renderer.streamed:
                     await renderer.close()
                     print_kwargs: dict[str, Any] = {}
@@ -335,11 +336,11 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                         msg = as_text_message(await asyncio.wait_for(bus.consume_outbound(), timeout=1.0))
                         event = msg.event
 
-                        if notice := turn_failure_notice(event):
+                        if isinstance(event, EmptyFinalResponseNotice):
                             if renderer:
                                 await renderer.close()
                                 renderer = None
-                            await cli_terminal._print_interactive_line(notice)
+                            await cli_terminal._print_interactive_line(empty_final_notice_text(event))
                             turn_done.set()
                             continue
 

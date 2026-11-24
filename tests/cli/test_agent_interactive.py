@@ -8,10 +8,10 @@ from typer.testing import CliRunner
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
+    EmptyFinalResponseNotice,
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
-    TurnEndEvent,
     outbound_message_for_event,
 )
 from nanobot.cli.commands import app
@@ -73,7 +73,7 @@ def test_interactive_agent_routes_a_complete_user_turn(
             seen["inbound"] = message
             if reply == "empty_final":
                 await self.bus.publish_event(
-                    TurnEndEvent(outcome="failed", failure_kind="model", failure_error_kind="empty_final_response"),
+                    EmptyFinalResponseNotice(output_limited=False),
                     channel=message.channel, chat_id=message.chat_id,
                 )
             elif reply == "streamed":

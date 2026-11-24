@@ -5,13 +5,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.context import TranscriptInput
+from nanobot.agent.hook import SDKCaptureHook
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.message import MessageTool
-from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.bus.outbound_events import TurnEndEvent
+from nanobot.bus.events import INBOUND_META_TURN_ID, InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import EmptyFinalResponseNotice, TurnEndEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.sdk.types import result_from_response
 from nanobot.utils.progress_events import output_events
 
 
@@ -25,13 +27,15 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
 class TestMessageToolSuppressLogic:
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("ephemeral", [False, True])
+    @pytest.mark.parametrize("ephemeral, max_iterations", [(False, 2), (True, 2), (False, 1)])
     async def test_suppress_when_sent_to_same_target(
         self,
         tmp_path: Path,
         ephemeral: bool,
+        max_iterations: int,
     ) -> None:
         loop = _make_loop(tmp_path)
+        loop.max_iterations = max_iterations
         tool_call = ToolCallRequest(
             id="call1", name="message",
             arguments={"content": "Hello", "channel": "feishu", "chat_id": "chat123"},
@@ -122,8 +126,9 @@ class TestMessageToolSuppressLogic:
         assert result.content == "Heartbeat summary"
 
     @pytest.mark.asyncio
-    async def test_injected_followup_with_message_tool_does_not_emit_empty_fallback(
-        self, tmp_path: Path
+    @pytest.mark.parametrize("final_text", ["", "Sent."])
+    async def test_send_after_followup_completes_that_input_without_a_duplicate(
+        self, tmp_path: Path, final_text: str,
     ) -> None:
         loop = _make_loop(tmp_path)
         tool_call = ToolCallRequest(
@@ -133,9 +138,7 @@ class TestMessageToolSuppressLogic:
         calls = iter([
             LLMResponse(content="First answer", tool_calls=[]),
             LLMResponse(content="", tool_calls=[tool_call]),
-            LLMResponse(content="", tool_calls=[]),
-            LLMResponse(content="", tool_calls=[]),
-            LLMResponse(content="", tool_calls=[]),
+            LLMResponse(content=final_text),
         ])
         pending_queue: asyncio.Queue[InboundMessage] = asyncio.Queue()
 
@@ -147,6 +150,7 @@ class TestMessageToolSuppressLogic:
                     sender_id="user1",
                     chat_id="chat123",
                     content="follow-up",
+                    metadata={INBOUND_META_TURN_ID: "follow-up"},
                 ))
             return response
 
@@ -162,35 +166,79 @@ class TestMessageToolSuppressLogic:
         completed: list[TurnCompleted] = []
         loop.bus.subscribe(completed.append, TurnCompleted)
         delivery = loop.turn_delivery_factory.create(msg, msg.session_key)
-        result = await loop._process_message(msg, pending_queue=pending_queue, delivery=delivery)
+        capture = SDKCaptureHook()
+        capture.on_error = AsyncMock()
+        result = await loop._process_message(msg, pending_queue=pending_queue, delivery=delivery, hooks=[capture])
         await delivery.complete(result, publish_completion=True)
 
         assert len(sent) == 1
         assert sent[0].content == "Tool reply"
+        assert sent[0].metadata["response_input_ids"] == ["user:follow-up"]
         assert result is None
         assert [event.outcome for event in completed] == ["completed"]
+        sdk = result_from_response(result, capture)
+        assert (sdk.stop_reason, sdk.error, sdk.tools_used) == ("completed", None, ["message"])
+        capture.on_error.assert_not_awaited()
+
+    @pytest.mark.parametrize("final_text", ["", "New answer"])
+    async def test_send_before_followup_does_not_answer_the_new_input(self, tmp_path: Path, final_text: str) -> None:
+        loop = _make_loop(tmp_path)
+        pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
+        msg = InboundMessage(channel="feishu", sender_id="user", chat_id="chat", content="Start")
+
+        async def on_send(_message: OutboundMessage) -> None:
+            # Even inputs without public IDs have separate reply ownership.
+            pending.put_nowait(InboundMessage(channel="feishu", sender_id="user", chat_id="chat", content="Next?"))
+
+        tool = loop.tools.get("message")
+        assert isinstance(tool, MessageTool)
+        tool.set_send_callback(on_send)
+        call = ToolCallRequest(id="send", name="message", arguments={"content": "First answer"})
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+            LLMResponse(tool_calls=[call], content=None),
+            *[LLMResponse(content=final_text) for _ in range(1 if final_text else 3)],
+        ])
+        capture = SDKCaptureHook()
+        capture.on_error = AsyncMock()
+        result = await loop._process_message(msg, pending_queue=pending, hooks=[capture])
+
+        assert result is not None
+        sdk = result_from_response(result, capture)
+        if final_text:
+            assert (sdk.content, sdk.stop_reason, sdk.error) == (final_text, "completed", None)
+            capture.on_error.assert_not_awaited()
+        else:
+            assert (sdk.content, sdk.stop_reason, sdk.error) == ("", "empty_final_response", "empty_final_response")
+            capture.on_error.assert_awaited_once()
 
     @pytest.mark.parametrize("channel", ["websocket", "feishu"])
     async def test_undelivered_empty_final_reaches_channel_as_failure(self, tmp_path: Path, channel: str) -> None:
         loop = _make_loop(tmp_path)
+        from nanobot.session.webui_turns import WebuiTurnCoordinator
+
         loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="", finish_reason="length"))
         msg = InboundMessage(channel=channel, sender_id="user", chat_id="chat", content="Start")
         completed: list[TurnCompleted] = []
         loop.bus.subscribe(completed.append, TurnCompleted)
         delivery = loop.turn_delivery_factory.create(msg, msg.session_key)
-        result = await loop._process_message(msg, delivery=delivery)
-        await delivery.complete(result, publish_completion=True)
+        with WebuiTurnCoordinator(loop.bus, loop.sessions, loop.schedule_background).connected():
+            result = await loop._process_message(msg, delivery=delivery)
+            await delivery.complete(result, publish_completion=True)
 
         assert result is not None and result.content == ""
-        assert isinstance(result.event, TurnEndEvent)
+        assert result.event == EmptyFinalResponseNotice(output_limited=True)
         assert [(e.outcome, e.failure_kind, e.failure_error_kind) for e in completed] == [
             ("failed", "model", "empty_final_response_length"),
         ]
         # The WebSocket coordinator projects the lifecycle completion; other channels get the routed event.
         routed = [loop.bus.outbound.get_nowait() for _ in range(loop.bus.outbound_size)]
-        assert [m.event for m in routed if isinstance(m.event, TurnEndEvent)] == (
-            [] if channel == "websocket" else [result.event]
-        )
+        terminal = [m.event for m in routed if isinstance(m.event, EmptyFinalResponseNotice | TurnEndEvent)]
+        if channel == "websocket":
+            [end] = terminal
+            assert isinstance(end, TurnEndEvent)
+            assert (end.outcome, end.failure_error_kind, end.failure_message) == ("failed", "empty_final_response_length", None)
+        else:
+            assert terminal == [result.event]
 
     async def test_progress_hides_internal_reasoning(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)

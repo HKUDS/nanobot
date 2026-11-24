@@ -114,11 +114,16 @@ async def test_scheduled_recovery_remains_busy_while_waiting_for_a_send_slot(tmp
         await manager.stop_all()
 
 
-@pytest.mark.parametrize("legacy_message,one_shot,origin", [
-    (False, False, "whatsapp"), (True, False, "whatsapp"), (True, True, "whatsapp"),
-    (True, False, "websocket"),
+@pytest.mark.parametrize("reply_kind,one_shot,origin", [
+    ("final", False, "whatsapp"), ("message_tool", False, "whatsapp"), ("message_tool", True, "whatsapp"),
+    ("message_tool", False, "websocket"), ("empty_final", True, "whatsapp"),
 ])
-async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, monkeypatch, legacy_message, one_shot, origin):
+async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, monkeypatch, reply_kind, one_shot, origin):
+    legacy_message = reply_kind == "message_tool"
+    expected = (
+        "The model reached its output limit before returning a final answer."
+        if reply_kind == "empty_final" else "Diagnostic result"
+    )
     monkeypatch.setattr(outbox_module, "RETRY_SECONDS", 0)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -135,6 +140,8 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
 
     async def reply(**kwargs):
         calls.append(kwargs)
+        if reply_kind == "empty_final":
+            return LLMResponse(content="", finish_reason="length")
         if legacy_message and len(calls) == 1:
             arguments = {"content": "Diagnostic result"}
             if origin == "websocket":
@@ -187,13 +194,18 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
             assert cron.list_jobs()[0].state.last_status == "ok"
         assert len(whatsapp_rows()) == 1
         assert whatsapp_rows()[0]["status"] == "pending"
+        saved = json.loads(whatsapp_rows()[0]["payload"])
+        assert saved["content"] == expected
+        assert saved["delivery"]["run_id"] == whatsapp_rows()[0]["run_id"]
+        assert saved["delivery"]["session_generation"]
         if origin == "websocket":
-            saved = json.loads(whatsapp_rows()[0]["payload"])
             assert saved["delivery"]["session_key"] == "websocket:source"
             assert saved["metadata"] == {}
         channel._client.send_message.assert_not_called()
         count = len(calls)
-        assert count == (2 if legacy_message else 1)
+        # An output-limited turn may make continuation requests before it fails.
+        if reply_kind != "empty_final":
+            assert count == (2 if legacy_message else 1)
         assert DELIVERY_RUN_META not in json.dumps(calls[0]["messages"])
         assert "Diagnostic result" not in calls[0]["messages"][0]["content"]
         await manager.stop_all()
@@ -202,7 +214,7 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
         channel._connected = True
         await manager._recover_scheduled()
         await drain(manager)
-        channel._client.send_message.assert_awaited_once_with("synthetic", "Diagnostic result")
+        channel._client.send_message.assert_awaited_once_with("synthetic", expected)
         assert whatsapp_rows()[0]["status"] == "sent"
         assert whatsapp_rows()[0]["payload"] is None
         again = make_manager(tmp_path, sessions)

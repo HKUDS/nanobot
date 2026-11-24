@@ -12,6 +12,7 @@ from nanobot.bus.delivery import DeliveryRequest
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.notification_delivery import notification_is_deliverable
 from nanobot.bus.outbound_events import (
+    EmptyFinalResponseNotice,
     RetryStatusEvent,
     StreamDeltaEvent,
     StreamedResponseEvent,
@@ -324,6 +325,15 @@ class TurnDelivery:
     ) -> None:
         self._stop_reason = stop_reason
         self._failure_error_kind = failure_error_kind
+
+    def empty_final_response(self) -> OutboundMessage:
+        return OutboundMessage(
+            channel=self.route.channel, chat_id=self.route.chat_id,
+            metadata=dict(self.route.metadata), content="",
+            event=EmptyFinalResponseNotice(
+                output_limited=self._failure_error_kind == "empty_final_response_length",
+            ),
+        )
 
     def background_response(
         self,

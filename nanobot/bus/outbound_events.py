@@ -89,6 +89,13 @@ class CommandResultEvent(SideChannelReplyEvent):
 
 
 @dataclass(frozen=True)
+class EmptyFinalResponseNotice(AgentEvent):
+    """A deliverable result, distinct from the turn's lifecycle completion."""
+
+    output_limited: bool
+
+
+@dataclass(frozen=True)
 class TurnEndEvent(AgentEvent):
     latency_ms: int | None = None
     goal_state: dict[str, Any] | None = None

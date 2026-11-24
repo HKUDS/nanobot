@@ -20,6 +20,7 @@ from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
     CommandResultEvent,
+    EmptyFinalResponseNotice,
     ProgressEvent,
     RetryWaitEvent,
     RuntimeModelUpdatedEvent,
@@ -38,7 +39,7 @@ from nanobot.channels.contracts import (
     resolve_channel_action_target,
 )
 from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
-from nanobot.channels.turn_notices import turn_failure_notice
+from nanobot.channels.turn_notices import empty_final_notice_text
 from nanobot.command.results import command_result
 from nanobot.config.schema import Config
 from nanobot.security.workspace_access import WorkspaceScopeResolver
@@ -168,7 +169,7 @@ class ChannelManager:
         self._origin_reply_fingerprints: OrderedDict[tuple[str, str, str], str] = OrderedDict()
         self._outbox = DeliveryOutbox(self._config_path.parent / "delivery" / "outbox.sqlite3")
         self._scheduled_deliveries: set[str] = set()
-        self.bus.outbound_recorder = self._record_scheduled
+        self.bus.prepare_outbound = self._prepare_outbound
 
         self._init_channels()
         self._remove_delivery_check: Callable[[], None] | None = (
@@ -743,10 +744,15 @@ class ChannelManager:
 
         return False
 
-    def _record_scheduled(self, msg: OutboundMessage) -> None:
+    def _prepare_outbound(self, msg: OutboundMessage) -> OutboundMessage:
+        if isinstance(notice := msg.event, EmptyFinalResponseNotice):
+            channel = self.channels.get(msg.channel)
+            text = channel.format_empty_final_notice(notice, msg) if channel else empty_final_notice_text(notice)
+            msg = replace(msg, content=text, event=None)
         if msg.delivery is not None:
             with self.bus.admission.activity():
                 self._outbox.record(msg)
+        return msg
 
     @property
     def has_pending_delivery(self) -> bool:
@@ -778,9 +784,6 @@ class ChannelManager:
         """
         if msg.delivery_id in self._scheduled_deliveries:
             return
-        # WebUI and TUI render the structured turn end themselves.
-        if msg.channel != "websocket" and (notice := turn_failure_notice(msg.event)):
-            msg = replace(msg, content=notice, event=None)
         if isinstance(msg.event, ProgressEvent) and msg.event.tool_events:
             msg = channel.prepare_tool_events(msg)
         await self._outbound_slots.acquire()

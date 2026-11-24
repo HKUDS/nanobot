@@ -25,6 +25,7 @@ from nanobot.agent.execution_policy import ExecutionControlError
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.execution import ToolCallResult, execute_tool_calls
+from nanobot.agent.tools.message import capture_message_reply
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.events import NO_EVENTS, EventSink, ModelRequestEvent, ResponseInputsEvent
 from nanobot.llm_usage.context import (
@@ -139,6 +140,7 @@ class AgentRunSpec:
     provider_state: ProviderConversationState | None = None
     llm_usage_source: LLMUsageSource | None = None
     events: EventSink = NO_EVENTS
+    reply_target: tuple[str, str] | None = None
 
 
 @dataclass(slots=True)
@@ -157,6 +159,8 @@ class AgentRunResult:
     failure_error_kind: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
+    # A successful MessageTool send already answered the terminal input batch.
+    reply_delivered: bool = False
     # Unstreamed terminal content or tail; excludes any prefix already delivered.
     pending_stream_content: str | None = None
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
@@ -216,32 +220,6 @@ class AgentRunner:
     @staticmethod
     def _with_response_inputs(input_ids: tuple[str, ...], response: dict[str, Any]) -> dict[str, Any]:
         return {**response, "_meta": {**response.get("_meta", {}), "response_input_ids": list(input_ids)}}
-
-    async def _try_drain_injections(
-        self,
-        spec: AgentRunSpec,
-        messages: list[dict[str, Any]],
-        *,
-        phase: str,
-        terminal: bool = False,
-    ) -> bool:
-        injections = await self._drain_injections(spec, terminal=terminal)
-        if not injections:
-            return False
-        self._append_injected_messages(messages, injections)
-        preview = "[content hidden]"
-        if tool_log_content_allowed():
-            preview = "\n\n".join(
-                content for message in injections
-                if isinstance(content := message.get("content"), str)
-                and not is_hidden_history_message(message)
-            )
-            preview = preview[:80] + "..." if len(preview) > 80 else preview
-        logger.info(
-            "Injected {} follow-up message(s) {}: {}",
-            len(injections), phase, preview,
-        )
-        return True
 
     @staticmethod
     async def _continuation_prompt(spec: AgentRunSpec) -> str | None:
@@ -419,6 +397,7 @@ class AgentRunner:
         length_recovery_parts: list[str] = []
         pending_length_segment: tuple[AgentHookContext, str] | None = None
         had_injections = False
+        reply_delivered = False
         pending_stream_content: str | None = None
 
         async def checkpoint_compaction(state: ProviderConversationState) -> None:
@@ -457,6 +436,28 @@ class AgentRunner:
             events=spec.events,
         )
 
+        async def drain_inputs(phase: str, *, terminal: bool = False) -> bool:
+            nonlocal reply_delivered
+            injections = await self._drain_injections(spec, terminal=terminal)
+            if not injections:
+                return False
+            # Public IDs are optional. Admission itself starts a new reply owner.
+            reply_delivered = False
+            self._append_injected_messages(messages, injections)
+            preview = "[content hidden]"
+            if tool_log_content_allowed():
+                preview = "\n\n".join(
+                    content for message in injections
+                    if isinstance(content := message.get("content"), str)
+                    and not is_hidden_history_message(message)
+                )
+                preview = preview[:80] + "..." if len(preview) > 80 else preview
+            logger.info(
+                "Injected {} follow-up message(s) {}: {}",
+                len(injections), phase, preview,
+            )
+            return True
+
         async def end_length_segment(*, interrupted: bool) -> None:
             nonlocal pending_length_segment
             if pending_length_segment is None:
@@ -492,9 +493,7 @@ class AgentRunner:
             # The session inbox cuts a finite snapshot before every model call.
             # This includes follow-ups that arrived before the first request and
             # messages received while the previous request or tools were running.
-            drained_before_request = await self._try_drain_injections(
-                spec, messages, phase="before model call",
-            )
+            drained_before_request = await drain_inputs("before model call")
             if drained_before_request:
                 had_injections = True
             await end_length_segment(interrupted=drained_before_request)
@@ -638,18 +637,20 @@ class AgentRunner:
                         messages,
                     )
 
-                await execute_tool_calls(
-                    spec.tools,
-                    response.tool_calls,
-                    concurrent=spec.concurrent_tools,
-                    external_lookup_counts=external_lookup_counts,
-                    workspace_violation_counts=workspace_violation_counts,
-                    hook=hook,
-                    context=context,
-                    model_messages=messages_for_model,
-                    compacted_tool_results=request_state.compacted_tool_results,
-                    on_settled=settle_tool_results,
-                )
+                with capture_message_reply(spec.reply_target, response_input_ids) as receipt:
+                    await execute_tool_calls(
+                        spec.tools,
+                        response.tool_calls,
+                        concurrent=spec.concurrent_tools,
+                        external_lookup_counts=external_lookup_counts,
+                        workspace_violation_counts=workspace_violation_counts,
+                        hook=hook,
+                        context=context,
+                        model_messages=messages_for_model,
+                        compacted_tool_results=request_state.compacted_tool_results,
+                        on_settled=settle_tool_results,
+                    )
+                reply_delivered |= receipt.delivered
                 empty_content_retries = 0
                 length_recovery_parts.clear()
                 await hook.after_iteration(context)
@@ -667,6 +668,7 @@ class AgentRunner:
                 response.finish_reason
                 not in {"error", "length", "refusal", "content_filter"}
                 and is_blank_text(clean)
+                and not reply_delivered
             ):
                 empty_content_retries += 1
                 if empty_content_retries < _MAX_EMPTY_RETRIES:
@@ -797,7 +799,7 @@ class AgentRunner:
             # If injections are found we keep the stream alive (resuming=True)
             # so streaming channels don't prematurely finalize the card.
             normal_response = (
-                assistant_message is not None
+                (assistant_message is not None or reply_delivered)
                 and response.finish_reason not in {"error", "length", "refusal", "content_filter"}
             )
             ordinary_budget_remaining = iteration + 1 < spec.max_iterations
@@ -805,9 +807,7 @@ class AgentRunner:
             if normal_response and not ordinary_budget_remaining:
                 continuation_prompt = await self._continuation_prompt(spec)
             can_make_followup_request = ordinary_budget_remaining or continuation_prompt is not None
-            should_continue = can_make_followup_request and await self._try_drain_injections(
-                spec, messages, phase="after final response",
-            )
+            should_continue = can_make_followup_request and await drain_inputs("after final response")
             if not should_continue and normal_response:
                 if ordinary_budget_remaining:
                     continuation_prompt = await self._continuation_prompt(spec)
@@ -819,9 +819,7 @@ class AgentRunner:
                     should_continue = True
                     logger.info("Injected caller-requested continuation after final response")
                 elif can_make_followup_request:
-                    should_continue = await self._try_drain_injections(
-                        spec, messages, phase="at terminal response", terminal=True,
-                    )
+                    should_continue = await drain_inputs("at terminal response", terminal=True)
             if should_continue:
                 had_injections = True
 
@@ -846,15 +844,13 @@ class AgentRunner:
                 context.error = error
                 context.stop_reason = stop_reason
                 await hook.after_iteration(context)
-                if can_make_followup_request and await self._try_drain_injections(
-                    spec, messages, phase="after LLM error",
-                ):
+                if can_make_followup_request and await drain_inputs("after LLM error"):
                     had_injections = True
                     length_recovery_parts.clear()
                     continue
                 failure_error_kind = LLMProvider.public_error_kind(response)
                 break
-            if is_blank_text(clean):
+            if is_blank_text(clean) and not reply_delivered:
                 final_content = None
                 stop_reason = "empty_final_response"
                 error = stop_reason
@@ -862,16 +858,16 @@ class AgentRunner:
                 context.error = error
                 context.stop_reason = stop_reason
                 await hook.after_iteration(context)
-                if can_make_followup_request and await self._try_drain_injections(
-                    spec, messages, phase="after empty response",
-                ):
+                if can_make_followup_request and await drain_inputs("after empty response"):
                     had_injections = True
                     length_recovery_parts.clear()
                     continue
                 failure_error_kind = "empty_final_response_length" if response.finish_reason == "length" else stop_reason
                 break
 
-            if length_recovery_parts:
+            if is_blank_text(clean):
+                final_content = None  # Answered by MessageTool, not by terminal text.
+            elif length_recovery_parts:
                 final_content = (
                     "".join(length_recovery_parts)
                     + _restore_outer_whitespace(clean or "", original_content)
@@ -904,9 +900,12 @@ class AgentRunner:
                 pending_stream_content = terminal_content
             if terminal_content is None:
                 if goal_overrun and spec.finalize_on_max_iterations:
-                    stop_reason = "empty_final_response"
-                    failure_error_kind = stop_reason
-                    error = stop_reason
+                    if reply_delivered:
+                        stop_reason = "completed"
+                    else:
+                        stop_reason = "empty_final_response"
+                        failure_error_kind = stop_reason
+                        error = stop_reason
                 else:
                     terminal_content = self._max_iterations_fallback(spec)
             if length_recovery_parts and terminal_content is not None:
@@ -930,6 +929,7 @@ class AgentRunner:
             failure_error_kind=failure_error_kind,
             tool_events=tool_events,
             had_injections=had_injections,
+            reply_delivered=reply_delivered and stop_reason in {"completed", "max_iterations"},
             pending_stream_content=pending_stream_content,
             provider_state=conversation_state.finish(messages),
             summary_checkpoint=request_state.compaction.summary_checkpoint,

@@ -33,7 +33,6 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
-from nanobot.agent.tools.message import capture_message_deliveries
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.runtime_control import AgentRuntimeControl
 from nanobot.agent.turn_delivery import (
@@ -54,7 +53,6 @@ from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
-    TurnEndEvent,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter
@@ -1282,6 +1280,10 @@ class AgentLoop:
             ))
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=None,
+                reply_target=(
+                    (request_ctx.channel, request_ctx.chat_id)
+                    if initial_message is not None and initial_message.is_user_input else None
+                ),
                 tools=effective_tools,
                 runtime=runtime,
                 max_iterations=self.max_iterations,
@@ -1335,7 +1337,7 @@ class AgentLoop:
         if result.stop_reason == "max_iterations" or result.pending_stream_content is not None:
             # Push final content through stream so streaming channels (e.g. Feishu)
             # update the card instead of leaving it empty.
-            if events.publish is not None and streaming:
+            if events.publish is not None and streaming and not result.reply_delivered:
                 stream_content = (
                     result.pending_stream_content
                     if result.pending_stream_content is not None
@@ -2258,40 +2260,30 @@ class AgentLoop:
         ctx.run_started_at = time.time()
         await ctx.delivery.running(started_at=ctx.run_started_at)
         assert ctx.transcript_input is not None
-        with capture_message_deliveries() as message_sends:
-            result = await self._run_agent_loop(
-                ctx.transcript_input,
-                runtime=runtime,
-                streaming=ctx.streaming,
-                session=ctx.session,
-                pending_queue=ctx.pending_queue,
-                ephemeral=ctx.ephemeral,
-                run_extra_hooks_for_ephemeral=ctx.run_extra_hooks_for_ephemeral,
-                hooks=ctx.hooks,
-                hook_factories=ctx.hook_factories,
-                tools=ctx.tools,
-                request_context=ctx.request_context,
-                provider_state=ctx.provider_state,
-                initial_message=ctx.msg,
-                events=ctx.events,
-                commit_session=ctx.commit_session,
-            )
+        result = await self._run_agent_loop(
+            ctx.transcript_input,
+            runtime=runtime,
+            streaming=ctx.streaming,
+            session=ctx.session,
+            pending_queue=ctx.pending_queue,
+            ephemeral=ctx.ephemeral,
+            run_extra_hooks_for_ephemeral=ctx.run_extra_hooks_for_ephemeral,
+            hooks=ctx.hooks,
+            hook_factories=ctx.hook_factories,
+            tools=ctx.tools,
+            request_context=ctx.request_context,
+            provider_state=ctx.provider_state,
+            initial_message=ctx.msg,
+            events=ctx.events,
+            commit_session=ctx.commit_session,
+        )
         ctx.final_content = result.final_content
         ctx.all_messages = result.messages
         ctx.summary_checkpoint = result.summary_checkpoint
         ctx.provider_compaction_applied = result.provider_compaction_applied
         ctx.stop_reason = result.stop_reason
         ctx.failure_error_kind = result.failure_error_kind
-        if (
-            ctx.kind is TurnKind.USER
-            and (ctx.delivery.route.channel, ctx.delivery.route.chat_id) in message_sends
-            and (not result.had_injections or result.stop_reason == "empty_final_response")
-        ):
-            ctx.suppress_response = True
-            if result.stop_reason == "empty_final_response":
-                # The message tool already delivered the answer to this chat.
-                ctx.stop_reason = "completed"
-                ctx.failure_error_kind = None
+        ctx.suppress_response = result.reply_delivered
         ctx.usage = result.usage
         ctx.delivery.record_usage(result.round_usages)
 
@@ -2353,11 +2345,7 @@ class AgentLoop:
             ctx.outbound = None
             return
         if ctx.stop_reason == "empty_final_response":
-            ctx.outbound = OutboundMessage(
-                channel=ctx.delivery.route.channel, chat_id=ctx.delivery.route.chat_id,
-                metadata=dict(ctx.delivery.route.metadata), content="",
-                event=TurnEndEvent(outcome="failed", failure_kind="model", failure_error_kind=ctx.failure_error_kind),
-            )
+            ctx.outbound = ctx.delivery.empty_final_response()
             return
         if ctx.kind is TurnKind.SYSTEM:
             ctx.outbound = ctx.delivery.background_response(

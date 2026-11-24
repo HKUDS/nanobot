@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import TurnEndEvent
+from nanobot.bus.outbound_events import EmptyFinalResponseNotice
 from nanobot.bus.queue import MessageBus
 from nanobot.channels import manager as manager_module
 from nanobot.channels.base import BaseChannel
@@ -24,29 +24,29 @@ def make_manager(*, config_path=None):
     return manager, channel
 
 
-@pytest.mark.parametrize("destination", ["telegram", "websocket"])
-@pytest.mark.parametrize(("error_kind", "notice"), [
-    ("empty_final_response", "The model didn't return a final answer. Please try again."),
-    ("empty_final_response_length", "The model reached its output limit before returning a final answer."),
-])
-async def test_empty_final_failure_reaches_each_channel_once_in_its_native_form(
-    tmp_path, destination, error_kind, notice,
-):
+async def test_scheduled_delivery_admits_the_channels_own_failure_notice(tmp_path):
+    from nanobot.bus.delivery import DeliveryRequest
+
     manager, channel = make_manager(config_path=tmp_path / "config.json")
-    manager.channels[destination] = channel
-    end = TurnEndEvent(outcome="failed", failure_kind="model", failure_error_kind=error_kind)
-    await manager.bus.publish_event(end, channel=destination, chat_id="chat", metadata={"message_thread_id": 42})
+    manager.channels["telegram"] = channel
+    channel.format_empty_final_notice.return_value = "La réponse a atteint la limite de sortie."
+    notice = EmptyFinalResponseNotice(output_limited=True)
+    delivery = DeliveryRequest("run", "telegram:chat", "generation")
+    await manager.bus.publish_outbound(OutboundMessage(
+        "telegram", "chat", "", metadata={"message_thread_id": 42}, event=notice, delivery=delivery,
+    ))
+    # A crash before the dispatcher even starts must recover the channel's presentation.
+    [pending] = manager._outbox.ready()
+    assert (pending.content, pending.event, pending.delivery) == ("La réponse a atteint la limite de sortie.", None, delivery)
     manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
     try:
         await wait_until(lambda: not manager.has_pending_delivery)
         channel.send.assert_awaited_once()
         msg = channel.send.await_args.args[0]
-        assert (msg.channel, msg.chat_id, msg.metadata) == (destination, "chat", {"message_thread_id": 42})
-        if destination == "websocket":
-            assert msg.event is end
-            assert msg.content == ""
-        else:
-            assert msg.content == notice
+        assert (msg.channel, msg.chat_id, msg.metadata) == ("telegram", "chat", {"message_thread_id": 42})
+        assert (msg.content, msg.delivery_id) == (pending.content, pending.delivery_id)
+        channel.format_empty_final_notice.assert_called_once()
+        assert channel.format_empty_final_notice.call_args.args[0] is notice
     finally:
         await manager.stop_all()
 

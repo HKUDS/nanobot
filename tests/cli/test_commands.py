@@ -1606,16 +1606,16 @@ def test_agent_rejects_unknown_tui_theme(mock_agent_runtime):
     mock_agent_runtime["from_config"].assert_not_called()
 
 
-@pytest.mark.parametrize(("error_kind", "notice"), [
-    ("empty_final_response", "The model didn't return a final answer. Please try again."),
-    ("empty_final_response_length", "The model reached its output limit before returning a final answer."),
+@pytest.mark.parametrize(("output_limited", "notice"), [
+    (False, "The model didn't return a final answer. Please try again."),
+    (True, "The model reached its output limit before returning a final answer."),
 ])
-def test_one_shot_agent_reports_empty_final_as_a_notice(mock_agent_runtime, error_kind, notice):
-    from nanobot.bus.outbound_events import TurnEndEvent
+def test_one_shot_agent_reports_empty_final_as_a_notice(mock_agent_runtime, output_limited, notice):
+    from nanobot.bus.outbound_events import EmptyFinalResponseNotice
 
     mock_agent_runtime["agent_loop"].process_direct.return_value = OutboundMessage(
         channel="cli", chat_id="direct", content="",
-        event=TurnEndEvent(outcome="failed", failure_kind="model", failure_error_kind=error_kind),
+        event=EmptyFinalResponseNotice(output_limited=output_limited),
     )
     result = runner.invoke(app, ["agent", "-m", "hello"])
     assert result.exit_code == 0, result.output
