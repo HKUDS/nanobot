@@ -1030,22 +1030,15 @@
   --message-block-control-size: 1.75rem;
   --message-block-action-width: 1.75rem;
   --message-column-margin: calc((100% - var(--content-column-width)) / 2);
-  padding-left: max(calc(3 * var(--message-block-action-width) + 0.75rem + var(--message-source-space, 0px)), var(--message-column-margin));
+  --message-actions-width: calc(3 * var(--message-block-action-width));
+  padding-left: max(calc(var(--message-actions-width) + 0.75rem), var(--message-column-margin));
   padding-right: max(3rem, var(--message-column-margin));
-}
-
-.thread-message-row:has(.message-action-sources, .message-side-actions [data-automation-trigger]) {
-  --message-source-space: 6rem;
-}
-
-.message-action-sources {
-  max-width: var(--message-source-space);
 }
 
 /* Keep the prompt navigator and the answer actions in separate hit areas. */
 @container thread-viewport (width > 59rem) {
   .thread-message-row {
-    padding-left: max(calc(8.25rem + var(--message-source-space, 0px)), var(--message-column-margin));
+    padding-left: max(8.25rem, var(--message-column-margin));
   }
 }
 
@@ -1066,6 +1059,7 @@
 
 .message-side-actions[data-side="left"] {
   right: calc(100% + 0.25rem);
+  max-width: var(--message-actions-width);
 }
 
 [data-user-text-bubble] > .message-side-actions,

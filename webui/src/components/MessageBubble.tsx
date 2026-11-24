@@ -177,7 +177,7 @@ export function MessageBlockMenuActions({
   const fallbackSources = (
     <FallbackResponseSources
       sources={message.role === "assistant" ? message.responseSources : undefined}
-      className={cn("min-h-[var(--message-block-control-size)] gap-1", !sheet && "message-action-sources")}
+      className="min-h-[var(--message-block-control-size)] gap-1"
       badgeClassName="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
     />
   );
@@ -202,10 +202,9 @@ export function MessageBlockMenuActions({
     </button>
   );
   return (
-    <div className={sheet ? "flex w-full flex-col gap-1" : "flex flex-col items-start"}>
-      <div className={cn("flex", sheet && "flex-col items-stretch gap-1")}>
+    <div className={sheet ? "flex w-full flex-col gap-1" : "flex min-w-0 flex-col items-start"}>
+      <div className={sheet ? "flex flex-col items-stretch gap-1" : "flex max-w-full flex-wrap"}>
         {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
-        {!sheet && fallbackSources}
         {showFork ? (
           <HoverHint content={t("message.forkFromHere")}>
             <button type="button" onClick={onForkFromHere}
@@ -218,17 +217,18 @@ export function MessageBlockMenuActions({
           </HoverHint>
         ) : null}
         {activityAction && !sheet ? <HoverHint content={activity.label}>{activityAction}</HoverHint> : activityAction}
+        {!sheet && fallbackSources}
       </div>
       {sheet && fallbackSources}
       {(time || automation) && (
         <div data-message-block-metadata className={cn("leading-4 text-muted-foreground", sheet
           ? "mt-0.5 w-full border-t border-border/45 px-2 pt-1 text-xs"
-          : "ms-[calc((var(--message-block-action-width)-0.875rem)/2)] flex items-center gap-1 text-[10px]")}>
+          : "flex max-w-full items-center gap-1 ps-[calc((var(--message-block-action-width)-0.875rem)/2)] text-[10px]")}>
           {time && !sheet ? <HoverHint content={fmtDateTime(timestamp)}>{time}</HoverHint> : time}
           {automation && (sheet
             ? <span data-automation-trigger className="flex min-h-[var(--message-block-control-size)] items-center break-words">{automation}</span>
             : <HoverHint content={automationSourceLabel}>
-                <span data-automation-trigger tabIndex={0} className="whitespace-nowrap rounded-mark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("message.automationTriggered")}</span>
+                <span data-automation-trigger tabIndex={0} className="truncate rounded-mark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("message.automationTriggered")}</span>
               </HoverHint>)}
         </div>
       )}
