@@ -9,6 +9,7 @@ import {
   formatActivityDuration,
 } from "@/components/thread/AgentActivityCluster";
 import { sameHistoryRowIdentity, type HistoryRowIdentity, type HistoryRowSource } from "@/components/thread/history-row-identity";
+import { ThreadDivider } from "@/components/thread/ThreadDivider";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -805,10 +806,8 @@ function unitIndexAfterMessageCount(
 
 function ForkBoundaryDivider({ label }: { label: string }) {
   return (
-    <div className="thread-message-row my-5 flex items-center gap-3 text-[11px] text-muted-foreground/80">
-      <span aria-hidden className="h-px flex-1 bg-border/70" />
-      <span className="shrink-0">{label}</span>
-      <span aria-hidden className="h-px flex-1 bg-border/70" />
+    <div className="thread-message-row my-5">
+      <ThreadDivider>{label}</ThreadDivider>
     </div>
   );
 }
