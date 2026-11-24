@@ -9,7 +9,6 @@ import {
   unitKeysForDisplay,
 } from "@/components/thread/ThreadMessages";
 import { preloadMarkdownText } from "@/components/MarkdownText";
-import { fmtDateTime } from "@/lib/format-time";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import type { UIMessage } from "@/lib/types";
 
@@ -1040,16 +1039,16 @@ describe("ThreadMessages", () => {
     expect(answer).not.toHaveAttribute("data-context-block-active");
   });
 
-  it.each(["cron", "local_trigger", "trigger"])("shows %s provenance in the timestamp details", (kind) => {
+  it.each(["cron", "local_trigger", "trigger"])("shows %s provenance alongside the timestamp", (kind) => {
     render(<ThreadMessages messages={[
       { id: "answer", role: "assistant", content: "automated answer", createdAt: 2,
         source: { kind, label: "Review schedule" } },
     ]} />);
     const answer = screen.getByText("automated answer").closest<HTMLElement>("[data-thread-display-unit]")!;
-    fireEvent.click(within(sideActions(answer)).getByRole("button", { name: fmtDateTime(2) }));
-    const details = screen.getByRole("dialog");
-    expect(details).toHaveTextContent("Triggered automatically Review schedule");
-    expect(details.querySelector("time")).toHaveAttribute("datetime", new Date(2).toISOString());
+    const side = within(sideActions(answer));
+    const time = side.getByRole("time");
+    expect(time).toHaveAttribute("datetime", new Date(2).toISOString());
+    expect(time.nextElementSibling).toHaveTextContent(/^Triggered automatically$/);
   });
 
   it("renders a fork boundary divider after the copied history", () => {
