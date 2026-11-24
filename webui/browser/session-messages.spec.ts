@@ -117,8 +117,9 @@ test("triggered replies keep the ordinary reply column with and without side act
   await page.goto("/browser/fixture.html?case=session-messages");
   const pane = page.getByRole("main", { name: "Session messages" });
   await pane.evaluate(node => { node.style.maxWidth = "1000px"; });
-  const ordinary = page.getByText("Thanks, I will keep those details.", { exact: true });
-  const triggered = page.getByText("The scheduled update is ready.", { exact: true });
+  const replies = pane.getByRole("paragraph");
+  const ordinary = replies.filter({ hasText: "Thanks, I will keep those details." });
+  const triggered = replies.filter({ hasText: "The scheduled update is ready." });
   const side = pane.locator("[data-message-side-actions]").filter({ has: page.locator("[data-automation-trigger]") });
   await expect(side).toHaveCSS("opacity", "0");
   const left = (await ordinary.boundingBox())!.x;
