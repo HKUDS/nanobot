@@ -23,6 +23,7 @@ from nanobot.session.recovery import (
 from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
 from nanobot.webui import history as history_module
 from nanobot.webui.recovery import RecoveryActionError, RecoveryCoordinator
+from nanobot.webui.session_projection import WebUISessionProjection
 
 
 @pytest.fixture(autouse=True)
@@ -841,9 +842,11 @@ async def test_dismiss_does_not_queue_work(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("reply_preserved", [False, True])
+@pytest.mark.parametrize(("error_kind", "reply_preserved"), [
+    ("connection", True), ("empty_final_response", False), ("empty_final_response_length", False),
+])
 async def test_model_failure_waits_across_restart_and_rejects_duplicate_continue(
-    tmp_path: Path, reply_preserved: bool,
+    tmp_path: Path, error_kind: str, reply_preserved: bool,
 ) -> None:
     coordinator, bus, sessions = _coordinator(tmp_path)
     session = sessions.get_or_create("websocket:chat")
@@ -852,18 +855,18 @@ async def test_model_failure_waits_across_restart_and_rejects_duplicate_continue
         session.messages.append({"role": "assistant", "content": "saved reply", "_interrupted": True})
     _persist(sessions, session)
 
-    await coordinator.turn_completed("websocket:chat", failure_kind="model", failure_error_kind="connection")
+    await coordinator.turn_completed("websocket:chat", failure_kind="model", failure_error_kind=error_kind)
+    live = bus.outbound.get_nowait().event
+    assert isinstance(live, RecoveryStateEvent)
+    assert live.failure_error_kind == error_kind
     assert bus.inbound.empty()
     coordinator, bus, sessions = _coordinator(tmp_path)
     await coordinator.scan()
     assert bus.inbound.empty()
-    state = sessions.get_or_create("websocket:chat").metadata[RECOVERY_METADATA_KEY]
-    assert state["failure_error_kind"] == "connection"
+    attached = await WebUISessionProjection(sessions).attach_fields("websocket:chat")
+    state = attached["recovery_state"]
+    assert state["failure_error_kind"] == live.failure_error_kind
     assert state.get("reply_preserved", False) is reply_preserved
-    from nanobot.session.recovery import recovery_state_from_metadata
-    public_state = recovery_state_from_metadata({RECOVERY_METADATA_KEY: state})
-    assert public_state is not None
-    assert public_state.get("reply_preserved", False) is reply_preserved
     assert state["status"] == "awaiting_user"
     payload = {"chat_id": "chat", "recovery_id": state["recovery_id"]}
     await coordinator.handle_action("continue", payload)
