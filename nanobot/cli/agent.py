@@ -18,7 +18,6 @@ from nanobot.cli.runtime_config import (
     _print_agent_start_error,
 )
 from nanobot.config.schema import Config
-from nanobot.observability.langfuse import langfuse_runtime_owner
 
 console = Console()
 
@@ -128,7 +127,6 @@ def agent(
         _run_classic(runtime_config, message=message, session_id=session_id, markdown=markdown, logs=logs)
 
 
-@langfuse_runtime_owner()
 def _run_classic(runtime_config: Config, *, message: str | None, session_id: str | None,
                  markdown: bool, logs: bool) -> None:
     from nanobot.agent.hooks import create_file_edit_activity_hook
@@ -145,7 +143,6 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
     from nanobot.cli.stream import ThinkingSpinner
     from nanobot.command.results import as_text_message
     from nanobot.cron.service import CronService
-    from nanobot.observability.langfuse import initialize_langfuse
     from nanobot.providers.factory import make_provider
     from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates
     from nanobot.utils.restart import (
@@ -161,7 +158,6 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
     sync_workspace_templates = _classic_dependency("sync_workspace_templates")
 
     session_id = session_id or "cli:direct"
-    initialize_langfuse(runtime_config)
 
     try:
         provider = make_provider(runtime_config)

@@ -873,7 +873,11 @@ export interface SettingsPayload {
       use_jina_reader: boolean;
     };
   };
-  observability?: ObservabilitySettingsPayload;
+  observability?: {
+    provider: "langfuse" | string;
+    configured: boolean;
+    base_url: string;
+  };
   image_generation: {
     enabled: boolean;
     provider: string;
@@ -1488,33 +1492,6 @@ export interface ProviderCreationUpdate {
   extraQuery?: string;
   thinkingStyle?: string;
 }
-
-export interface ObservabilitySettingsPayload {
-  provider: "langfuse" | string;
-  configured: boolean;
-  base_url: string;
-  /** Present on hosts advertising webui.langfuse-settings.v1. */
-  enabled?: boolean;
-  public_key_hint?: string | null;
-  secret_key_hint?: string | null;
-  source?: "config" | "environment";
-  uses_environment?: boolean;
-  active_enabled?: boolean;
-  requires_restart?: boolean;
-}
-
-export interface ObservabilitySettingsUpdate {
-  enabled: boolean;
-  baseUrl: string;
-  /** Omit to preserve the saved value/reference; an empty string clears it. */
-  publicKey?: string;
-  secretKey?: string;
-}
-
-export type ObservabilityTestResult = { ok: true } | {
-  ok: false;
-  error: "missing_credentials" | "invalid_url" | "blocked_url" | "invalid_credentials" | "unreachable" | "timeout";
-};
 
 export interface WebSearchSettingsUpdate {
   provider: string;

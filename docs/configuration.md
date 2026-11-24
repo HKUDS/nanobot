@@ -67,7 +67,7 @@ If the WebUI does not expose the option you need, start from the task below. Mos
 | Tighten tool and network safety | `tools.restrictToWorkspace`, `tools.exec.sandbox`, `tools.ssrfWhitelist`, `channels.*.allowFrom` | Run the same workflow through the channel or CLI you plan to expose | [Security](#security), [Pairing](#pairing) |
 | Tune request timeouts or process concurrency | `NANOBOT_STREAM_IDLE_TIMEOUT_S`, `NANOBOT_MAX_CONCURRENT_REQUESTS` | Start nanobot from the same environment and inspect startup/runtime logs | [Runtime Environment Variables](#runtime-environment-variables) |
 | Run multiple isolated bots | separate `--home` directories, or `--config` and `--workspace` paths, plus distinct `gateway.port` or channel ports when processes run together | Place `--home` before the subcommand; use the same instance selectors with `status`, `agent`, `webui`, `gateway`, and `serve` | [Multiple Instances](./multiple-instances.md), [CLI Reference](./cli-reference.md) |
-| Observe model calls | Settings → System → Tracing, `observability.langfuse`, or legacy `LANGFUSE_*` variables | Restart, run one supported model call, then check the matching Langfuse project | [Langfuse Observability](#langfuse-observability) |
+| Observe model calls | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` environment variables | Run one model call, then check the matching Langfuse project | [Langfuse Observability](#langfuse-observability) |
 
 ## Shared network proxy
 
@@ -247,26 +247,7 @@ Internal variables such as `NANOBOT_RESTART_*` and `NANOBOT_PATH_*` are set by n
 
 ## Langfuse Observability
 
-Use Langfuse to trace supported OpenAI-compatible model calls and Codex OAuth calls. In **Settings → System → Tracing → Langfuse**, install support if needed, enter the key pair, enable tracing, and save. The service URL is under **Advanced options**. Restart nanobot to apply changes; pending changes show the current running state and a restart notice.
-
-**Test connection** checks the current form's URL and credentials without saving, enabling tracing, or sending conversation content. A successful check does not mean a model call has been traced. For a self-hosted service on a private address, connection checks require the appropriate `tools.ssrfWhitelist` entry.
-
-You can also configure `config.json` directly:
-
-```json
-{
-  "observability": {
-    "langfuse": {
-      "enabled": true,
-      "baseUrl": "https://cloud.langfuse.com",
-      "publicKey": "${LANGFUSE_PUBLIC_KEY}",
-      "secretKey": "${LANGFUSE_SECRET_KEY}"
-    }
-  }
-}
-```
-
-An explicit `observability.langfuse` block owns the complete configuration: missing fields do not inherit `LANGFUSE_*` values, and `enabled: false` disables tracing even if environment credentials are present. `${VAR}` references remain supported. If the block is absent, the existing environment-variable setup below continues to work, including after unrelated settings are saved. The first WebUI save preserves untouched environment-backed values as references rather than copying their secrets.
+Use Langfuse to trace OpenAI-compatible model calls and Codex OAuth calls. Keep the credentials and service URL in the environment. In WebUI Settings → System, turn Langfuse off and restart nanobot to stop sending model inputs and outputs without removing the keys. Turn it back on and restart to resume. The switch defaults to on for existing environment-based setups.
 
 Install the optional package in the same Python environment that runs nanobot:
 
@@ -290,11 +271,11 @@ $env:LANGFUSE_PUBLIC_KEY = "pk-lf-..."
 $env:LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
 ```
 
-With environment-only configuration, provide both keys and install Langfuse before starting nanobot. `LANGFUSE_TRACING_ENABLED=false` disables environment-configured tracing. If support is missing or tracing initialization fails, model calls continue without tracing.
+With the switch on, `LANGFUSE_SECRET_KEY` set, and the `langfuse` package installed, tracing is enabled for OpenAI-compatible providers and the Codex OAuth provider (`openai_codex`). If the package is missing, nanobot logs a warning and model calls continue without tracing.
 
 Use the Langfuse region or self-hosted URL that matches your project. The [Langfuse OpenAI SDK docs](https://langfuse.com/integrations/model-providers/openai-py) use `LANGFUSE_BASE_URL` for cloud regions and self-hosted instances.
 
-Tracing sends model inputs and outputs to the configured Langfuse service. Treat the project as a store for sensitive conversation content. Other native provider integrations are not covered by this tracing setup. Changes apply after restarting the nanobot process using this configuration.
+Other native provider integrations are not covered by this tracing setup.
 
 ## Providers
 

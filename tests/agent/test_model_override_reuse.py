@@ -23,7 +23,7 @@ def configured_override(monkeypatch):
     })
     created = []
 
-    def construct(owned, *, preset, model=None, langfuse=None):
+    def construct(owned, *, preset, model=None):
         factory.validate_provider_setup(owned, preset=preset, model=model)
         provider = MagicMock(spec=LLMProvider)
         provider._image_input_error.return_value = None

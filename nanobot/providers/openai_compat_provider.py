@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import json
 import os
 import secrets
@@ -19,7 +20,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from nanobot.observability.langfuse import LangfuseRuntime, provider_langfuse_runtime
+from nanobot.providers import langfuse as tracing
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -450,11 +451,9 @@ class OpenAICompatProvider(LLMProvider):
         extra_query: dict[str, str] | None = None,
         proxy: str | None = None,
         provider_name: str = "openai",
-        langfuse: LangfuseRuntime | None = None,
     ):
         super().__init__(api_key, api_base, provider_name=provider_name)
         self.default_model = default_model
-        self._langfuse = langfuse or provider_langfuse_runtime()
         self.extra_headers = extra_headers or {}
         self._spec = spec
         self._preset_model_api = model_api
@@ -544,8 +543,16 @@ class OpenAICompatProvider(LLMProvider):
                 return self._client
             global AsyncOpenAI
             if AsyncOpenAI is None:
-                from openai import AsyncOpenAI as _AsyncOpenAI
-
+                trace = tracing.requested()
+                if trace and importlib.util.find_spec("langfuse"):
+                    from langfuse.openai import AsyncOpenAI as _AsyncOpenAI
+                else:
+                    if trace:
+                        logger.warning(
+                            "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
+                            "run `nanobot plugins enable langfuse` to enable tracing"
+                        )
+                    from openai import AsyncOpenAI as _AsyncOpenAI
                 AsyncOpenAI = _AsyncOpenAI
 
             self._build_client()
@@ -1583,7 +1590,6 @@ class OpenAICompatProvider(LLMProvider):
                         reasoning_effort, tool_choice,
                         provider_context,
                     )
-                    body.update(self._langfuse.openai_options())
                     result = await self._responses.sdk_request(
                         client, body, provider=self._responses_state_provider(),
                         extra_headers=affinity,
@@ -1603,7 +1609,6 @@ class OpenAICompatProvider(LLMProvider):
                 extra_headers=affinity,
             )
             kwargs = await prepare_inline_images(kwargs)
-            kwargs.update(self._langfuse.openai_options())
             chat_raw = cast(
                 Any,
                 await client.chat.completions.create(**kwargs),
@@ -1638,7 +1643,6 @@ class OpenAICompatProvider(LLMProvider):
                         provider_context,
                     )
                     body["stream"] = True
-                    body.update(self._langfuse.openai_options())
                     result = await self._responses.sdk_request(
                         client, body, provider=self._responses_state_provider(),
                         extra_headers=affinity, on_content_delta=on_content_delta,
@@ -1668,7 +1672,6 @@ class OpenAICompatProvider(LLMProvider):
             kwargs["stream"] = True
             kwargs["timeout"] = idle_timeout_s
             kwargs["stream_options"] = {"include_usage": True}
-            kwargs.update(self._langfuse.openai_options())
             chat_stream = cast(
                 Any,
                 await client.chat.completions.create(**kwargs),

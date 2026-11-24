@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypedDict
@@ -37,11 +38,6 @@ from nanobot.webui.settings_models import (
     mask_secret_hint,
     provider_configured_for_settings,
 )
-from nanobot.webui.settings_observability import (
-    observability_settings_payload,
-    parse_observability_update,
-    probe_langfuse_connection,
-)
 from nanobot.webui.workspaces import (
     read_webui_default_access_mode,
 )
@@ -58,7 +54,6 @@ class CapabilitySettingsOperations:
     update_image: SettingsOperation
     update_transcription: SettingsOperation
     update_network: SettingsOperation
-    update_observability: SettingsOperation
     reload_image: Callable[[], Awaitable[dict[str, Any]]]
 
 
@@ -187,7 +182,15 @@ def capability_settings_payload(
                 "use_jina_reader": config.tools.web.fetch.use_jina_reader,
             },
         },
-        "observability": observability_settings_payload(config),
+        "observability": {
+            "provider": "langfuse",
+            "configured": bool(
+                os.environ.get("LANGFUSE_SECRET_KEY")
+                and os.environ.get("LANGFUSE_PUBLIC_KEY")
+            ),
+            "base_url": os.environ.get("LANGFUSE_BASE_URL")
+            or "https://cloud.langfuse.com",
+        },
         "image_generation": {
             "enabled": image_config.enabled,
             "provider": image_config.provider,
@@ -556,16 +559,6 @@ class CapabilitySettingsHandler:
         request: SettingsRequest,
         operations: CapabilitySettingsOperations,
     ) -> SettingsRouteResult:
-        if action in {"observability-update", "observability-test"}:
-            try:
-                update = parse_observability_update(request.payload)
-                if action == "observability-test":
-                    result = await probe_langfuse_connection(self.settings.config.load(), update)
-                    return SettingsRouteResult.success(dict(result))
-                payload = self.settings.mutate(operations.update_observability, update)
-            except WebUISettingsError as exc:
-                return SettingsRouteResult.failure(exc.status, exc.message)
-            return SettingsRouteResult.success(payload, decorate_restart=True)
         mutation = {
             "web-search-update": (
                 operations.update_web_search,

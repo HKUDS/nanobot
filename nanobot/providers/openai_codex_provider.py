@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import json
 import re
 import ssl
@@ -18,11 +19,7 @@ from oauth_cli_kit.storage import FileTokenStorage
 
 from nanobot import __version__
 from nanobot.events import NO_EVENTS
-from nanobot.observability.langfuse import (
-    LangfuseObservation,
-    LangfuseRuntime,
-    provider_langfuse_runtime,
-)
+from nanobot.providers import langfuse as tracing
 from nanobot.providers.base import (
     CONTEXT_SAFETY_BUFFER,
     LLMProvider,
@@ -68,6 +65,9 @@ OPENAI_CODEX_CATALOG_CLIENT_VERSION = "99.99.99"
 DEFAULT_ORIGINATOR = "nanobot"
 
 
+_LANGFUSE_TRACE_WARNING = "Langfuse tracing failed for Codex request: {}"
+
+
 def _usage_details(usage: LLMUsage | None) -> dict[str, int] | None:
     """Split inclusive input usage into Langfuse's exclusive token buckets."""
     if usage is None:
@@ -88,7 +88,7 @@ def _usage_details(usage: LLMUsage | None) -> dict[str, int] | None:
 class _CodexGenerationTracer:
     """Best-effort Langfuse updates; the request owns generation closure."""
 
-    def __init__(self, generation: LangfuseObservation) -> None:
+    def __init__(self, generation: Any | None) -> None:
         self._generation = generation
 
     def record_success(self, result: LLMResponse) -> None:
@@ -110,37 +110,68 @@ class _CodexGenerationTracer:
         )
 
     def _update(self, **kwargs: Any) -> None:
+        generation = self._generation
         filtered = {k: v for k, v in kwargs.items() if v is not None}
-        if filtered:
-            self._generation.update(**filtered)
+        if generation is None or not filtered:
+            return
+        try:
+            generation.update(**filtered)
+        except Exception as exc:
+            logger.warning(_LANGFUSE_TRACE_WARNING, exc)
 
     def close(self) -> None:
-        self._generation.end()
+        generation = self._generation
+        if generation is None:
+            return
+        try:
+            generation.end()
+        except Exception as exc:
+            logger.warning(_LANGFUSE_TRACE_WARNING, exc)
 
 
 def _start_codex_langfuse_generation(
     *,
-    langfuse: LangfuseRuntime,
     name: str,
     model: str,
     body: dict[str, Any],
 ) -> _CodexGenerationTracer:
-    """Trace the actual wire request using the same frozen client as OpenAI."""
-    return _CodexGenerationTracer(langfuse.start_observation(
-        name=name,
-        as_type="generation",
-        model=model,
-        input={
-            "instructions": body.get("instructions"),
-            "input": body.get("input"),
-            "tools": body.get("tools"),
-        },
-        model_parameters={
-            key: body[key]
-            for key in ("reasoning", "tool_choice", "text", "parallel_tool_calls")
-            if key in body
-        },
-    ))
+    """Start a Langfuse generation for a Codex request, or a no-op tracer.
+
+    Detection and the SDK call share one try/except so a broken
+    ``find_spec`` can't fail the Codex request itself.
+    """
+    try:
+        if not tracing.requested():
+            return _CodexGenerationTracer(None)
+        if importlib.util.find_spec("langfuse"):
+            from langfuse import get_client
+
+            langfuse = get_client()
+            generation = langfuse.start_observation(
+                name=name,
+                as_type="generation",
+                model=model,
+                input={
+                    "instructions": body.get("instructions"),
+                    "input": body.get("input"),
+                    "tools": body.get("tools"),
+                },
+                model_parameters={
+                    key: body[key]
+                    for key in ("reasoning", "tool_choice", "text", "parallel_tool_calls")
+                    if key in body
+                },
+            )
+            return _CodexGenerationTracer(generation)
+
+        logger.warning(
+            "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
+            "run `nanobot plugins enable langfuse` to enable tracing"
+        )
+        return _CodexGenerationTracer(None)
+    except Exception as exc:
+        logger.warning(_LANGFUSE_TRACE_WARNING, exc)
+        return _CodexGenerationTracer(None)
 
 
 class OpenAICodexProvider(LLMProvider):
@@ -154,11 +185,9 @@ class OpenAICodexProvider(LLMProvider):
         *,
         fast_mode: CodexFastMode | None = None,
         provider_name: str = "openai_codex",
-        langfuse: LangfuseRuntime | None = None,
     ):
         super().__init__(api_key=None, api_base=None, provider_name=provider_name)
         self.default_model = default_model
-        self._langfuse = langfuse or provider_langfuse_runtime()
         self.proxy = proxy or None
         self._extra_body = dict(extra_body or {})
         self._fast_mode = fast_mode
@@ -307,7 +336,6 @@ class OpenAICodexProvider(LLMProvider):
             ) -> LLMResponse:
                 wire_body = await prepare_inline_images(without_response_item_ids(request_body))
                 tracer = _start_codex_langfuse_generation(
-                    langfuse=self._langfuse,
                     name=trace_name,
                     model=_strip_model_prefix(str(wire_body.get("model") or model)),
                     body=wire_body,

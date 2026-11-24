@@ -471,6 +471,7 @@ export function SettingsPage({
             {runtimeConfiguration("runtime")}
             <RuntimeSettings
               form={modelState.form}
+              runtimeConfig={controller.runtimeConfigState}
               settings={settings}
               onRestart={showSidebar ? undefined : restartViaSettingsSurface}
               isRestarting={restartInProgress}
@@ -479,11 +480,7 @@ export function SettingsPage({
               capabilitiesLoading={systemState.nanobotFeaturesLoading}
               capabilityAction={systemState.nanobotFeatureAction}
               capabilityError={systemState.nanobotFeaturesError}
-              onInstallCapability={(name, installOnly) => installOnly
-                ? void systemActions.handleNanobotFeatureAction("enable", name, { installOnly: true })
-                : void systemActions.installCapabilities([name])}
-              onSaveObservability={webuiCapabilities.includes("webui.langfuse-settings.v1")
-                ? controller.saveObservabilitySettings : undefined}
+              onInstallCapability={(name) => void systemActions.installCapabilities([name])}
             />
           </div>
         );

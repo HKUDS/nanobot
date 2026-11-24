@@ -33,7 +33,6 @@ from nanobot.config.network import NetworkConfig, migrate_legacy_proxy_config
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
-from nanobot.observability.config import ObservabilityConfig
 from nanobot.providers.generation import GenerationSettings
 from nanobot.providers.model_api import ModelAPICapabilities, RequestAPI
 
@@ -192,6 +191,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 200
     max_concurrent_subagents: int = Field(default=4, ge=1)
     max_tool_result_chars: int = 16_000
+    langfuse_enabled: bool = True  # Allow tracing with the service's environment credentials.
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
     tool_hint_max_length: int = Field(
         default=40,
@@ -505,7 +505,6 @@ class Config(BaseSettings):
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     network: NetworkConfig = Field(default_factory=NetworkConfig)
-    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     model_presets: dict[str, ModelPresetConfig] = Field(

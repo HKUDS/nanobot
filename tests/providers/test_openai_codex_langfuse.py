@@ -12,7 +12,7 @@ from nanobot.providers.openai_codex_provider import OpenAICodexProvider, _CodexH
 from nanobot.providers.openai_responses import build_responses_state
 
 LANGFUSE_MISSING_WARNING = (
-    "Langfuse tracing is enabled but langfuse is not installed; "
+    "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
     "run `nanobot plugins enable langfuse` to enable tracing"
 )
 
@@ -41,7 +41,6 @@ class _WarningCaptureLogger:
 def _capture_codex_warnings(monkeypatch: pytest.MonkeyPatch) -> _WarningCaptureLogger:
     capture = _WarningCaptureLogger()
     monkeypatch.setattr("nanobot.providers.openai_codex_provider.logger", capture)
-    monkeypatch.setattr("nanobot.observability.langfuse.logger", capture)
     return capture
 
 
@@ -59,19 +58,11 @@ class _FakeGeneration:
 
 
 def _install_fake_langfuse(monkeypatch: pytest.MonkeyPatch, start_observation) -> None:
-    """Keep transport/generation lifecycle cases independent of the optional SDK."""
+    """Insert a fake ``langfuse`` module so ``from langfuse import get_client`` resolves."""
     fake_module = types.ModuleType("langfuse")
     fake_module.__spec__ = ModuleSpec("langfuse", loader=None)
+    fake_module.get_client = lambda: SimpleNamespace(start_observation=start_observation)  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "langfuse", fake_module)
-    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "public")
-    monkeypatch.setattr(fake_module, "Langfuse", lambda **kwargs: SimpleNamespace(
-        start_observation=start_observation,
-    ), raising=False)
-
-
-@pytest.fixture(autouse=True)
-def isolated_tracing_startup(monkeypatch):
-    monkeypatch.delenv("LANGFUSE_TRACING_ENABLED", raising=False)
 
 
 @pytest.fixture
@@ -112,11 +103,20 @@ async def test_codex_langfuse_missing_package_warns_and_call_still_succeeds(monk
     assert capture.calls == [(LANGFUSE_MISSING_WARNING, ())]
 
 
-async def test_codex_langfuse_disabled_when_env_var_unset(monkeypatch) -> None:
-    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+@pytest.mark.parametrize("enabled", [True, False], ids=["missing-key", "switch-off-with-key"])
+async def test_codex_without_tracing_still_replies(monkeypatch, enabled) -> None:
+    monkeypatch.setattr("nanobot.providers.langfuse.enabled", enabled)
+    if enabled:
+        monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    else:
+        monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret")
     capture = _capture_codex_warnings(monkeypatch)
     _mock_codex_token(monkeypatch)
-    monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
+    find_spec_calls: list[str] = []
+    monkeypatch.setattr(
+        "importlib.util.find_spec",
+        lambda name: find_spec_calls.append(name),
+    )
     monkeypatch.setattr(
         "nanobot.providers.openai_codex_provider._request_codex", _fake_request_success
     )
@@ -126,7 +126,7 @@ async def test_codex_langfuse_disabled_when_env_var_unset(monkeypatch) -> None:
 
     assert result.content == "hello"
     assert capture.calls == []
-    assert not provider._langfuse.active
+    assert find_spec_calls == []
 
 
 @pytest.mark.parametrize(
@@ -218,7 +218,7 @@ async def test_codex_langfuse_tracing_failure_does_not_break_codex_call(monkeypa
     assert result.content == "hello"
     assert len(capture.calls) == 1
     message, _args = capture.calls[0]
-    assert "Langfuse observation failed" in message
+    assert "Langfuse tracing failed for Codex request" in message
 
 
 async def test_codex_langfuse_generation_still_ends_when_update_raises(monkeypatch, generations) -> None:
@@ -240,7 +240,7 @@ async def test_codex_langfuse_generation_still_ends_when_update_raises(monkeypat
     gen = generations[0]
     assert gen.end_calls == 1
     assert len(capture.calls) == 1
-    assert "Langfuse generation update failed" in capture.calls[0][0]
+    assert "Langfuse tracing failed for Codex request" in capture.calls[0][0]
 
 
 async def test_codex_langfuse_generation_ends_on_cancellation(monkeypatch, generations) -> None:
@@ -343,7 +343,7 @@ async def test_codex_langfuse_detection_failure_does_not_break_codex_call(monkey
 
     assert result.content == "hello"
     assert len(capture.calls) == 1
-    assert "Langfuse initialization failed" in capture.calls[0][0]
+    assert "Langfuse tracing failed for Codex request" in capture.calls[0][0]
 
 
 async def test_codex_langfuse_traces_the_actual_wire_body_not_the_prenormalized_one(

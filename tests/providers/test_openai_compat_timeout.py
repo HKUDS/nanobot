@@ -65,19 +65,28 @@ async def test_openai_compat_provider_timeout_can_be_overridden_by_env(monkeypat
 
 async def test_missing_langfuse_warning_recommends_plugin_command(monkeypatch) -> None:
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
-    monkeypatch.delenv("LANGFUSE_TRACING_ENABLED", raising=False)
     monkeypatch.setattr(openai_compat_provider, "AsyncOpenAI", None)
 
     with (
         patch("importlib.util.find_spec", return_value=None),
         patch("openai.AsyncOpenAI") as mock_async_openai,
-        patch("nanobot.observability.langfuse.logger.warning") as mock_warning,
+        patch("nanobot.providers.openai_compat_provider.logger.warning") as mock_warning,
     ):
         provider = OpenAICompatProvider(api_key="test-key", api_base="https://example.com/v1")
         await provider._ensure_client()
 
     mock_warning.assert_called_once_with(
-        "Langfuse tracing is enabled but langfuse is not installed; "
+        "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
         "run `nanobot plugins enable langfuse` to enable tracing"
     )
     mock_async_openai.assert_called_once()
+
+
+async def test_tracing_opt_out_uses_plain_openai_with_env_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret")
+    monkeypatch.setattr("nanobot.providers.langfuse.enabled", False)
+    monkeypatch.setattr(openai_compat_provider, "AsyncOpenAI", None)
+    with patch("openai.AsyncOpenAI") as plain_client, patch("importlib.util.find_spec") as probe:
+        provider = OpenAICompatProvider(api_key="test-key", api_base="https://example.com/v1")
+        assert await provider._ensure_client() is plain_client.return_value
+        probe.assert_not_called()
