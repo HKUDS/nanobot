@@ -643,7 +643,6 @@ class Config(BaseSettings):
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key or spec.name in legacy_connections:
                     return p, spec.name
 
-        # Check for custom provider by prefix (e.g., "companyProxy/gpt-4").
         # Return the matching provider even when apiBase is missing, so a
         # malformed explicit prefix fails instead of falling through to a
         # different custom provider.

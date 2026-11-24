@@ -45,7 +45,6 @@ _GEMINI_IMAGEN_ASPECT_RATIOS = {"1:1", "9:16", "16:9", "3:4", "4:3"}
 _GEMINI_FLASH_COMMON_ASPECT_RATIOS = {
     "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9",
 }
-# Gemini 3.1 Flash and Flash Lite additionally accept extreme aspect ratios.
 _GEMINI_31_FLASH_ASPECT_RATIOS = {
     *_GEMINI_FLASH_COMMON_ASPECT_RATIOS,
     "1:4",
@@ -53,8 +52,6 @@ _GEMINI_31_FLASH_ASPECT_RATIOS = {
     "1:8",
     "8:1",
 }
-# Gemini 3 Pro image models accept these sizes. Gemini 3.1 Flash adds 512,
-# while Gemini 3.1 Flash Lite supports only 1K.
 _GEMINI_3_IMAGE_SIZES = {"1K", "2K", "4K"}
 _GEMINI_31_FLASH_IMAGE_SIZES = {"512", *_GEMINI_3_IMAGE_SIZES}
 _GEMINI_31_FLASH_LITE_IMAGE_SIZES = {"1K"}
@@ -1652,7 +1649,6 @@ class StepFunImageGenerationClient(ImageGenerationProvider):
         if size:
             body["size"] = size
 
-        # step-1x-medium supports style_reference for reference-image-guided generation
         refs = list(reference_images or [])
         if refs and "1x" in model:
             body["style_reference"] = {

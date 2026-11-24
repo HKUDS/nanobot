@@ -744,7 +744,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
             ("kimi-k2.7-code-highspeed", {"temperature": 1.0}),
         ),
     ),
-    # Kimi Coding Plan — Anthropic Messages API at api.kimi.com/coding
     # sk-kimi-* keys; requires User-Agent: claude-code/0.1.0 header.
     ProviderSpec(
         name="kimi_coding",
@@ -910,7 +909,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_local=True,
         default_api_base="http://localhost:8000/v3",
     ),
-    # Keys start with "nvapi-", base URL at integrate.api.nvidia.com
     ProviderSpec(
         name="nvidia",
         keywords=("nvidia", "nemotron", "nvapi"),

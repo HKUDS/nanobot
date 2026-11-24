@@ -311,7 +311,7 @@ export class NanobotClient {
     return `${url.protocol}//${url.host}${url.pathname}`;
   }
 
-  /** Swap the URL (e.g. after fetching a fresh token) then reconnect. */
+  /** Set the URL and optional socket factory for the next connection. */
   updateUrl(url: string, socketFactory?: (url: string) => WebSocket): void {
     this.currentUrl = url;
     if (socketFactory) {

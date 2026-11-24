@@ -564,7 +564,6 @@ class SignalChannel(BaseChannel):
             self.logger.exception("Error sending Signal message")
             raise
         finally:
-            # Keep typing active across progress updates; stop on the final reply.
             if not is_progress_message:
                 # Avoid immediate START->STOP for fast responses, which can be invisible
                 # in some Signal clients. Let indicator expire naturally (~15s).
@@ -1163,8 +1162,7 @@ class SignalChannel(BaseChannel):
             if placeholder_span:
                 bot_mentions.append(placeholder_span)
 
-        # Sort mentions by start position (descending) to remove from end to start
-        # This prevents position shifts when removing earlier mentions
+        # Removing later mentions first preserves the offsets of earlier ones.
         bot_mentions.sort(reverse=True)
 
         for start, length in bot_mentions:

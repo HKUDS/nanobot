@@ -20,7 +20,6 @@ for (const width of [1280, 390]) {
     const initial = (await dialog.boundingBox())!;
     await page.screenshot({ path: info.outputPath("invitation-day.png") });
 
-    // System changes are live even while the modal is open.
     await page.emulateMedia({ colorScheme: "dark" });
     await expect(images.nth(0)).toHaveCSS("opacity", "0");
     await expect(images.nth(1)).toHaveCSS("opacity", "1");

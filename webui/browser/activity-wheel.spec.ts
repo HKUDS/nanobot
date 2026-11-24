@@ -80,7 +80,6 @@ test("the narrow preview is a single tappable row and honors reduced motion", as
   await page.setViewportSize({ width: 360, height: 740 });
   const wheel = page.getByTestId("latest-activity-wheel");
   await expect(wheel).toContainText("brief.md");
-  // Change the system preference while the wheel is already mounted.
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.getByRole("button", { name: "切换主题" }).click();
   const toggle = page.getByRole("button", { name: "正在处理", exact: true });

@@ -30,7 +30,6 @@ describe("focus modality", () => {
 
     expect(document.documentElement.dataset.focusModality).toBe("pointer");
 
-    // Shift held while clicking, followed by key repeat and Escape.
     button.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", shiftKey: true, bubbles: true }));
     button.dispatchEvent(new MouseEvent("mousedown", { shiftKey: true, bubbles: true }));
     button.focus();
@@ -52,15 +51,12 @@ describe("focus modality", () => {
     button.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
     expect(document.documentElement.dataset.focusModality).toBe("keyboard");
 
-    // Escape during keyboard interaction preserves keyboard focus rings on return.
     button.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(document.documentElement.dataset.focusModality).toBe("keyboard");
 
-    // Any pointer press switches back to pointer modality, even with Shift held.
     button.dispatchEvent(new MouseEvent("mousedown", { shiftKey: true, bubbles: true }));
     expect(document.documentElement.dataset.focusModality).toBe("pointer");
 
-    // Arrow and activation keys on non-text controls re-enter keyboard modality.
     button.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     expect(document.documentElement.dataset.focusModality).toBe("keyboard");
 
@@ -77,24 +73,20 @@ describe("focus modality", () => {
     const textarea = document.createElement("textarea");
     document.body.append(input, textarea);
 
-    // Editing keys inside inputs do not flip pointer modality into keyboard navigation.
     input.focus();
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(document.documentElement.dataset.focusModality).toBe("pointer");
 
-    // Submitting a single-line input with Enter hands keyboard focus to the destination control.
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(document.documentElement.dataset.focusModality).toBe("keyboard");
 
-    // Pressing Enter inside a multiline textarea does not flip pointer modality.
     textarea.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     textarea.focus();
     textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(document.documentElement.dataset.focusModality).toBe("pointer");
 
-    // Tabbing out of a textarea always enters keyboard navigation.
     textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
     expect(document.documentElement.dataset.focusModality).toBe("keyboard");
   });

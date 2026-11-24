@@ -217,7 +217,6 @@ export async function encodeImageInWorker(
   };
 }
 
-// --- Worker boot -------------------------------------------------------------
 // Only attach the message listener when running *inside* a Worker so the same
 // module can be imported by tests (and by the thin ``imageEncode.ts`` wrapper
 // in the main thread, which also calls ``encodeImageInWorker`` as a

@@ -276,8 +276,6 @@ class CronService:
                     _normalize_agent_turn_job(job)
                     jobs.append(job)
             except Exception:
-                # Preserve the corrupt file for forensic recovery instead of
-                # letting the next save overwrite it with an empty job list.
                 backup = self.store_path.with_suffix(
                     self.store_path.suffix + f".corrupt-{int(time.time())}"
                 )
@@ -463,10 +461,7 @@ class CronService:
         self._running = True
         loaded = self._load_store()
         if loaded is None:
-            # Store file existed but was corrupt and has been preserved with
-            # a ``.corrupt-<ts>`` suffix.  Bail out instead of starting with
-            # an empty store; that would call ``_save_store`` and overwrite
-            # the now-renamed (but still recoverable) data with [].
+            # If the backup rename failed, saving an empty store would destroy the original.
             self._running = False
             raise RuntimeError(
                 f"cron store at {self.store_path} is corrupt and was preserved; "

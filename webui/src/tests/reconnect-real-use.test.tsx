@@ -194,7 +194,6 @@ describe("reconnect across chat selection and transport generations", () => {
       "alpha answer turn-1", "alpha answer turn-2",
     ]));
     expect(selected.result.current.messages.every((message) => !message.content.includes("beta"))).toBe(true);
-    // A third alpha turn starts while the user returns to the now-idle beta.
     act(() => h.running("alpha", "turn-3", 300));
     const alphaThird = h.client.getRunState("alpha");
     selected.rerender({ chat: "beta" });

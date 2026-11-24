@@ -366,8 +366,6 @@ class ChannelManager:
             else:
                 allow = getattr(cfg, "allow_from", None)
             if allow is None:
-                # allowFrom omitted → pairing-only mode.  Unapproved senders
-                # receive a pairing code instead of being silently ignored.
                 logger.info(
                     '"{}" has no allowFrom; unapproved users will receive a pairing code',
                     name,
@@ -1093,8 +1091,8 @@ class ChannelManager:
         )
         non_matching: list[OutboundMessage] = []
 
-        # Only merge consecutive deltas. As soon as we hit any other message,
-        # stop and hand that boundary back to the dispatcher via `pending`.
+        # A matching end event can carry the last text chunk. Leave the first
+        # nonmatching message for the dispatcher to preserve delivery order.
         while True:
             try:
                 next_msg = self.bus.outbound.get_nowait()

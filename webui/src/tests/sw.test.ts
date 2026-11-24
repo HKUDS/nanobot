@@ -108,8 +108,6 @@ function loadSw(noticeStore = new FakeCacheStore()): LoadedSw {
     }),
   };
   const fetchMock = vi.fn();
-  // Execute the plain public/sw.js script inside a controlled scope so the
-  // service worker globals (self/caches/fetch) are fully mocked.
   new Function("self", "caches", "fetch", SW_SCRIPT)(self, caches, fetchMock);
 
   const fire = async (type: string, event: Record<string, unknown> = {}) => {

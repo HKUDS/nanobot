@@ -2880,8 +2880,6 @@ async def test_send_text_does_not_fallback_on_network_timeout() -> None:
     finally:
         tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
 
-    # With the fix: only _call_with_retry's 3 HTML attempts (no plain fallback).
-    # Before the fix: 3 HTML + 3 plain = 6 attempts.
     assert call_count == 3, (
         f"Expected 3 calls (HTML retries only), got {call_count} "
         "(plain-text fallback should not trigger on TimedOut)"
@@ -2916,9 +2914,6 @@ async def test_send_text_does_not_fallback_on_network_error() -> None:
     finally:
         tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
 
-    # _call_with_retry does NOT retry NetworkError (only TimedOut/RetryAfter),
-    # so it raises after 1 attempt. The fix prevents plain-text fallback.
-    # Before the fix: 1 HTML + 1 plain = 2. After the fix: 1 HTML only.
     assert call_count == 1, (
         f"Expected 1 call (HTML only, no plain fallback), got {call_count}"
     )
@@ -2987,9 +2982,6 @@ async def test_send_text_bad_request_plain_fallback_exhausted() -> None:
     finally:
         tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
 
-    # _call_with_retry does NOT retry BadRequest (only TimedOut/RetryAfter),
-    # so HTML fails after 1 attempt → fallback to plain also fails after 1 attempt.
-    # Before the fix: 2 total. After the fix: still 2 (BadRequest SHOULD fallback).
     assert call_count == 2, f"Expected 2 calls (1 HTML + 1 plain), got {call_count}"
 
 

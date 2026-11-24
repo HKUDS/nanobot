@@ -865,8 +865,6 @@ class EmailChannel(BaseChannel):
                 return True
             features.uid_store = False
 
-        # Compatibility fallback for servers where UID STORE is unavailable or
-        # unreliable: resolve the current sequence number from UID and use STORE.
         imap_id = self._lookup_imap_id_by_uid(client, uid)
         if not imap_id:
             self.logger.warning("Could not locate UID {} to set flag {}", uid, flag)

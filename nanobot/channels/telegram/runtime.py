@@ -1232,7 +1232,6 @@ class TelegramChannel(BaseChannel):
             text = msg.content
             if msg.metadata.get("render_as") == "text":
                 text = _telegram_command_text(text)
-            # Fallback: no native keyboard → splice labels into the message so the choices survive.
             if buttons and reply_markup is None:
                 text = f"{text}\n\n{self._buttons_as_text(buttons)}"
 
