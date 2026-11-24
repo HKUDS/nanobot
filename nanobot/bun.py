@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import logging
 import os
 import platform
 import shutil
@@ -16,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from filelock import FileLock
+from loguru import logger
 
 BUN_VERSION = "1.3.13"
 # SHA-256 of the official bun-v1.3.13 release archives.
@@ -69,7 +69,7 @@ def _cleanup_bun_alias(temporary: tempfile.TemporaryDirectory[str]) -> None:
         except PermissionError as exc:
             if os.name != "nt" or getattr(exc, "winerror", None) != 32:
                 raise
-    logging.getLogger(__name__).warning("Leaving locked Bun alias in %s", temporary.name)
+    logger.warning("Leaving locked Bun alias in {}", temporary.name)
 
 
 def _matches_version(executable: str) -> bool:

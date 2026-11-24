@@ -88,6 +88,7 @@ def test_locked_node_cleanup_preserves_command_result(monkeypatch, tmp_path, cap
     runtime.write_bytes(b"runtime")
     monkeypatch.setattr(bun.tempfile, "tempdir", str(tmp_path))
     with ExitStack() as handles:
+        handles.callback(bun.logger.remove, bun.logger.add(caplog.handler, level="WARNING", format="{message}"))
         if exit_code:
             error = handles.enter_context(pytest.raises(subprocess.CalledProcessError))
         with bun.bun_environment(str(runtime)) as env:

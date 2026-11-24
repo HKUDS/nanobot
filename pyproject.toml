@@ -129,7 +129,7 @@ nanobot = "nanobot.cli.entry:main"
 nanobot-desktop-tui = "nanobot.cli.desktop_tui:main"
 
 [build-system]
-requires = ["hatchling", "filelock>=3.25.2"]
+requires = ["hatchling", "filelock>=3.25.2", "loguru>=0.7.3,<1.0.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.metadata]
