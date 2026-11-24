@@ -880,15 +880,12 @@ class AgentRunner:
             break
         else:
             await end_length_segment(interrupted=False)
-            stop_reason = "max_iterations"
+            stop_reason = "completed" if reply_delivered else "max_iterations"
             # Once a goal allowed tool work beyond the ordinary budget, its
             # closure deserves an answer, not a claim that work is unfinished.
             goal_overrun = iteration + 1 > spec.max_iterations
             terminal_content = None
-            if reply_delivered:
-                if goal_overrun and spec.finalize_on_max_iterations:
-                    stop_reason = "completed"
-            else:
+            if not reply_delivered:
                 if spec.finalize_on_max_iterations:
                     terminal_content, usage = await self._try_finalize_after_max_iterations(
                         spec,
@@ -930,7 +927,7 @@ class AgentRunner:
             failure_error_kind=failure_error_kind,
             tool_events=tool_events,
             had_injections=had_injections,
-            reply_delivered=reply_delivered and stop_reason in {"completed", "max_iterations"},
+            reply_delivered=reply_delivered and stop_reason == "completed",
             pending_stream_content=pending_stream_content,
             provider_state=conversation_state.finish(messages),
             summary_checkpoint=request_state.compaction.summary_checkpoint,

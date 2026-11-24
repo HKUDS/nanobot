@@ -53,14 +53,19 @@ class TestMessageToolSuppressLogic:
             mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
 
         msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Send")
-        result = await loop._process_message(msg, ephemeral=ephemeral)
+        capture = SDKCaptureHook()
+        result = await loop._process_message(
+            msg, ephemeral=ephemeral, hooks=[capture], run_extra_hooks_for_ephemeral=True,
+        )
 
+        assert capture.stop_reason == "completed"
         assert len(sent) == 1
         assert result is None
         assert loop.provider.chat_stream_with_retry.await_count == max_iterations
         if not ephemeral:
             session = await loop.sessions.state.read(msg.session_key)
             assert session is not None
+            assert not session.metadata.get("_stopped_at_iteration_limit")
             assert all(m.get("role") != "assistant" or m.get("tool_calls") or m.get("content") == "Done" for m in session.messages)
 
     @pytest.mark.asyncio
