@@ -1948,7 +1948,6 @@
         "codexFast": "Fast",
         "ultrafast": "超高速"
       },
-      "modelSwitchUnconfirmed": "モデルの切り替えを確認できませんでした。もう一度モデルを選択してください。",
       "switchModel": "モデルを切り替え",
       "manageModels": "プリセット管理",
       "fallbackNotice": "この応答では代替モデルを使用しました：{{model}}。",

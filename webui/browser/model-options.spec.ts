@@ -11,15 +11,6 @@ async function expectSpeedCircle(button: Locator, track: { y: number; height: nu
   await expect(button).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 }
 
-test("an unconfirmed model switch keeps the current badge and reports a toast", async ({ page }) => {
-  await page.goto("/browser/fixture.html?case=model-options&receipt-error");
-  const current = page.getByRole("button", { name: "Default", exact: true });
-  await current.click();
-  await page.getByRole("option", { name: "5.4", exact: true }).click();
-  await expect(page.locator('[data-toast-tone="error"]').getByRole("alert")).toHaveText("Could not confirm the model switch. Try selecting the model again.");
-  await expect(current).toBeVisible();
-});
-
 for (const width of [390, 1280]) {
   test(`current-chat model options preserve the compact preset menu at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });

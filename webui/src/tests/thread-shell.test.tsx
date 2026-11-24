@@ -1812,10 +1812,12 @@ describe("ThreadShell", () => {
 
     const badge = await screen.findByRole("button", { name: "Default" });
     expect(badge).toHaveTextContent("Default");
-    client.sendSystemCommand.mockResolvedValueOnce({ text: "Preset unavailable", command_result: { command: "/model", switched_preset: null } });
+    client.sendSystemCommand.mockResolvedValueOnce({ text: "Preset unavailable" });
     fireEvent.click(badge);
     fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Preset unavailable");
+    const toast = await screen.findByRole("alert");
+    expect(toast.closest("[data-toast-tone=error]")).not.toBeNull();
+    expect(toast).toHaveTextContent("Preset unavailable");
     expect(badge).toHaveAccessibleName("Default");
     fireEvent.click(badge);
     fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
@@ -2520,7 +2522,7 @@ describe("ThreadShell", () => {
     settings.model_call_order = ["fast"];
     let allocations = 0;
     client.newChat.mockImplementation(async () => `draft-${++allocations}`);
-    client.sendSystemCommand.mockResolvedValueOnce({ text: "Preset unavailable", command_result: { command: "/model", switched_preset: null } });
+    client.sendSystemCommand.mockResolvedValueOnce({ text: "Preset unavailable" });
     function Chat() {
       const { createChat, sessions } = useSessions();
       const current = sessions[0] ?? null;

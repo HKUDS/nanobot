@@ -1948,7 +1948,6 @@
         "codexFast": "Fast",
         "ultrafast": "초고속"
       },
-      "modelSwitchUnconfirmed": "모델 전환을 확인할 수 없습니다. 모델을 다시 선택하세요.",
       "switchModel": "모델 전환",
       "manageModels": "프리셋 관리",
       "fallbackNotice": "이 응답은 대체 모델을 사용했습니다: {{model}}.",

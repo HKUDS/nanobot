@@ -1948,7 +1948,6 @@
         "codexFast": "Fast",
         "ultrafast": "Siêu nhanh"
       },
-      "modelSwitchUnconfirmed": "Không thể xác nhận việc chuyển mô hình. Hãy chọn lại mô hình.",
       "switchModel": "Đổi mô hình",
       "manageModels": "Quản lý bộ thiết lập",
       "fallbackNotice": "Phản hồi này đã sử dụng mô hình dự phòng: {{model}}.",

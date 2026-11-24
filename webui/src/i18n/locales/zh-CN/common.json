@@ -2131,7 +2131,6 @@
         "codexFast": "Fast",
         "ultrafast": "极速"
       },
-      "modelSwitchUnconfirmed": "未能确认模型切换，请重新选择模型。",
       "switchModel": "切换模型",
       "manageModels": "管理预设",
       "fallbackNotice": "本次已使用备用模型：{{model}}。",

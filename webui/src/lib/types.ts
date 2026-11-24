@@ -1611,7 +1611,7 @@ export type InboundEvent =
       chat_id: string;
       text: string;
       side_channel?: true;
-      command_result?: { command: "/model"; switched_preset: string | null };
+      command_result?: { command: "/model"; switched_preset: string };
       render_as?: "text";
       reply_to?: string;
       media?: string[];

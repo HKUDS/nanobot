@@ -1951,7 +1951,6 @@
         "codexFast": "Fast",
         "ultrafast": "Ultrarrápido"
       },
-      "modelSwitchUnconfirmed": "Não foi possível confirmar a troca de modelo. Selecione o modelo novamente.",
       "switchModel": "Trocar modelo",
       "manageModels": "Gerenciar presets",
       "fallbackNotice": "Esta resposta usou um modelo alternativo: {{model}}.",
