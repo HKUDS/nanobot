@@ -2346,8 +2346,7 @@ class AgentLoop:
             return
         if ctx.stop_reason == "empty_final_response":
             ctx.outbound = ctx.delivery.empty_final_response()
-            return
-        if ctx.kind is TurnKind.SYSTEM:
+        elif ctx.kind is TurnKind.SYSTEM:
             ctx.outbound = ctx.delivery.background_response(
                 ctx.final_content,
                 stop_reason=ctx.stop_reason,
@@ -2355,13 +2354,14 @@ class AgentLoop:
                 latency_ms=ctx.turn_latency_ms,
             )
             return
-        ctx.outbound = self._assemble_outbound(
-            ctx.delivery.delivery_message,
-            cast(str, ctx.final_content),
-            ctx.stop_reason,
-            ctx.streamed_content,
-            turn_latency_ms=ctx.turn_latency_ms,
-        )
+        else:
+            ctx.outbound = self._assemble_outbound(
+                ctx.delivery.delivery_message,
+                cast(str, ctx.final_content),
+                ctx.stop_reason,
+                ctx.streamed_content,
+                turn_latency_ms=ctx.turn_latency_ms,
+            )
         if ctx.ephemeral and ctx.outbound is not None:
             ctx.outbound.metadata["_stop_reason"] = ctx.stop_reason
 

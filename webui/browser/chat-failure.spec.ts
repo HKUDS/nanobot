@@ -21,16 +21,24 @@ test("recovery toast offers continuation without taking the composer's space", a
   await expect(input).toHaveValue("保留草稿");
 });
 
-test("authentication recovery keeps provider settings reachable from toast details", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
-  await openChatFailure(page, "&notice=recovery");
-  const toast = page.locator(".toast-card");
-  await expect(toast).toContainText("Model provider authorization failed");
-  await toast.getByRole("button", { name: /details/i }).click();
-  await page.getByRole("button", { name: /settings/i }).click();
-  await expect(page.getByLabel("Fixture action")).toHaveText("settings");
-});
+for (const width of [390, 1440]) {
+  test(`authentication recovery keeps provider settings reachable from toast details at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
+    await openChatFailure(page, "&notice=recovery");
+    const toast = page.locator(".toast-card");
+    await expect(toast).toContainText("Model provider authorization failed");
+    await toast.getByRole("button", { name: /details/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeInViewport({ ratio: 1 });
+    const toastBox = (await toast.boundingBox())!;
+    const dialogBox = (await dialog.boundingBox())!;
+    expect(Math.abs((dialogBox.x + dialogBox.width / 2) - (toastBox.x + toastBox.width / 2))).toBeLessThan(2);
+    expect(dialogBox.y).toBeGreaterThanOrEqual(toastBox.y + toastBox.height);
+    await dialog.getByRole("button", { name: /settings/i }).click();
+    await expect(page.getByLabel("Fixture action")).toHaveText("settings");
+  });
+}
 
 for (const locale of ["en", "zh-CN", "zh-TW", "fr", "ja", "ko", "es", "pt-BR", "vi", "id"]) {
   for (const gateway of ["bwrap", "seatbelt"]) {

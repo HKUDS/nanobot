@@ -57,6 +57,11 @@ class TestMessageToolSuppressLogic:
 
         assert len(sent) == 1
         assert result is None
+        assert loop.provider.chat_stream_with_retry.await_count == max_iterations
+        if not ephemeral:
+            session = await loop.sessions.state.read(msg.session_key)
+            assert session is not None
+            assert all(m.get("role") != "assistant" or m.get("tool_calls") or m.get("content") == "Done" for m in session.messages)
 
     @pytest.mark.asyncio
     async def test_not_suppress_when_sent_to_different_target(self, tmp_path: Path) -> None:

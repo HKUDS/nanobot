@@ -43,7 +43,7 @@ type ToastEntry = ToastNotice & { id: number; step: number };
 const ToastContext = createContext<((notice: ToastNotice) => void) | null>(null);
 export const useToast = () => useContext(ToastContext);
 
-const ToastHostContext = createContext<{ localPortal: HTMLElement | null; unavailable: boolean }>({ localPortal: null, unavailable: false });
+const ToastHostContext = createContext<{ collisionBoundary: HTMLElement | null; unavailable: boolean }>({ collisionBoundary: null, unavailable: false });
 const ThreadToastEntries = createContext<ReactNode>(null);
 
 function ToastViewport({ children, local = false }: { children: ReactNode; local?: boolean }) {
@@ -51,7 +51,10 @@ function ToastViewport({ children, local = false }: { children: ReactNode; local
   const [hostHidden, setHostHidden] = useState(false);
   const unavailable = hostHidden || (local && !threadVisible);
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
-  const host = useMemo(() => ({ localPortal: local ? viewport : null, unavailable }), [local, viewport, unavailable]);
+  const host = useMemo(() => ({
+    collisionBoundary: local ? viewport?.parentElement ?? null : null,
+    unavailable,
+  }), [local, viewport, unavailable]);
   useLayoutEffect(() => {
     const visibilityTree: HTMLElement[] = [];
     if (!viewport) return;
@@ -96,7 +99,7 @@ function ToastCard({ notice, step, paused, unavailable, onAction, onSecondaryAct
   onHoverChange?: (hovered: boolean) => void;
   onFocusChange?: (focused: boolean) => void;
 }) {
-  const { localPortal } = useContext(ToastHostContext);
+  const { collisionBoundary } = useContext(ToastHostContext);
   const { message, detail, tone, persistent, details, action, secondaryAction } = notice;
   const [detailsOpen, setDetailsOpen] = useState(false);
   useEffect(() => {
@@ -182,9 +185,8 @@ function ToastCard({ notice, step, paused, unavailable, onAction, onSecondaryAct
           align="center"
           side="bottom"
           sideOffset={8}
-          portalContainer={localPortal}
-          collisionBoundary={localPortal?.parentElement}
-          style={localPortal ? { minWidth: 0, maxWidth: "var(--radix-popover-content-available-width)", pointerEvents: "auto" } : undefined}
+          collisionBoundary={collisionBoundary}
+          style={collisionBoundary ? { minWidth: 0, maxWidth: "var(--radix-popover-content-available-width)" } : undefined}
           className="w-[var(--radix-popover-trigger-width)] min-w-[min(calc(100vw-1.5rem),21rem)] max-w-[calc(100vw-1.5rem)] rounded-panel border border-border bg-popover p-0 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_12px_32px_-10px_rgb(0_0_0/0.18)] dark:shadow-[0_1px_2px_rgb(0_0_0/0.2),0_14px_34px_-8px_rgb(0_0_0/0.48)]"
         >
           {details.render()}

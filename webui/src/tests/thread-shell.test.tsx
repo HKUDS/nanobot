@@ -5820,6 +5820,27 @@ describe("ThreadShell", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("renders recovery and toast notices inside an unfocused visible pane", async () => {
+    const client = makeClient();
+    const chatId = "unfocused-pane";
+    render(wrap(client, <ThreadShell session={session(chatId)} title={chatId} composerActive={false} onToggleSidebar={() => {}} />));
+    await act(async () => {});
+    act(() => client._emitChat(chatId, {
+      event: "recovery_state", chat_id: chatId, recovery_id: "rec",
+      status: "awaiting_user", reason: "model_request_failed", failure_error_kind: "empty_final_response",
+    }));
+    const recoveryAlert = screen.getByRole("alert");
+    expect(recoveryAlert.closest(".thread-viewport [data-toast-viewport=thread]")).not.toBeNull();
+    expect(recoveryAlert).toHaveTextContent("The model did not return a final reply.");
+    act(() => client._emitChat(chatId, {
+      event: "recovery_state", chat_id: chatId, recovery_id: "rec",
+      status: "recovered", reason: "input_rejected", failure_error_kind: "unsupported_image",
+    }));
+    const imageAlert = await screen.findByRole("alert");
+    expect(imageAlert.closest('.thread-viewport [data-toast-viewport="thread"]')).not.toBeNull();
+    expect(imageAlert).toHaveTextContent("Image input is off for this preset");
+  });
+
   it.each([false, true])("keeps one terminal model failure visible until the next user action (recovery: %s)", async (recoverable) => {
     const client = makeClient();
     await act(async () => {

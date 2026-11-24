@@ -885,29 +885,30 @@ class AgentRunner:
             # closure deserves an answer, not a claim that work is unfinished.
             goal_overrun = iteration + 1 > spec.max_iterations
             terminal_content = None
-            if spec.finalize_on_max_iterations:
-                terminal_content, usage = await self._try_finalize_after_max_iterations(
-                    spec,
-                    hook,
-                    messages,
-                    usage,
-                    iteration=iteration + 1,
-                    request_state=request_state,
-                    round_usages=round_usages,
-                )
-            if terminal_content is not None and goal_overrun:
-                stop_reason = "completed"
-                pending_stream_content = terminal_content
-            if terminal_content is None:
+            if reply_delivered:
                 if goal_overrun and spec.finalize_on_max_iterations:
-                    if reply_delivered:
-                        stop_reason = "completed"
-                    else:
+                    stop_reason = "completed"
+            else:
+                if spec.finalize_on_max_iterations:
+                    terminal_content, usage = await self._try_finalize_after_max_iterations(
+                        spec,
+                        hook,
+                        messages,
+                        usage,
+                        iteration=iteration + 1,
+                        request_state=request_state,
+                        round_usages=round_usages,
+                    )
+                if terminal_content is not None and goal_overrun:
+                    stop_reason = "completed"
+                    pending_stream_content = terminal_content
+                if terminal_content is None:
+                    if goal_overrun and spec.finalize_on_max_iterations:
                         stop_reason = "empty_final_response"
                         failure_error_kind = stop_reason
                         error = stop_reason
-                else:
-                    terminal_content = self._max_iterations_fallback(spec)
+                    else:
+                        terminal_content = self._max_iterations_fallback(spec)
             if length_recovery_parts and terminal_content is not None:
                 terminal_tail = f"\n\n{terminal_content.lstrip()}"
                 final_content = (

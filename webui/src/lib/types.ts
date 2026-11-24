@@ -5,7 +5,7 @@ type Role = "user" | "assistant" | "tool" | "system";
 
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,
  * progress pings) that should not be rendered as conversational replies. */
-type MessageKind = "message" | "trace" | "compaction" | "empty_final_response";
+type MessageKind = "message" | "trace" | "compaction";
 
 export interface UIContextCompaction extends ContextCompaction {
   contextSnapshot?: ContextSnapshot;

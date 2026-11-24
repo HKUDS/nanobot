@@ -1435,7 +1435,7 @@ function ThreadShellContent({
           <ExecSessionCommandsContext.Provider value={sessionCommands}>
           <ThreadViewport
             ref={viewportRef}
-            toastViewport={composerActive && <ThreadToastViewport>
+            toastViewport={<ThreadToastViewport>
               {messagesReady && (recoveryNeedsDecision && recoveryState ? (
                 <RecoveryNotice key={chatId} state={recoveryState} onContinue={continueRecovery} onDismiss={dismissRecovery}
                   onOpenSettings={onOpenModelSettings} onInspectImagePreset={inspectImagePreset} imageInputBlocked={imageInputBlocked} />
