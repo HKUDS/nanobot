@@ -105,11 +105,6 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
 ];
 
-function openSourceDetails(name: string | RegExp) {
-  fireEvent.click(screen.getByRole("button", { name }));
-  return screen.getByRole("dialog");
-}
-
 describe("MessageBubble", () => {
   beforeAll(preloadMarkdownText);
 
@@ -255,8 +250,12 @@ describe("MessageBubble", () => {
       responseSources: [{ provider: "xai", model: "grok-4.5", preset: "grok", fallback: true }] },
   ])("keeps source details accessible as '$name' when the timestamp is unknown", ({ name, detail, source, responseSources }) => {
     render(<MessageBlockMenuActions message={{ id: "untimed", role: "assistant", content: "Reply", createdAt: 0, source, responseSources }} />);
-    fireEvent.click(screen.getByRole("button", { name }));
-    expect(screen.getByRole("dialog")).toHaveTextContent(detail);
+    if (source) {
+      expect(screen.getByText(detail)).toBeVisible();
+    } else {
+      fireEvent.click(screen.getByRole("button", { name }));
+      expect(screen.getByRole("dialog")).toHaveTextContent(detail);
+    }
   });
 
   it("explains the fallback badge on focus and click", async () => {
@@ -910,11 +909,10 @@ describe("MessageBubble", () => {
       createdAt: completedAt - 1_000,
     };
 
-    render(<MessageBlockMenuActions message={message} />);
+    render(<MessageBlockMenuActions sheet message={message} />);
 
-    const details = openSourceDetails("drink water");
-    const timestamp = details.querySelector("[data-message-timestamp]")!;
-    const automation = details.querySelector("[data-automation-trigger]")!;
+    const timestamp = screen.getByRole("time");
+    const automation = screen.getByText("Triggered automatically drink water");
     expect(timestamp).toHaveTextContent(formatMessageEndTime(completedAt));
     expect(automation).toHaveTextContent("Triggered automatically drink water");
     expect(timestamp.compareDocumentPosition(automation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

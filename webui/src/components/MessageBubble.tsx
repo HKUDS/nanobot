@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Info, Quote, Wrench } from "lucide-react";
+import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Quote, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DisclosureContent } from "@/components/ui/disclosure";
 
@@ -28,8 +28,7 @@ import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
 import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { HoverHint } from "@/components/ui/tooltip";
+import { HoverHint, TruncatedTextTooltip } from "@/components/ui/tooltip";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -155,7 +154,6 @@ export function MessageBlockMenuActions({
   sheet = false,
 }: MessageBlockMenuActionsProps) {
   const { t } = useTranslation();
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const content = message.content;
   const hasText = content.trim().length > 0;
   const showFork = message.role === "assistant"
@@ -169,7 +167,7 @@ export function MessageBlockMenuActions({
     ? message.completedAt
     : message.createdAt;
   const timestampLabel = typeof timestamp === "number" && Number.isFinite(timestamp)
-    ? formatMessageEndTime(timestamp)
+    ? (sheet ? formatMessageEndTime(timestamp) : formatMessageHoverTime(timestamp))
     : "";
   const automationSourceLabel = message.role === "assistant"
     && ["cron", "local_trigger", "trigger"].includes(message.source?.kind ?? "")
@@ -183,35 +181,17 @@ export function MessageBlockMenuActions({
       badgeClassName="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
     />
   );
-  const details = timestampLabel || automationSourceLabel ? (
-      <div
-        data-message-block-metadata
-        className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4 text-muted-foreground", sheet ? "px-2 text-xs" : "text-[10px]")}
-      >
-        {timestampLabel ? (
-          <time
-            data-message-timestamp
-            data-message-created-at={message.role === "user" || undefined}
-            data-assistant-completed-at={
-              message.role === "assistant" && timestamp === message.completedAt || undefined
-            }
-            dateTime={new Date(timestamp).toISOString()}
-            className="flex min-h-[var(--message-block-control-size)] items-center tabular-nums"
-          >
-            {timestampLabel}
-          </time>
-        ) : null}
-        {automationSourceLabel ? (
-          <span
-            data-automation-trigger
-            className="flex min-h-[var(--message-block-control-size)] flex-wrap items-baseline gap-x-2 break-words"
-          >
-            <span>{t("message.automationTriggered")}</span>{" "}
-            <span>{automationSourceLabel}</span>
-          </span>
-        ) : null}
-      </div>
-    ) : null;
+  const automation = automationSourceLabel && `${t("message.automationTriggered")} ${automationSourceLabel}`;
+  const time = timestampLabel && (
+    <time data-message-timestamp data-message-hover-time={!sheet || undefined}
+      data-message-created-at={message.role === "user" || undefined}
+      data-assistant-completed-at={message.role === "assistant" && timestamp === message.completedAt || undefined}
+      dateTime={new Date(timestamp).toISOString()} tabIndex={sheet ? undefined : 0}
+      className={cn("tabular-nums", sheet ? "flex min-h-[var(--message-block-control-size)] items-center"
+        : "shrink-0 rounded-mark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}>
+      {timestampLabel}
+    </time>
+  );
   const activityAction = activity && (
     <button type="button" data-message-block-activity-action onClick={activity.onToggle}
       aria-expanded={activity.expanded} aria-controls={activity.controls} aria-label={activity.label}
@@ -239,29 +219,15 @@ export function MessageBlockMenuActions({
         ) : null}
         {activityAction && !sheet ? <HoverHint content={activity.label}>{activityAction}</HoverHint> : activityAction}
       </div>
-      {sheet ? <>{fallbackSources}{details}</> : (timestampLabel || automationSourceLabel) && (
-        <div className="ms-[calc((var(--message-block-action-width)-0.875rem)/2)] flex items-center gap-1 text-muted-foreground">
-          {timestampLabel && (
-            <HoverHint content={fmtDateTime(timestamp)}>
-              <time data-message-hover-time dateTime={new Date(timestamp).toISOString()} tabIndex={0}
-                className="rounded-mark text-[10px] leading-4 tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                {formatMessageHoverTime(timestamp)}
-              </time>
-            </HoverHint>
-          )}
-          {automationSourceLabel && (
-            <Popover open={detailsOpen} onOpenChange={setDetailsOpen}>
-              <HoverHint content={automationSourceLabel} enabled={!detailsOpen}>
-                <PopoverTrigger asChild>
-                  <button type="button" aria-label={automationSourceLabel}
-                    className="rounded-mark hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <Info className="h-3.5 w-3.5" aria-hidden />
-                  </button>
-                </PopoverTrigger>
-              </HoverHint>
-              <PopoverContent side="bottom" collisionPadding={12} className="w-max max-w-64 [--message-block-control-size:1.75rem]">{details}</PopoverContent>
-            </Popover>
-          )}
+      {sheet && fallbackSources}
+      {(time || automation) && (
+        <div data-message-block-metadata className={cn("leading-4 text-muted-foreground", sheet
+          ? "mt-0.5 w-full border-t border-border/45 px-2 pt-1 text-xs"
+          : "ms-[calc((var(--message-block-action-width)-0.875rem)/2)] flex items-center gap-1 text-[10px]")}>
+          {time && !sheet ? <HoverHint content={fmtDateTime(timestamp)}>{time}</HoverHint> : time}
+          {automation && (sheet
+            ? <span data-automation-trigger className="flex min-h-[var(--message-block-control-size)] items-center break-words">{automation}</span>
+            : <TruncatedTextTooltip data-automation-trigger text={automation} tabIndex={0} className="max-w-32" />)}
         </div>
       )}
     </div>

@@ -1034,7 +1034,7 @@
   padding-right: max(3rem, var(--message-column-margin));
 }
 
-.thread-message-row:has(.message-action-sources) {
+.thread-message-row:has(.message-action-sources, .message-side-actions [data-automation-trigger]) {
   --message-source-space: 6rem;
 }
 
