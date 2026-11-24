@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ToastProvider } from "@/components/ui/toast";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import type { SessionMention, SlashCommand, WebUIIngressLimits } from "@/lib/types";
 import { ComposerDraftStore } from "@/lib/composer-draft";
@@ -94,7 +95,7 @@ describe("merged waiting messages", () => {
 
   it("leaves an over-limit UTF-8 append in the input without changing the pending content", () => {
     const onSend = vi.fn();
-    render(<ThreadComposer onSend={onSend} isStreaming ingressLimits={limits({}, 6)} />);
+    render(<ThreadComposer onSend={onSend} isStreaming ingressLimits={limits({}, 6)} />, { wrapper: ToastProvider });
     enter("一");
     enter("二");
     expect(screen.getByLabelText("Message input")).toHaveValue("二");
@@ -109,7 +110,7 @@ describe("merged waiting messages", () => {
     ]));
     const bytes = new TextEncoder().encode(formatQuotedUserMessage("1\n2", "first quote\n\nsecond quote")).length;
     const onSend = vi.fn();
-    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming quotedContext="second quote" ingressLimits={limits({}, bytes - 1)} />);
+    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming quotedContext="second quote" ingressLimits={limits({}, bytes - 1)} />, { wrapper: ToastProvider });
     enter("2");
     expect(screen.getByLabelText("Message input")).toHaveValue("2");
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)[0]).toMatchObject({ text: "1", quotedContext: "first quote" });
@@ -124,7 +125,7 @@ describe("merged waiting messages", () => {
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:queued-test") });
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
     const onSend = vi.fn();
-    const view = render(<ThreadComposer onSend={onSend} isStreaming ingressLimits={limits(policy)} />);
+    const view = render(<ThreadComposer onSend={onSend} isStreaming ingressLimits={limits(policy)} />, { wrapper: ToastProvider });
     const picker = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
     for (const [index, name] of ["first.png", "second.png"].entries()) {
       fireEvent.change(picker, { target: { files: [new File(["image"], name, { type: "image/png" })] } });
@@ -144,7 +145,7 @@ describe("merged waiting messages", () => {
       { id: "second", text: "2", images: [DOCUMENT] },
     ]));
     const onSend = vi.fn();
-    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" ingressLimits={limits({ max_count: 1 })} />);
+    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" ingressLimits={limits({ max_count: 1 })} />, { wrapper: ToastProvider });
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.getByText("Max 1 attachments per message")).toBeInTheDocument();
@@ -256,7 +257,7 @@ describe("merged waiting messages", () => {
     render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming sessions={[{
       key: "websocket:target8", channel: "websocket", chatId: "target8", title: "Ninth chat", preview: "",
       createdAt: null, updatedAt: null, handle: { id: `handle_${"a".repeat(32)}`, name: "target8" },
-    }]} />);
+    }]} />, { wrapper: ToastProvider });
     fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "@target8" } });
     fireEvent.mouseDown(screen.getByRole("option", { name: /target8/i }));
     fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
@@ -279,7 +280,7 @@ describe("merged waiting messages", () => {
     view.unmount();
     const refreshed = new ComposerDraftStore();
     expect(refreshed.get("chat-a", true)?.sessionMentions).toEqual(targets);
-    render(<ThreadComposer {...props} draftStore={refreshed} />);
+    render(<ThreadComposer {...props} draftStore={refreshed} />, { wrapper: ToastProvider });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(screen.getByText("A message can mention up to 8 chats")).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();

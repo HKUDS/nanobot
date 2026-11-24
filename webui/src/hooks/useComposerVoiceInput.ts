@@ -62,21 +62,13 @@ type VoiceInputOptions = Pick<Parameters<typeof useVoiceRecorder>[0],
 export function useComposerVoiceInput({ disabled, onTranscribeAudio, onTranscript, wantsWav }: VoiceInputOptions) {
   const { t } = useTranslation();
   const showToast = useToast();
-  const [voiceSetupError, setVoiceSetupError] = useState<VoiceRecorderErrorKey | null>(null);
   const [shortcutLabel] = useState(getVoiceShortcutLabel);
   const voiceShortcutDownRef = useRef(false);
-  const clearVoiceSetupError = useCallback(() => setVoiceSetupError(null), []);
   const setVoiceError = useCallback((key: VoiceRecorderErrorKey) => {
-    // Setup blockers carry instructions users may need to keep in view while fixing them.
-    if (key === "insecureContext" || key === "permission" || key === "notConfigured") {
-      setVoiceSetupError(key);
-      return;
-    }
     showToast?.({ message: t(`thread.composer.voiceErrors.${key}`), tone: "error", dedupeKey: "voice-input" });
   }, [showToast, t]);
   const voiceRecorder = useVoiceRecorder({
     disabled,
-    onClearError: clearVoiceSetupError,
     onError: setVoiceError,
     onTranscript,
     onTranscribeAudio,
@@ -118,8 +110,6 @@ export function useComposerVoiceInput({ disabled, onTranscribeAudio, onTranscrip
 
   return {
     recorder: voiceRecorder,
-    setupError: voiceSetupError,
-    clearSetupError: clearVoiceSetupError,
     shortcutLabel,
     shortcutAria: VOICE_SHORTCUT_ARIA,
     // Includes the interval while the shortcut is held and permission is still pending.
