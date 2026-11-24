@@ -37,14 +37,13 @@ def search_lines(usage: SearchUsageInfo) -> list[CommandLine]:
 
 def status_lines(
     *, version: str, model: str, start_time: float, last_usage: LLMUsage | None,
-    context_window_tokens: int, session_msg_count: int, context_tokens_estimate: int,
+    context_window_tokens: int, session_msg_count: int, context_tokens: int | None,
     search_usage: SearchUsageInfo | None = None, active_task_count: int = 0,
-    max_completion_tokens: int = 8192,
+    recorded_context: bool = False,
 ) -> list[CommandLine]:
     seconds = max(int(time.time() - start_time), 0)
     hours, rem = divmod(seconds, 3600)
     minutes, secs = divmod(rem, 60)
-    budget = max(context_window_tokens - max_completion_tokens - 1024, 1)
     incoming = last_usage.input_tokens if last_usage else 0
     outgoing = last_usage.output_tokens if last_usage else 0
     rows = [
@@ -54,9 +53,18 @@ def status_lines(
     ]
     if last_usage and last_usage.cache_read_tokens and incoming:
         rows.append(line("status.cache", percent=last_usage.cache_read_tokens * 100 // incoming))
+    if context_tokens is not None and context_window_tokens > 0:
+        rows.append(line(
+            "status.context_recorded" if recorded_context else "status.context",
+            used=context_tokens,
+            total=context_window_tokens,
+            percent=min(100, (100 * context_tokens + context_window_tokens // 2) // context_window_tokens),
+        ))
+    elif last_usage is not None and last_usage.context_tokens is not None:
+        rows.append(line("status.context_previous", used=last_usage.context_tokens))
+    else:
+        rows.append(line("status.context_unavailable"))
     rows.extend((
-        line("status.context", used=context_tokens_estimate, total=context_window_tokens,
-             percent=min(context_tokens_estimate * 100 // budget, 999)),
         line("status.session", count=session_msg_count),
         line("status.uptime", uptime=f"{hours}:{minutes:02}:{secs:02}"),
         line("status.tasks", count=active_task_count),

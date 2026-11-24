@@ -137,15 +137,21 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     session = ctx.session or await loop.sessions.state.get(ctx.key)
     runtime = ctx.runtime or await loop.runtime_for_session(session)
-    ctx_est = 0
-    with suppress(Exception):
-        ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(
-            session,
-            runtime=runtime,
-        )
     last_usage = LLMUsage.from_dict(session.metadata.get("_last_usage"))
-    if ctx_est <= 0:
-        ctx_est = last_usage.input_tokens if last_usage is not None else 0
+    snapshot = await loop.sessions.state.project_history(
+        ctx.key, lambda history: history.latest_context_usage(session.generation),
+    )
+    if snapshot is not None:
+        context_tokens, window, estimated = snapshot
+        recorded = not estimated
+    else:
+        recorded = False
+        window = runtime.context_window_tokens
+        context_tokens = None
+        with suppress(Exception):
+            estimate, _ = loop.consolidator.estimate_session_prompt_tokens(session, runtime=runtime)
+            if estimate > 0:
+                context_tokens = estimate
 
     # Await web search provider usage; network requests have a bounded timeout.
     usage = None
@@ -163,9 +169,9 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         task_count += loop.subagents.get_running_count_by_session(ctx.key)
     return command_reply(ctx.msg, "/status", *status_lines(
         version=__version__, model=runtime.model, start_time=loop._start_time,  # pyright: ignore[reportPrivateUsage]
-        last_usage=last_usage, context_window_tokens=runtime.context_window_tokens,
-        session_msg_count=len(session.get_text_history()), context_tokens_estimate=ctx_est,
-        search_usage=usage, active_task_count=task_count, max_completion_tokens=runtime.generation.max_tokens,
+        last_usage=last_usage, context_window_tokens=window,
+        session_msg_count=len(session.get_text_history()), context_tokens=context_tokens,
+        recorded_context=recorded, search_usage=usage, active_task_count=task_count,
     ))
 
 

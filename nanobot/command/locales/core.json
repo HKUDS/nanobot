@@ -372,16 +372,52 @@
     "id": "🧠 Model: {model}"
   },
   "status.context": {
-    "en": "📚 Context: {used}/{total} ({percent}% of input budget)",
-    "zh-CN": "📚 上下文: {used}/{total} (输入预算的 {percent}%)",
-    "zh-TW": "📚 上下文: {used}/{total} (輸入預算的 {percent}%)",
-    "fr": "📚 Contexte: {used}/{total} ({percent} % du budget d’entrée)",
-    "ja": "📚 コンテキスト: {used}/{total} (入力上限の {percent}%)",
-    "ko": "📚 컨텍스트: {used}/{total} (입력 한도의 {percent}%)",
-    "es": "📚 Contexto: {used}/{total} ({percent}% del límite de entrada)",
-    "pt-BR": "📚 Contexto: {used}/{total} ({percent}% do limite de entrada)",
-    "vi": "📚 Ngữ cảnh: {used}/{total} ({percent}% giới hạn đầu vào)",
-    "id": "📚 Konteks: {used}/{total} ({percent}% anggaran input)"
+    "en": "📚 Context: ≈{used}/{total} (≈{percent}%)",
+    "zh-CN": "📚 上下文: ≈{used}/{total} (≈{percent}%)",
+    "zh-TW": "📚 上下文: ≈{used}/{total} (≈{percent}%)",
+    "fr": "📚 Contexte: ≈{used}/{total} (≈{percent}%)",
+    "ja": "📚 コンテキスト: ≈{used}/{total} (≈{percent}%)",
+    "ko": "📚 컨텍스트: ≈{used}/{total} (≈{percent}%)",
+    "es": "📚 Contexto: ≈{used}/{total} (≈{percent}%)",
+    "pt-BR": "📚 Contexto: ≈{used}/{total} (≈{percent}%)",
+    "vi": "📚 Ngữ cảnh: ≈{used}/{total} (≈{percent}%)",
+    "id": "📚 Konteks: ≈{used}/{total} (≈{percent}%)"
+  },
+  "status.context_recorded": {
+    "en": "📚 Context (last request): {used}/{total} ({percent}%)",
+    "zh-CN": "📚 上下文（上次请求）: {used}/{total} ({percent}%)",
+    "zh-TW": "📚 上下文（上次請求）: {used}/{total} ({percent}%)",
+    "fr": "📚 Contexte (dernière requête): {used}/{total} ({percent}%)",
+    "ja": "📚 コンテキスト（前回のリクエスト）: {used}/{total} ({percent}%)",
+    "ko": "📚 컨텍스트(최근 요청): {used}/{total} ({percent}%)",
+    "es": "📚 Contexto (última solicitud): {used}/{total} ({percent}%)",
+    "pt-BR": "📚 Contexto (última solicitação): {used}/{total} ({percent}%)",
+    "vi": "📚 Ngữ cảnh (yêu cầu gần nhất): {used}/{total} ({percent}%)",
+    "id": "📚 Konteks (permintaan terakhir): {used}/{total} ({percent}%)"
+  },
+  "status.context_previous": {
+    "en": "📚 Context: unavailable (last recorded request: {used} tokens)",
+    "zh-CN": "📚 上下文: 无法估算（最近记录的请求使用了 {used} 个 token）",
+    "zh-TW": "📚 上下文: 無法估算（最近記錄的請求使用了 {used} 個 token）",
+    "fr": "📚 Contexte: indisponible (dernière requête enregistrée : {used} jetons)",
+    "ja": "📚 コンテキスト: 推定できません（最後に記録したリクエスト: {used} トークン）",
+    "ko": "📚 컨텍스트: 추정 불가 (마지막으로 기록된 요청: {used} 토큰)",
+    "es": "📚 Contexto: no disponible (última solicitud registrada: {used} tokens)",
+    "pt-BR": "📚 Contexto: indisponível (última solicitação registrada: {used} tokens)",
+    "vi": "📚 Ngữ cảnh: không có ước tính (yêu cầu gần nhất được ghi nhận: {used} token)",
+    "id": "📚 Konteks: tidak tersedia (permintaan terakhir yang tercatat: {used} token)"
+  },
+  "status.context_unavailable": {
+    "en": "📚 Context: unavailable",
+    "zh-CN": "📚 上下文: 无法估算",
+    "zh-TW": "📚 上下文: 無法估算",
+    "fr": "📚 Contexte: indisponible",
+    "ja": "📚 コンテキスト: 推定できません",
+    "ko": "📚 컨텍스트: 추정 불가",
+    "es": "📚 Contexto: no disponible",
+    "pt-BR": "📚 Contexto: indisponível",
+    "vi": "📚 Ngữ cảnh: không có ước tính",
+    "id": "📚 Konteks: tidak tersedia"
   },
   "status.session": {
     "en": "💬 Session: {count} messages",

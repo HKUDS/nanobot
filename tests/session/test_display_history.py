@@ -27,6 +27,30 @@ def _legacy(directory: Path, key: str, records: list[dict]) -> Path:
     return path
 
 
+async def test_latest_context_usage_starts_at_successful_compaction(tmp_path):
+    sessions = _manager(tmp_path)
+    session = await sessions.state.get("websocket:compact")
+    await sessions.state.finish_turn(session)
+
+    async def append(kind, content):
+        await sessions.state.append_history(session.key, [HistoryFact(kind, content)], expected_generation=session.generation)
+
+    def meter():
+        return sessions.project_history(session.key, lambda reader: reader.latest_context_usage(session.generation))
+
+    await append(HistoryKind.MODEL_REQUEST, {"phase": "completed", "request_usage": {"prompt_tokens": 800}, "context_window_tokens": 1000})
+    await append(HistoryKind.COMPACTION, {"phase": "succeeded"})
+    assert meter() is None
+    await append(HistoryKind.COMPACTION, {"phase": "succeeded", "context_snapshot": {
+        "estimated_tokens": 200, "context_window_tokens": 1000, "graph": {"nodes": [], "edges": []},
+    }})
+    await append(HistoryKind.MODEL_REQUEST, {"phase": "started", "context_window_tokens": 1000})
+    assert meter() == (200, 1000, True)
+    await append(HistoryKind.MODEL_REQUEST, {"phase": "completed", "request_usage": {"prompt_tokens": 220}, "context_window_tokens": 1000})
+    assert meter() == (220, 1000, False)
+    await sessions.state.aclose()
+
+
 async def test_display_facts_survive_reopen_without_entering_model_history(tmp_path):
     sessions = _manager(tmp_path)
     session = await sessions.state.get("websocket:durable")
