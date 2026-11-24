@@ -86,7 +86,7 @@ function ToastCard({ notice, step, paused, unavailable, controller, onAction, on
           <Icon aria-hidden="true" size={15} strokeWidth={2} className="shrink-0" />
           <div role={tone === "error" ? "alert" : "status"} className="min-w-0 truncate text-sm leading-5">
             <span className={detail ? "text-muted-foreground" : "font-medium"}>{message}</span>
-            {detail && <> <span className="font-medium">{detail}</span></>}
+            {detail && <><span className="inline-block w-1.5"> </span><span className="font-medium">{detail}</span></>}
           </div>
           {details && (
             <PopoverTrigger asChild>
@@ -108,7 +108,7 @@ function ToastCard({ notice, step, paused, unavailable, controller, onAction, on
             <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-border/80" />
           )}
           {hasActions && (
-            <div className="flex shrink-0 items-center gap-0.5">
+            <div className={`flex shrink-0 items-center gap-0.5${details ? "" : " -ms-1"}`}>
               {secondaryAction && (
                 <Button
                   key={`secondary-${step}`}
@@ -130,7 +130,7 @@ function ToastCard({ notice, step, paused, unavailable, controller, onAction, on
                   onClick={onAction}
                   className={action.tone === "destructive"
                     ? "h-7 shrink-0 rounded-full px-2.5 text-sm font-medium leading-5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    : "h-7 shrink-0 rounded-full px-2.5 text-sm font-medium leading-5"}
+                    : "h-7 shrink-0 rounded-full px-2.5 text-sm font-medium leading-5 text-content-link hover:text-content-link-hover"}
                 >
                   {action.label}
                 </Button>
