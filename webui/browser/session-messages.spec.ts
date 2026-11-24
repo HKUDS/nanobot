@@ -111,3 +111,24 @@ for (const theme of ["light", "dark"] as const) {
     });
   }
 }
+
+test("triggered replies keep the ordinary reply column with and without side actions visible", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/browser/fixture.html?case=session-messages");
+  const pane = page.getByRole("main", { name: "Session messages" });
+  await pane.evaluate(node => { node.style.maxWidth = "1000px"; });
+  const ordinary = page.getByText("Thanks, I will keep those details.", { exact: true });
+  const triggered = page.getByText("The scheduled update is ready.", { exact: true });
+  const side = pane.locator("[data-message-side-actions]").filter({ has: page.locator("[data-automation-trigger]") });
+  await expect(side).toHaveCSS("opacity", "0");
+  const left = (await ordinary.boundingBox())!.x;
+  expect((await triggered.boundingBox())!.x).toBeCloseTo(left, 0);
+  await triggered.hover();
+  await expect(side).toHaveCSS("opacity", "1");
+  const rail = (await side.boundingBox())!;
+  expect(rail.x).toBeGreaterThanOrEqual((await pane.boundingBox())!.x);
+  expect(rail.x + rail.width).toBeLessThanOrEqual(left);
+  expect((await triggered.boundingBox())!.x).toBeCloseTo(left, 0);
+  await side.locator("[data-automation-trigger]").focus();
+  await expect(page.getByRole("tooltip")).toHaveText("Release monitor");
+});
