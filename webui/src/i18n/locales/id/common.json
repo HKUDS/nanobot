@@ -1948,6 +1948,7 @@
         "codexFast": "Fast",
         "ultrafast": "Ultracepat"
       },
+      "modelSwitchUnconfirmed": "Perubahan model belum dapat dikonfirmasi. Pilih kembali modelnya.",
       "switchModel": "Ganti model",
       "manageModels": "Kelola preset",
       "fallbackNotice": "Respons ini menggunakan model cadangan: {{model}}.",

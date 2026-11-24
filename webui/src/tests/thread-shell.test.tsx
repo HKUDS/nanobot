@@ -1808,11 +1808,11 @@ describe("ThreadShell", () => {
         settingsSnapshot={settings}
       />
     ));
-    const { rerender } = render(view("default"));
+    const { rerender } = render(view("default"), { wrapper: ToastProvider });
 
     const badge = await screen.findByRole("button", { name: "Default" });
     expect(badge).toHaveTextContent("Default");
-    client.sendSystemCommand.mockResolvedValueOnce({ text: "Preset unavailable" });
+    client.sendSystemCommand.mockResolvedValueOnce({ text: "Preset unavailable", command_result: { command: "/model", switched_preset: null } });
     fireEvent.click(badge);
     fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Preset unavailable");
@@ -2520,14 +2520,14 @@ describe("ThreadShell", () => {
     settings.model_call_order = ["fast"];
     let allocations = 0;
     client.newChat.mockImplementation(async () => `draft-${++allocations}`);
-    client.sendSystemCommand.mockResolvedValueOnce({ text: "Preset unavailable" });
+    client.sendSystemCommand.mockResolvedValueOnce({ text: "Preset unavailable", command_result: { command: "/model", switched_preset: null } });
     function Chat() {
       const { createChat, sessions } = useSessions();
       const current = sessions[0] ?? null;
       return <ThreadShell session={current} title="New chat" onToggleSidebar={() => {}} settingsSnapshot={settings}
         onCreateChat={(scope, _message, preset) => createChat(scope, preset)} />;
     }
-    render(wrap(client, <Chat />));
+    render(wrap(client, <Chat />), { wrapper: ToastProvider });
 
     fireEvent.click(await screen.findByRole("button", { name: "Default" }));
     fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
@@ -5622,7 +5622,7 @@ describe("ThreadShell", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/api/commands")
       ? httpJson({ commands: [{ command: "/cancel_goal", title: "Cancel goal", description: "Cancel the goal", icon: "square", lifecycle: "side_channel", accepts_args: false }] })
       : new Response(null, { status: 404 })));
-    render(wrap(client, <ThreadShell session={session(chatId)} title="Goal" onToggleSidebar={() => {}} />));
+    render(wrap(client, <ThreadShell session={session(chatId)} title="Goal" onToggleSidebar={() => {}} />), { wrapper: ToastProvider });
     await act(async () => {});
     act(() => {
       client._emitChat(chatId, { event: "goal_status", chat_id: chatId, turn_id: "unrelated", status: "running", started_at: 100 });

@@ -38,7 +38,6 @@ export type VoiceRecorderErrorKey =
 
 interface VoiceRecorderOptions {
   disabled?: boolean;
-  onClearError: () => void;
   onError: (key: VoiceRecorderErrorKey) => void;
   onTranscript: (text: string) => void;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
@@ -48,7 +47,6 @@ interface VoiceRecorderOptions {
 
 export function useVoiceRecorder({
   disabled,
-  onClearError,
   onError,
   onTranscript,
   onTranscribeAudio,
@@ -163,7 +161,6 @@ export function useVoiceRecorder({
 
   const startRecording = useCallback(async () => {
     if (!onTranscribeAudio || state !== "idle" || startPendingRef.current) return;
-    onClearError();
     if (window.isSecureContext === false) {
       onError("insecureContext");
       return;
@@ -212,7 +209,6 @@ export function useVoiceRecorder({
       };
       recorder.start();
       setState("recording");
-      onClearError();
       maxTimerRef.current = setTimeout(stopRecording, VOICE_RECORDING_MAX_MS);
     } catch (error) {
       cleanupRecording();
@@ -221,7 +217,6 @@ export function useVoiceRecorder({
     }
   }, [
     cleanupRecording,
-    onClearError,
     onError,
     onTranscribeAudio,
     onTranscript,

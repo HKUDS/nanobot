@@ -1948,6 +1948,7 @@
         "codexFast": "Fast",
         "ultrafast": "Ultrarapide"
       },
+      "modelSwitchUnconfirmed": "Le changement de modèle n’a pas pu être confirmé. Sélectionnez à nouveau le modèle.",
       "switchModel": "Changer de modèle",
       "manageModels": "Gérer les préréglages",
       "fallbackNotice": "Cette réponse a utilisé un modèle de secours : {{model}}.",

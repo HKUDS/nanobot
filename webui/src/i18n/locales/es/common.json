@@ -1948,6 +1948,7 @@
         "codexFast": "Fast",
         "ultrafast": "Ultrarrápido"
       },
+      "modelSwitchUnconfirmed": "No se pudo confirmar el cambio de modelo. Vuelve a seleccionar el modelo.",
       "switchModel": "Cambiar modelo",
       "manageModels": "Gestionar preajustes",
       "fallbackNotice": "Esta respuesta usó un modelo alternativo: {{model}}.",

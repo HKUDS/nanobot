@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { ToastProvider } from "@/components/ui/toast";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { useSettingsController } from "@/components/settings/useSettingsController";
 import { ThreadShell } from "@/components/thread/ThreadShell";
@@ -73,7 +74,11 @@ const group = groups.find(({ id }) => id === params.get("group")) ?? groups[0]!;
 const base = loadCodexCatalog
   ? preset("Review", "openai_codex", "openai-codex/gpt-6.2-sol", "xhigh", ["low", "medium", "high"], { default: false, ultrafast_supported: true })
   : group.id === "oauth" ? (params.has("ultrafast") ? ultrafastCodex : standardCodex) : group.presets[0]!;
-const extraPresets = params.has("many-presets")
+const receiptErrorScene = params.has("receipt-error");
+const switchReceipt = "已切换到 `5.4`。\n- 仅此会话生效\n- 模型：`glm-5.4`\n- 上下文窗口：200000\n- 最大输出 token 数：16000";
+const extraPresets = receiptErrorScene
+  ? [{ ...preset("5.4", "custom", "glm-5.4"), max_tokens: 16_000 }]
+  : params.has("many-presets")
   ? Array.from({ length: 12 }, (_, index) => preset(`Example ${index + 1}`, "openai_codex", "gpt-6.2-sol"))
   : [];
 const settings: SettingsPayload = {
@@ -146,8 +151,10 @@ export function ModelOptionsFixture() {
       if (!frame.content.startsWith("/")) setSent(frame.model_options);
       queueMicrotask(() => {
         const preset = frame.content.startsWith("/model ") ? frame.content.slice(7) : null;
-        preview.receive({ event: "message", chat_id: frame.chat_id, turn_id: frame.turn_id, text: "Fixture message accepted.",
-          ...(preset && { side_channel: true, command_result: { command: "/model", switched_preset: preset } }),
+        const textOnly = receiptErrorScene && preset === "5.4";
+        preview.receive({ event: "message", chat_id: frame.chat_id, turn_id: frame.turn_id, text: textOnly ? switchReceipt : "Fixture message accepted.",
+          ...(preset && { side_channel: true as const }),
+          ...(preset && !textOnly && { command_result: { command: "/model", switched_preset: preset } }),
         });
         preview.receive({ event: "turn_end", chat_id: frame.chat_id, turn_id: frame.turn_id });
       });
@@ -158,7 +165,7 @@ export function ModelOptionsFixture() {
   document.documentElement.classList.toggle("dark", params.has("dark"));
   const chatId = `model-options-preview-${group.id}-${base.model}`;
   return <ClientProvider client={client} token="fixture" webuiCapabilities={["webui.core.v1", "webui.model-options.v1"]}>
-    <div className="flex flex-col overflow-hidden" style={{ height: "100dvh" }}>
+    <ToastProvider><div className="flex flex-col overflow-hidden" style={{ height: "100dvh" }}>
       <FixtureNav />
       {showSettings ? <ModelSettingsFixture /> : (
         <main className="thread-workspace flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
@@ -170,6 +177,6 @@ export function ModelOptionsFixture() {
             {sent ? `Reasoning: ${sent.reasoning_effort ?? "unchanged"}; Codex Fast: ${typeof sent.codex_fast_mode === "boolean" ? (sent.codex_fast_mode ? "on" : "off") : sent.codex_fast_mode ?? "unchanged"}` : "No model options sent"}
           </output>
         </main>)}
-    </div>
+    </div></ToastProvider>
   </ClientProvider>;
 }

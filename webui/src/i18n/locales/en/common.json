@@ -2131,6 +2131,7 @@
         "codexFast": "Fast",
         "ultrafast": "Ultrafast"
       },
+      "modelSwitchUnconfirmed": "Could not confirm the model switch. Try selecting the model again.",
       "switchModel": "Switch model",
       "manageModels": "Manage presets",
       "fallbackNotice": "This response used a fallback model: {{model}}.",

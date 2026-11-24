@@ -523,7 +523,7 @@ class WebUIOutboundDelivery:
         )
         if guarded_receipt and not persisted:
             return
-        if isinstance(msg.event, CommandResultEvent) and msg.event.switched_preset is not None:
+        if isinstance(msg.event, CommandResultEvent) and msg.event.command == "/model":
             body["command_result"] = {"command": msg.event.command, "switched_preset": msg.event.switched_preset}
         await self._fanout(recipients, body, label=" ", on_sent=msg.confirm_sent if msg.sent is not None else None)
 

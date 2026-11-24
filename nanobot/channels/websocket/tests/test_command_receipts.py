@@ -89,6 +89,12 @@ async def test_model_switch_confirms_canonical_preset_to_requester(history, chat
     reply, = _sent_ws_payloads(connection)
     assert reply["command_result"] == {"command": "/model", "switched_preset": "Fast"}
 
+    ctx.loop.set_session_model_preset.side_effect = ValueError("Unavailable")
+    await channel.send_command_result(await cmd_model(ctx))
+    rejection = _sent_ws_payloads(connection)[-1]
+    assert rejection["command_result"] == {"command": "/model", "switched_preset": None}
+    assert "Unavailable" in rejection["text"]
+
 
 async def test_large_dream_log_delivers_and_replays_the_full_diff(history, chat):
     channel, connection = chat

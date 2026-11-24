@@ -521,8 +521,10 @@ export function ThreadComposer({
     start: number;
     end: number;
   } | null>(null);
-  const [inlineError, setInlineError] = useState<string | null>(null);
   const showToast = useToast();
+  const reportError = useCallback((message: string) => {
+    showToast?.({ message, tone: "error", dedupeKey: message });
+  }, [showToast]);
   const [sendPending, setSendPending] = useState(false);
   const [modelSwitchPending, setModelSwitchPending] = useState(false);
   const [pathInspection, setPathInspection] = useState<{
@@ -612,9 +614,9 @@ export function ThreadComposer({
       return false;
     }
     const error = queuedPromptError(prompt);
-    if (error) setInlineError(error);
+    if (error) reportError(error);
     return error === null;
-  }, [imageInputBlocked, onInspectImagePreset, queuedPromptError, showToast, t]);
+  }, [imageInputBlocked, onInspectImagePreset, queuedPromptError, reportError, showToast, t]);
 
   const {
     snapshot: queueSnapshot,
@@ -633,8 +635,8 @@ export function ThreadComposer({
   const interactionDisabled = !!disabled || sendPending || queueSnapshot.sending;
   const sendDisabled = interactionDisabled || modelSwitchPending;
   useEffect(() => {
-    if (queueSnapshot.error) setInlineError(queueSnapshot.error);
-  }, [queueSnapshot.error]);
+    if (queueSnapshot.error) reportError(queueSnapshot.error);
+  }, [queueSnapshot.error, reportError]);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [cliAppMenuDismissed, setCliAppMenuDismissed] = useState(false);
@@ -749,18 +751,12 @@ export function ThreadComposer({
       const { rejected } = enqueue(files);
       if (rejected.length > 0) {
         const { reason, file } = rejected[0];
-        if (reason === "empty_file" || reason === "unsupported_type") {
-          showToast?.({ message: formatRejection(reason), tone: "error", dedupeKey: `attachment:${reason}` });
-          return;
-        }
-        setInlineError(reason === "too_large"
+        reportError(reason === "too_large"
           ? formatUploadTooLarge(file.size, acceptedAttachmentKind(file) === "video" ? MAX_VIDEO_BYTES : maxFileBytes)
           : formatRejection(reason));
-      } else {
-        setInlineError(null);
       }
     },
-    [enqueue, formatRejection, formatUploadTooLarge, interactionDisabled, maxFileBytes, showToast],
+    [enqueue, formatRejection, formatUploadTooLarge, interactionDisabled, maxFileBytes, reportError],
   );
 
   const {
@@ -1040,7 +1036,6 @@ export function ThreadComposer({
     const edited = pathInspection.range.replace("", rawSelection().start);
     if (edited && !addLocal(pathInspection.attachment)) {
       replaceMentionInput(edited.value, edited.cursor, { preserveFocus: true });
-      setInlineError(null);
     }
     setPathInspection(null);
   }, [addLocal, isUserShell, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
@@ -1319,7 +1314,7 @@ export function ThreadComposer({
   }, [focusTextarea]);
 
   const {
-    recorder: voiceRecorder, setupError: voiceSetupError, clearSetupError,
+    recorder: voiceRecorder,
     shortcutLabel: voiceShortcutLabel, shortcutAria, canSendQueuedPrompt,
   } = useComposerVoiceInput({
     disabled: interactionDisabled, onTranscribeAudio, onTranscript: appendTranscription,
@@ -1331,13 +1326,11 @@ export function ThreadComposer({
     if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
     previousPendingQueueKeyRef.current = pendingQueueKey;
     setValue("");
-    setInlineError(null);
-    clearSetupError();
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     setCursorPosition(0);
     clear();
-  }, [clear, clearSetupError, pendingQueueKey]);
+  }, [clear, pendingQueueKey]);
 
   const handleStop = useCallback(() => {
     pauseQueue();
@@ -1364,7 +1357,6 @@ export function ThreadComposer({
       replaceMentionInput(next, nextCursor);
       setSlashMenuDismissed(true);
       setCliAppMenuDismissed(false);
-      setInlineError(null);
       focusTextarea();
     },
     [focusTextarea, recordSlashRecent, replaceMentionInput, skillQuery, value],
@@ -1377,7 +1369,6 @@ export function ThreadComposer({
         setValue("");
         setSlashMenuDismissed(true);
         setCliAppMenuDismissed(false);
-        setInlineError(null);
         focusTextarea();
         return;
       }
@@ -1386,7 +1377,6 @@ export function ThreadComposer({
       setValue(command.argHint ? `${command.command} ` : command.command);
       setSlashMenuDismissed(true);
       setCliAppMenuDismissed(false);
-      setInlineError(null);
       focusTextarea();
     },
     [focusTextarea, handleStop, isStreaming, onStop, recordSlashRecent],
@@ -1398,7 +1388,6 @@ export function ThreadComposer({
       replaceMentionInput(insertion.value, insertion.cursor);
       setCliAppMenuDismissed(true);
       setSlashMenuDismissed(false);
-      setInlineError(null);
       focusTextarea();
     },
     [replaceMentionInput, focusTextarea, value],
@@ -1470,7 +1459,6 @@ export function ThreadComposer({
 
   const clearComposerText = useCallback((restoreFocus = true) => {
     setValue("");
-    setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     setCursorPosition(0);
@@ -1502,7 +1490,6 @@ export function ThreadComposer({
     clearQueuedPrompt();
     replaceMentionInput(prompt.text, prompt.text.length);
     setBoundSessionMentions(prompt.sessionMentions ?? []);
-    setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     onQuotedContextChange?.(prompt.quotedContext ?? null);
@@ -1523,13 +1510,13 @@ export function ThreadComposer({
     }
     if (!canSend) return;
     if (isUserShell && (images.length > 0 || normalizedQuotedContext)) {
-      setInlineError(t("thread.composer.shell.removeContext"));
+      reportError(t("thread.composer.shell.removeContext"));
       return;
     }
     const trimmed = value.trim();
     const content = trimmed;
     if (utf8Bytes(formatQuotedUserMessage(content, normalizedQuotedContext)) > maxTextBytes) {
-      setInlineError(textTooLargeMessage());
+      reportError(textTooLargeMessage());
       return;
     }
     // Keep self-contained local previews across drafts and optimistic bubbles.
@@ -1617,7 +1604,7 @@ export function ThreadComposer({
           if (accepted !== false) finishSend();
         })
         .catch((error: unknown) => {
-          setInlineError(error instanceof Error ? error.message : "Failed to send message");
+          reportError(error instanceof Error ? error.message : "Failed to send message");
         })
         .finally(() => setSendPending(false));
       return;
@@ -1653,6 +1640,7 @@ export function ThreadComposer({
     slashCommands,
     t,
     textTooLargeMessage,
+    reportError,
     value,
   ]);
 
@@ -1777,7 +1765,6 @@ export function ThreadComposer({
   const removeChip = useCallback(
     (id: string) => {
       const { nextFocusId } = remove(id);
-      setInlineError(null);
       requestAnimationFrame(() => {
         const el = nextFocusId ? chipRefs.current.get(nextFocusId) : null;
         if (el) {
@@ -1833,7 +1820,7 @@ export function ThreadComposer({
     : showStopButton ? "stop" : requiresModelSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
-    && value.length === 0 && images.length === 0 && !inlineError && !(onTranscribeAudio && voiceSetupError)
+    && value.length === 0 && images.length === 0
     && !normalizedQuotedContext && !queuedPrompt
     && !isDragging && !sessionDragPreview && !voiceRecorder.isRecording && !showProjectPicker;
   useLayoutEffect(() => {
@@ -1890,13 +1877,12 @@ export function ThreadComposer({
       onMenuOpenChange={onModelMenuOpenChange}
       disabled={sendDisabled}
       onPresetChange={onModelPresetChange && ((name) => {
-        setInlineError(null);
         const selection = onModelPresetChange(name);
         if (!selection) return;
         setModelSwitchPending(true);
         void selection.catch((error: unknown) => {
           pauseQueue();
-          setInlineError(error instanceof Error ? error.message : t("message.agentActivity.commandFailed"));
+          reportError(error instanceof Error ? error.message : t("message.agentActivity.commandFailed"));
         }).finally(() => setModelSwitchPending(false));
       })}
       onManageModels={onManageModels}
@@ -2160,11 +2146,6 @@ export function ThreadComposer({
             )}
           />
         </div>
-        {inlineError || (onTranscribeAudio && voiceSetupError) ? (
-          <div role="alert" className="mx-3 mb-1 break-words rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-1 text-[11.5px] font-medium text-destructive">
-            {inlineError ?? t(`thread.composer.voiceErrors.${voiceSetupError}`)}
-          </div>
-        ) : null}
         <div
           className={cn(
             "thread-composer-footer flex flex-nowrap items-center px-[var(--composer-footer-inset)] motion-safe:transition-[padding-bottom] motion-safe:[transition-duration:220ms] motion-safe:ease-in-out",

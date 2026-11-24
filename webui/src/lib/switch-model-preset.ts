@@ -7,5 +7,6 @@ export async function switchModelPreset(client: NanobotClient, chatId: string, n
   const reply = await client.sendSystemCommand(chatId, `/model ${name}`);
   const result = reply?.command_result;
   if (result?.command === "/model" && typeof result.switched_preset === "string" && result.switched_preset) return result.switched_preset;
-  throw new Error(reply?.text || i18n.t("message.agentActivity.commandFailed"));
+  if (result?.command === "/model" && result.switched_preset === null && reply?.text) throw new Error(reply.text);
+  throw new Error(i18n.t("thread.composer.modelSwitchUnconfirmed"));
 }

@@ -134,7 +134,7 @@ All frames are JSON text. Each message has an `event` field.
 
 `media` and `reply_to` are only present when applicable.
 
-WebUI and TUI can send `locale` with a slash command. Display the reply’s `text` as sent, including when replaying history. A successful `/model <preset>` also sends `command_result: {"command": "/model", "switched_preset": "<canonical preset>"}` on the live reply. Neither the reply text nor `turn_end` confirms a switch.
+WebUI and TUI can send `locale` with a slash command. Display the reply’s `text` as sent, including when replaying history. A successful `/model <preset>` also sends `command_result: {"command": "/model", "switched_preset": "<canonical preset>"}` on the live reply. If `/model` did not switch presets, `switched_preset` is `null`. A picker can show the reason from that reply. A reply without `command_result` leaves the switch unconfirmed; neither localized text nor `turn_end` confirms a switch.
 
 **`delta`** — streaming text chunk (only when `streaming: true`):
 
