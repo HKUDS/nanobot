@@ -19,12 +19,9 @@ from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_li
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
     MAX_GOAL_OBJECTIVE_CHARS,
-    discard_legacy_goal_state_key,
     explicit_goal_requested,
-    goal_state_raw,
     goal_state_runtime_lines,
-    parse_goal_state,
-    sustained_goal_active,
+    read_goal_state,
 )
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.prompt_templates import render_template
@@ -88,7 +85,6 @@ class _GoalToolsMixin:
             nonlocal saved
             def change(metadata: dict[str, Any]) -> None:
                 metadata[GOAL_STATE_KEY] = deepcopy(blob)
-                discard_legacy_goal_state_key(metadata)
             _, sess.metadata = await self._sessions.state.mutate_metadata(
                 sess.key, change, expected_generation=sess.generation,
             )
@@ -178,9 +174,10 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             return None
         metadata = payload["metadata"]
         goal_start_requested = explicit_goal_requested(request.metadata)
-        goal_active = sustained_goal_active(metadata)
-        goal = parse_goal_state(goal_state_raw(metadata))
-        goal_blocked = isinstance(goal, dict) and goal.get("status") == "blocked"
+        goal = read_goal_state(metadata)
+        status = goal.get("status") if goal is not None else None
+        goal_active = status == "active"
+        goal_blocked = status == "blocked"
         if not goal_start_requested and not goal_active and not goal_blocked:
             return None
 
@@ -208,8 +205,8 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             )
         if not self._goal_mutation_allowed():
             return ToolResult.error(_CREATE_UNAVAILABLE_ERROR)
-        prior = parse_goal_state(goal_state_raw(sess.metadata))
-        if isinstance(prior, dict) and prior.get("status") == "active":
+        prior = read_goal_state(sess.metadata)
+        if prior is not None and prior.get("status") == "active":
             return ToolResult.error(
                 "Error: a sustained goal is already active. Use update_goal with "
                 "action='replace' only if the user explicitly changes the objective."
@@ -301,11 +298,11 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         sess = await self._session()
         if sess is None:
             return ToolResult.error("Error: update_goal requires an active chat session.")
-        prior = parse_goal_state(goal_state_raw(sess.metadata))
+        prior = read_goal_state(sess.metadata)
         normalized = (action or "").strip().lower()
         if normalized not in _GOAL_ACTIONS:
             return ToolResult.error("Error: action must be one of complete, block, or replace.")
-        if not isinstance(prior, dict) or prior.get("status") != "active":
+        if prior is None or prior.get("status") != "active":
             return "No active goal to update."
 
         if normalized == "replace":

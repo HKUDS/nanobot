@@ -1,43 +1,23 @@
-"""Session metadata helpers for explicit sustained goals.
-
-Tools set ``metadata[GOAL_STATE_KEY]``. Reads accept the legacy session key ``thread_goal``
-for older sessions. Callers can read the goal without importing tool implementations.
-"""
+"""Session metadata helpers for explicit sustained goals."""
 
 from __future__ import annotations
 
-import json
-from typing import Any, Mapping, MutableMapping, cast
+from typing import Any, Mapping, cast
 
 GOAL_STATE_KEY = "goal_state"
 GOAL_COMMAND = "/goal"
 MAX_GOAL_OBJECTIVE_CHARS = 4000
-# Older builds stored the same JSON blob under this key.
-_LEGACY_GOAL_STATE_SESSION_KEY = "thread_goal"
 
 
-def _session_goal_raw(metadata: Mapping[str, Any] | None) -> Any:
-    if not metadata:
-        return None
-    if GOAL_STATE_KEY in metadata:
-        return metadata.get(GOAL_STATE_KEY)
-    return metadata.get(_LEGACY_GOAL_STATE_SESSION_KEY)
-
-
-def discard_legacy_goal_state_key(metadata: MutableMapping[str, Any]) -> None:
-    """Remove legacy metadata key after migrating writes to :data:`GOAL_STATE_KEY`."""
-    metadata.pop(_LEGACY_GOAL_STATE_SESSION_KEY, None)
-
-
-def goal_state_raw(metadata: Mapping[str, Any] | None) -> Any:
-    """Return the session goal blob under :data:`GOAL_STATE_KEY` or the legacy key."""
-    return _session_goal_raw(metadata)
+def read_goal_state(metadata: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    goal = metadata.get(GOAL_STATE_KEY) if metadata is not None else None
+    return cast(dict[str, Any], goal) if isinstance(goal, dict) else None
 
 
 def sustained_goal_active(metadata: Mapping[str, Any] | None) -> bool:
     """True when this session has an active sustained objective."""
-    goal = parse_goal_state(goal_state_raw(metadata))
-    return isinstance(goal, dict) and goal.get("status") == "active"
+    goal = read_goal_state(metadata)
+    return goal is not None and goal.get("status") == "active"
 
 
 def explicit_goal_requested(message_metadata: Mapping[str, Any] | None) -> bool:
@@ -49,26 +29,10 @@ def explicit_goal_requested(message_metadata: Mapping[str, Any] | None) -> bool:
     return str(message_metadata.get("original_command") or "").strip() == GOAL_COMMAND
 
 
-def parse_goal_state(blob: Any) -> dict[str, Any] | None:
-    if blob is None:
-        return None
-    if isinstance(blob, dict):
-        return cast(dict[str, Any], blob)
-    if isinstance(blob, str):
-        try:
-            parsed = json.loads(blob)
-        except json.JSONDecodeError:
-            return None
-        return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else None
-    return None
-
-
 def goal_state_runtime_lines(metadata: Mapping[str, Any] | None) -> list[str]:
     """Lines appended inside the Runtime Context block for active or blocked goals."""
-    if not metadata:
-        return []
-    goal = parse_goal_state(_session_goal_raw(metadata))
-    if not isinstance(goal, dict) or goal.get("status") not in {"active", "blocked"}:
+    goal = read_goal_state(metadata)
+    if goal is None or goal.get("status") not in {"active", "blocked"}:
         return []
     status = goal["status"]
     objective = str(goal.get("objective") or "").strip()
