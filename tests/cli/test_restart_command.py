@@ -313,28 +313,34 @@ class TestRestartCommand:
         )
         assert second.usage == LLMUsage.estimated(input_tokens=123, output_tokens=7)
 
+    @pytest.mark.parametrize(
+        "estimate_error", [None, RuntimeError("cannot build prompt")], ids=["zero", "error"]
+    )
     @pytest.mark.asyncio
-    async def test_status_falls_back_to_session_usage_when_context_estimate_missing(self):
+    async def test_status_labels_previous_context_when_estimate_is_unavailable(
+        self, estimate_error: RuntimeError | None
+    ):
         loop, _bus = _make_loop()
+        loop.set_runtime_context_window(204_800)
         session = Session("telegram:c1")
         session.add_message("user", "Hello")
-        session.metadata = {
-            "_last_usage": LLMUsage.reported(input_tokens=1200, output_tokens=34).to_dict()
-        }
+        usage = LLMUsage.reported(input_tokens=82_000, output_tokens=500)
+        for _ in range(16):
+            usage += LLMUsage.reported(input_tokens=82_000, output_tokens=500)
+        usage += LLMUsage.reported(input_tokens=80_000, output_tokens=500)
+        session.metadata["_last_usage"] = usage.to_dict()
         loop.sessions.state.get = AsyncMock(return_value=session)
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
-            return_value=(0, "none")
+            return_value=(0, "none"), side_effect=estimate_error
         )
-        loop.subagents.get_running_count_by_session.return_value = 0
 
         response = await loop._process_message(
             InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
         )
 
         assert response is not None
-        assert "Tokens: 1200 in / 34 out" in message_text(response)
-        assert "Context: 1200/200000 (0% of input budget)" in message_text(response)
-        assert "Tasks: 0 active" in message_text(response)
+        assert "Tokens: 1474000 in / 9000 out" in message_text(response)
+        assert "Context: unavailable (last recorded request: 80000 tokens)" in message_text(response)
 
     @pytest.mark.asyncio
     async def test_process_direct_preserves_render_metadata(self):

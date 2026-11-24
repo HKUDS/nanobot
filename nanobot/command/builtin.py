@@ -144,8 +144,6 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             runtime=runtime,
         )
     last_usage = LLMUsage.from_dict(session.metadata.get("_last_usage"))
-    if ctx_est <= 0:
-        ctx_est = last_usage.input_tokens if last_usage is not None else 0
 
     # Await web search provider usage; network requests have a bounded timeout.
     usage = None

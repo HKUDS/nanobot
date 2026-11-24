@@ -89,3 +89,16 @@ def test_status_context_pct_capped_at_999():
         max_completion_tokens=4096,
     )
     assert "(999% of input budget)" in content
+
+
+def test_status_context_unavailable_without_recorded_request():
+    content = status_text(
+        version="0.1.0",
+        model="test",
+        start_time=1000000.0,
+        last_usage=None,
+        context_window_tokens=128000,
+        session_msg_count=0,
+        context_tokens_estimate=0,
+    )
+    assert "📚 Context: unavailable" in content.splitlines()
