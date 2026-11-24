@@ -1,0 +1,35 @@
+.nanobot-file-diff {
+  --code-foreground: hsl(var(--foreground));
+  --code-background: hsl(var(--background));
+  display: block;
+  min-width: 0;
+  --diffs-font-size: var(--text-code-dense-size);
+  --diffs-line-height: calc(var(--text-code-dense-size) * 1.6);
+  --diffs-gap-block: 0px;
+  --diffs-bg-context-override: transparent;
+  --diffs-bg-context-gutter-override: transparent;
+  --diffs-bg-addition-override: var(--diff-added);
+  --diffs-bg-addition-number-override: var(--diff-added);
+  --diffs-bg-deletion-override: var(--diff-deleted);
+  --diffs-bg-deletion-number-override: var(--diff-deleted);
+  --diffs-addition-color-override: var(--diff-added-foreground);
+  --diffs-deletion-color-override: var(--diff-deleted-foreground);
+  --diffs-fg-number-override: hsl(var(--muted-foreground));
+  --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--diff-added-foreground) 15%, transparent);
+  --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--diff-deleted-foreground) 15%, transparent);
+}
+
+.nanobot-diff-gap {
+  height: 26px;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
+html[data-custom-background] .file-edit-diff-surface {
+  background-color: hsl(var(--background) / 0.78);
+  backdrop-filter: blur(12px);
+}
+
+html[data-custom-background] .nanobot-file-diff {
+  --code-background: transparent;
+}

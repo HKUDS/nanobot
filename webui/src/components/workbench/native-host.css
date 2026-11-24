@@ -1,0 +1,100 @@
+@property --host-glass-spot {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
+@property --host-glass-start {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
+@property --host-glass-end {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
+@layer utilities {
+  .host-drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .host-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  html.native-host,
+  html.native-host body,
+  html.native-host #root {
+    background: transparent;
+  }
+
+  html.native-host body {
+    overflow: hidden;
+  }
+
+  .host-window-shell,
+  .host-sidebar-glass {
+    --host-glass-spot: hsl(var(--background) / 0.42);
+    --host-glass-start: hsl(var(--sidebar) / 0.5);
+    --host-glass-end: hsl(var(--sidebar) / 0.3);
+    background:
+      radial-gradient(
+        circle at 18% 0%,
+        var(--host-glass-spot),
+        transparent 34rem
+      ),
+      linear-gradient(
+        180deg,
+        var(--host-glass-start),
+        var(--host-glass-end)
+      );
+    background-attachment: fixed, fixed;
+    -webkit-backdrop-filter: saturate(185%) blur(34px);
+    backdrop-filter: saturate(185%) blur(34px);
+  }
+
+  .host-window-shell {
+    transition: --host-glass-spot var(--theme-paint-duration, 0s) linear,
+      --host-glass-start var(--theme-paint-duration, 0s) linear,
+      --host-glass-end var(--theme-paint-duration, 0s) linear;
+  }
+
+  .host-sidebar-glass {
+    background: hsl(var(--sidebar) / 0.94);
+    -webkit-backdrop-filter: saturate(145%) blur(18px);
+    backdrop-filter: saturate(145%) blur(18px);
+    box-shadow: 14px 0 32px -30px rgb(0 0 0 / 0.12);
+  }
+
+  .dark .host-window-shell,
+  .dark .host-sidebar-glass {
+    --host-glass-spot: hsl(var(--foreground) / 0.06);
+    --host-glass-start: hsl(var(--sidebar) / 0.48);
+    --host-glass-end: hsl(var(--sidebar) / 0.3);
+  }
+
+  .dark .host-sidebar-glass {
+    background: hsl(var(--sidebar) / 0.96);
+    box-shadow: 14px 0 34px -30px rgb(0 0 0 / 0.34);
+  }
+
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .host-sidebar-glass {
+      background: hsl(var(--sidebar) / 0.92);
+    }
+  }
+
+  html.native-host * {
+    scrollbar-width: none;
+    scrollbar-gutter: auto !important;
+  }
+
+  html.native-host *::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}

@@ -1,0 +1,106 @@
+@layer utilities {
+  .markdown-content > :first-child {
+    @apply mt-0;
+  }
+  .markdown-content > :last-child {
+    @apply mb-0;
+  }
+
+  .markdown-content {
+    --tw-prose-body: hsl(var(--foreground) / 0.9);
+    --tw-prose-headings: hsl(var(--foreground) / 0.9);
+    --tw-prose-bold: hsl(var(--foreground) / 0.9);
+    --tw-prose-lead: hsl(var(--foreground) / 0.9);
+    transition: var(--theme-ink-transition, color 0s);
+    @apply text-reading;
+  }
+
+  .markdown-content :is(h1, h2, h3, h4, h5, h6) {
+    margin-block: 1.25em 0.5em;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .markdown-content h1 { font-size: 2em; }
+  .markdown-content h2 { font-size: 1.5em; }
+  .markdown-content h3 { font-size: 1.25em; }
+  .markdown-content h4 { font-size: 1.125em; }
+  .markdown-content :is(h5, h6) { font-size: 1em; }
+  .markdown-content :is(p, ul, ol) { margin-block: 0.8em; }
+  .markdown-content li { margin-block: 0.25em; }
+  .markdown-content :is(li > ul, li > ol) { margin-block: 0; }
+  .markdown-content strong { font-weight: 600; }
+  .markdown-content :is(th, td) {
+    font-size: inherit;
+    line-height: inherit;
+  }
+  .markdown-content blockquote {
+    font-size: 1em;
+    line-height: inherit;
+  }
+  .markdown-content summary {
+    font-size: 1em;
+    font-weight: 600;
+    line-height: inherit;
+  }
+
+  .markdown-inline-code {
+    font-size: 0.875em;
+    font-weight: 400;
+  }
+
+  .markdown-content .contains-task-list {
+    @apply list-none pl-0;
+  }
+
+  .markdown-content .task-list-item {
+    @apply list-none pl-0;
+  }
+
+  .markdown-content :is(h1, h2, h3, h4, h5, h6) {
+    text-wrap: balance;
+  }
+
+  /*
+   * Mobile responsive safety net — keep the chat viewport + composer inside a
+   * narrow viewport (see #4693). These are containment rules: long markdown
+   * (URLs, branch names, file paths, code, tables) wraps or scrolls inside its
+   * own box instead of forcing the whole column — and thus the page — wider
+   * than 100vw. Desktop layout is unchanged; the rules only engage when content
+   * would otherwise overflow. Fenced code blocks keep their own internal
+   * horizontal scroll (CodeBlock and the markdown <pre> wrappers already set
+   * overflow-x: auto), so clipping the thread column horizontally is safe.
+   */
+
+  .markdown-content {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+  }
+
+  .markdown-content a,
+  .markdown-content code {
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+  }
+
+  .markdown-content > p code.markdown-inline-code,
+  .markdown-content > p code.markdown-wide-inline-code {
+    white-space: break-spaces;
+  }
+
+  .markdown-content > p code.markdown-wide-inline-code {
+    display: inline;
+    overflow: visible;
+  }
+
+  .markdown-content pre,
+  .not-prose pre {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+html[data-custom-background] .markdown-inline-code {
+  background-color: hsl(var(--muted) / 0.45);
+}

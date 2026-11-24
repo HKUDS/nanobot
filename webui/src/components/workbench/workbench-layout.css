@@ -1,0 +1,144 @@
+@layer base {
+  #root.visual-viewport {
+    position: fixed;
+    top: var(--app-viewport-top);
+    left: 0;
+    width: 100%;
+    height: var(--app-viewport-height);
+  }
+
+  /* A landscape keyboard can leave less room than the composer needs. Keep
+     navigation reachable and scroll the composer instead of overlapping it. */
+  #root.visual-viewport .workbench-body {
+    min-height: 2.75rem;
+  }
+
+  #root.short-visual-viewport .workbench-composer-footer {
+    max-height: max(0px, calc(var(--app-viewport-height) - 2.75rem));
+    overflow-y: auto;
+  }
+
+  /* Body portals share the viewport owner's short-frame state. A landscape
+     keyboard needs input and results beside each other, not stacked. */
+  @media (min-width: 640px) {
+    body:has(> #root.short-visual-viewport) .session-search-dialog {
+      flex-direction: row;
+    }
+
+    body:has(> #root.short-visual-viewport) .session-search-input {
+      width: 40%;
+      height: auto;
+      border-bottom-width: 0;
+      border-right-width: 1px;
+    }
+
+    body:has(> #root.short-visual-viewport) .session-search-label {
+      @apply sr-only;
+    }
+  }
+}
+
+@layer utilities {
+  .thread-workspace {
+    container: thread-workspace / inline-size;
+  }
+  .thread-preview-layout {
+    container: thread-preview-layout / inline-size;
+  }
+  .context-expanded-overlay[data-state="open"] {
+    animation: context-backdrop-in 250ms ease-out;
+  }
+  .context-expanded-overlay[data-state="closed"] {
+    animation: context-backdrop-in 250ms ease-out reverse;
+  }
+  @keyframes context-backdrop-in {
+    from { opacity: 0; backdrop-filter: blur(0); }
+    to { opacity: 1; backdrop-filter: blur(12px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .context-expanded-overlay { animation: none !important; }
+  }
+  /* Sidebars share the full pane height with a local conversation composer. */
+  .workbench-composer-footer:not(:has([data-active-composer])) {
+    display: none;
+  }
+  /* A split needs 420px for the conversation plus 360px for the preview.
+     Narrow workbench panes use the same contained overlay as a phone. */
+  @container thread-preview-layout (min-width: 780px) {
+    /* A replacement owns the slot while the outgoing surface fades over it. */
+    .thread-preview-layout:has(> .file-preview-pane:not([data-closing])) > .file-preview-pane[data-closing] {
+      position: absolute;
+      width: var(--file-preview-width);
+      z-index: 30;
+    }
+    .file-preview-pane {
+      position: relative;
+      z-index: auto;
+      width: var(--file-preview-slot-width);
+      min-width: 0;
+      flex-shrink: 0;
+    }
+    .file-preview-content {
+      width: calc(var(--file-preview-width) - 1rem);
+      bottom: var(--sidebar-bottom-inset, calc(1.125rem + env(safe-area-inset-bottom)));
+      padding-bottom: 0;
+    }
+    .file-preview-resize {
+      display: flex;
+    }
+  }
+  @container thread-preview-layout (width < 780px) {
+    /* Covered conversation controls must not remain in the keyboard/AT order. */
+    .thread-preview-layout[data-preview-open] > .thread-conversation {
+      visibility: hidden;
+    }
+  }
+  @media (max-width: 639px) {
+    .context-drawer-backdrop {
+      animation: context-drawer-backdrop-in 150ms cubic-bezier(0.2, 0, 0, 1);
+      transition: background-color 150ms cubic-bezier(0.2, 0, 0, 1), backdrop-filter 150ms cubic-bezier(0.2, 0, 0, 1);
+    }
+    .context-drawer-backdrop:has(.context-drawer-panel[data-state="closed"]) {
+      animation: none;
+      background-color: transparent;
+      backdrop-filter: blur(0px);
+    }
+  }
+  @keyframes context-drawer-backdrop-in {
+    from { background-color: transparent; backdrop-filter: blur(0px); }
+    to { background-color: rgb(0 0 0 / 0.25); backdrop-filter: blur(8px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .context-drawer-backdrop { animation: none; transition: none; }
+  }
+  .thread-preview-layout:has(.context-drawer-panel) > .thread-conversation {
+    visibility: visible;
+  }
+  .thread-preview-layout[data-preview-open] > .thread-conversation {
+    --thread-header-position: relative;
+  }
+  /* Keep room for the 49.5rem message column and controls in the side margin. */
+  @container thread-workspace (max-width: 72rem) {
+    .thread-workspace > * {
+      --thread-header-position: relative;
+    }
+  }
+
+  .workbench-pane {
+    transform-origin: top left;
+  }
+}
+
+@media (pointer: coarse) {
+
+  .touch-target.preview-tab-close {
+    opacity: 1;
+  }
+}
+
+@media (forced-colors: active) {
+  :where(:root:not([data-focus-modality="pointer"])) [data-workbench-move-handle]:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+}

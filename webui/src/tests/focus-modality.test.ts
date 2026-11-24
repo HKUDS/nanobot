@@ -1,12 +1,7 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
-import postcss from "postcss";
-import tailwindcss from "tailwindcss";
-import loadConfig from "tailwindcss/loadConfig";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { installFocusModality } from "@/lib/focus-modality";
+import { compiledGlobalCss } from "./compiled-global-css";
 
 describe("focus modality", () => {
   const cleanups: Array<() => void> = [];
@@ -92,17 +87,11 @@ describe("focus modality", () => {
   });
 
   it("gates Tailwind focus-visible variants and base outlines on pointer modality while exempting text inputs", async () => {
-    const config = loadConfig(resolve(process.cwd(), "tailwind.config.js"));
-    const source = readFileSync(resolve(process.cwd(), "src/globals.css"), "utf8");
-    const result = await postcss([tailwindcss({
-      ...config,
-      content: [{
-        raw: 'class="focus-visible:ring-2 group-focus-visible:ring-2 peer-focus-visible:ring-2 has-focus-visible:ring-2"',
-      }],
-    })]).process(source, { from: undefined });
-
+    const css = await compiledGlobalCss(
+      'class="focus-visible:ring-2 group-focus-visible:ring-2 peer-focus-visible:ring-2 has-focus-visible:ring-2"',
+    );
     const selectors: string[] = [];
-    result.root.walkRules((rule) => {
+    css.walkRules((rule) => {
       if (rule.selector.includes("focus-visible")) selectors.push(rule.selector);
     });
 
@@ -119,8 +108,11 @@ describe("focus modality", () => {
     expect(selectors.some((selector) =>
       selector.includes(':where(:root:not([data-focus-modality="pointer"])) .has-focus-visible\\:ring-2:has(:focus-visible)'),
     )).toBe(true);
-    expect(selectors.some((selector) =>
-      selector.includes(':root[data-focus-modality="pointer"] :focus-visible:not('),
-    )).toBe(true);
+    const pointerOutline = css.nodes.find((rule) => rule.type === "rule"
+      && rule.selector.startsWith(':root[data-focus-modality="pointer"] :focus-visible:not('));
+    expect(pointerOutline).toMatchObject({
+      selector: expect.stringContaining("textarea"),
+      nodes: expect.arrayContaining([expect.objectContaining({ prop: "outline", value: "none" })]),
+    });
   });
 });

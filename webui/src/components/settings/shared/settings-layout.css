@@ -1,0 +1,112 @@
+@layer utilities {
+  .settings-section-title { text-wrap: balance; }
+}
+
+@keyframes settings-restart-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .settings-restart-pending { animation: settings-restart-breathe 3s ease-in-out infinite; }
+  .settings-restart-pending:hover, .settings-restart-pending:focus-visible { animation: none; }
+}
+
+@layer components {
+  .settings-grid {
+    --settings-columns: 4;
+    --settings-gutter: 16px;
+    --settings-margin: 16px;
+    --settings-inset: 16px;
+    --settings-module-gap: 20px;
+    container-type: inline-size;
+    max-inline-size: 720px;
+    padding-inline: var(--settings-margin);
+  }
+  .settings-grid.settings-feature-page {
+    --settings-margin: 0.75rem;
+    max-inline-size: calc(var(--content-column-width) + 2 * var(--settings-margin));
+  }
+  .catalog-section {
+    display: grid;
+    min-inline-size: 0;
+    gap: var(--settings-module-gap, 20px);
+  }
+  /* Match the main sidebar's lg visibility; its collapsed rail has no labels. */
+  @media (min-width: 1024px) {
+    .settings-feature-page[data-main-navigation-expanded="true"] .settings-feature-header {
+      margin-block-end: 0;
+    }
+    .settings-feature-page[data-main-navigation-expanded="true"] .settings-feature-header h1 {
+      @apply sr-only;
+    }
+  }
+  .settings-stack > :not([hidden]) ~ :not([hidden]) {
+    margin-block-start: var(--settings-module-gap, 20px);
+  }
+  .settings-section-title {
+    margin-block-end: 20px;
+    padding-inline: var(--settings-inset, 16px);
+    line-height: 20px;
+  }
+  .settings-section-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 24px;
+    padding-inline: var(--settings-inset, 16px);
+  }
+  .settings-section-heading > .settings-section-title { margin: 0; padding: 0; }
+  .settings-stack > .settings-section-heading + :not([hidden]) { margin-block-start: 20px; }
+  .settings-row, .settings-footer, .settings-disclosure-row {
+    display: grid;
+    grid-template-columns: repeat(var(--settings-columns, 4), minmax(0, 1fr));
+    column-gap: var(--settings-gutter, 16px);
+    row-gap: 12px;
+    align-items: center;
+    padding: 12px var(--settings-inset, 16px);
+    min-block-size: 60px;
+  }
+  .settings-row > *, .settings-footer > * { grid-column: 1 / -1; min-inline-size: 0; }
+  .settings-disclosure-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .settings-control { display: flex; align-items: center; max-inline-size: 100%; }
+  .settings-control > * { max-inline-size: 100%; }
+  .settings-control input, .settings-control textarea { max-inline-size: 100%; text-align: start; }
+  .settings-control input[type="number"] { font-variant-numeric: tabular-nums; }
+  .settings-footer { min-block-size: 60px; }
+  .settings-footer-auto { min-block-size: 40px; padding-block: 8px; row-gap: 0; }
+  .settings-footer-auto > :first-child { grid-column: 1 / -1; font-size: 12px; }
+  .settings-footer-auto > :nth-child(2):empty { display: none; }
+  .settings-row:has(> .settings-control > :is([role="switch"], [data-skeleton-switch])) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 24px;
+  }
+  .settings-row:has(> .settings-control > :is([role="switch"], [data-skeleton-switch])) > :first-child { grid-column: 1; }
+  .settings-row:has(> .settings-control > :is([role="switch"], [data-skeleton-switch])) > :nth-child(2) { grid-column: 2; }
+  .settings-list-row, .settings-list-inset { padding-inline: var(--settings-inset, 16px); }
+  .settings-list-row { min-block-size: 60px; border-radius: var(--radius-control); }
+  .settings-list-row:focus-visible { outline: none; }
+  .settings-editor { padding: 16px var(--settings-inset, 16px); }
+  @media (min-width: 640px) {
+    .settings-grid { --settings-margin: 32px; }
+    .settings-grid.settings-feature-page { --settings-margin: 1rem; }
+  }
+  @container (min-width: 640px) {
+    .settings-grid .settings-row, .settings-grid .settings-footer {
+      --settings-columns: 12;
+      --settings-gutter: 24px;
+    }
+    .settings-grid .settings-control { justify-content: flex-end; }
+    .settings-grid .settings-row > :first-child,
+    .settings-grid .settings-footer > :first-child { grid-column: 1 / 8; }
+    .settings-grid .settings-row > :nth-child(2),
+    .settings-grid .settings-footer > :nth-child(2) { grid-column: 8 / -1; }
+    .settings-grid .settings-footer-auto > :first-child { grid-column: 1 / -1; }
+    .settings-grid .settings-row:has(:is(.segmented-control, .settings-version-actions)) > :first-child { grid-column: 1 / 7; }
+    .settings-grid .settings-row:has(:is(.segmented-control, .settings-version-actions)) > :nth-child(2) { grid-column: 7 / -1; }
+  }
+  @media (min-width: 768px) {
+    .settings-grid { --settings-inset: 24px; }
+  }
+}

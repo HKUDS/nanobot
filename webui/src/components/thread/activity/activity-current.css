@@ -1,0 +1,16 @@
+@layer components {
+  .activity-current-trace { display: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .activity-current > path:first-child { opacity: 0.35; }
+    .activity-current-trace {
+      display: block;
+      stroke-dasharray: 16 84;
+      animation: activity-current-flow var(--activity-animation);
+    }
+  }
+  @keyframes activity-current-flow {
+    0% { stroke-dashoffset: 16; opacity: 0; }
+    50% { opacity: 1; }
+    100% { stroke-dashoffset: 116; opacity: 0; }
+  }
+}

@@ -1,3 +1,5 @@
+import "./file-diff.css";
+
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { DisclosureContent } from "@/components/ui/disclosure";
 import {
