@@ -2304,8 +2304,10 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
                     "brand_color": "#111827",
                     "required_fields": [],
                     "connection_summary": "",
+                    "icons": [],
                 }
             ],
+            "plugin_server_icons": {},
             "installed_count": 0,
         },
     )
@@ -2321,6 +2323,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         preset_calls.append((action, params.values))
         return {
             "presets": [],
+            "plugin_server_icons": {},
             "installed_count": 1,
             "requires_restart": action != "test",
             "last_action": {"ok": True, "message": f"{action}:{params.values['name']}"},
@@ -2335,6 +2338,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         custom_calls.append((action, params.values))
         return {
             "presets": [],
+            "plugin_server_icons": {},
             "installed_count": 1,
             "requires_restart": True,
             "last_action": {
