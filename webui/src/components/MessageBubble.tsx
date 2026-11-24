@@ -176,13 +176,14 @@ export function MessageBlockMenuActions({
     ? message.source?.label?.trim() || t("message.automationSourceFallback")
     : "";
 
-  const details = <>
+  const fallbackSources = (
     <FallbackResponseSources
       sources={message.role === "assistant" ? message.responseSources : undefined}
-      className="min-h-[var(--message-block-control-size)] gap-1"
+      className={cn("min-h-[var(--message-block-control-size)] gap-1", !sheet && "message-action-sources")}
       badgeClassName="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
     />
-    {timestampLabel || automationSourceLabel ? (
+  );
+  const details = timestampLabel || automationSourceLabel ? (
       <div
         data-message-block-metadata
         className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4 text-muted-foreground", sheet ? "px-2 text-xs" : "text-[10px]")}
@@ -210,11 +211,7 @@ export function MessageBlockMenuActions({
           </span>
         ) : null}
       </div>
-    ) : null}
-  </>;
-  const fallback = message.responseSources?.find((source) => source.fallback);
-  const detailsLabel = automationSourceLabel
-    || (fallback ? t("message.fallbackResponse", { preset: fallback.preset }) : "");
+    ) : null;
   const activityAction = activity && (
     <button type="button" data-message-block-activity-action onClick={activity.onToggle}
       aria-expanded={activity.expanded} aria-controls={activity.controls} aria-label={activity.label}
@@ -228,6 +225,7 @@ export function MessageBlockMenuActions({
     <div className={sheet ? "flex w-full flex-col gap-1" : "flex flex-col items-start"}>
       <div className={cn("flex", sheet && "flex-col items-stretch gap-1")}>
         {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
+        {!sheet && fallbackSources}
         {showFork ? (
           <HoverHint content={t("message.forkFromHere")}>
             <button type="button" onClick={onForkFromHere}
@@ -241,7 +239,7 @@ export function MessageBlockMenuActions({
         ) : null}
         {activityAction && !sheet ? <HoverHint content={activity.label}>{activityAction}</HoverHint> : activityAction}
       </div>
-      {sheet ? details : (timestampLabel || detailsLabel) && (
+      {sheet ? <>{fallbackSources}{details}</> : (timestampLabel || automationSourceLabel) && (
         <div className="ms-[calc((var(--message-block-action-width)-0.875rem)/2)] flex items-center gap-1 text-muted-foreground">
           {timestampLabel && (
             <HoverHint content={fmtDateTime(timestamp)}>
@@ -251,11 +249,11 @@ export function MessageBlockMenuActions({
               </time>
             </HoverHint>
           )}
-          {detailsLabel && (
+          {automationSourceLabel && (
             <Popover open={detailsOpen} onOpenChange={setDetailsOpen}>
-              <HoverHint content={detailsLabel} enabled={!detailsOpen}>
+              <HoverHint content={automationSourceLabel} enabled={!detailsOpen}>
                 <PopoverTrigger asChild>
-                  <button type="button" aria-label={detailsLabel}
+                  <button type="button" aria-label={automationSourceLabel}
                     className="rounded-mark hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <Info className="h-3.5 w-3.5" aria-hidden />
                   </button>

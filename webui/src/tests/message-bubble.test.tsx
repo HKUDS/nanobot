@@ -228,7 +228,7 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("button", { name: /fallback/i })).not.toBeInTheDocument();
   });
 
-  it("keeps fallback sources visible live and moves them into the completed message's source details", () => {
+  it("shows fallback sources while streaming and beside Copy after completion", () => {
     const message: UIMessage = { id: "actual", role: "assistant", content: "Hello", createdAt: 1,
       isStreaming: true, responseSources: [
         { provider: "openai_codex", model: "gpt", preset: "codex", fallback: false },
@@ -242,9 +242,8 @@ describe("MessageBubble", () => {
     fireEvent.error(container.querySelector("img")!);
     expect(screen.getByText("grok")).toBeVisible();
     rerender(<ThreadMessages messages={[{ ...message, isStreaming: false }]} />);
-    expect(screen.queryByText("grok")).not.toBeInTheDocument();
-    const details = openSourceDetails(/fallback model.*grok/i);
-    expect(within(details).getByText("grok")).toBeVisible();
+    const actions = screen.getByRole("button", { name: "Copy" }).parentElement!;
+    expect(within(actions).getByRole("button", { name: /fallback model.*grok/i })).toHaveTextContent("grok");
     expect(screen.getAllByText("grok")).toHaveLength(1);
     rerender(<ThreadMessages messages={[{ ...message, isStreaming: false, responseSources: undefined }]} />);
     expect(screen.queryByText("grok")).not.toBeInTheDocument();
@@ -260,17 +259,14 @@ describe("MessageBubble", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent(detail);
   });
 
-  it("explains fallback on focus and click, with the source above static metadata", async () => {
+  it("explains the fallback badge on focus and click", async () => {
     await setAppLanguage("zh-CN");
     const description = "本条回复已切换至备用模型，由 grok 回答。";
     render(<MessageBlockMenuActions message={{
       id: "fallback-info", role: "assistant", content: "你好", createdAt: 1,
       responseSources: [{ provider: "xai", model: "grok", preset: "grok", fallback: true }],
     }} />);
-    const details = openSourceDetails(description);
-    const trigger = within(details).getByRole("button", { name: description });
-    const metadata = details.querySelector("[data-message-block-metadata]")!;
-    expect(trigger.compareDocumentPosition(metadata) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const trigger = screen.getByRole("button", { name: description });
     fireEvent.focus(trigger);
     expect(await screen.findByRole("tooltip")).toHaveTextContent(description);
     fireEvent.blur(trigger);
