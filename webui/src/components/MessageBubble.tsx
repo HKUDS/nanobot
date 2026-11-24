@@ -28,7 +28,7 @@ import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
 import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
-import { HoverHint, TruncatedTextTooltip } from "@/components/ui/tooltip";
+import { HoverHint } from "@/components/ui/tooltip";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -227,7 +227,9 @@ export function MessageBlockMenuActions({
           {time && !sheet ? <HoverHint content={fmtDateTime(timestamp)}>{time}</HoverHint> : time}
           {automation && (sheet
             ? <span data-automation-trigger className="flex min-h-[var(--message-block-control-size)] items-center break-words">{automation}</span>
-            : <TruncatedTextTooltip data-automation-trigger text={automation} tabIndex={0} className="max-w-32" />)}
+            : <HoverHint content={automationSourceLabel}>
+                <span data-automation-trigger tabIndex={0} className="whitespace-nowrap rounded-mark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("message.automationTriggered")}</span>
+              </HoverHint>)}
         </div>
       )}
     </div>

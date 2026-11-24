@@ -245,13 +245,14 @@ describe("MessageBubble", () => {
   });
 
   it.each([
-    { name: "Review schedule", detail: "Triggered automatically Review schedule", source: { kind: "cron", label: "Review schedule" } },
+    { name: "Review schedule", detail: "Triggered automatically", source: { kind: "cron", label: "Review schedule" } },
     { name: "This reply switched to a fallback model, answered by grok.", detail: "grok",
       responseSources: [{ provider: "xai", model: "grok-4.5", preset: "grok", fallback: true }] },
-  ])("keeps source details accessible as '$name' when the timestamp is unknown", ({ name, detail, source, responseSources }) => {
+  ])("keeps source details accessible as '$name' when the timestamp is unknown", async ({ name, detail, source, responseSources }) => {
     render(<MessageBlockMenuActions message={{ id: "untimed", role: "assistant", content: "Reply", createdAt: 0, source, responseSources }} />);
     if (source) {
-      expect(screen.getByText(detail)).toBeVisible();
+      fireEvent.focus(screen.getByText(detail));
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(name);
     } else {
       fireEvent.click(screen.getByRole("button", { name }));
       expect(screen.getByRole("dialog")).toHaveTextContent(detail);

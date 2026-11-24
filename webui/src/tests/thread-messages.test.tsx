@@ -1048,7 +1048,7 @@ describe("ThreadMessages", () => {
     const side = within(sideActions(answer));
     const time = side.getByRole("time");
     expect(time).toHaveAttribute("datetime", new Date(2).toISOString());
-    expect(time.nextElementSibling).toHaveTextContent("Triggered automatically Review schedule");
+    expect(time.nextElementSibling).toHaveTextContent(/^Triggered automatically$/);
   });
 
   it("renders a fork boundary divider after the copied history", () => {
