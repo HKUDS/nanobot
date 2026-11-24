@@ -807,7 +807,7 @@
       "currentModel": "Dùng cho câu trả lời mới.",
       "selectedModelProvider": "Được đặt bởi mô hình đã chọn.",
       "selectedModelValue": "Được đặt bởi mô hình đã chọn.",
-      "brandLogos": "Hiện logo nhà cung cấp và ứng dụng trong Thiết lập.\n\nHiển thị logo nhà cung cấp bên thứ ba và CLI trong Cài đặt.",
+      "brandLogos": "Hiện logo thương hiệu trong phần cài đặt và hoạt động trò chuyện.\n\nHoạt động MCP dùng biểu tượng do máy chủ cung cấp nếu có.",
       "browserNotifications": "Nhận thông báo trạng thái tác vụ khi trang này ở nền.",
       "notificationSound": "Phát âm báo khi phản hồi kết thúc, kể cả khi trang ở nền.",
       "cliAppsCatalog": "Cài công cụ CLI cho nanobot; giữ nguyên ứng dụng máy tính.\n\nCài các công cụ dòng lệnh mà nanobot có thể dùng trên máy này. Các ứng dụng trên máy tính không bị thay đổi.",

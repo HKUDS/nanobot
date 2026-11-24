@@ -179,7 +179,7 @@ async def test_mcp_provider_connect_propagates_external_cancellation(monkeypatch
         await task
 
     assert provider.connected_server_names == set()
-    assert provider.runtime_status() == {"test": "failed"}
+    assert provider.runtime_snapshot().statuses == {"test": "failed"}
 
 
 @pytest.mark.asyncio
@@ -237,7 +237,7 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
 
     await provider.connect()
 
-    snapshot = provider.runtime_status()
+    snapshot = provider.runtime_snapshot().statuses
     assert snapshot == {"xmind": "failed"}
     assert "saved-oauth-secret" not in str(snapshot)
     assert "app.xmind.com" not in str(snapshot)
@@ -2536,3 +2536,31 @@ async def test_stdio_cannot_opt_into_shared_proxy(monkeypatch) -> None:
     assert connections == {}
     assert registry.tool_names == []
     stdio_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_initialize_icons_follow_connection_replacement_and_shutdown(fake_mcp_runtime):
+    png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+k7uoAAAAASUVORK5CYII="
+    theme = "dark"
+
+    async def initialize():
+        return SimpleNamespace(
+            capabilities=SimpleNamespace(tools=None),
+            serverInfo=SimpleNamespace(icons=[SimpleNamespace(src=png, sizes=None, mimeType=None, theme=theme)]),
+        )
+
+    fake_mcp_runtime["session"] = SimpleNamespace(initialize=initialize)
+    provider = MCPProvider(
+        {"custom": MCPServerConfig(command="first", enabled_tools=[])},
+        ToolRegistry(),
+        server_loader=lambda: ({"custom": MCPServerConfig(command="second", enabled_tools=[])}, NetworkConfig()),
+    )
+    try:
+        await provider.connect()
+        assert provider.runtime_snapshot().icons == {"custom": [{"src": png, "theme": "dark"}]}
+        theme = "light"
+        await provider.reload()
+        assert provider.runtime_snapshot().icons == {"custom": [{"src": png, "theme": "light"}]}
+    finally:
+        await provider.aclose()
+    assert provider.runtime_snapshot().icons == {}

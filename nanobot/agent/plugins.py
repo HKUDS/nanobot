@@ -241,6 +241,11 @@ def _load_manifest(plugin_root: Path) -> AgentPlugin | None:
     )
 
 
+def plugin_mcp_server_name(plugin_name: str, server_name: str, server_count: int) -> str:
+    # "--" cannot occur in a valid plugin identity.
+    return plugin_name if server_count == 1 else f"{plugin_name}--{server_name}"
+
+
 def agent_plugin_mcp_servers(
     workspace: Path,
     configured: dict[str, MCPServerConfig] | None = None,
@@ -255,9 +260,7 @@ def agent_plugin_mcp_servers(
             continue
         plugin_servers = _plugin_mcp_servers(workspace, plugin)
         for name, server in plugin_servers.items():
-            # ``--`` cannot occur in a valid plugin identity, so multi-server
-            # namespaces cannot collide with a single-server plugin name.
-            host_name = plugin.name if len(plugin_servers) == 1 else f"{plugin.name}--{name}"
+            host_name = plugin_mcp_server_name(plugin.name, name, len(plugin_servers))
             servers[host_name] = server
     configured = configured or {}
     if collisions := servers.keys() & configured.keys():

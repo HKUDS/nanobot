@@ -1031,7 +1031,7 @@
       "activityMode": "Choose how activity details appear by default.",
       "fileEditDisplay": "Show edit line counts or expanded changes by default.",
       "codeWrap": "Wrap long code lines for easier reading.",
-      "brandLogos": "Show provider and app logos in Settings.\n\nShow third-party provider and CLI logos in Settings.",
+      "brandLogos": "Show brand logos in Settings and chat activity.\n\nMCP activity uses the icon supplied by the server when available.",
       "browserNotifications": "Get task status notifications while this page is in the background.",
       "notificationSound": "Play a chime when a reply ends, even in the background.",
       "maxResults": "Maximum results per search.",

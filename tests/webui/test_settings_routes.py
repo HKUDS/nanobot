@@ -4,7 +4,7 @@ import asyncio
 import gzip
 import json
 import threading
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock
@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from websockets.datastructures import Headers
 
+from nanobot.agent.tools.mcp_metadata import MCPRuntimeSnapshot
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import get_config_path
 from nanobot.config.network import NetworkConfig
@@ -29,7 +30,7 @@ def _router(
     *,
     authorized: bool = True,
     config_path: Path | None = None,
-    mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
+    mcp_runtime_snapshot: Callable[[], MCPRuntimeSnapshot] | None = None,
     mcp_reload: Callable[[], Awaitable[dict[str, object]]] | None = None,
     image_generation_reload: Callable[[], Awaitable[dict[str, object]]] | None = None,
     rename_model_preset: Callable[[str, str], int] | None = None,
@@ -52,7 +53,7 @@ def _router(
         ),
         runtime_surface="browser",
         runtime_capabilities={},
-        mcp_runtime_status=mcp_runtime_status,
+        mcp_runtime_snapshot=mcp_runtime_snapshot,
         mcp_reload=mcp_reload,
         image_generation_reload=image_generation_reload,
         mcp_oauth_redirect_uri=lambda _request: "https://gateway.example/auth/mcp/callback",
@@ -307,14 +308,14 @@ async def test_mcp_list_serializes_local_runtime_failure_snapshot(tmp_path) -> N
     )
     snapshot_calls = 0
 
-    def runtime_snapshot() -> Mapping[str, str]:
+    def runtime_snapshot() -> MCPRuntimeSnapshot:
         nonlocal snapshot_calls
         snapshot_calls += 1
-        return {"team-docs": "failed"}
+        return MCPRuntimeSnapshot({"team-docs": "failed"})
 
     router = _router(
         config_path=config_path,
-        mcp_runtime_status=runtime_snapshot,
+        mcp_runtime_snapshot=runtime_snapshot,
     )
     request = SimpleNamespace(
         path="/api/settings/mcp-presets",

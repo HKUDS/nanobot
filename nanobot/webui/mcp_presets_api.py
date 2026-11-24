@@ -18,8 +18,10 @@ from loguru import logger
 from nanobot.agent.plugins import (
     AgentPlugin,
     discover_agent_plugins,
+    plugin_mcp_server_name,
     set_agent_plugin_enabled,
 )
+from nanobot.agent.tools.mcp_metadata import MCPIcon, MCPRuntimeSnapshot
 from nanobot.agent.tools.mcp_oauth import (
     delete_mcp_oauth_credentials,
     mcp_oauth_has_credentials,
@@ -65,7 +67,6 @@ _CUSTOM_ACTIONS = {"custom", "import", "import-cursor", "tools"}
 _MCP_RUNTIME_STATUSES = {"connecting", "connected", "failed"}
 
 McpReload = Callable[[], Awaitable[dict[str, Any]]]
-McpRuntimeStatus = Callable[[], Mapping[str, str]]
 
 
 class McpPresetError(Exception):
@@ -557,9 +558,13 @@ def _custom_payload(
     }
 
 
-def _agent_plugin_payload(plugin: AgentPlugin) -> dict[str, Any]:
+def _agent_plugin_payload(plugin: AgentPlugin, configured: Mapping[str, MCPServerConfig]) -> dict[str, Any]:
     return {
         "name": f"plugin-{plugin.name}",
+        "mcp_server_names": [
+            host_name for key in plugin.mcp_servers
+            if (host_name := plugin_mcp_server_name(plugin.name, key, len(plugin.mcp_servers))) not in configured
+        ],
         "display_name": plugin.display_name,
         "category": plugin.category,
         "description": plugin.description or "Agent Plugin",
@@ -585,7 +590,7 @@ def mcp_presets_payload(
     *,
     last_action: dict[str, Any] | None = None,
     tool_preview: Mapping[str, list[str]] | None = None,
-    runtime_status: Mapping[str, str] | None = None,
+    runtime_snapshot: MCPRuntimeSnapshot | None = None,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     config = load_config(config_path) if config_path is not None else load_config()
@@ -603,29 +608,36 @@ def mcp_presets_payload(
     existing_names = {str(row["name"]) for row in (*preset_rows, *custom_rows)}
     managed_plugins = CliAppManager(workspace=config.workspace_path).managed_plugin_owners()
     plugin_rows: list[dict[str, Any]] = [
-        _agent_plugin_payload(plugin) | {"managed_by_cli": managed_plugins.get(plugin.root)}
+        _agent_plugin_payload(plugin, config.tools.mcp_servers) | {"managed_by_cli": managed_plugins.get(plugin.root)}
         for plugin in discover_agent_plugins(config.workspace_path)
-        if f"plugin-{plugin.name}" not in existing_names
     ]
+    # A plugin card groups its servers. Activity instead names the precise runtime
+    # instance, even when an explicit custom card hides the plugin card's ID.
+    plugin_server_icons: dict[str, list[MCPIcon]] = {
+        name: [] for row in plugin_rows if row["enabled"] for name in row["mcp_server_names"]
+    }
+    plugin_rows = [row for row in plugin_rows if row["name"] not in existing_names]
     payload: dict[str, Any] = {
         "presets": [*preset_rows, *custom_rows, *plugin_rows],
+        "plugin_server_icons": plugin_server_icons,
         "proxy_configured": bool(config.network.proxy),
         "installed_count": len(config.tools.mcp_servers)
         + sum(int(row["enabled"]) for row in plugin_rows),
     }
     if last_action is not None:
         payload["last_action"] = last_action
-    return attach_mcp_runtime_status(payload, runtime_status)
+    return attach_mcp_runtime_snapshot(payload, runtime_snapshot)
 
 
-def attach_mcp_runtime_status(
+def attach_mcp_runtime_snapshot(
     payload: dict[str, Any],
-    runtime_status: Mapping[str, str] | None,
+    runtime_snapshot: MCPRuntimeSnapshot | None,
 ) -> dict[str, Any]:
     """Project safe, connection-attempt state onto eligible installed MCP rows."""
-    if runtime_status is None:
-        return payload
+    snapshot = runtime_snapshot or MCPRuntimeSnapshot({})
+    icons = snapshot.icons
     projected = dict(payload)
+    projected["plugin_server_icons"] = {name: icons.get(name, []) for name in payload["plugin_server_icons"]}
     raw_rows: object = payload.get("presets", [])
     preset_rows = cast(list[object], raw_rows) if isinstance(raw_rows, list) else []
     rows: list[Any] = []
@@ -634,8 +646,16 @@ def attach_mcp_runtime_status(
             rows.append(raw_row)
             continue
         row = dict(cast(dict[str, Any], raw_row))
-        name = row.get("name")
-        status = runtime_status.get(name) if isinstance(name, str) else None
+        name = row["name"]
+        status = snapshot.statuses.get(name)
+        if row.get("source") == "agent-plugin":
+            row["icons"] = [
+                icon for server in row["mcp_server_names"] for icon in icons.get(server, [])
+            ] if row["enabled"] else []
+        else:
+            # A custom instance can reuse a preset name without its template credentials.
+            # The successful handshake, not the template status, owns its metadata.
+            row["icons"] = icons.get(name, []) if row.get("installed") else []
         oauth_authorization_failed = (
             status == "failed"
             and row.get("auth") == "oauth"
@@ -1340,7 +1360,7 @@ async def mcp_presets_settings_action(
     query: QueryParams,
     *,
     reload_mcp: McpReload | None = None,
-    mcp_runtime_status: McpRuntimeStatus | None = None,
+    mcp_runtime_snapshot: Callable[[], MCPRuntimeSnapshot] | None = None,
     config: WebUISettingsConfig | None = None,
 ) -> dict[str, Any]:
     """Run a WebUI MCP preset action and hot-reload the agent when config changes."""
@@ -1348,7 +1368,7 @@ async def mcp_presets_settings_action(
     if action is None:
         return await asyncio.to_thread(
             mcp_presets_payload,
-            runtime_status=mcp_runtime_status() if mcp_runtime_status is not None else None,
+            runtime_snapshot=mcp_runtime_snapshot() if mcp_runtime_snapshot is not None else None,
             config_path=config_path,
         )
     name = (_query_first(query, "name") or "").strip()
@@ -1376,15 +1396,15 @@ async def mcp_presets_settings_action(
             )
             if reload_mcp is not None:
                 payload = attach_mcp_hot_reload_result(payload, await reload_mcp())
-            return attach_mcp_runtime_status(
+            return attach_mcp_runtime_snapshot(
                 payload,
-                mcp_runtime_status() if mcp_runtime_status is not None else None,
+                mcp_runtime_snapshot() if mcp_runtime_snapshot is not None else None,
             )
     if action == "test":
         payload = await mcp_presets_test_action(query, config_path=config_path)
-        return attach_mcp_runtime_status(
+        return attach_mcp_runtime_snapshot(
             payload,
-            mcp_runtime_status() if mcp_runtime_status is not None else None,
+            mcp_runtime_snapshot() if mcp_runtime_snapshot is not None else None,
         )
     if action == "reconnect":
         payload = await asyncio.to_thread(
@@ -1404,7 +1424,7 @@ async def mcp_presets_settings_action(
         payload = await asyncio.to_thread(mcp_presets_action, action, query)
     if reload_mcp is not None:
         payload = attach_mcp_hot_reload_result(payload, await reload_mcp())
-    return attach_mcp_runtime_status(
+    return attach_mcp_runtime_snapshot(
         payload,
-        mcp_runtime_status() if mcp_runtime_status is not None else None,
+        mcp_runtime_snapshot() if mcp_runtime_snapshot is not None else None,
     )

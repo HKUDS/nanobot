@@ -1314,7 +1314,15 @@ interface McpPresetField {
   env_var?: string | null;
 }
 
+export interface McpServerIcon {
+  src: string;
+  mimeType?: string;
+  sizes?: string[];
+  theme?: "light" | "dark";
+}
+
 export interface McpPresetInfo {
+  icons?: McpServerIcon[];
   name: string;
   display_name: string;
   category: string;
@@ -1371,6 +1379,7 @@ export interface McpOAuthFlowPayload {
 }
 
 export interface McpPresetsPayload {
+  plugin_server_icons?: Record<string, McpServerIcon[]>;
   presets: McpPresetInfo[];
   proxy_configured?: boolean;
   installed_count: number;

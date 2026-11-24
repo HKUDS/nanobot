@@ -1,7 +1,6 @@
 import {
   CompletedTaskIcon,
   WebSearchIcon,
-  McpIcon,
   ToolRunIcon,
 } from "@/components/icons/product-icons";
 import {
@@ -18,7 +17,7 @@ import { Clock3, Layers, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { MarkdownText } from "@/components/MarkdownText";
-import { cliAppInitials, mcpPresetInitials } from "@/components/CliAppMentionText";
+import { cliAppInitials } from "@/components/CliAppMentionText";
 import { ActivityStep } from "@/components/thread/activity/ActivityStep";
 import { coalesceActivityMessages } from "@/components/thread/activity/activity-message-model";
 import {
@@ -55,6 +54,8 @@ import { formControlFocusClassName } from "@/components/ui/form-control";
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { McpCatalogContext, useMcpPresetCatalog } from "@/hooks/useMcpPresetCatalog";
+import { McpActivityIcon } from "@/components/thread/activity/McpActivityIcon";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
@@ -70,6 +71,8 @@ import type {
   UIFileEdit,
   UIMessage,
 } from "@/lib/types";
+
+type McpServer = Pick<McpPresetInfo, "icons"> & { display_name?: string };
 
 const EMPTY_CLI_APPS: CliAppInfo[] = [];
 const EMPTY_MCP_PRESETS: McpPresetInfo[] = [];
@@ -98,8 +101,6 @@ type McpRunStatus = "running" | "done" | "error";
 
 interface McpRunSummary {
   key: string;
-  presetName: string;
-  displayName: string;
   toolName: string;
   args: unknown;
   status: McpRunStatus;
@@ -251,7 +252,7 @@ function FoldedAgentActivity({
   detailsId,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
-  const { activityMode, fileEditDisplayMode } = useLocalPreferences();
+  const { activityMode, fileEditDisplayMode, brandLogos } = useLocalPreferences();
   const mobile = useMediaQuery("(max-width: 639px)");
   const pageVisible = usePageVisibility();
   const threadVisible = useThreadVisibility();
@@ -270,10 +271,24 @@ function FoldedAgentActivity({
     () => new Map(cliApps.map((app) => [app.name.toLowerCase(), app])),
     [cliApps],
   );
-  const mcpPresetsByName = useMemo(
-    () => new Map(mcpPresets.map((preset) => [preset.name.toLowerCase(), preset])),
-    [mcpPresets],
-  );
+  const catalog = useContext(McpCatalogContext);
+  const payload = useMcpPresetCatalog(catalog, brandLogos ? mcpRuns.length : 0);
+  const activityPresets = payload?.presets ?? mcpPresets;
+  const pluginIcons = payload?.plugin_server_icons;
+  const mcpPresetsByName = useMemo(() => {
+    const servers = new Map<string, McpServer>();
+    // Use the gateway's tool-name alphabet; a settings card can group multiple servers.
+    const wireName = (name: string) => name.replace(/[^a-zA-Z0-9-]+/g, "_");
+    for (const preset of activityPresets) {
+      if (preset.source !== "agent-plugin") servers.set(wireName(preset.name), {
+        display_name: preset.display_name, icons: brandLogos ? preset.icons : undefined,
+      });
+    }
+    for (const [name, icons] of Object.entries(pluginIcons ?? {})) {
+      servers.set(wireName(name), { icons: brandLogos ? icons : undefined });
+    }
+    return servers;
+  }, [activityPresets, brandLogos, pluginIcons]);
   const {
     reasoningSteps,
     toolCalls,
@@ -505,7 +520,7 @@ function latestActivityRow(
   messages: UIMessage[],
   fileEditsByMessage: Map<string, FileEditSummary[]>,
   cliAppsByName: Map<string, CliAppInfo>,
-  mcpPresetsByName: Map<string, McpPresetInfo>,
+  mcpPresetsByName: Map<string, McpServer>,
 ) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -542,7 +557,7 @@ function latestActivityRow(
     const cli = cliRunMapByTraceLine(message).get(traceKey) ?? parseCliRunTrace(line, state?.status);
     if (cli) return <CliRunRow key={key} run={cli} active app={cliAppsByName.get(cli.name.toLowerCase())} />;
     const mcp = mcpRunMapByTraceLine(message).get(traceKey) ?? parseMcpRunTrace(line, state?.status);
-    if (mcp) return <McpRunRow key={key} run={mcp} active preset={mcpPresetsByName.get(mcp.presetName.toLowerCase())} />;
+    if (mcp) return <McpRunRow key={key} run={mcp} active presets={mcpPresetsByName} />;
     const trace = parseGenericToolTrace(line);
     if (trace) return <GenericToolRun key={key} items={[{ trace, status: state?.status ?? "running", error: state?.error }]} />;
     return <ActivityTraceRow key={key} line={line} active state={state} />;
@@ -562,7 +577,7 @@ const ActivityMessageTimeline = memo(function ActivityMessageTimeline({
   messages: UIMessage[];
   active: boolean;
   cliAppsByName: Map<string, CliAppInfo>;
-  mcpPresetsByName: Map<string, McpPresetInfo>;
+  mcpPresetsByName: Map<string, McpServer>;
   fileEditsByMessage: Map<string, FileEditSummary[]>;
   fileEditDisplayMode: FileEditDisplayMode;
   onOpenFilePreview?: (path: string) => void;
@@ -822,7 +837,7 @@ function ActivityTraceTimeline({
   active: boolean;
   turnActive: boolean;
   cliAppsByName: Map<string, CliAppInfo>;
-  mcpPresetsByName: Map<string, McpPresetInfo>;
+  mcpPresetsByName: Map<string, McpServer>;
 }) {
   const entries = foldSessionChecks(activityTraceEntries(message));
   const cliRunsByLine = cliRunMapByTraceLine(message);
@@ -1249,12 +1264,9 @@ function mcpRunFromToolName(
 ): McpRunSummary | null {
   const match = MCP_TOOL_NAME_RE.exec(toolName);
   if (!match) return null;
-  const presetName = match[1].toLowerCase();
   return {
     key: options.key,
-    presetName,
-    displayName: titleFromPresetName(presetName),
-    toolName: match[2],
+    toolName,
     args: argsObject,
     status: options.status,
     error: options.error,
@@ -1495,7 +1507,7 @@ function McpRunGroup({
 }: {
   runs: McpRunSummary[];
   active: boolean;
-  mcpPresetsByName: Map<string, McpPresetInfo>;
+  mcpPresetsByName: Map<string, McpServer>;
 }) {
   if (runs.length === 0) return null;
   return (
@@ -1505,23 +1517,29 @@ function McpRunGroup({
           key={run.key}
           run={run}
           active={active}
-          preset={mcpPresetsByName.get(run.presetName.toLowerCase())}
+          presets={mcpPresetsByName}
         />
       ))}
     </>
   );
 }
 
-function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolean; preset?: McpPresetInfo }) {
+function McpRunRow({ run, active, presets }: { run: McpRunSummary; active: boolean; presets: Map<string, McpServer> }) {
   const { t } = useTranslation();
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
-  const color = failed ? "#DC2626" : preset?.brand_color || "#6D5DF6";
-  const logoUrls = useMemo(() => logoFallbackUrls(preset?.logo_url), [preset?.logo_url]);
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
-  const displayName = preset?.display_name || run.displayName;
+  // The wire name has no separate server field. Prefer the longest catalog prefix
+  // so both server and tool names may contain underscores.
+  const qualified = run.toolName.slice(4);
+  let split = qualified.lastIndexOf("_");
+  while (!presets.has(qualified.slice(0, split)) && split > qualified.indexOf("_")) {
+    split = qualified.lastIndexOf("_", split - 1);
+  }
+  const name = qualified.slice(0, split);
+  const preset = presets.get(name);
+  const displayName = preset?.display_name || titleFromPresetName(name);
   const activity = describeMcpActivity(
-    run.toolName,
+    qualified.slice(split + 1),
     run.args,
     failed ? "error" : rowActive ? "running" : "done",
     t,
@@ -1534,33 +1552,7 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
       tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
       label={label}
       detail={displayName}
-      marker={(
-        <span
-          data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}
-          className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark text-[6.5px] font-semibold text-white",
-            rowActive && "animate-pulse",
-          )}
-          style={{ backgroundColor: logoUrl ? "transparent" : color }}
-          aria-hidden
-        >
-          {logoUrl ? (
-            <img
-              src={logoUrl}
-              alt=""
-              decoding="async"
-              loading="lazy"
-              className="h-full w-full object-contain"
-              onLoad={onLogoLoad}
-              onError={onLogoError}
-            />
-          ) : preset ? (
-            mcpPresetInitials(preset).slice(0, 2)
-          ) : (
-            <McpIcon className="h-3 w-3" aria-hidden />
-          )}
-        </span>
-      )}
+      marker={<McpActivityIcon name={name} icons={preset?.icons} />}
     />
   );
 }

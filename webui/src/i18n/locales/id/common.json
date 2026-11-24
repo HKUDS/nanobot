@@ -807,7 +807,7 @@
       "currentModel": "Digunakan untuk balasan baru.",
       "selectedModelProvider": "Ditentukan oleh model yang dipilih.",
       "selectedModelValue": "Ditentukan oleh model yang dipilih.",
-      "brandLogos": "Tampilkan logo penyedia dan aplikasi di Pengaturan.\n\nTampilkan logo penyedia pihak ketiga dan CLI di Pengaturan.",
+      "brandLogos": "Tampilkan logo merek di Pengaturan dan aktivitas obrolan.\n\nAktivitas MCP menggunakan ikon dari server jika tersedia.",
       "browserNotifications": "Terima notifikasi status tugas saat halaman ini di latar belakang.",
       "notificationSound": "Putar nada saat balasan selesai, termasuk di latar belakang.",
       "cliAppsCatalog": "Pasang alat CLI untuk nanobot; aplikasi desktop tetap tidak berubah.\n\nMemasang alat baris perintah yang dapat digunakan nanobot di komputer ini. Aplikasi desktop tidak diubah.",

@@ -26,7 +26,7 @@ For local interactive setup:
 2. Choose a known MCP server preset, or add a custom stdio, HTTP, or SSE server. For a custom OAuth server, choose **OAuth** under **Authentication**, save it, and click **Connect**. Presets such as Xmind, Notion, and Linear go straight to **Connect**. Approve access in the browser window. HTTPS and localhost WebUIs return automatically. From a remote plain-HTTP WebUI, copy the complete localhost callback URL from the browser address bar and paste it into nanobot.
 3. Limit the enabled tools when the server exposes more than the task needs.
 4. Save and restart when prompted.
-5. Mention the connected MCP server with `@` in the next message and ask for a small test action.
+5. Ask the agent to perform a small action using the connected server. An `@` mention is optional. Expand the chat activity to see which tool ran.
 
 <details>
 <summary>Manual configuration</summary>

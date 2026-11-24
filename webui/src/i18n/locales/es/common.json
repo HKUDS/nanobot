@@ -807,7 +807,7 @@
       "currentModel": "Se usa para nuevas respuestas.",
       "selectedModelProvider": "Definido por el modelo seleccionado.",
       "selectedModelValue": "Definido por el modelo seleccionado.",
-      "brandLogos": "Muestra los logos de proveedores y apps en Ajustes.\n\nMuestra logos de proveedores de terceros y CLI en Ajustes.",
+      "brandLogos": "Muestra los logotipos en los ajustes y en la actividad del chat.\n\nLa actividad de MCP usa el icono del servidor si está disponible.",
       "browserNotifications": "Recibe avisos del estado de las tareas con esta página en segundo plano.",
       "notificationSound": "Reproduce un sonido al terminar una respuesta, incluso en segundo plano.",
       "cliAppsCatalog": "Instala herramientas CLI para nanobot; las apps de escritorio no cambian.\n\nInstala las herramientas de línea de comandos que nanobot puede usar en este equipo. Las aplicaciones de escritorio no se modifican.",

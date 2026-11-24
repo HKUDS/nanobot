@@ -10,6 +10,7 @@ import pytest
 from mcp.shared.auth import OAuthToken
 
 from nanobot.agent.plugins import AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA
+from nanobot.agent.tools.mcp_metadata import MCPRuntimeSnapshot
 from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credentials
 from nanobot.apps.cli import CliAppManager
 from nanobot.config.loader import load_config, save_config
@@ -88,6 +89,7 @@ def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest
         "linear",
     }.issubset(names)
     browserbase = next(preset for preset in payload["presets"] if preset["name"] == "browserbase")
+    assert browserbase["icons"] == []
     assert browserbase["installed"] is False
     assert browserbase["install_supported"] is True
     assert browserbase["required_fields"][0]["configured"] is False
@@ -130,7 +132,7 @@ def test_agent_plugin_reuses_mcp_catalog_and_runtime_action(
     plugin_action = partial(
         mcp_presets_settings_action,
         query={"name": ["plugin-desktop"]},
-        mcp_runtime_status=lambda: statuses,
+        mcp_runtime_snapshot=lambda: MCPRuntimeSnapshot(statuses),
     )
     enabled = asyncio.run(plugin_action("enable", reload_mcp=reload))
     enabled_row = next(item for item in enabled["presets"] if item["name"] == "plugin-desktop")
@@ -162,6 +164,33 @@ def test_agent_plugin_reuses_mcp_catalog_and_runtime_action(
     config_path.write_text(json.dumps(config), encoding="utf-8")
     rows = [item for item in mcp_presets_payload()["presets"] if item["name"] == "plugin-desktop"]
     assert len(rows) == 1 and rows[0]["source"] == "custom"
+
+
+def test_multi_server_plugin_projects_icons_by_instance_and_respects_overrides(tmp_path, monkeypatch):
+    _use_config(tmp_path, monkeypatch)
+    config = load_config()
+    _write_agent_plugin(config.workspace_path)
+    component = config.workspace_path / "plugins" / "desktop" / "mcp.json"
+    component.write_text(json.dumps({
+        "$schema": AGENT_PLUGIN_MCP_SCHEMA,
+        "mcpServers": {name: {"type": "stdio", "command": "echo"} for name in ("a", "b", "c")},
+    }), encoding="utf-8")
+    custom_mcp_action("custom", {"name": ["desktop--c"], "transport": ["stdio"], "command": ["echo"]})
+    png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+k7uoAAAAASUVORK5CYII="
+    icons = {f"desktop--{s}": [{"src": png, "sizes": [f"{n}x{n}"]}] for s, n in zip("abc", (16, 24, 32), strict=True)}
+    snapshot = MCPRuntimeSnapshot({}, icons)
+    payload = asyncio.run(mcp_presets_settings_action(
+        "enable", {"name": ["plugin-desktop"]}, mcp_runtime_snapshot=lambda: snapshot,
+    ))
+    rows = {row["name"]: row for row in payload["presets"]}
+    assert payload["plugin_server_icons"] == {name: icons[name] for name in ("desktop--a", "desktop--b")}
+    assert rows["plugin-desktop"]["icons"] == icons["desktop--a"] + icons["desktop--b"]
+    assert rows["desktop--c"]["icons"] == icons["desktop--c"]
+    disabled = asyncio.run(mcp_presets_settings_action(
+        "disable", {"name": ["plugin-desktop"]}, mcp_runtime_snapshot=lambda: snapshot,
+    ))
+    assert disabled["plugin_server_icons"] == {}
+    assert next(row for row in disabled["presets"] if row["name"] == "plugin-desktop")["icons"] == []
 
 
 def test_cli_installer_exposes_managed_plugin_owner_without_claiming_other_plugins(
@@ -218,25 +247,25 @@ async def test_oauth_preset_is_one_click_configured_after_token_storage(
     assert row["configured"] is True
     assert row["status"] == "configured"
 
-    failed = mcp_presets_payload(runtime_status={"xmind": "failed"})
+    failed = mcp_presets_payload(runtime_snapshot=MCPRuntimeSnapshot({"xmind": "failed"}))
     row = next(item for item in failed["presets"] if item["name"] == "xmind")
     assert row["configured"] is True
     assert row["status"] == "configured"
     assert row["runtime_status"] == "failed"
     assert "secret" not in str(row)
 
-    healthy = mcp_presets_payload(runtime_status={"xmind": "connected"})
+    healthy = mcp_presets_payload(runtime_snapshot=MCPRuntimeSnapshot({"xmind": "connected"}))
     row = next(item for item in healthy["presets"] if item["name"] == "xmind")
     assert row["runtime_status"] == "connected"
 
     await MCPOAuthStorage("xmind", cfg.url).clear_tokens()
-    refresh_failed = mcp_presets_payload(runtime_status={"xmind": "failed"})
+    refresh_failed = mcp_presets_payload(runtime_snapshot=MCPRuntimeSnapshot({"xmind": "failed"}))
     row = next(item for item in refresh_failed["presets"] if item["name"] == "xmind")
     assert row["configured"] is False
     assert row["status"] == "authorization_required"
     assert row["runtime_status"] == "failed"
 
-    stale_connected = mcp_presets_payload(runtime_status={"xmind": "connected"})
+    stale_connected = mcp_presets_payload(runtime_snapshot=MCPRuntimeSnapshot({"xmind": "connected"}))
     row = next(item for item in stale_connected["presets"] if item["name"] == "xmind")
     assert "runtime_status" not in row
 
@@ -259,12 +288,14 @@ async def test_settings_list_projects_runtime_snapshot_and_reconnects_custom_ser
         },
     )
     statuses = {"team-docs": "failed"}
+    icons = {}
     reload_calls = 0
 
     async def reload_mcp() -> dict[str, object]:
         nonlocal reload_calls
         reload_calls += 1
         statuses["team-docs"] = "connected"
+        icons["team-docs"] = [{"src": "https://mcp.example.com/app.png"}]
         return {
             "ok": True,
             "connected": ["team-docs"],
@@ -276,7 +307,7 @@ async def test_settings_list_projects_runtime_snapshot_and_reconnects_custom_ser
         None,
         {},
         reload_mcp=reload_mcp,
-        mcp_runtime_status=lambda: statuses,
+        mcp_runtime_snapshot=lambda: MCPRuntimeSnapshot(statuses, icons),
     )
     row = next(item for item in listed["presets"] if item["name"] == "team-docs")
     assert row["configured"] is True
@@ -287,10 +318,11 @@ async def test_settings_list_projects_runtime_snapshot_and_reconnects_custom_ser
         "reconnect",
         {"name": ["team-docs"]},
         reload_mcp=reload_mcp,
-        mcp_runtime_status=lambda: statuses,
+        mcp_runtime_snapshot=lambda: MCPRuntimeSnapshot(statuses, icons),
     )
     row = next(item for item in reconnected["presets"] if item["name"] == "team-docs")
     assert row["runtime_status"] == "connected"
+    assert row["icons"] == icons["team-docs"]
     assert reconnected["requires_restart"] is False
     assert reload_calls == 1
 

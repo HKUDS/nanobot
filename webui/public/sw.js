@@ -246,6 +246,9 @@ self.addEventListener("fetch", (event) => {
   // every path we touch. WebSocket upgrades are never dispatched to a service
   // worker's fetch handler, so the WS endpoint cannot be cached.
   if (request.method !== "GET") return;
+  // Privacy-sensitive image callers (including MCP) use the native HTTP cache.
+  // Even an explicitly advertised /favicon.ico may be private or short-lived.
+  if (request.destination === "image" && request.referrerPolicy === "no-referrer") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) {
     if (isPublicIconRequest(request, url)) {

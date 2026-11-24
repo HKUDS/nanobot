@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, cast
@@ -11,6 +11,7 @@ from typing import Any, cast
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
+from nanobot.agent.tools.mcp_metadata import MCPRuntimeSnapshot
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.registry import load_channel_plugin
@@ -186,7 +187,7 @@ class WebUISettingsRouter:
         runtime_capabilities: dict[str, Any],
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
-        mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
+        mcp_runtime_snapshot: Callable[[], MCPRuntimeSnapshot] | None = None,
         mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         image_generation_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         mcp_oauth_redirect_uri: Callable[[Any], str] | None = None,
@@ -202,7 +203,7 @@ class WebUISettingsRouter:
         self._runtime_capabilities = runtime_capabilities
         self._channel_feature_action = channel_feature_action
         self._channel_runtime_status = channel_runtime_status
-        self._mcp_runtime_status = mcp_runtime_status
+        self._mcp_runtime_snapshot = mcp_runtime_snapshot
         self._mcp_reload = mcp_reload
         self._image_generation_reload = image_generation_reload
         self._mcp_oauth_redirect_uri = mcp_oauth_redirect_uri
@@ -485,7 +486,7 @@ class WebUISettingsRouter:
             deny_code=partial(deny_code, on_change=self._pairing_changed),
             mcp_presets_action=mcp_presets_settings_action,
             reload_mcp=self._reload_mcp_runtime,
-            mcp_runtime_status=self._mcp_runtime_status,
+            mcp_runtime_snapshot=self._mcp_runtime_snapshot,
             check_for_update=check_for_update,
             channel_feature_action=self._channel_feature_action,
             channel_runtime_status=self._channel_runtime_status,
