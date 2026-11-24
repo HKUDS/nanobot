@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from nanobot.bus.delivery import DeliveryRequest
@@ -34,7 +34,7 @@ class InboundMessage:
     sender_id: str
     chat_id: str
     content: str
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC).astimezone())
     media: list[str] = field(default_factory=list)  # Media paths or URLs
     metadata: dict[str, Any] = field(default_factory=dict)
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
