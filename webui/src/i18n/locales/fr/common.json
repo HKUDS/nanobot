@@ -2506,6 +2506,7 @@
       "imageInputTitle": "L’entrée d’images est désactivée pour ce préréglage",
       "imageRequestRejectedTitle": "Le modèle a rejeté la requête avec image",
       "imageInputBody": "Cette requête contient des images. Vérifiez le préréglage ou utilisez-en un qui accepte les images.",
+      "emptyFinalResponse": "Le modèle n’a pas fourni de réponse finale.",
       "unknownTitle": "Échec de la requête au fournisseur du modèle",
       "bodyWithAttempt": "Arrêt après {{attempts}} tentatives. Réessayez plus tard ou choisissez un autre modèle.",
       "body": "Réessayez plus tard ou choisissez un autre modèle."

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import TurnEndEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels import manager as manager_module
 from nanobot.channels.base import BaseChannel
@@ -21,6 +22,27 @@ def make_manager(*, config_path=None):
     channel.has_pending_delivery = False
     manager.channels["websocket"] = channel
     return manager, channel
+
+
+@pytest.mark.parametrize("destination", ["telegram", "websocket"])
+async def test_empty_final_failure_reaches_each_channel_once_in_its_native_form(tmp_path, destination):
+    manager, channel = make_manager(config_path=tmp_path / "config.json")
+    manager.channels[destination] = channel
+    end = TurnEndEvent(outcome="failed", failure_kind="model", failure_error_kind="empty_final_response")
+    await manager.bus.publish_event(end, channel=destination, chat_id="chat", metadata={"message_thread_id": 42})
+    manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+    try:
+        await wait_until(lambda: not manager.has_pending_delivery)
+        channel.send.assert_awaited_once()
+        msg = channel.send.await_args.args[0]
+        assert (msg.channel, msg.chat_id, msg.metadata) == (destination, "chat", {"message_thread_id": 42})
+        if destination == "websocket":
+            assert msg.event is end
+            assert msg.content == ""
+        else:
+            assert msg.content == "The model didn't return a final answer. Please try again."
+    finally:
+        await manager.stop_all()
 
 
 async def test_delivery_has_no_idle_gap_between_queue_dispatch_and_send(monkeypatch):

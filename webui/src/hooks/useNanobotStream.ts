@@ -778,7 +778,8 @@ export function useNanobotStream(
           setGoalState(ev.goal_state);
         }
         setRetryStatus(null);
-        const modelRequestFailed = ev.outcome === "failed" && ev.failure_kind === "model";
+        // An empty final response has its own persistent transcript notice.
+        const modelRequestFailed = ev.outcome === "failed" && ev.failure_kind === "model" && ev.failure_error_kind !== "empty_final_response";
         const failureAttempts =
           typeof ev.failure_attempts === "number"
           && Number.isInteger(ev.failure_attempts)

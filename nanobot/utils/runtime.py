@@ -14,11 +14,6 @@ _MAX_REPEAT_EXTERNAL_LOOKUPS = 2
 _MAX_REPEAT_WORKSPACE_VIOLATIONS = 2
 _LENGTH_RECOVERY_TAIL_CHARS = 64
 
-EMPTY_FINAL_RESPONSE_MESSAGE = (
-    "I completed the tool steps but couldn't produce a final answer. "
-    "Please try again or narrow the task."
-)
-
 FINALIZATION_RETRY_PROMPT = (
     "Please provide your response to the user based on the conversation above."
 )

@@ -13,7 +13,6 @@ from nanobot.providers.base import (
     ProviderConversationState,
     ToolCallRequest,
 )
-from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 
 @pytest.fixture
@@ -133,12 +132,15 @@ async def test_goal_closing_after_tool_overrun_gets_bounded_finalization(run_spe
     assert result.tools_used == ["work"] * tool_rounds
     if finalization_fails:
         assert result.stop_reason == "empty_final_response"
-        assert result.error == result.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
+        assert result.error == result.failure_error_kind == "empty_final_response"
+        assert result.final_content is None
+        assert result.messages[-1]["role"] == "tool"
     else:
         assert result.stop_reason == ("completed" if finalize else "max_iterations")
         assert result.final_content == ("All goal work is complete." if finalize else "limit reached")
     assert result.pending_stream_content == (result.final_content if finalize else None)
-    assert result.messages[-1]["content"] == result.final_content
+    if not finalization_fails:
+        assert result.messages[-1]["content"] == result.final_content
     assert run_spec.runtime.provider.chat_stream_with_retry.await_count == tool_rounds + int(finalize)
     assert run_spec.continuation_callback.await_count == tool_rounds
     assert result.usage.request_count == tool_rounds + int(finalize)

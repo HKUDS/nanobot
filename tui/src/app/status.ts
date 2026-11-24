@@ -1,4 +1,5 @@
 import type { ConnectionStatus, ConnectionStatusInfo, RetryStatus } from "../client"
+import { emptyFinalResponseLine } from "../platform/locale"
 
 export function formatElapsed(milliseconds: number): string {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000))
@@ -31,6 +32,7 @@ function retryFailureLabel(errorKind: string): string {
 }
 
 export function terminalModelFailureLine(errorKind?: string, attempts?: number): string {
+  if (errorKind === "empty_final_response") return emptyFinalResponseLine()
   if (errorKind === "unsupported_image") {
     return "Image input is off for this preset. Check the preset or select a model that supports images."
   }

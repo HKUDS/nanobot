@@ -37,7 +37,7 @@ export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings, o
   if (!waiting || hiddenRecoveryId === state.recovery_id) return null;
 
   const contextUnavailable = state.can_continue === false;
-  const modelFailure = state.reason === "model_request_failed"
+  const modelFailure = state.reason === "model_request_failed" && state.failure_error_kind !== "empty_final_response"
     ? resolveModelRequestFailureCopy({ errorKind: state.failure_error_kind }, t)
     : null;
   const imageFailure = modelFailure !== null && isImageRequestFailure(state.failure_error_kind);

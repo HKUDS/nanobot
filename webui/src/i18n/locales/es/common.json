@@ -2506,6 +2506,7 @@
       "imageInputTitle": "La entrada de imágenes está desactivada en este preajuste",
       "imageRequestRejectedTitle": "El modelo rechazó la solicitud con imagen",
       "imageInputBody": "Esta solicitud incluye imágenes. Revisa este preajuste o usa uno compatible con imágenes.",
+      "emptyFinalResponse": "El modelo no devolvió una respuesta final.",
       "unknownTitle": "La solicitud al proveedor del modelo falló",
       "bodyWithAttempt": "Se detuvo tras {{attempts}} intentos. Inténtalo más tarde o elige otro modelo.",
       "body": "Inténtalo más tarde o elige otro modelo."

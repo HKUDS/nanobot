@@ -139,6 +139,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
         StreamEndEvent,
     )
     from nanobot.bus.queue import MessageBus
+    from nanobot.channels.turn_notices import turn_failure_notice
     from nanobot.cli import terminal as cli_terminal
     from nanobot.cli.stream import ThinkingSpinner
     from nanobot.command.results import as_text_message
@@ -268,7 +269,10 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                     on_stream=renderer.on_delta,
                     on_stream_end=renderer.on_end,
                 )
-                if not renderer.streamed:
+                if response is not None and (notice := turn_failure_notice(response.event)):
+                    await renderer.close()
+                    console.print(notice)
+                elif not renderer.streamed:
                     await renderer.close()
                     print_kwargs: dict[str, Any] = {}
                     if renderer.header_printed:
@@ -325,10 +329,19 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             reasoning_buffer = cli_terminal._ReasoningBuffer()
 
             async def _consume_outbound() -> None:
+                nonlocal renderer
                 while True:
                     try:
                         msg = as_text_message(await asyncio.wait_for(bus.consume_outbound(), timeout=1.0))
                         event = msg.event
+
+                        if notice := turn_failure_notice(event):
+                            if renderer:
+                                await renderer.close()
+                                renderer = None
+                            await cli_terminal._print_interactive_line(notice)
+                            turn_done.set()
+                            continue
 
                         if isinstance(event, StreamDeltaEvent):
                             if renderer:

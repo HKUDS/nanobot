@@ -55,7 +55,6 @@ from nanobot.utils.helpers import (
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.runtime import (
-    EMPTY_FINAL_RESPONSE_MESSAGE,
     build_budget_exhausted_finalization_message,
     build_finalization_retry_message,
     build_length_recovery_message,
@@ -856,11 +855,10 @@ class AgentRunner:
                 failure_error_kind = LLMProvider.public_error_kind(response)
                 break
             if is_blank_text(clean):
-                final_content = EMPTY_FINAL_RESPONSE_MESSAGE
+                final_content = None
                 stop_reason = "empty_final_response"
-                error = final_content
-                self._append_final_message(messages, final_content, response_input_ids)
-                context.final_content = final_content
+                error = stop_reason
+                context.final_content = None
                 context.error = error
                 context.stop_reason = stop_reason
                 await hook.after_iteration(context)
@@ -905,13 +903,11 @@ class AgentRunner:
                 pending_stream_content = terminal_content
             if terminal_content is None:
                 if goal_overrun and spec.finalize_on_max_iterations:
-                    terminal_content = EMPTY_FINAL_RESPONSE_MESSAGE
                     stop_reason = "empty_final_response"
-                    error = terminal_content
-                    pending_stream_content = terminal_content
+                    error = stop_reason
                 else:
                     terminal_content = self._max_iterations_fallback(spec)
-            if length_recovery_parts:
+            if length_recovery_parts and terminal_content is not None:
                 terminal_tail = f"\n\n{terminal_content.lstrip()}"
                 final_content = (
                     "".join(length_recovery_parts).rstrip() + terminal_tail
@@ -929,7 +925,7 @@ class AgentRunner:
             round_usages=round_usages,
             stop_reason=stop_reason,
             error=error,
-            failure_error_kind=failure_error_kind,
+            failure_error_kind=stop_reason if stop_reason == "empty_final_response" else failure_error_kind,
             tool_events=tool_events,
             had_injections=had_injections,
             pending_stream_content=pending_stream_content,

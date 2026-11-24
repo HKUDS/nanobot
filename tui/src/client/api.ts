@@ -1,3 +1,4 @@
+import { emptyFinalResponseLine } from "../platform/locale"
 import { isRecoveryState } from "../../../packages/client-events/notifications"
 
 import type {
@@ -254,6 +255,9 @@ export async function fetchHistory(
         })
         break
       case "turn_end":
+        if (event.outcome === "failed" && event.failure_kind === "model" && event.failure_error_kind === "empty_final_response") {
+          messages.push({ role: "error", content: emptyFinalResponseLine() })
+        }
         stream = null
         lastAnswer = null
         break

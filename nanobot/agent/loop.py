@@ -54,6 +54,7 @@ from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
+    TurnEndEvent,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter
@@ -117,9 +118,6 @@ from nanobot.utils.document import reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.progress_events import output_events
-from nanobot.utils.runtime import (
-    EMPTY_FINAL_RESPONSE_MESSAGE,
-)
 
 if TYPE_CHECKING:
     from nanobot.config.schema import (
@@ -2290,18 +2288,15 @@ class AgentLoop:
             and (not result.had_injections or result.stop_reason == "empty_final_response")
         ):
             ctx.suppress_response = True
+            if result.stop_reason == "empty_final_response":
+                # The message tool already delivered the answer to this chat.
+                ctx.stop_reason = "completed"
+                ctx.failure_error_kind = None
         ctx.usage = result.usage
         ctx.delivery.record_usage(result.round_usages)
 
     async def _persist_turn(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
-
-        if (
-            ctx.kind is TurnKind.USER
-            and (ctx.final_content is None or not ctx.final_content.strip())
-            and not ctx.suppress_response
-        ):
-            ctx.final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
         latency_started_at = (
             ctx.run_started_at
@@ -2356,6 +2351,13 @@ class AgentLoop:
         )
         if ctx.suppress_response:
             ctx.outbound = None
+            return
+        if ctx.stop_reason == "empty_final_response":
+            ctx.outbound = OutboundMessage(
+                channel=ctx.delivery.route.channel, chat_id=ctx.delivery.route.chat_id,
+                metadata=dict(ctx.delivery.route.metadata), content="",
+                event=TurnEndEvent(outcome="failed", failure_kind="model", failure_error_kind=ctx.failure_error_kind),
+            )
             return
         if ctx.kind is TurnKind.SYSTEM:
             ctx.outbound = ctx.delivery.background_response(

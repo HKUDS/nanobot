@@ -1606,6 +1606,19 @@ def test_agent_rejects_unknown_tui_theme(mock_agent_runtime):
     mock_agent_runtime["from_config"].assert_not_called()
 
 
+def test_one_shot_agent_reports_empty_final_as_a_notice(mock_agent_runtime):
+    from nanobot.bus.outbound_events import TurnEndEvent
+
+    mock_agent_runtime["agent_loop"].process_direct.return_value = OutboundMessage(
+        channel="cli", chat_id="direct", content="",
+        event=TurnEndEvent(outcome="failed", failure_kind="model", failure_error_kind="empty_final_response"),
+    )
+    result = runner.invoke(app, ["agent", "-m", "hello"])
+    assert result.exit_code == 0, result.output
+    assert result.output.count("The model didn't return a final answer. Please try again.") == 1
+    mock_agent_runtime["print_response"].assert_not_called()
+
+
 def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_runtime):
     result = runner.invoke(app, ["agent", "-m", "hello"])
 

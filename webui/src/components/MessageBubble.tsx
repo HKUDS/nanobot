@@ -384,6 +384,10 @@ export function MessageBubble({
     temporary || message.role !== "user",
   );
 
+  if (message.kind === "empty_final_response") {
+    return <p className="text-sm text-destructive">{t("errors.modelRequestFailed.emptyFinalResponse")}</p>;
+  }
+
   if (message.kind === "compaction" && message.compaction) {
     return <ContextCompactionNotice compaction={message.compaction} />;
   }

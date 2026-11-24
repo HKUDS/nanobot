@@ -2506,6 +2506,7 @@
       "imageInputTitle": "Input gambar dinonaktifkan untuk preset ini",
       "imageRequestRejectedTitle": "Model menolak permintaan yang berisi gambar",
       "imageInputBody": "Permintaan ini berisi gambar. Periksa preset ini atau gunakan preset yang mendukung gambar.",
+      "emptyFinalResponse": "Model tidak memberikan jawaban akhir.",
       "unknownTitle": "Permintaan ke penyedia model gagal",
       "bodyWithAttempt": "Dihentikan setelah {{attempts}} percobaan. Coba lagi nanti atau pilih model lain.",
       "body": "Coba lagi nanti atau pilih model lain."

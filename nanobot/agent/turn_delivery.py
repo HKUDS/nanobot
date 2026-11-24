@@ -80,7 +80,7 @@ def _bind_events(
 
 
 def _turn_outcome(stop_reason: object) -> tuple[str, str | None]:
-    if stop_reason == "error":
+    if stop_reason in ("error", "empty_final_response"):
         return "failed", "model"
     if stop_reason == "tool_error":
         return "failed", "tool"
@@ -372,7 +372,7 @@ class TurnDelivery:
                 self._response_source is not None
                 and self._response_content is not None
                 and strip_think(self._response_content).strip() == response.content.strip()
-                and stop_reason not in {"error", "tool_error"}
+                and stop_reason not in {"error", "tool_error", "empty_final_response"}
             ):
                 response = dataclasses.replace(response, metadata={
                     **response.metadata,
@@ -382,7 +382,7 @@ class TurnDelivery:
                 response = dataclasses.replace(response, metadata={
                     **response.metadata, "response_input_ids": list(self._response_input_ids),
                 })
-            if response.channel != "websocket" or stop_reason != "error":
+            if response.channel != "websocket" or stop_reason not in {"error", "empty_final_response"}:
                 delivery = DeliveryRequest.from_context(
                     self.input_message.metadata, self.session_key,
                     self.delivery_message.session_generation,

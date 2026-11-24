@@ -1225,6 +1225,14 @@ function reduceThreadEvent(
     },
     turn.turnId,
   );
+  if (event.outcome === "failed" && event.failure_kind === "model" && event.failure_error_kind === "empty_final_response") {
+    const id = projectionMessageId(event, options);
+    state.messages = [...state.messages, {
+      id, role: "system", kind: "empty_final_response", content: "",
+      ...positionedTurnFields(undefined, turn, options), createdAt: projectionCreatedAt(event, options),
+    }];
+    options.effects?.bodyWrites.add(id);
+  }
   state.activeAssistantId = null;
   state.closedAssistantIds = new Set();
   state.closedAnswerStreamIds = new Set();

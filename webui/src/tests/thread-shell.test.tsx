@@ -5779,6 +5779,24 @@ describe("ThreadShell", () => {
     expect(inspectPreset).toHaveBeenCalledWith("test-vision");
   });
 
+  it("keeps the empty-final notice in the transcript when recovery offers continuation", async () => {
+    const client = makeClient();
+    const chatId = "empty-final";
+    render(wrap(client, <ThreadShell session={session(chatId)} title="Empty reply" onToggleSidebar={() => {}} />));
+    await act(async () => {});
+    act(() => client._emitChat(chatId, {
+      event: "turn_end", chat_id: chatId, turn_id: "turn", turn_seq: 2,
+      outcome: "failed", failure_kind: "model", failure_error_kind: "empty_final_response",
+    }));
+    expect(await screen.findByText("The model did not return a final reply.")).toBeVisible();
+    act(() => client._emitChat(chatId, {
+      event: "recovery_state", chat_id: chatId, recovery_id: "recovery", status: "awaiting_user",
+      reason: "model_request_failed", failure_error_kind: "empty_final_response",
+    }));
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+    expect(screen.getByText("The model did not return a final reply.")).toBeVisible();
+  });
+
   it.each([false, true])("keeps one terminal model failure visible until the next user action (recovery: %s)", async (recoverable) => {
     const client = makeClient();
     await act(async () => {

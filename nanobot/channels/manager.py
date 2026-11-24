@@ -8,6 +8,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
@@ -37,6 +38,7 @@ from nanobot.channels.contracts import (
     resolve_channel_action_target,
 )
 from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
+from nanobot.channels.turn_notices import turn_failure_notice
 from nanobot.command.results import command_result
 from nanobot.config.schema import Config
 from nanobot.security.workspace_access import WorkspaceScopeResolver
@@ -776,6 +778,9 @@ class ChannelManager:
         """
         if msg.delivery_id in self._scheduled_deliveries:
             return
+        # WebUI and TUI render the structured turn end themselves.
+        if msg.channel != "websocket" and (notice := turn_failure_notice(msg.event)):
+            msg = replace(msg, content=notice, event=None)
         if isinstance(msg.event, ProgressEvent) and msg.event.tool_events:
             msg = channel.prepare_tool_events(msg)
         await self._outbound_slots.acquire()

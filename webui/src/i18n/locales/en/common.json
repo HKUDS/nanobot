@@ -2689,6 +2689,7 @@
       "imageInputTitle": "Image input is off for this preset",
       "imageRequestRejectedTitle": "The model rejected the image request",
       "imageInputBody": "This request includes images. Check the preset or use one that supports images.",
+      "emptyFinalResponse": "The model did not return a final reply.",
       "unknownTitle": "Model provider request failed",
       "bodyWithAttempt": "Stopped after {{attempts}} attempts. Try again later or choose another model.",
       "body": "Try again later or choose another model."

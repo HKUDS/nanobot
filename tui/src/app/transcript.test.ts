@@ -16,6 +16,34 @@ describe("NanobotTui transcript", () => {
   const createRenderer = (rendererOptions: Parameters<typeof createTestRenderer>[0]) => (
     createTestRenderer(rendererOptions)
   )
+  test("renders a failed turn with no final reply live and on reattach in the current locale", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const end = { event: "turn_end", chat_id: "chat", turn_id: "empty", outcome: "failed",
+      failure_kind: "model", failure_error_kind: "empty_final_response" } as const
+    const original = globalThis.fetch
+    const lang = process.env.LC_ALL
+    globalThis.fetch = Object.assign(async () => Response.json({
+      schemaVersion: 3, projection: "events", events: [end],
+    }), { preconnect: original.preconnect })
+    try {
+      process.env.LC_ALL = "en"
+      const app = NanobotTui.mount(setup.renderer, { ...options, apiUrl: "http://fixture", apiToken: "fixture" }, client())
+      app.accept({ event: "attached", chat_id: "chat" })
+      app.accept(end)
+      await setup.flush()
+      expect(setup.captureCharFrame()).toContain("The model did not return a final reply.")
+      process.env.LC_ALL = "fr_FR.UTF-8"
+      app.accept({ event: "attached", chat_id: "chat" })
+      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+      await setup.flush()
+      expect(setup.captureCharFrame()).toContain("Le modèle n’a pas fourni de réponse finale.")
+    } finally {
+      globalThis.fetch = original
+      if (lang === undefined) delete process.env.LC_ALL
+      else process.env.LC_ALL = lang
+    }
+  })
+
   test("keeps localized help syntax literal live and after reattaching to the thread", async () => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const help = {

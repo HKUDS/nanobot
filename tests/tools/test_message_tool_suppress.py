@@ -8,7 +8,9 @@ from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.message import MessageTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import TurnEndEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import TurnCompleted
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.utils.progress_events import output_events
 
@@ -157,11 +159,38 @@ class TestMessageToolSuppressLogic:
             mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
 
         msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Start")
-        result = await loop._process_message(msg, pending_queue=pending_queue)
+        completed: list[TurnCompleted] = []
+        loop.bus.subscribe(completed.append, TurnCompleted)
+        delivery = loop.turn_delivery_factory.create(msg, msg.session_key)
+        result = await loop._process_message(msg, pending_queue=pending_queue, delivery=delivery)
+        await delivery.complete(result, publish_completion=True)
 
         assert len(sent) == 1
         assert sent[0].content == "Tool reply"
         assert result is None
+        assert [event.outcome for event in completed] == ["completed"]
+
+    @pytest.mark.parametrize("channel", ["websocket", "feishu"])
+    async def test_undelivered_empty_final_reaches_channel_as_failure(self, tmp_path: Path, channel: str) -> None:
+        loop = _make_loop(tmp_path)
+        loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="", finish_reason="length"))
+        msg = InboundMessage(channel=channel, sender_id="user", chat_id="chat", content="Start")
+        completed: list[TurnCompleted] = []
+        loop.bus.subscribe(completed.append, TurnCompleted)
+        delivery = loop.turn_delivery_factory.create(msg, msg.session_key)
+        result = await loop._process_message(msg, delivery=delivery)
+        await delivery.complete(result, publish_completion=True)
+
+        assert result is not None and result.content == ""
+        assert isinstance(result.event, TurnEndEvent)
+        assert [(e.outcome, e.failure_kind, e.failure_error_kind) for e in completed] == [
+            ("failed", "model", "empty_final_response"),
+        ]
+        # The WebSocket coordinator projects the lifecycle completion; other channels get the routed event.
+        routed = [loop.bus.outbound.get_nowait() for _ in range(loop.bus.outbound_size)]
+        assert [m.event for m in routed if isinstance(m.event, TurnEndEvent)] == (
+            [] if channel == "websocket" else [result.event]
+        )
 
     async def test_progress_hides_internal_reasoning(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)

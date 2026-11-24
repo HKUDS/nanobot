@@ -231,7 +231,7 @@ export type ApiReauthenticator = (
 ) => Promise<GatewayApiConnection>
 
 export interface HistoryMessage {
-  role: "user" | "assistant" | "activity"
+  role: "user" | "assistant" | "activity" | "error"
   content: string
   renderAs?: "text"
   turnId?: string

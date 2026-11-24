@@ -264,6 +264,7 @@ export class Transcript {
         this.user(message.content, message.turnId, message.media)
       }
       else if (message.role === "assistant") this.assistant(message.content, message.renderAs)
+      else if (message.role === "error") this.notice(message.content, true)
       else if (message.fileEdits?.length) this.fileEdits(message.fileEdits)
       else this.progress(message.content, message.toolEvents)
     }
@@ -284,6 +285,8 @@ export class Transcript {
         if (message.turnId) this.userTurnIds.add(message.turnId)
       } else if (message.role === "assistant") {
         this.writeAnswer(message.content, message.renderAs, index++)
+      } else if (message.role === "error") {
+        this.writeRole("×", message.content, "error", index++)
       } else {
         const activity = this.createActivity(index++)
         const events: ToolProgressEvent[] = message.fileEdits?.length
