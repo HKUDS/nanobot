@@ -554,9 +554,13 @@ class CronService:
             if self.on_job:
                 result = await self.on_job(job)
 
-            job.state.last_status = "ok"
-            job.state.last_error = None
-            logger.info("Cron: job '{}' completed", job.name)
+            job.state.last_error = result.error if isinstance(result, CronRunResult) else None
+            if job.state.last_error:
+                job.state.last_status = "error"
+                logger.warning("Cron: job '{}' failed: {}", job.name, job.state.last_error)
+            else:
+                job.state.last_status = "ok"
+                logger.info("Cron: job '{}' completed", job.name)
 
         except CronJobSkippedError as e:
             job.state.last_status = "skipped"

@@ -440,14 +440,17 @@ class AgentRunner:
             events=spec.events,
         )
 
-        async def drain_inputs(phase: str, *, terminal: bool = False) -> bool:
+        def admit_inputs(inputs: list[dict[str, Any]]) -> None:
             nonlocal reply_delivered
+            # A user follow-up or new goal step owns its own reply, even without public IDs.
+            reply_delivered = False
+            self._append_injected_messages(messages, inputs)
+
+        async def drain_inputs(phase: str, *, terminal: bool = False) -> bool:
             injections = await self._drain_injections(spec, terminal=terminal)
             if not injections:
                 return False
-            # Public IDs are optional. Admission itself starts a new reply owner.
-            reply_delivered = False
-            self._append_injected_messages(messages, injections)
+            admit_inputs(injections)
             preview = "[content hidden]"
             if tool_log_content_allowed():
                 preview = "\n\n".join(
@@ -816,10 +819,10 @@ class AgentRunner:
                 if ordinary_budget_remaining:
                     continuation_prompt = await self._continuation_prompt(spec)
                 if continuation_prompt is not None:
-                    messages.append({
+                    admit_inputs([{
                         "role": "user", "content": continuation_prompt,
                         HIDDEN_HISTORY_META: {"kind": "internal_continuation"},
-                    })
+                    }])
                     should_continue = True
                     logger.info("Injected caller-requested continuation after final response")
                 elif can_make_followup_request:

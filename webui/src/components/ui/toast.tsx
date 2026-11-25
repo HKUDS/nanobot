@@ -44,9 +44,11 @@ const ToastContext = createContext<((notice: ToastNotice) => void) | null>(null)
 export const useToast = () => useContext(ToastContext);
 
 const ToastHostContext = createContext<{ collisionBoundary: HTMLElement | null; unavailable: boolean }>({ collisionBoundary: null, unavailable: false });
-const ThreadToastEntries = createContext<ReactNode>(null);
+const LocalToastEntries = createContext<ReactNode>(null);
+type LocalSurface = "thread" | "preview";
 
-function ToastViewport({ children, local = false }: { children: ReactNode; local?: boolean }) {
+function ToastViewport({ children, surface = "global" }: { children: ReactNode; surface?: LocalSurface | "global" }) {
+  const local = surface !== "global";
   const threadVisible = useThreadVisibility();
   const [hostHidden, setHostHidden] = useState(false);
   const unavailable = hostHidden || (local && !threadVisible);
@@ -73,7 +75,7 @@ function ToastViewport({ children, local = false }: { children: ReactNode; local
     };
   }, [viewport]);
   return <ToastHostContext.Provider value={host}>
-    <div ref={setViewport} data-toast-viewport={local ? "thread" : "global"}
+    <div ref={setViewport} data-toast-viewport={surface}
       className={`pointer-events-none inset-x-3 z-50 mx-auto flex max-w-[min(calc(100vw-1.5rem),36rem)] flex-col items-center gap-2 ${local ? "absolute top-3" : "fixed top-[calc(0.75rem+env(safe-area-inset-top))] [.native-host_&]:top-12"}`}
       style={unavailable ? { visibility: "hidden" } : undefined}>
       {children}
@@ -83,8 +85,12 @@ function ToastViewport({ children, local = false }: { children: ReactNode; local
 
 /** Place inside the positioned conversation panel, outside its scrolling transcript. */
 export function ThreadToastViewport({ children }: { children?: ReactNode }) {
-  const entries = useContext(ThreadToastEntries);
-  return <ToastViewport local>{children}{entries}</ToastViewport>;
+  return <LocalToastViewport surface="thread">{children}</LocalToastViewport>;
+}
+
+export function LocalToastViewport({ surface, children }: { surface: LocalSurface; children?: ReactNode }) {
+  const entries = useContext(LocalToastEntries);
+  return <ToastViewport surface={surface}>{children}{entries}</ToastViewport>;
 }
 
 type CardNotice = Omit<ToastNotice, "details"> & { details?: { label: string; render: () => ReactNode } };
@@ -253,10 +259,10 @@ export function PersistentToast({ details, ...notice }: Pick<ToastNotice, "messa
     onAction={() => notice.action?.run()} onSecondaryAction={() => notice.secondaryAction?.run?.()} />;
 }
 
-export function ToastProvider({ children, threadKey }: { children: ReactNode; threadKey?: string | null }) {
+export function ToastProvider({ children, scopeKey }: { children: ReactNode; scopeKey?: string | null }) {
   const nextId = useRef(0);
   // Late callbacks retain the old queue, not the new conversation's viewport.
-  const live = useMemo(() => new Map<number, ToastEntry>(), [threadKey]);
+  const live = useMemo(() => new Map<number, ToastEntry>(), [scopeKey]);
   const [, publish] = useReducer((version: number) => version + 1, 0);
   const show = useCallback((notice: ToastNotice) => {
     if (notice.dedupeKey && !notice.onExpire && (!notice.action || notice.persistent)) {
@@ -302,7 +308,7 @@ export function ToastProvider({ children, threadKey }: { children: ReactNode; th
     <TimedToast key={entry.id} entry={entry} finish={finish} update={update} dismiss={dismiss} />
   ));
   return <ToastContext.Provider value={show}>
-    {threadKey === undefined ? <>{children}<ToastViewport>{cards}</ToastViewport></>
-      : <ThreadToastEntries.Provider value={cards}>{children}</ThreadToastEntries.Provider>}
+    {scopeKey === undefined ? <>{children}<ToastViewport>{cards}</ToastViewport></>
+      : <LocalToastEntries.Provider value={cards}>{children}</LocalToastEntries.Provider>}
   </ToastContext.Provider>;
 }

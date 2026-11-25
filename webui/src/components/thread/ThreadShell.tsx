@@ -38,7 +38,7 @@ import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { GoalIsland } from "@/components/thread/GoalIsland";
 import { ThreadLoadingSkeleton } from "@/components/thread/ThreadLoadingSkeleton";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
-import { PersistentToast, ThreadToastViewport, ToastProvider, useToast } from "@/components/ui/toast";
+import { LocalToastViewport, PersistentToast, ThreadToastViewport, ToastProvider, useToast } from "@/components/ui/toast";
 import { emptyFinalMessageKey, isImageRequestFailure, resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
@@ -343,7 +343,7 @@ function useInstalledSettingItems<Payload, Item>({
 }
 
 export function ThreadShell(props: ThreadShellProps) {
-  return <ToastProvider threadKey={props.session?.key ?? null}><ThreadShellContent {...props} /></ToastProvider>;
+  return <ToastProvider scopeKey={props.session?.key ?? null}><ThreadShellContent {...props} /></ToastProvider>;
 }
 
 function ThreadShellContent({
@@ -1510,9 +1510,9 @@ function ThreadShellContent({
         )}
       </ComposerUsagePopover>
       {activePreview && previewSessionKey ? (
-        <FileActionsProvider key={previewSessionKey} value={fileActions}>
+        <ToastProvider key={previewSessionKey} scopeKey={previewSessionKey}>
+        <FileActionsProvider value={fileActions}>
         <PreviewPane
-          key={previewSessionKey}
           tabs={visiblePreview.tabs}
           activeId={activePreview.id}
           width={filePreviewWidth}
@@ -1523,6 +1523,7 @@ function ThreadShellContent({
           panelRef={previewPanelRef}
           onResizeStart={handleFilePreviewResizeStart}
         >
+          <LocalToastViewport surface="preview" />
           <FilePreviewPanel
             key={activePreview.id}
             sessionKey={previewSessionKey}
@@ -1535,6 +1536,7 @@ function ThreadShellContent({
           />
         </PreviewPane>
         </FileActionsProvider>
+        </ToastProvider>
       ) : null}
     </section>
     </SubagentTasksProvider>

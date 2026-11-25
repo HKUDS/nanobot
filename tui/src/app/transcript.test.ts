@@ -49,10 +49,24 @@ describe("NanobotTui transcript", () => {
       for (const text of liveText) expect(live).toContain(text)
       process.env.LC_ALL = "zh_TW.UTF-8"
       app.accept({ event: "attached", chat_id: "chat" })
-      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+      const ui = app as unknown as { ready: boolean; activeTurn: boolean; contextWindowTokens: number }
+      if (event.event === "turn_end") {
+        // The snapshot already includes the end queued while reattach is fetching it.
+        expect(ui.ready).toBe(false)
+        app.accept({ event: "goal_status", chat_id: "chat", turn_id: event.turn_id, status: "running" })
+        app.accept({ ...event, context_window_tokens: 64000 })
+        await waitUntil(() => ui.contextWindowTokens === 64000)
+      }
+      await waitUntil(() => ui.ready)
       await setup.flush()
       const replay = setup.captureCharFrame()
-      for (const text of replayText) expect(replay).toContain(text)
+      for (const text of replayText) expect(occurrences(replay, text)).toBe(1)
+      if (event.event === "turn_end") {
+        expect(ui.activeTurn).toBe(false)
+        app.accept({ ...event, turn_id: "another-turn" })
+        await setup.flush()
+        expect(occurrences(setup.captureCharFrame(), replayText[0]!)).toBe(2)
+      }
     } finally {
       globalThis.fetch = original
       if (lang === undefined) delete process.env.LC_ALL
@@ -74,6 +88,7 @@ describe("NanobotTui transcript", () => {
         schemaVersion: 3, projection: "events",
         events: older
           ? [
+              failedTurn("empty_final_response"),
               { event: "user_message", chat_id: "chat", starts_turn: false, text: "!cat oldest.log", turn_id: "old-shell" },
               { event: "message", chat_id: "chat", text: oldest, render_as: "text", turn_id: "old-shell" },
             ]
@@ -103,6 +118,8 @@ describe("NanobotTui transcript", () => {
       await setup.flush()
       const frame = setup.captureCharFrame()
 
+      expect(frame).toContain("×")
+      expect(frame.indexOf("×")).toBeLessThan(frame.indexOf("!cat oldest.log"))
       expect(frame.indexOf("!cat oldest.log")).toBeLessThan(frame.indexOf("!cat recent.log"))
       expect(frame.indexOf("oldest answer")).toBeLessThan(frame.indexOf("recent answer"))
       expect((app as unknown as { historyHasMore: boolean }).historyHasMore).toBe(false)

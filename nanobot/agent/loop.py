@@ -20,6 +20,7 @@ from loguru import logger
 from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
+from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.agent.context import ContextBuilder, PersistedPromptContextResolver, TranscriptInput
 from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.execution_policy import ExecutionControlError, ExecutionPolicy, ExecutionScope
@@ -1622,11 +1623,11 @@ class AgentLoop:
                         pending_queue=pending,
                         delivery=delivery,
                     )
-                    await delivery.complete(response, publish_completion=True)
+                    failure = await delivery.complete(response, publish_completion=True)
                     if response is not None and delivery.after_command_reply:
                         delivery.after_command_reply()
                     for coordinator in self._automation_turn_coordinators:
-                        coordinator.complete(msg, response=response)
+                        coordinator.complete(msg, response=response, error=AutomationTurnError(failure) if failure else None)
                 except asyncio.CancelledError as exc:
                     logger.info("Task cancelled for session {}", session_key)
                     if not processing:

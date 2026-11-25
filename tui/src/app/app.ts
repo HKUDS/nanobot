@@ -836,11 +836,11 @@ export class NanobotTui {
         const failed = event.outcome === "failed"
         this.transcript.finishStream(failed || this.turnHadAnswer ? "" : this.finalMessage)
         if (failed) {
-          this.transcript.notice(
+          this.transcript.turnFailure(
             event.failure_kind === "model"
               ? terminalModelFailureLine(event.failure_error_kind, event.failure_attempts)
               : event.failure_message || "This turn failed and has ended.",
-            true,
+            event.turn_id,
           )
         }
         this.transcript.finishActivity()

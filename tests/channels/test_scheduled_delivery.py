@@ -116,7 +116,7 @@ async def test_scheduled_recovery_remains_busy_while_waiting_for_a_send_slot(tmp
 
 @pytest.mark.parametrize("reply_kind,one_shot,origin", [
     ("final", False, "whatsapp"), ("message_tool", False, "whatsapp"), ("message_tool", True, "whatsapp"),
-    ("message_tool", False, "websocket"), ("empty_final", True, "whatsapp"),
+    ("message_tool", False, "websocket"), ("empty_final", False, "whatsapp"),
 ])
 async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, monkeypatch, reply_kind, one_shot, origin):
     legacy_message = reply_kind == "message_tool"
@@ -191,7 +191,17 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
         if one_shot:
             assert cron.list_jobs() == []
         else:
-            assert cron.list_jobs()[0].state.last_status == "ok"
+            state = cron.list_jobs()[0].state
+            if reply_kind == "empty_final":
+                assert state.last_status == "error"
+                assert state.last_error == "empty_final_response_length"
+                record, = (tmp_path / "cron" / "runs").glob("*.json")
+                audit = json.loads(record.read_text(encoding="utf-8"))
+                assert (audit["status"], audit["error"], audit["run_id"]) == (
+                    "error", state.last_error, state.run_history[-1].run_id,
+                )
+            else:
+                assert state.last_status == "ok"
         assert len(whatsapp_rows()) == 1
         assert whatsapp_rows()[0]["status"] == "pending"
         saved = json.loads(whatsapp_rows()[0]["payload"])

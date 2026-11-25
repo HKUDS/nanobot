@@ -366,7 +366,8 @@ class TurnDelivery:
         response: OutboundMessage | None,
         *,
         publish_completion: bool,
-    ) -> None:
+    ) -> str | None:
+        """Deliver the response and return the turn failure independently of delivery success."""
         stop_reason = self._stop_reason
         if stop_reason is None and response is not None:
             stop_reason = cast(str | None, response.metadata.get("_stop_reason"))
@@ -409,20 +410,23 @@ class TurnDelivery:
                     metadata=dict(self.lifecycle_message.metadata or {}),
                 )
             )
+        outcome, failure_kind = _turn_outcome(stop_reason)
+        error_kind = self._failure_error_kind or (
+            self._retry_status.error_kind if failure_kind == "model" and self._retry_status else None
+        )
         if publish_completion:
-            outcome, failure_kind = _turn_outcome(stop_reason)
             await self._publish_completion(
                 channel=completed_channel,
                 chat_id=completed_chat_id,
                 outcome=outcome,
                 failure_kind=failure_kind,
-                failure_error_kind=(self._failure_error_kind or (
-                    self._retry_status.error_kind if failure_kind == "model" and self._retry_status else None
-                )),
+                failure_error_kind=error_kind,
                 failure_attempts=(
                     self._retry_status.attempt if failure_kind == "model" and self._retry_status else None
                 ),
             )
+
+        return (error_kind or stop_reason) if outcome == "failed" else None
 
     async def cancelled(self) -> None:
         await self._publish_completion(outcome="cancelled")

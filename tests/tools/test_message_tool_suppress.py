@@ -135,8 +135,29 @@ class TestMessageToolSuppressLogic:
         assert result is not None
         assert result.content == "Heartbeat summary"
 
-    @pytest.mark.parametrize("followup_reply", ["tool", "text", "empty"])
-    async def test_only_sends_for_the_current_input_suppress_the_final_reply(self, tmp_path, followup_reply):
+    async def test_goal_milestone_does_not_suppress_the_continued_goal_report(self, tmp_path):
+        loop = _make_loop(tmp_path)
+        loop.execution_policy = MagicMock()
+        scope = loop.execution_policy.scope.return_value.__enter__.return_value
+        scope.continuation_prompt = AsyncMock(side_effect=["Continue the goal", None])
+        send = AsyncMock()
+        loop.tools.get("message").set_send_callback(send)
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+            LLMResponse(content=None, tool_calls=[ToolCallRequest(
+                id="milestone", name="message", arguments={"content": "First milestone"},
+            )]),
+            LLMResponse(content="Milestone sent"),
+            LLMResponse(content="Final goal report"),
+        ])
+
+        response = await loop._process_message(InboundMessage("feishu", "user", "chat", "Start"))
+
+        send.assert_awaited_once()
+        assert send.await_args.args[0].content == "First milestone"
+        assert response is not None and response.content == "Final goal report"
+
+    @pytest.mark.parametrize(("followup_reply", "ack"), [("tool", ""), ("tool", "Sent."), ("text", ""), ("empty", "")])
+    async def test_only_sends_for_the_current_input_suppress_the_final_reply(self, tmp_path, followup_reply, ack):
         loop = _make_loop(tmp_path)
         pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
         sent = []
@@ -159,7 +180,7 @@ class TestMessageToolSuppressLogic:
         second = tool_reply("second") if followup_reply == "tool" else LLMResponse(
             content="Second answer" if followup_reply == "text" else "",
         )
-        replies = iter([tool_reply("first"), second])
+        replies = iter([tool_reply("first"), second, LLMResponse(content=ack)])
         loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda **_: next(replies, LLMResponse(content="")))
         capture = SDKCaptureHook()
         result = await loop._process_message(

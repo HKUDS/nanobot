@@ -257,7 +257,7 @@ export async function fetchHistory(
       case "turn_end":
         if (event.outcome === "failed" && event.failure_kind === "model") {
           const notice = emptyFinalResponseLine(event.failure_error_kind)
-          if (notice) messages.push({ role: "error", content: notice })
+          if (notice) messages.push({ role: "error", content: notice, turnId: event.turn_id })
         }
         stream = null
         lastAnswer = null
