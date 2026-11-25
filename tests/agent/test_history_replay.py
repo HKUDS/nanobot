@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -117,5 +118,5 @@ async def test_runner_checkpoint_keeps_current_user_as_replay_boundary(tmp_path:
     assert "new question" in sent_text
     assert [message["role"] for message in sent_messages] == ["system", "user"]
     assert sent_messages[1]["content"].startswith("new question\n\n")
-    assert "File access:" in sent_messages[1]["content"]
+    assert f"Current project (JSON path): {json.dumps(str(tmp_path.resolve()), ensure_ascii=False)}" in sent_messages[1]["content"]
     assert any(message.get("content") == "long older turn" for message in session.messages)
