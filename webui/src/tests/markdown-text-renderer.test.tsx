@@ -707,6 +707,40 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("sub")).toHaveTextContent("2");
   });
 
+  it.each([
+    { streaming: true, preserveStreamingLayout: true },
+    { streaming: false, preserveStreamingLayout: true },
+    { streaming: false, preserveStreamingLayout: false },
+  ])("renders bare HTML line breaks in table cells (streaming=$streaming, preserve=$preserveStreamingLayout)", (props) => {
+    render(
+      <MarkdownTextRenderer {...props}>
+        {[
+          "| Task | Status |",
+          "| --- | --- |",
+          "| Report | Draft<br>Ready |",
+          "| Build | Queued<br/>Running |",
+          "| Review | Pending<br />Done |",
+          "| Test | Started<BR>Passed |",
+        ].join("\n")}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(Array.from(screen.getByRole("table").querySelectorAll("td:last-child"), (cell) => cell.innerHTML))
+      .toEqual(["Draft<br>Ready", "Queued<br>Running", "Pending<br>Done", "Started<br>Passed"]);
+  });
+
+  it("keeps escaped, code, and attributed line break syntax literal", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>
+        {'Escaped: &lt;br&gt;. Code: `<br>`. Attributed: A<br title="note">B.'}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container).toHaveTextContent('Escaped: <br>. Code: <br>. Attributed: A<br title="note">B.');
+    expect(container.querySelector("code")).toHaveTextContent(/^<br>$/);
+    expect(container.querySelector("br")).toBeNull();
+  });
+
   it.each([false, true])("keeps unsafe HTML as text (streaming=%s)", (streaming) => {
     const { container } = render(
       <MarkdownTextRenderer streaming={streaming}>

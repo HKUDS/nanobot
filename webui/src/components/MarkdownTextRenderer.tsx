@@ -167,6 +167,11 @@ function normalizeSafeInlineHtml(children: MarkdownAstNode[]): MarkdownAstNode[]
       node.children = normalizeSafeInlineHtml(node.children);
     }
 
+    if (node.type === "html" && /^<br\s*\/?>$/i.test(node.value ?? "")) {
+      next.push(safeHtmlNode("br", []));
+      continue;
+    }
+
     const tag = htmlTag(node);
     if (!tag || tag.closing || !SAFE_INLINE_HTML_TAGS.has(tag.tag)) {
       next.push(node);
