@@ -99,7 +99,7 @@ export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onClos
         <span aria-hidden className="h-full w-px bg-foreground/25 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
       </button>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-tab-${tabs.findIndex((tab) => tab.id === activeId)}`} tabIndex={0}
-        className="flex min-h-0 flex-1 flex-col outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+        className="relative flex min-h-0 flex-1 flex-col outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         {children}
       </div>
   </SidebarPanel>;

@@ -89,6 +89,14 @@ class CommandResultEvent(SideChannelReplyEvent):
 
 
 @dataclass(frozen=True)
+class TurnFailureNotice(AgentEvent):
+    """Deliverable failure facts; the destination owns their presentation."""
+
+    failure_kind: Literal["model", "tool", "internal"]
+    failure_error_kind: str | None = None
+
+
+@dataclass(frozen=True)
 class TurnEndEvent(AgentEvent):
     latency_ms: int | None = None
     goal_state: dict[str, Any] | None = None

@@ -2348,7 +2348,11 @@
     "automationTriggered": "Activada automáticamente"
   },
   "recovery": {
-    "actionFailed": "La recuperación falló. Inténtalo de nuevo.",
+    "details": "Detalles",
+    "restart": "La puerta de enlace se reinició antes de terminar la tarea",
+    "uncertainTool": "Es posible que ya se haya ejecutado una herramienta",
+    "interruptedAgain": "La tarea se interrumpió de nuevo",
+    "actionFailed": "Vuelve a intentar la recuperación",
     "interrupted": "Tarea interrumpida",
     "completed": "Tarea completada",
     "failed": "La recuperación de la tarea falló",
@@ -2506,6 +2510,8 @@
       "imageInputTitle": "La entrada de imágenes está desactivada en este preajuste",
       "imageRequestRejectedTitle": "El modelo rechazó la solicitud con imagen",
       "imageInputBody": "Esta solicitud incluye imágenes. Revisa este preajuste o usa uno compatible con imágenes.",
+      "emptyFinalResponseLength": "El modelo alcanzó el límite de salida antes de responder",
+      "emptyFinalResponse": "El modelo no dio una respuesta final",
       "unknownTitle": "La solicitud al proveedor del modelo falló",
       "bodyWithAttempt": "Se detuvo tras {{attempts}} intentos. Inténtalo más tarde o elige otro modelo.",
       "body": "Inténtalo más tarde o elige otro modelo."

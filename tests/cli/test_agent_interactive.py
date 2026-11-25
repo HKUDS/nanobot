@@ -11,6 +11,7 @@ from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
+    TurnFailureNotice,
     outbound_message_for_event,
 )
 from nanobot.cli.commands import app
@@ -19,11 +20,11 @@ from nanobot.config.schema import Config
 runner = CliRunner()
 
 
-@pytest.mark.parametrize("streamed", [False, True])
+@pytest.mark.parametrize("reply", ["plain", "streamed", "internal_failure"])
 def test_interactive_agent_routes_a_complete_user_turn(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
-    streamed: bool,
+    reply: str,
 ) -> None:
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
@@ -70,7 +71,16 @@ def test_interactive_agent_routes_a_complete_user_turn(
         async def run(self) -> None:
             message = await self.bus.consume_inbound()
             seen["inbound"] = message
-            if streamed:
+            if reply == "internal_failure":
+                await self.bus.publish_event(
+                    StreamDeltaEvent(content="partial answer"),
+                    channel=message.channel, chat_id=message.chat_id,
+                )
+                await self.bus.publish_event(
+                    TurnFailureNotice(failure_kind="internal"),
+                    channel=message.channel, chat_id=message.chat_id,
+                )
+            elif reply == "streamed":
                 for event in (
                     StreamDeltaEvent(content="hello "),
                     StreamDeltaEvent(content="world"),
@@ -103,6 +113,8 @@ def test_interactive_agent_routes_a_complete_user_turn(
 
     read_input = AsyncMock(side_effect=["hello nanobot", "exit"])
     print_response = MagicMock()
+    print_notice = AsyncMock()
+    monkeypatch.setattr("nanobot.cli.terminal._print_interactive_line", print_notice)
     monkeypatch.setattr("nanobot.cli.agent._load_runtime_config", lambda *_args: config)
     monkeypatch.setattr("nanobot.cli.agent.sync_workspace_templates", lambda *_args: None)
     monkeypatch.setattr("nanobot.cli.agent.is_default_workspace", lambda *_args: False)
@@ -144,7 +156,12 @@ def test_interactive_agent_routes_a_complete_user_turn(
     assert len(renderers) == 1
     renderer = renderers[0]
     assert isinstance(renderer, _Renderer)
-    if streamed:
+    if reply == "internal_failure":
+        assert renderer.deltas == ["partial answer"]
+        print_notice.assert_awaited_once_with("An internal error prevented nanobot from completing the request. Please try again.")
+        print_response.assert_not_called()
+        assert renderer.closed == 1
+    elif reply == "streamed":
         assert renderer.deltas == ["hello ", "world"]
         assert renderer.ends == [False]
         assert renderer.closed == 0

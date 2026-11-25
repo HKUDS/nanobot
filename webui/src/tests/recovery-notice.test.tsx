@@ -1,12 +1,17 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as renderUI, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { ReactElement } from "react";
+import { ThreadToastViewport } from "@/components/ui/toast";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
+
+const render = (element: ReactElement) => renderUI(element, { wrapper: ThreadToastViewport });
+const openDetails = () => fireEvent.click(screen.getByRole("button", { name: "Details" }));
 
 const INTERRUPTED = {
   status: "awaiting_user" as const,
   recovery_id: "recovery-1",
-  reason: "tool_state_uncertain",
+  reason: "tool_state_unknown",
 };
 
 describe("RecoveryNotice", () => {
@@ -38,7 +43,7 @@ describe("RecoveryNotice", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
     unmount();
 
-    const { container } = render(
+    render(
       <RecoveryNotice
         state={{ status: "resuming", recovery_id: "recovery-1" }}
         onContinue={onContinue}
@@ -46,30 +51,16 @@ describe("RecoveryNotice", () => {
       />,
     );
 
-    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("uses the shared alert surface and motion treatment", () => {
-    render(
-      <RecoveryNotice
-        state={INTERRUPTED}
-        onContinue={vi.fn().mockResolvedValue(undefined)}
-        onDismiss={vi.fn().mockResolvedValue(undefined)}
-      />,
-    );
-
+  it("keeps the uncertain tool decision available and explains that tools are not replayed", () => {
+    render(<RecoveryNotice state={INTERRUPTED} onContinue={vi.fn()} onDismiss={vi.fn()} />);
     const notice = screen.getByRole("alert");
-    expect(notice).toHaveAttribute("data-recovery-status", "awaiting_user");
-    expect(notice).toHaveAttribute("aria-live", "assertive");
-    expect(notice).toHaveClass(
-      "thread-composer-notice",
-      "rounded-control",
-      "animate-in",
-      "fade-in-0",
-      "slide-in-from-bottom-1",
-      "duration-200",
-      "motion-reduce:animate-none",
-    );
+    expect(notice).toHaveTextContent("A tool may already have run");
+    expect(notice.closest(".toast-card")).toHaveAttribute("data-toast-timed", "false");
+    openDetails();
+    expect(screen.getByRole("dialog")).toHaveTextContent("Tools will not be replayed automatically.");
   });
 
   it("keeps the notice visible when Continue fails", async () => {
@@ -86,7 +77,7 @@ describe("RecoveryNotice", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("Recovery action failed");
+      expect(screen.getByRole("alert")).toHaveTextContent("Try the recovery action again");
     });
   });
 
@@ -142,7 +133,8 @@ describe("RecoveryNotice", () => {
     const state = { ...INTERRUPTED, reason: "model_request_failed", failure_error_kind: "unsupported_image" };
     const actions = { onContinue: vi.fn(), onDismiss: vi.fn(), onInspectImagePreset };
     const { rerender } = render(<RecoveryNotice state={state} {...actions} imageInputBlocked />);
-    expect(screen.getByRole("alert")).toHaveTextContent("This request includes images");
+    openDetails();
+    expect(screen.getByRole("dialog")).toHaveTextContent("This request includes images");
     expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View preset" }));
     expect(onInspectImagePreset).toHaveBeenCalledOnce();
@@ -163,6 +155,7 @@ describe("RecoveryNotice", () => {
     );
     expect(screen.getByRole("alert")).toHaveTextContent("Model provider authorization failed");
     expect(screen.getByRole("alert")).not.toHaveTextContent("Task interrupted");
+    openDetails();
     fireEvent.click(screen.getByRole("button", { name: "Open model settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
@@ -182,7 +175,8 @@ it("shows a saved reply without treating the failed request as completed", async
   );
 
   expect(screen.getByRole("alert")).toHaveTextContent("Model connection failed");
-  expect(screen.getByRole("alert")).toHaveTextContent("Reply saved. You can continue.");
+  openDetails();
+  expect(screen.getByRole("dialog")).toHaveTextContent("Reply saved. You can continue.");
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   expect(onContinue).toHaveBeenCalledOnce();
@@ -195,5 +189,6 @@ it("shows a saved reply without treating the failed request as completed", async
     />,
   );
   expect(screen.getByRole("alert")).toHaveTextContent("Model connection failed");
-  expect(screen.getByRole("alert")).toHaveTextContent("Try again later or choose another model.");
+  openDetails();
+  expect(screen.getByRole("dialog")).toHaveTextContent("Try again later or choose another model.");
 });

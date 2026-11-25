@@ -5,6 +5,12 @@ export interface ModelRequestFailureDetails {
   attempts?: number;
 }
 
+export function emptyFinalMessageKey(errorKind?: string) {
+  if (errorKind === "empty_final_response_length") return "errors.modelRequestFailed.emptyFinalResponseLength";
+  if (errorKind === "empty_final_response") return "errors.modelRequestFailed.emptyFinalResponse";
+  return null;
+}
+
 export function isImageRequestFailure(errorKind?: string): boolean {
   return errorKind === "unsupported_image" || errorKind === "image_request_rejected";
 }

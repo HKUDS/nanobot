@@ -16,37 +16,61 @@ describe("NanobotTui transcript", () => {
   const createRenderer = (rendererOptions: Parameters<typeof createTestRenderer>[0]) => (
     createTestRenderer(rendererOptions)
   )
-  test("keeps localized help syntax literal live and after reattaching to the thread", async () => {
-    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
-    const help = {
+
+  const helpText = ["Commandes nanobot", "/model [preset]", "/dream-prompt [init]"]
+  const failedTurn = (failure_error_kind: string) => ({
+    event: "turn_end", chat_id: "chat", turn_id: "empty", outcome: "failed", failure_kind: "model", failure_error_kind,
+  }) as const
+  test.each([
+    { name: "literal help syntax", event: {
       event: "message", chat_id: "chat", turn_id: "help", side_channel: true, render_as: "text",
       text: "Commandes nanobot :\n/model [preset]\n/dream-prompt [init]", command_result: { command: "/help", parts: [
         { key: "help.title", values: {} }, { text: "/model [preset]" }, { text: "/dream-prompt [init]" },
       ] },
-    } as const
+    } as const, liveText: helpText, replayText: helpText },
+    { name: "empty reply", event: failedTurn("empty_final_response"),
+      liveText: ["Le modèle n’a pas fourni de réponse finale."], replayText: ["模型未傳回最終答覆。"] },
+    { name: "provider failure", event: failedTurn("connection"),
+      liveText: ["Could not connect to the model provider"], replayText: ["Could not connect to the model provider"] },
+    { name: "tool failure", event: { event: "turn_end", chat_id: "chat", turn_id: "tool", outcome: "failed", failure_kind: "tool" } as const,
+      liveText: ["Un outil a échoué avant la fin de la requête"], replayText: ["工具執行失敗"] },
+    { name: "output limit", event: failedTurn("empty_final_response_length"),
+      liveText: ["Le modèle a atteint sa limite de sortie avant de donner une réponse finale."], replayText: ["模型在給出最終答覆前已達輸出上限。"] },
+  ])("renders $name live and after reattach", async ({ event, liveText, replayText }) => {
+    setup = await createRenderer({ width: 100, height: 24, screenMode: "alternate-screen" })
     const original = globalThis.fetch
     const lang = process.env.LC_ALL
     globalThis.fetch = Object.assign(async () => Response.json({
-      schemaVersion: 3, projection: "events", events: [help],
+      schemaVersion: 3, projection: "events", events: [event],
     }), { preconnect: original.preconnect })
     try {
       process.env.LC_ALL = "fr_FR.UTF-8"
       const app = NanobotTui.mount(setup.renderer, { ...options, apiUrl: "http://fixture", apiToken: "fixture" }, client())
       app.accept({ event: "attached", chat_id: "chat" })
-      app.accept(help)
+      app.accept(event)
       await setup.flush()
       const live = setup.captureCharFrame()
-      expect(live).toContain("Commandes nanobot")
-      expect(live).toContain("/model [preset]")
-      expect(live).toContain("/dream-prompt [init]")
+      for (const text of liveText) expect(live).toContain(text)
       process.env.LC_ALL = "zh_TW.UTF-8"
       app.accept({ event: "attached", chat_id: "chat" })
-      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+      const ui = app as unknown as { ready: boolean; activeTurn: boolean; contextWindowTokens: number }
+      if (event.event === "turn_end") {
+        // The snapshot already includes the end queued while reattach is fetching it.
+        expect(ui.ready).toBe(false)
+        app.accept({ event: "goal_status", chat_id: "chat", turn_id: event.turn_id, status: "running" })
+        app.accept({ ...event, context_window_tokens: 64000 })
+        await waitUntil(() => ui.contextWindowTokens === 64000)
+      }
+      await waitUntil(() => ui.ready)
       await setup.flush()
       const replay = setup.captureCharFrame()
-      expect(replay).toContain("Commandes nanobot")
-      expect(replay).toContain("/model [preset]")
-      expect(replay).toContain("/dream-prompt [init]")
+      for (const text of replayText) expect(occurrences(replay, text)).toBe(1)
+      if (event.event === "turn_end") {
+        expect(ui.activeTurn).toBe(false)
+        app.accept({ ...event, turn_id: "another-turn" })
+        await setup.flush()
+        expect(occurrences(setup.captureCharFrame(), replayText[0]!)).toBe(2)
+      }
     } finally {
       globalThis.fetch = original
       if (lang === undefined) delete process.env.LC_ALL
@@ -68,6 +92,7 @@ describe("NanobotTui transcript", () => {
         schemaVersion: 3, projection: "events",
         events: older
           ? [
+              failedTurn("empty_final_response"),
               { event: "user_message", chat_id: "chat", starts_turn: false, text: "!cat oldest.log", turn_id: "old-shell" },
               { event: "message", chat_id: "chat", text: oldest, render_as: "text", turn_id: "old-shell" },
             ]
@@ -97,6 +122,8 @@ describe("NanobotTui transcript", () => {
       await setup.flush()
       const frame = setup.captureCharFrame()
 
+      expect(frame).toContain("×")
+      expect(frame.indexOf("×")).toBeLessThan(frame.indexOf("!cat oldest.log"))
       expect(frame.indexOf("!cat oldest.log")).toBeLessThan(frame.indexOf("!cat recent.log"))
       expect(frame.indexOf("oldest answer")).toBeLessThan(frame.indexOf("recent answer"))
       expect((app as unknown as { historyHasMore: boolean }).historyHasMore).toBe(false)
@@ -126,6 +153,8 @@ describe("NanobotTui transcript", () => {
       setup = await createRenderer({ width: 100, height: 26, screenMode: "alternate-screen" })
       const app = mount(setup)
       app.accept({ event: "delta", chat_id: "chat", turn_id: "agent", text: "Beginning" })
+      app.accept({ event: "turn_failure_notice", chat_id: "chat", failure_kind: "internal" })
+      expect((app as unknown as { activeTurn: boolean }).activeTurn).toBe(true)
       app.accept({ event: "message", chat_id: "chat", text: "Modèle actuel : `{preset}`\nRaw {model}", side_channel: true, turn_id: "notice",
         command_result: { command: "/model", parts: [{ key: "model.current", values: { model: "{preset}" } }, { text: "Raw {model}" }] } })
       app.accept({ event: "context_compaction", chat_id: "chat", compaction_id: "manual", phase: "succeeded" })
@@ -133,7 +162,7 @@ describe("NanobotTui transcript", () => {
       app.accept({ event: "turn_end", chat_id: "chat", turn_id: "agent" })
       await setup.flush()
       const frame = setup.captureCharFrame()
-      for (const text of ["Modèle actuel", "{preset}", "Raw {model}", "Contexte compressé.", "Beginning to end"]) expect(frame).toContain(text)
+      for (const text of ["Une erreur interne a empêché la requête d’aboutir", "Modèle actuel", "{preset}", "Raw {model}", "Contexte compressé.", "Beginning to end"]) expect(frame).toContain(text)
     } finally {
       if (lang === undefined) delete process.env.LC_ALL
       else process.env.LC_ALL = lang

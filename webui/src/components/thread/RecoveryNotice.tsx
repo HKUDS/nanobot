@@ -1,14 +1,10 @@
-import {
-  ResumeIcon,
-} from "@/components/icons/product-icons";
-import { useEffect, useState } from "react";
-import { AlertTriangle, X } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { PersistentToast } from "@/components/ui/toast";
+import { emptyFinalMessageKey, isImageRequestFailure, resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 import type { RecoveryState } from "@/lib/types";
-import { isImageRequestFailure, resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 
 interface RecoveryNoticeProps {
   state: RecoveryState;
@@ -19,100 +15,50 @@ interface RecoveryNoticeProps {
   imageInputBlocked?: boolean;
 }
 
-export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings, onInspectImagePreset, imageInputBlocked }: RecoveryNoticeProps) {
+export function RecoveryNotice(props: RecoveryNoticeProps) {
+  const { status, recovery_id } = props.state;
+  // A resuming or resolved task is no longer a decision. If it is interrupted
+  // again, even with the same ID, start with a fresh pair of actions.
+  if (status !== "awaiting_user" && status !== "failed") return null;
+  return <RecoveryDecision key={`${recovery_id}:${status}`} {...props} />;
+}
+
+function RecoveryDecision({ state, onContinue, onDismiss, onOpenSettings, onInspectImagePreset, imageInputBlocked }: RecoveryNoticeProps) {
   const { t } = useTranslation();
-  const [pending, setPending] = useState<"continue" | "dismiss" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [hiddenRecoveryId, setHiddenRecoveryId] = useState<string | null>(null);
-  useEffect(() => {
-    // A continuation can be interrupted again with the same recovery ID.
-    // Reveal the decision surface when the server returns to a waiting state.
-    if (state.status === "awaiting_user" || state.status === "failed") {
-      setHiddenRecoveryId(null);
-    }
-  }, [state.recovery_id, state.status]);
-  const waiting = state.status === "awaiting_user" || state.status === "failed";
-  // Recovery metadata stays resuming until the continued turn commits, but
-  // execution progress belongs to the normal running-turn UI, even after reload.
-  if (!waiting || hiddenRecoveryId === state.recovery_id) return null;
+  const [submitted, setSubmitted] = useState(false);
+  const [actionFailed, setActionFailed] = useState(false);
+  if (submitted) return null;
 
-  const contextUnavailable = state.can_continue === false;
-  const modelFailure = state.reason === "model_request_failed"
-    ? resolveModelRequestFailureCopy({ errorKind: state.failure_error_kind }, t)
-    : null;
+  const emptyFinalKey = state.reason === "model_request_failed" && emptyFinalMessageKey(state.failure_error_kind);
+  const modelFailure = state.reason === "model_request_failed" && !emptyFinalKey
+    ? resolveModelRequestFailureCopy({ errorKind: state.failure_error_kind }, t) : null;
   const imageFailure = modelFailure !== null && isImageRequestFailure(state.failure_error_kind);
-  const openSettings = imageFailure ? onInspectImagePreset : onOpenSettings;
-  const title = modelFailure?.title ?? (state.status === "failed"
-    ? t("recovery.failed", { defaultValue: "Task recovery failed" })
-    : t("recovery.interrupted", { defaultValue: "Task interrupted" }));
-  const detail = contextUnavailable || state.status === "failed"
-    ? t("recovery.failedHelp", {
-        defaultValue: "The saved task could not be restored safely. Review it before continuing.",
-      })
-    : modelFailure && !imageFailure && state.reply_preserved === true
-      ? t("recovery.replyPreserved", { defaultValue: "Reply saved. You can continue." })
-      : modelFailure?.body ?? t("recovery.review", { defaultValue: "Review the task before continuing. Tools will not be replayed automatically." });
-  const run = (action: "continue" | "dismiss") => {
-    setPending(action);
-    setError(null);
-    // ``resuming`` is an internal transition, not another task for the user
-    // to monitor. Hide the notice optimistically and only bring it back if
-    // the explicit action is rejected.
-    if (action === "continue") setHiddenRecoveryId(state.recovery_id);
-    const operation = action === "continue" ? onContinue() : onDismiss();
-    void operation.catch(() => {
-      if (action === "continue") setHiddenRecoveryId(null);
-      setError(t("recovery.actionFailed", { defaultValue: "Recovery action failed. Try again." }));
-    }).finally(() => setPending(null));
-  };
+  const openSettings = modelFailure && (imageFailure ? onInspectImagePreset : onOpenSettings);
+  const canContinue = state.can_continue !== false && !(state.failure_error_kind === "unsupported_image" && imageInputBlocked);
+  const reasonKey = state.reason === "restart_requires_confirmation" ? "recovery.restart"
+    : state.reason === "tool_state_unknown" ? "recovery.uncertainTool"
+    : state.reason === "loop_guard" ? "recovery.interruptedAgain"
+    : state.status === "failed" || state.reason === "checkpoint_invalid" ? "recovery.failed" : "recovery.interrupted";
+  const title = emptyFinalKey ? t(emptyFinalKey) : modelFailure?.title ?? t(reasonKey);
+  const detail = state.can_continue === false || state.status === "failed" ? t("recovery.failedHelp")
+    : modelFailure && !imageFailure && state.reply_preserved ? t("recovery.replyPreserved")
+    : emptyFinalKey ? null : modelFailure?.body ?? t("recovery.review");
 
-  return (
-    <div
-      role="alert"
-      aria-live="assertive"
-      data-recovery-status={state.status}
-      className="thread-composer-notice mb-2 flex flex-wrap items-center gap-3 rounded-control border border-border/70 bg-muted/35 px-3 py-2 text-sm transition-[background-color,border-color,opacity,transform] duration-200 ease-out motion-reduce:transition-none animate-in fade-in-0 slide-in-from-bottom-1 duration-200 motion-reduce:animate-none"
-    >
-      <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
-      <div className="min-w-0 flex-1 basis-48">
-        <p className="font-medium">
-          {title}
-        </p>
-        {modelFailure && openSettings ? (
-          <Button variant="link" size="sm" className="h-auto px-0 py-1" onClick={openSettings}>
-            {t(imageFailure ? "settings.models.viewPreset" : "thread.composer.reauthSettings")}
-          </Button>
-        ) : null}
-        <p className={cn(
-          "mt-0.5 text-xs",
-          error ? "text-destructive" : "text-muted-foreground",
-        )}>
-          {error ?? detail}
-        </p>
-      </div>
-      <div className="ms-auto flex shrink-0 items-center gap-1.5">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={pending !== null}
-          onClick={() => run("dismiss")}
-        >
-          <X className="mr-1 h-3.5 w-3.5" aria-hidden />
-          {t("recovery.dismiss", { defaultValue: "Dismiss" })}
-        </Button>
-        {!contextUnavailable && !(state.failure_error_kind === "unsupported_image" && imageInputBlocked) ? (
-          <Button
-            type="button"
-            size="sm"
-            disabled={pending !== null}
-            onClick={() => run("continue")}
-          >
-            <ResumeIcon className="mr-1 h-3.5 w-3.5" aria-hidden />
-            {t("recovery.continue", { defaultValue: "Continue" })}
-          </Button>
-        ) : null}
-      </div>
-    </div>
-  );
+  const run = (operation: () => Promise<void>) => {
+    setSubmitted(true);
+    void operation().catch(() => {
+      setSubmitted(false);
+      setActionFailed(true);
+    });
+  };
+  return <PersistentToast tone="error" message={actionFailed ? t("recovery.actionFailed") : title}
+    action={canContinue ? { label: t("recovery.continue"), run: () => run(onContinue) } : undefined}
+    secondaryAction={{ label: t("recovery.dismiss"), run: () => run(onDismiss) }}
+    details={detail || openSettings || actionFailed ? { label: t("recovery.details"), content: <div className="space-y-2 p-3 text-sm">
+      {actionFailed && <p>{title}</p>}
+      {detail && <p>{detail}</p>}
+      {openSettings && <Button variant="link" size="sm" className="h-auto p-0" onClick={openSettings}>
+        {t(imageFailure ? "settings.models.viewPreset" : "thread.composer.reauthSettings")}
+      </Button>}
+    </div> } : undefined} />;
 }

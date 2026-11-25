@@ -51,7 +51,8 @@ async def test_failed_stream_retains_real_reply_for_the_next_request(text):
     assert result.failure_error_kind == "connection"
     assert result.messages[-1]["content"] == text
     assert result.messages[-1]["_interrupted"] is True
-    assert result.final_content == result.error == "network diagnostic, not assistant text"
+    assert result.final_content is None
+    assert result.error == "network diagnostic, not assistant text"
     assert checkpoints == []
     continue_goal.assert_not_awaited()
     tools.execute.assert_not_awaited()
@@ -138,8 +139,8 @@ async def test_nonstreaming_provider_error_is_not_observed_as_assistant_body():
 
     assert result.stop_reason == "error"
     assert result.failure_error_kind == "unknown"
-    assert result.error == result.final_content
-    assert "Open Settings → Models" in result.final_content
+    assert result.final_content is None
+    assert "Open Settings → Models" in result.error
     assert result.messages[-1]["content"] == _PERSISTED_MODEL_ERROR_PLACEHOLDER
     assert result.messages[-1].get("_interrupted") is not True
     show.assert_not_awaited()
@@ -200,7 +201,8 @@ async def test_retry_and_fallback_preserve_failed_segments_only_on_terminal_erro
         assert assistant[0]["content"] == "First attempt.\n\nSecond attempt.\n\nBackup answer."
         assert assistant[0]["_interrupted"] is True
         assert result.stop_reason == "error"
-        assert result.final_content == "fallback connection diagnostic"
+        assert result.final_content is None
+        assert result.error == "fallback connection diagnostic"
     else:
         assert assistant[0]["content"] == "Backup answer."
         assert assistant[0].get("_interrupted") is not True

@@ -10,7 +10,7 @@ from nanobot.agent.context import TranscriptInput
 from nanobot.agent.goal_permission import goal_mutation_allowed
 from nanobot.agent.tools.context import RequestContext
 from nanobot.bus.events import InboundMessage
-from nanobot.bus.outbound_events import StreamedResponseEvent
+from nanobot.bus.outbound_events import StreamedResponseEvent, TurnFailureNotice
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults
 from nanobot.events import ModelRequestEvent, RetryStatusEvent
@@ -491,7 +491,7 @@ async def test_loop_retries_think_only_final_response(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_llm_error_returns_regular_response_instead_of_streamed_event(tmp_path):
+async def test_streaming_turn_returns_model_failure_notice(tmp_path):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -501,7 +501,7 @@ async def test_llm_error_returns_regular_response_instead_of_streamed_event(tmp_
     provider.get_default_model.return_value = "test-model"
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
     error_resp = LLMResponse(
-        content="503 service unavailable", finish_reason="error", tool_calls=[], usage=None,
+        content="503 service unavailable", finish_reason="error", error_status_code=503,
     )
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=error_resp)
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -516,10 +516,8 @@ async def test_llm_error_returns_regular_response_instead_of_streamed_event(tmp_
     )
 
     assert result is not None
-    assert "503" in result.content
-    assert not isinstance(result.event, StreamedResponseEvent), (
-        "streamed response event must not be set when stop_reason is error"
-    )
+    assert result.event == TurnFailureNotice("model", "server")
+    assert result.content == ""
 
 
 @pytest.mark.asyncio
@@ -584,7 +582,7 @@ async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.chat_stream_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage=None),
+        LLMResponse(content="429 rate limit exceeded", finish_reason="error", error_status_code=429),
         LLMResponse(content="Recovered answer", tool_calls=[], usage=None),
     ])
 
@@ -595,7 +593,8 @@ async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
         InboundMessage(channel="cli", sender_id="user", chat_id="test", content="first question")
     )
     assert first is not None
-    assert first.content == "429 rate limit exceeded"
+    assert first.event == TurnFailureNotice("model", "rate_limit")
+    assert first.content == ""
 
     session = loop.sessions.get_or_create("cli:test")
     assert [

@@ -206,6 +206,10 @@ The event contains no pairing codes or account data. Read the current state from
 {"event": "attached", "chat_id": "uuid-v4"}
 ```
 
+**`turn_end` with `outcome: "failed"`** — the turn ended without a successful reply. Display a notice from `failure_kind` (`model`, `tool`, or `internal`) and, when present, `failure_error_kind`. For example, `{"event":"turn_end","chat_id":"chat1","outcome":"failed","failure_kind":"model","failure_error_kind":"billing"}` means the provider rejected the request for billing or quota reasons. Do not expect a separate assistant message containing the error.
+
+**`turn_failure_notice`** — a chat-scoped failure without a turn completion, for example when a follow-up cannot be accepted while a turn is running. Display the notice without ending that turn or changing its transcript.
+
 **`error`** — soft error for malformed inbound envelopes. The connection stays open:
 
 ```json

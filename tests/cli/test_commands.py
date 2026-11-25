@@ -21,6 +21,7 @@ from nanobot.agent.tools.mcp_metadata import MCPRuntimeSnapshot
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import TurnFailureNotice
 from nanobot.bus.queue import MessageBus
 from nanobot.cli import commands as cli_commands
 from nanobot.cli import gateway_runtime as cli_gateway_runtime
@@ -1606,6 +1607,35 @@ def test_agent_rejects_unknown_tui_theme(mock_agent_runtime):
     mock_agent_runtime["from_config"].assert_not_called()
 
 
+@pytest.mark.parametrize(("kind", "error_kind", "notice"), [
+    ("model", "empty_final_response", "The model didn't return a final answer. Please try again."),
+    ("model", "empty_final_response_length", "The model reached its output limit before returning a final answer."),
+    ("model", "billing", "The model provider has no quota available. Check the provider account's billing and try again."),
+    ("model", "server", "The model request failed. Check the provider configuration or service status and try again."),
+    ("tool", None, "A tool failed before the request could be completed."),
+])
+def test_one_shot_agent_reports_turn_failure_as_a_notice(mock_agent_runtime, kind, error_kind, notice):
+    from nanobot.bus.outbound_events import TurnFailureNotice
+
+    mock_agent_runtime["agent_loop"].process_direct.return_value = OutboundMessage(
+        channel="cli", chat_id="direct", content="",
+        event=TurnFailureNotice(failure_kind=kind, failure_error_kind=error_kind),
+    )
+    result = runner.invoke(app, ["agent", "-m", "hello"])
+    assert result.exit_code == 0, result.output
+    assert " ".join(result.output.split()).count(notice) == 1
+    mock_agent_runtime["print_response"].assert_not_called()
+
+
+def test_one_shot_agent_reports_internal_exception_without_diagnostics(mock_agent_runtime):
+    mock_agent_runtime["agent_loop"].process_direct.side_effect = RuntimeError("private diagnostic details")
+    result = runner.invoke(app, ["agent", "-m", "hello"])
+    assert result.exit_code == 1
+    assert "An internal error prevented nanobot from completing the request." in result.output
+    assert "private diagnostic details" not in result.output
+    mock_agent_runtime["print_response"].assert_not_called()
+
+
 def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_runtime):
     result = runner.invoke(app, ["agent", "-m", "hello"])
 
@@ -2070,9 +2100,15 @@ def _patch_cli_command_runtime(
         monkeypatch.setattr("nanobot.config.paths.get_cron_dir", get_cron_dir)
 
 
+@pytest.mark.parametrize(("notice", "expected_error"), [
+    (None, None),
+    (TurnFailureNotice("model", "empty_final_response_length"), "empty_final_response_length"),
+])
 def test_heartbeat_empty_response_is_not_evaluated(
-    monkeypatch, tmp_path: Path,
+    monkeypatch, tmp_path: Path, notice: TurnFailureNotice | None, expected_error: str | None,
 ) -> None:
+    from nanobot.cron.service import CronService
+
     config_file = _write_instance_config(tmp_path)
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
@@ -2086,25 +2122,27 @@ def test_heartbeat_empty_response_is_not_evaluated(
     provider = _fake_provider()
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
-    seen: dict[str, object] = {}
+    direct = AsyncMock(return_value=OutboundMessage(channel="telegram", chat_id="u1", content="", event=notice))
 
     class _FakeSessionManager(_EmptyGatewaySessionManager):
         def __init__(self, _workspace: Path) -> None:
             pass
 
-        def list_sessions(self) -> list[dict[str, str]]:
-            return [{"key": "telegram:u1"}]
+        @property
+        def state(self):
+            state = super().state
+            state.list_sessions.return_value = [{"key": "telegram:u1"}]
+            state.read = AsyncMock(return_value=SimpleNamespace(generation="generation"))
+            return state
 
-    class _FakeCron:
-        def __init__(self, _store_path: Path, *, admission=None) -> None:
-            self.on_job = None
-            seen["cron"] = self
+    class _TestCron(CronService):
+        def register_system_job(self, job: CronJob) -> CronJob:
+            registered = super().register_system_job(job)
+            if job.id == "heartbeat":
+                raise _StopGatewayError("stop")
+            return registered
 
-        def status(self) -> dict[str, int]:
-            return {"jobs": 0}
-
-        def register_system_job(self, _job: CronJob) -> None:
-            raise _StopGatewayError("stop")
+    cron = _TestCron(tmp_path / "cron" / "jobs.json")
 
     class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
@@ -2117,8 +2155,7 @@ def test_heartbeat_empty_response_is_not_evaluated(
             self.sessions = kwargs["session_manager"]
             self.tools = {}
 
-        async def process_direct(self, *_args, **_kwargs):
-            return SimpleNamespace(content="")
+        process_direct = direct
 
         async def aclose(self) -> None:
             return None
@@ -2142,7 +2179,7 @@ def test_heartbeat_empty_response_is_not_evaluated(
         make_provider=lambda _config: provider,
         message_bus=lambda: bus,
         session_manager=_FakeSessionManager,
-        cron_service=_FakeCron,
+        cron_service=lambda *_args, **_kwargs: cron,
     )
     _patch_fake_agent_loop(monkeypatch, "nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
@@ -2152,10 +2189,14 @@ def test_heartbeat_empty_response_is_not_evaluated(
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
     assert isinstance(result.exception, _StopGatewayError)
-    cron = seen["cron"]
-    response = asyncio.run(cron.on_job(CronJob(id="heartbeat", name="heartbeat")))
-
-    assert response is None
+    assert asyncio.run(cron.run_job("heartbeat"))
+    direct.assert_awaited_once()
+    bus.publish_outbound.assert_not_awaited()
+    job = cron.get_job("heartbeat")
+    assert job is not None
+    run, = job.state.run_history
+    assert run.status == ("error" if expected_error else "ok")
+    assert run.error == expected_error
 
 
 @pytest.mark.parametrize("yes", [True, False])

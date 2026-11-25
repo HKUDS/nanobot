@@ -38,8 +38,8 @@ import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { GoalIsland } from "@/components/thread/GoalIsland";
 import { ThreadLoadingSkeleton } from "@/components/thread/ThreadLoadingSkeleton";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
-import { useToast } from "@/components/ui/toast";
-import { isImageRequestFailure, resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
+import { LocalToastViewport, PersistentToast, ThreadToastViewport, ToastProvider, useToast } from "@/components/ui/toast";
+import { emptyFinalMessageKey, isImageRequestFailure, resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
 import { execSessionCommands } from "@/components/thread/activity/exec-session-model";
@@ -342,7 +342,11 @@ function useInstalledSettingItems<Payload, Item>({
   return items;
 }
 
-export function ThreadShell({
+export function ThreadShell(props: ThreadShellProps) {
+  return <ToastProvider scopeKey={props.session?.key ?? null}><ThreadShellContent {...props} /></ToastProvider>;
+}
+
+function ThreadShellContent({
   session,
   sessions = [],
   titleOverrides = EMPTY_TITLE_OVERRIDES,
@@ -784,11 +788,12 @@ export function ThreadShell({
   const inspectImagePreset = useMemo(() => onInspectImagePreset
     ? () => onInspectImagePreset(activeModelPreset)
     : onOpenModelSettings, [activeModelPreset, onInspectImagePreset, onOpenModelSettings]);
+  const emptyFinalKey = streamError?.kind === "model_request_failed" && emptyFinalMessageKey(streamError.errorKind);
   const imageRequestError = streamError?.kind === "model_request_failed" && isImageRequestFailure(streamError.errorKind)
     ? streamError
     : null;
   useEffect(() => {
-    if (!imageRequestError) return;
+    if (!messagesReady || !imageRequestError) return;
     showToast?.({
       message: resolveModelRequestFailureCopy(imageRequestError, t).title,
       tone: "error",
@@ -796,7 +801,7 @@ export function ThreadShell({
       action: inspectImagePreset ? { label: t("settings.models.viewPreset"), run: inspectImagePreset } : undefined,
     });
     dismissStreamError();
-  }, [dismissStreamError, imageRequestError, inspectImagePreset, showToast, t]);
+  }, [dismissStreamError, imageRequestError, inspectImagePreset, messagesReady, showToast, t]);
   useEffect(() => {
     setModelFallback(null);
     if (!chatId) return;
@@ -1211,17 +1216,7 @@ export function ThreadShell({
           onDismiss={() => setModelFallback((current) => current && { ...current, dismissed: true })}
         />
       ) : null}
-      {recoveryState ? (
-        <RecoveryNotice
-          state={recoveryState}
-          onContinue={continueRecovery}
-          onDismiss={dismissRecovery}
-          onOpenSettings={onOpenModelSettings}
-          onInspectImagePreset={inspectImagePreset}
-          imageInputBlocked={imageInputBlocked}
-        />
-      ) : null}
-      {streamError && !imageRequestError && !hasInlineDeliveryError(messages, streamError) ? (
+      {streamError && !emptyFinalKey && !imageRequestError && !hasInlineDeliveryError(messages, streamError) ? (
         <StreamErrorNotice
           error={streamError}
           onDismiss={dismissStreamError}
@@ -1440,6 +1435,14 @@ export function ThreadShell({
           <ExecSessionCommandsContext.Provider value={sessionCommands}>
           <ThreadViewport
             ref={viewportRef}
+            toastViewport={<ThreadToastViewport>
+              {messagesReady && (recoveryNeedsDecision && recoveryState ? (
+                <RecoveryNotice key={chatId} state={recoveryState} onContinue={continueRecovery} onDismiss={dismissRecovery}
+                  onOpenSettings={onOpenModelSettings} onInspectImagePreset={inspectImagePreset} imageInputBlocked={imageInputBlocked} />
+              ) : emptyFinalKey ? (
+                <PersistentToast tone="error" message={t(emptyFinalKey)} secondaryAction={{ label: t("recovery.dismiss"), run: dismissStreamError }} />
+              ) : null)}
+            </ThreadToastViewport>}
             messages={displayMessages}
             messagesKey={messagesKey}
             navigation={promptNavigation}
@@ -1507,9 +1510,9 @@ export function ThreadShell({
         )}
       </ComposerUsagePopover>
       {activePreview && previewSessionKey ? (
-        <FileActionsProvider key={previewSessionKey} value={fileActions}>
+        <ToastProvider key={previewSessionKey} scopeKey={previewSessionKey}>
+        <FileActionsProvider value={fileActions}>
         <PreviewPane
-          key={previewSessionKey}
           tabs={visiblePreview.tabs}
           activeId={activePreview.id}
           width={filePreviewWidth}
@@ -1520,6 +1523,7 @@ export function ThreadShell({
           panelRef={previewPanelRef}
           onResizeStart={handleFilePreviewResizeStart}
         >
+          <LocalToastViewport surface="preview" />
           <FilePreviewPanel
             key={activePreview.id}
             sessionKey={previewSessionKey}
@@ -1532,6 +1536,7 @@ export function ThreadShell({
           />
         </PreviewPane>
         </FileActionsProvider>
+        </ToastProvider>
       ) : null}
     </section>
     </SubagentTasksProvider>

@@ -209,6 +209,8 @@ function runObservation(event: InboundEvent): RunObservation | null {
     }
     case "goal_status":
       return { ...base, kind: "status", activity: event.status, startedAt: event.started_at };
+    case "turn_failure_notice":
+      return null;
     case "turn_end":
       return { ...base, kind: "completed" };
     case "error":

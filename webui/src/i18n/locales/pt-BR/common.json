@@ -2351,7 +2351,11 @@
     }
   },
   "recovery": {
-    "actionFailed": "A recuperação falhou. Tente novamente.",
+    "details": "Detalhes",
+    "restart": "O gateway reiniciou antes de concluir a tarefa",
+    "uncertainTool": "Uma ferramenta pode já ter sido executada",
+    "interruptedAgain": "A tarefa foi interrompida novamente",
+    "actionFailed": "Tente a recuperação novamente",
     "interrupted": "Tarefa interrompida",
     "completed": "Tarefa concluída",
     "failed": "Falha ao recuperar a tarefa",
@@ -2509,6 +2513,8 @@
       "imageInputTitle": "A entrada de imagens está desativada nesta predefinição",
       "imageRequestRejectedTitle": "O modelo rejeitou a solicitação com imagem",
       "imageInputBody": "Esta solicitação inclui imagens. Confira a predefinição ou use uma que aceite imagens.",
+      "emptyFinalResponseLength": "Limite de saída atingido antes da resposta final",
+      "emptyFinalResponse": "O modelo não deu uma resposta final",
       "unknownTitle": "Falha na solicitação ao provedor do modelo",
       "bodyWithAttempt": "Interrompido após {{attempts}} tentativas. Tente mais tarde ou escolha outro modelo.",
       "body": "Tente mais tarde ou escolha outro modelo."

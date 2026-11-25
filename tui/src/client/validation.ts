@@ -27,6 +27,7 @@ const CHAT_EVENTS = new Set([
   "reasoning_delta",
   "reasoning_end",
   "retry_status",
+  "turn_failure_notice",
   "turn_end",
   "goal_status",
   "goal_state",

@@ -27,6 +27,7 @@ from nanobot.bus.outbound_events import (
     SessionUpdatedEvent,
     SideChannelReplyEvent,
     TurnEndEvent,
+    TurnFailureNotice,
     TurnModelUpdatedEvent,
     UserInputEvent,
 )
@@ -60,6 +61,7 @@ from nanobot.webui.outbound_wire import (
     RuntimeModelWirePayload,
     SessionUpdatedWirePayload,
     StreamWirePayload,
+    TurnFailureNoticeWirePayload,
     TurnModelWirePayload,
     UserInputWirePayload,
     WebUIWirePayload,
@@ -317,6 +319,14 @@ class WebUIOutboundDelivery:
             log = logger.debug if isinstance(event, quiet_events) else logger.warning
             log("no active subscribers for chat_id={}", msg.chat_id)
 
+        if isinstance(event, TurnFailureNotice):
+            notice: TurnFailureNoticeWirePayload = {
+                "event": "turn_failure_notice", "chat_id": msg.chat_id, "failure_kind": event.failure_kind,
+            }
+            if event.failure_error_kind:
+                notice["failure_error_kind"] = event.failure_error_kind
+            await self._fanout(recipients, notice, label=" turn_failure_notice ")
+            return
         if isinstance(event, TurnModelUpdatedEvent):
             if recipients:
                 await self._send_turn_model_updated(msg.chat_id, event)

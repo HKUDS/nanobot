@@ -5754,6 +5754,7 @@ describe("ThreadShell", () => {
       <ThreadShell
         session={{ ...session(chatId), modelPreset: "test-vision" }}
         title="Chat image failure"
+        composerActive={false}
         onToggleSidebar={() => {}}
         onInspectImagePreset={inspectPreset}
       />
@@ -5771,12 +5772,65 @@ describe("ThreadShell", () => {
     }));
 
     const toast = await screen.findByRole("alert");
-    expect(toast.closest('[data-toast-tone="error"]')).not.toBeNull();
+    expect(toast.closest('.thread-viewport [data-toast-tone="error"]')).not.toBeNull();
     expect(toast).toHaveTextContent(toastTitle);
     expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View preset" }));
     expect(inspectPreset).toHaveBeenCalledOnce();
     expect(inspectPreset).toHaveBeenCalledWith("test-vision");
+  });
+
+  it.each([
+    ["empty_final_response", "No final reply from the model"],
+    ["empty_final_response_length", "Output limit reached before the final reply"],
+  ])("shows one scoped %s toast for the live failure and the attached recovery", async (errorKind, message) => {
+    const client = { ...makeClient(), requestMutation: vi.fn().mockResolvedValue({}) };
+    const chatId = "empty-final";
+    const scene = (id: string) => wrap(client,
+      <ThreadShell session={session(id)} title={id} composerActive={false} onToggleSidebar={() => {}} />);
+    const { rerender } = render(scene(chatId));
+    await act(async () => {});
+    act(() => client._emitChat(chatId, {
+      event: "turn_end", chat_id: chatId, turn_id: "turn", turn_seq: 2,
+      outcome: "failed", failure_kind: "model", failure_error_kind: errorKind,
+    }));
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+    const recovery = { recovery_id: "recovery", status: "awaiting_user" as const, reason: "model_request_failed", failure_error_kind: errorKind };
+    act(() => client._emitChat(chatId, { event: "recovery_state", chat_id: chatId, ...recovery }));
+    expect(screen.getByText(message).closest(".thread-viewport [data-toast-viewport=thread]")).not.toBeNull();
+    expect(screen.getByText(message).closest(".toast-card")).toHaveAttribute("data-toast-timed", "false");
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+    await act(async () => rerender(scene("another-chat")));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await act(async () => rerender(scene(chatId)));
+    act(() => client._emitChat(chatId, { event: "attached", chat_id: chatId, recovery_state: recovery }));
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+    const action = errorKind === "empty_final_response" ? "dismiss" : "continue";
+    fireEvent.click(screen.getByRole("button", { name: action === "dismiss" ? "Dismiss" : "Continue" }));
+    expect(client.requestMutation).toHaveBeenCalledWith(`recovery.${action}`, { chat_id: chatId, recovery_id: "recovery" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows localized delivery failures without ending the active turn, then shows its own failure", async () => {
+    await i18n.changeLanguage("zh-CN");
+    const client = makeClient();
+    const chatId = "delivery-failure";
+    const onTurnEnd = vi.fn();
+    render(wrap(client, <ThreadShell session={session(chatId)} title="Failures" onToggleSidebar={() => {}} onTurnEnd={onTurnEnd} />));
+    await act(async () => {});
+    act(() => client._emitChat(chatId, { event: "goal_status", chat_id: chatId, turn_id: "current", status: "running", started_at: 1234 }));
+    const before = client.getRunState(chatId);
+    expect(before.active).toBe(true);
+    act(() => client._emitChat(chatId, { event: "turn_failure_notice", chat_id: chatId, failure_kind: "internal" }));
+    expect(screen.getByText("请求因内部错误未能完成")).toBeVisible();
+    expect(client.getRunState(chatId)).toEqual(before);
+    expect(onTurnEnd).not.toHaveBeenCalled();
+
+    act(() => client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: "current", outcome: "failed", failure_kind: "tool" }));
+    expect(screen.getByText("工具执行失败")).toBeVisible();
+    expect(client.getRunState(chatId).active).toBe(false);
+    expect(onTurnEnd).toHaveBeenCalledOnce();
   });
 
   it.each([false, true])("keeps one terminal model failure visible until the next user action (recovery: %s)", async (recoverable) => {

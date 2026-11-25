@@ -9,8 +9,9 @@ from typing import Any, Literal, cast
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ProgressEvent, TurnFailureNotice
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.turn_notices import turn_failure_notice_text
 from nanobot.command.results import as_text_message
 from nanobot.config.network import NetworkConfig
 from nanobot.pairing import (
@@ -138,6 +139,13 @@ class BaseChannel(ABC):
         Like ``send``, returning confirms completion of the adapter's work.
         """
         raise NotImplementedError("Channels opting into batching must implement send_batch")
+
+    def format_turn_failure_notice(self, notice: TurnFailureNotice, msg: OutboundMessage) -> str:
+        """Return sendable notice text, using the destination's routing/locale if needed.
+
+        Scheduled delivery persists this projection so retries do not render it again.
+        """
+        return turn_failure_notice_text(notice)
 
     def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
         """Project tool activity once before delivery; override for native UI.

@@ -41,6 +41,7 @@ __all__ = [
     "_print_agent_response",
     "_print_cli_progress_line",
     "_print_cli_reasoning",
+    "_print_interactive_line",
     "_print_interactive_response",
     "_read_interactive_input_async",
     "_restore_terminal",

@@ -83,6 +83,12 @@ class RetryStatusWirePayload(_ChatWirePayload):
     retry_after_s: NotRequired[float]
 
 
+class TurnFailureNoticeWirePayload(_ChatWirePayload):
+    event: Literal["turn_failure_notice"]
+    failure_kind: Literal["model", "tool", "internal"]
+    failure_error_kind: NotRequired[str]
+
+
 class TurnEndWirePayload(_ChatWirePayload):
     event: Literal["turn_end"]
     latency_ms: NotRequired[int]
@@ -202,7 +208,7 @@ WebUIWirePayload: TypeAlias = (
     RetryStatusWirePayload | ContextCompactionWirePayload | RecoveryStateWirePayload | TurnEndWirePayload
     | SubagentTaskWirePayload | MessageWirePayload | StreamWirePayload | FileEditWirePayload
     | GoalStateWirePayload | GoalStatusWirePayload | SessionUpdatedWirePayload | UserInputWirePayload
-    | PairingChangedWirePayload | RuntimeModelWirePayload | TurnModelWirePayload
+    | PairingChangedWirePayload | RuntimeModelWirePayload | TurnModelWirePayload | TurnFailureNoticeWirePayload
 )
 WebUIWirePersistence: TypeAlias = Literal[
     "transient",

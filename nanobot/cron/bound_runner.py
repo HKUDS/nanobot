@@ -6,6 +6,7 @@ import time
 import uuid
 from typing import Any, Protocol
 
+from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.bus.delivery import DELIVERY_RUN_META
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.cron.session_delivery import origin_delivery_context
@@ -131,6 +132,8 @@ async def run_bound_cron_job(
                 "error": error_text,
             },
         )
+        if isinstance(exc, AutomationTurnError):
+            return CronRunResult(run_id=run_id, response="", error=error_text)
         raise
     response = resp.content if resp else ""
     cron.write_run_record(

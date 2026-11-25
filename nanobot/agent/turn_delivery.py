@@ -16,6 +16,7 @@ from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
+    TurnFailureNotice,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventPublisher
@@ -77,14 +78,6 @@ def _bind_events(
         )
 
     return EventSink(publish, accepts)
-
-
-def _turn_outcome(stop_reason: object) -> tuple[str, str | None]:
-    if stop_reason == "error":
-        return "failed", "model"
-    if stop_reason == "tool_error":
-        return "failed", "tool"
-    return "completed", None
 
 
 class TurnDeliveryFactory:
@@ -213,7 +206,7 @@ class TurnDelivery:
     completed: bool = field(init=False, default=False)
     after_command_reply: Callable[[], None] | None = field(init=False, default=None)
     _stop_reason: str | None = field(init=False, default=None)
-    _failure_error_kind: str | None = field(init=False, default=None)
+    _failure: TurnFailureNotice | None = field(init=False, default=None)
     _retry_status: RetryStatusEvent | None = field(init=False, default=None)
     _response_input_ids: tuple[str, ...] | None = field(init=False, default=None)
     _response_source: ResponseSource | None = field(init=False, default=None)
@@ -321,28 +314,34 @@ class TurnDelivery:
         stop_reason: str,
         *,
         failure_error_kind: str | None = None,
-    ) -> None:
+    ) -> TurnFailureNotice | None:
         self._stop_reason = stop_reason
-        self._failure_error_kind = failure_error_kind
+        if stop_reason in {"error", "empty_final_response"}:
+            error_kind = failure_error_kind or (self._retry_status.error_kind if self._retry_status else None)
+            self._failure = TurnFailureNotice("model", error_kind)
+        elif stop_reason == "tool_error":
+            self._failure = TurnFailureNotice("tool", failure_error_kind)
+        else:
+            self._failure = None
+        return self._failure
+
+    def failure_response(self, notice: TurnFailureNotice) -> OutboundMessage:
+        return OutboundMessage(
+            channel=self.route.channel, chat_id=self.route.chat_id,
+            metadata=dict(self.route.metadata), content="", event=notice,
+        )
 
     def background_response(
         self,
         content: str | None,
         *,
-        stop_reason: str,
         streamed: bool,
         latency_ms: int | None,
     ) -> OutboundMessage:
         metadata = dict(self.route.metadata)
         if self.route.publish_lifecycle and latency_ms is not None:
             metadata["latency_ms"] = int(latency_ms)
-        event = (
-            StreamedResponseEvent()
-            if self.route.publish_lifecycle
-            and streamed
-            and stop_reason not in {"error", "tool_error"}
-            else None
-        )
+        event = StreamedResponseEvent() if self.route.publish_lifecycle and streamed else None
         return OutboundMessage(
             channel=self.route.channel,
             chat_id=self.route.chat_id,
@@ -356,10 +355,9 @@ class TurnDelivery:
         response: OutboundMessage | None,
         *,
         publish_completion: bool,
-    ) -> None:
-        stop_reason = self._stop_reason
-        if stop_reason is None and response is not None:
-            stop_reason = cast(str | None, response.metadata.get("_stop_reason"))
+    ) -> str | None:
+        """Deliver the response and return the turn failure independently of delivery success."""
+        failure = response.event if response and isinstance(response.event, TurnFailureNotice) else self._failure
         completed_channel = self.lifecycle_message.channel
         completed_chat_id = self.lifecycle_message.chat_id
         if response is not None:
@@ -372,7 +370,7 @@ class TurnDelivery:
                 self._response_source is not None
                 and self._response_content is not None
                 and strip_think(self._response_content).strip() == response.content.strip()
-                and stop_reason not in {"error", "tool_error"}
+                and failure is None
             ):
                 response = dataclasses.replace(response, metadata={
                     **response.metadata,
@@ -382,7 +380,9 @@ class TurnDelivery:
                 response = dataclasses.replace(response, metadata={
                     **response.metadata, "response_input_ids": list(self._response_input_ids),
                 })
-            if response.channel != "websocket" or stop_reason != "error":
+            # A websocket turn_end already carries the failure. A standalone
+            # notice has no such lifecycle event and must reach the destination.
+            if not (failure and response.channel == "websocket" and publish_completion):
                 delivery = DeliveryRequest.from_context(
                     self.input_message.metadata, self.session_key,
                     self.delivery_message.session_generation,
@@ -400,34 +400,24 @@ class TurnDelivery:
                 )
             )
         if publish_completion:
-            outcome, failure_kind = _turn_outcome(stop_reason)
             await self._publish_completion(
                 channel=completed_channel,
                 chat_id=completed_chat_id,
-                outcome=outcome,
-                failure_kind=failure_kind,
-                failure_error_kind=(self._failure_error_kind or (
-                    self._retry_status.error_kind if failure_kind == "model" and self._retry_status else None
-                )),
+                outcome="failed" if failure else "completed",
+                failure_kind=failure.failure_kind if failure else None,
+                failure_error_kind=failure.failure_error_kind if failure else None,
                 failure_attempts=(
-                    self._retry_status.attempt if failure_kind == "model" and self._retry_status else None
+                    self._retry_status.attempt if failure and failure.failure_kind == "model" and self._retry_status else None
                 ),
             )
+
+        return (failure.failure_error_kind or self._stop_reason or failure.failure_kind) if failure else None
 
     async def cancelled(self) -> None:
         await self._publish_completion(outcome="cancelled")
 
     async def fail(self, *, publish_completion: bool) -> None:
-        await self.bus.publish_outbound(
-            OutboundMessage(
-                channel=self.lifecycle_message.channel,
-                chat_id=self.lifecycle_message.chat_id,
-                content="Sorry, I encountered an error.",
-                metadata=dict(self.lifecycle_message.metadata or {}),
-            )
-        )
-        if publish_completion:
-            await self._publish_completion(outcome="failed", failure_kind="internal")
+        await self.complete(self.failure_response(TurnFailureNotice("internal")), publish_completion=publish_completion)
 
     async def _publish_completion(
         self, *, outcome: str, channel: str | None = None, chat_id: str | None = None,

@@ -26,7 +26,15 @@ export interface RetryStatus {
   retry_after_s?: number
 }
 
+export type TurnFailureNotice = {
+  event: "turn_failure_notice"
+  chat_id: string
+  failure_kind: "model" | "internal" | "tool"
+  failure_error_kind?: string
+}
+
 export type NotificationEvent =
+  | TurnFailureNotice
   | ({ event: "retry_status"; chat_id: string; turn_id?: string } & RetryStatus)
   | ({ event: "recovery_state"; chat_id: string; turn_id?: string } & RecoveryState)
   | {
@@ -69,8 +77,12 @@ export function isRecoveryState(value: unknown): value is RecoveryState {
 /** Undefined means another protocol family; null means a malformed notification. */
 export function decodeNotification(value: unknown): NotificationEvent | null | undefined {
   if (!isRecord(value)) return undefined
-  if (!["recovery_state", "context_compaction", "retry_status"].includes(String(value.event))) return undefined
+  if (!["turn_failure_notice", "recovery_state", "context_compaction", "retry_status"].includes(String(value.event))) return undefined
   if (typeof value.chat_id !== "string" || !optional(value.turn_id, "string")) return null
+  if (value.event === "turn_failure_notice") {
+    return (value.failure_kind === "model" || value.failure_kind === "internal" || value.failure_kind === "tool")
+      && optional(value.failure_error_kind, "string") ? value as TurnFailureNotice : null
+  }
   if (value.event === "retry_status") {
     return isRetryStatus(value) ? value as unknown as NotificationEvent : null
   }

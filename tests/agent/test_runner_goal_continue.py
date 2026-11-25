@@ -13,7 +13,6 @@ from nanobot.providers.base import (
     ProviderConversationState,
     ToolCallRequest,
 )
-from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 
 @pytest.fixture
@@ -84,8 +83,15 @@ async def test_continuation_extends_budget_without_reset(run_spec):
     assert result.usage.total_tokens == total_rounds * 2
 
 
-@pytest.mark.parametrize("finalize,finalization_fails", [(True, False), (False, False), (True, True)])
-async def test_goal_closing_after_tool_overrun_gets_bounded_finalization(run_spec, finalize, finalization_fails):
+@pytest.mark.parametrize(("finish", "content", "expected_stop", "failure_kind"), [
+    ("stop", "All goal work is complete.", "completed", None),
+    (None, None, "max_iterations", None),
+    ("error", "Provider unavailable.", "error", "server"),
+    ("length", None, "empty_final_response", "empty_final_response_length"),
+    ("stop", None, "empty_final_response", "empty_final_response"),
+])
+async def test_goal_closing_after_tool_overrun_gets_bounded_finalization(run_spec, finish, content, expected_stop, failure_kind):
+    finalize = finish is not None
     run_spec.max_iterations = 1
     run_spec.finalize_on_max_iterations = finalize
     run_spec.max_iterations_message = "limit reached"
@@ -107,8 +113,8 @@ async def test_goal_closing_after_tool_overrun_gets_bounded_finalization(run_spe
             "Please provide your response to the user based on the conversation above."
         )
         return LLMResponse(
-            content="Provider unavailable." if finalization_fails else "All goal work is complete.",
-            finish_reason="error" if finalization_fails else "stop",
+            content=content, finish_reason=finish,
+            error_status_code=503 if finish == "error" else None,
             usage=LLMUsage.reported(input_tokens=2, output_tokens=3),
         )
 
@@ -131,19 +137,25 @@ async def test_goal_closing_after_tool_overrun_gets_bounded_finalization(run_spe
 
     assert completed_tools == tool_rounds
     assert result.tools_used == ["work"] * tool_rounds
-    if finalization_fails:
-        assert result.stop_reason == "empty_final_response"
-        assert result.error == result.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
+    assert result.stop_reason == expected_stop
+    assert result.failure_error_kind == failure_kind
+    if expected_stop == "empty_final_response":
+        assert result.error == expected_stop
+        assert result.final_content is None
+        assert result.messages[-1]["role"] == "tool"
+    elif expected_stop == "error":
+        assert result.final_content is None
+        assert result.error == failure_kind
+        assert content not in str(result.messages)
     else:
-        assert result.stop_reason == ("completed" if finalize else "max_iterations")
-        assert result.final_content == ("All goal work is complete." if finalize else "limit reached")
-    assert result.pending_stream_content == (result.final_content if finalize else None)
-    assert result.messages[-1]["content"] == result.final_content
+        assert result.final_content == (content if finalize else "limit reached")
+        assert result.messages[-1]["content"] == result.final_content
+    assert result.pending_stream_content == (content if expected_stop == "completed" else None)
     assert run_spec.runtime.provider.chat_stream_with_retry.await_count == tool_rounds + int(finalize)
     assert run_spec.continuation_callback.await_count == tool_rounds
     assert result.usage.request_count == tool_rounds + int(finalize)
     assert len(result.round_usages) == tool_rounds + int(finalize)
-    if finalize and not finalization_fails:
+    if expected_stop == "completed":
         assert run_spec.hook.finalize_content.call_args.args[0].iteration == tool_rounds
 
 
@@ -164,7 +176,7 @@ async def test_runner_does_not_auto_continue_terminal_provider_response(run_spec
     result = await AgentRunner().run(run_spec)
 
     assert result.stop_reason == ("error" if finish_reason == "error" else "completed")
-    assert result.final_content == "Provider stopped this request."
+    assert result.final_content == (None if finish_reason == "error" else "Provider stopped this request.")
     assert run_spec.runtime.provider.chat_stream_with_retry.await_count == 1
     run_spec.tools.execute.assert_not_awaited()
     callback.assert_not_awaited()

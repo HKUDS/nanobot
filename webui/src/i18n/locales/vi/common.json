@@ -2348,7 +2348,11 @@
     "automationTriggered": "Tự động kích hoạt"
   },
   "recovery": {
-    "actionFailed": "Khôi phục thất bại. Hãy thử lại.",
+    "details": "Chi tiết",
+    "restart": "Cổng kết nối đã khởi động lại trước khi tác vụ hoàn tất",
+    "uncertainTool": "Công cụ có thể đã chạy",
+    "interruptedAgain": "Tác vụ lại bị gián đoạn",
+    "actionFailed": "Hãy thử khôi phục lại",
     "interrupted": "Tác vụ bị gián đoạn",
     "completed": "Tác vụ đã hoàn tất",
     "failed": "Khôi phục tác vụ thất bại",
@@ -2506,6 +2510,8 @@
       "imageInputTitle": "Đầu vào hình ảnh đã tắt cho cấu hình này",
       "imageRequestRejectedTitle": "Mô hình đã từ chối yêu cầu có hình ảnh",
       "imageInputBody": "Yêu cầu này có hình ảnh. Hãy kiểm tra cấu hình hoặc dùng cấu hình hỗ trợ hình ảnh.",
+      "emptyFinalResponseLength": "Mô hình đã đạt giới hạn đầu ra trước khi đưa ra câu trả lời cuối cùng",
+      "emptyFinalResponse": "Mô hình không trả về câu trả lời cuối cùng",
       "unknownTitle": "Yêu cầu tới nhà cung cấp mô hình không thành công",
       "bodyWithAttempt": "Đã dừng sau {{attempts}} lần thử. Hãy thử lại sau hoặc chọn mô hình khác.",
       "body": "Hãy thử lại sau hoặc chọn mô hình khác."

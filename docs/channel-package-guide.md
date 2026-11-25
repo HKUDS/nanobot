@@ -513,6 +513,8 @@ class OutboundMessage:
 
 Runtime/UI semantics live on `msg.event`. Use `outbound_message_for_event()` from `nanobot.bus.outbound_events` to build outbound messages with the appropriate typed event. Keep `metadata` for channel routing context, such as message and thread IDs, and optional `OUTBOUND_META_AGENT_UI` payloads.
 
+The runtime delivers turn failures as `TurnFailureNotice`, with no assistant text. Text channels receive the default public notice in `send()`. Override `BaseChannel.format_turn_failure_notice(notice, msg)` to provide localized or platform-specific copy. The manager calls it before recording scheduled deliveries, so a retry sends the same notice without rerunning the turn.
+
 ## Streaming Support
 
 Channels can opt into real-time streaming — the agent sends content token-by-token instead of one final message. This is entirely optional; channels work fine without it.

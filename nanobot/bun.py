@@ -7,6 +7,7 @@ import platform
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.request
 import zipfile
 from collections.abc import Callable, Generator
@@ -14,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from filelock import FileLock
+from loguru import logger
 
 BUN_VERSION = "1.3.13"
 # SHA-256 of the official bun-v1.3.13 release archives.
@@ -43,14 +45,31 @@ def bun_environment(executable: str) -> Generator[dict[str, str]]:
         ).strip())
     # `bun --bun install` does not alias node in dependency lifecycle scripts.
     # Only this subprocess tree sees the alias; Windows hardlinks need no admin rights.
-    with tempfile.TemporaryDirectory(prefix="nanobot-bun-") as temporary:
-        node = Path(temporary) / ("node.exe" if os.name == "nt" else "node")
+    temporary = tempfile.TemporaryDirectory(prefix="nanobot-bun-")
+    try:
+        node = Path(temporary.name) / ("node.exe" if os.name == "nt" else "node")
         try:
             node.hardlink_to(runtime)
         except OSError:
             shutil.copy2(runtime, node)
-        env["PATH"] = os.pathsep.join((temporary, str(runtime.parent), env.get("PATH", "")))
+        env["PATH"] = os.pathsep.join((temporary.name, str(runtime.parent), env.get("PATH", "")))
         yield env
+    finally:
+        _cleanup_bun_alias(temporary)
+
+
+def _cleanup_bun_alias(temporary: tempfile.TemporaryDirectory[str]) -> None:
+    # Windows may still have the alias open after a lifecycle command exits.
+    for delay in (0, 0.05, 0.2, 0.5):
+        if delay:
+            time.sleep(delay)
+        try:
+            temporary.cleanup()
+            return
+        except PermissionError as exc:
+            if os.name != "nt" or getattr(exc, "winerror", None) != 32:
+                raise
+    logger.warning("Leaving locked Bun alias in {}", temporary.name)
 
 
 def _matches_version(executable: str) -> bool:

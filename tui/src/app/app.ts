@@ -100,11 +100,11 @@ import {
   COMPOSER_PLACEHOLDER,
   createAppLayout,
 } from "./layout"
+import { turnFailureLine } from "../platform/turn-failure"
 import {
   connectionStatusText,
   formatElapsed,
   retryStatusLine,
-  terminalModelFailureLine,
   type RenderedRetryStatus,
 } from "./status"
 import {
@@ -827,6 +827,9 @@ export class NanobotTui {
         this.setActive(true)
         this.renderActiveStatus()
         return
+      case "turn_failure_notice":
+        this.transcript.deliveryFailure(turnFailureLine(event))
+        return
       case "turn_end":
         if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) return
         if (event.turn_id) {
@@ -836,12 +839,7 @@ export class NanobotTui {
         const failed = event.outcome === "failed"
         this.transcript.finishStream(failed || this.turnHadAnswer ? "" : this.finalMessage)
         if (failed) {
-          this.transcript.notice(
-            event.failure_kind === "model"
-              ? terminalModelFailureLine(event.failure_error_kind, event.failure_attempts)
-              : event.failure_message || "This turn failed and has ended.",
-            true,
-          )
+          this.transcript.turnFailure(turnFailureLine(event), event.turn_id)
         }
         this.transcript.finishActivity()
         if (this.currentFileEdits.length) this.lastFileEdits = this.currentFileEdits
@@ -2642,5 +2640,6 @@ export class NanobotTui {
   }
 }
 
-export { sessionExitMessage, terminalModelFailureLine } from "./status"
+export { sessionExitMessage } from "./status"
+export { terminalModelFailureLine } from "../platform/turn-failure"
 export type { AppOptions } from "./types"

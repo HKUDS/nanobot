@@ -1033,16 +1033,16 @@ class TestToolEventProgress:
         while bus.outbound_size > 0:
             outbound.append(await bus.consume_outbound())
 
-        error_msgs = [m for m in outbound if m.content == "Sorry, I encountered an error."]
+        assert all(m.event is not None for m in outbound)
         turn_end_msgs = [m for m in outbound if isinstance(m.event, TurnEndEvent)]
         statuses = [m for m in outbound if isinstance(m.event, GoalStatusEvent)]
 
-        assert len(error_msgs) == 1
         assert len(turn_end_msgs) == 1
+        end = turn_end_msgs[0].event
+        assert isinstance(end, TurnEndEvent) and (end.outcome, end.failure_kind) == ("failed", "internal")
         assert turn_end_msgs[0].content == ""
         assert turn_end_msgs[0].chat_id == "chat1"
         assert [m.event.status for m in statuses if isinstance(m.event, GoalStatusEvent)] == ["idle"]
-        assert outbound.index(error_msgs[0]) < outbound.index(turn_end_msgs[0])
         assert outbound.index(turn_end_msgs[0]) < outbound.index(statuses[-1])
 
     @pytest.mark.asyncio

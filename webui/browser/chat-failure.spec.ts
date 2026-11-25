@@ -7,6 +7,39 @@ async function openChatFailure(page: Page, query = "") {
   await page.getByRole("main").waitFor({ state: "visible" });
 }
 
+test("recovery toast offers continuation without taking the composer's space", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => localStorage.setItem("nanobot.locale", "zh-CN"));
+  await openChatFailure(page, "&notice=recovery&reason=empty_final_response_length");
+  const toast = page.getByRole("main").locator('[data-toast-viewport="thread"] .toast-card[data-toast-timed="false"]');
+  await expect(toast).toContainText("输出上限");
+  const input = page.getByRole("textbox");
+  await input.fill("保留草稿");
+  await toast.getByRole("button", { name: "继续" }).click();
+  await expect(page.getByLabel("Fixture action")).toHaveText("continued");
+  await expect(toast).toBeHidden();
+  await expect(input).toHaveValue("保留草稿");
+});
+
+for (const width of [390, 1440]) {
+  test(`authentication recovery keeps provider settings reachable from toast details at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
+    await openChatFailure(page, "&notice=recovery");
+    const toast = page.locator(".toast-card");
+    await expect(toast).toContainText("Model provider authorization failed");
+    await toast.getByRole("button", { name: /details/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeInViewport({ ratio: 1 });
+    const toastBox = (await toast.boundingBox())!;
+    const dialogBox = (await dialog.boundingBox())!;
+    expect(Math.abs((dialogBox.x + dialogBox.width / 2) - (toastBox.x + toastBox.width / 2))).toBeLessThan(2);
+    expect(dialogBox.y).toBeGreaterThanOrEqual(toastBox.y + toastBox.height);
+    await dialog.getByRole("button", { name: /settings/i }).click();
+    await expect(page.getByLabel("Fixture action")).toHaveText("settings");
+  });
+}
+
 for (const locale of ["en", "zh-CN", "zh-TW", "fr", "ja", "ko", "es", "pt-BR", "vi", "id"]) {
   for (const gateway of ["bwrap", "seatbelt"]) {
     test(`sandbox path action fits a narrow view: ${gateway}, ${locale}`, async ({ page }) => {
@@ -43,7 +76,7 @@ test("sandbox guidance stays generic without gateway backend details", async ({ 
 
 for (const width of [1440, 390]) {
   for (const variant of ["thread", "hero"]) {
-    for (const notice of ["recovery", "stream", "fallback", "sandbox"]) {
+    for (const notice of ["stream", "fallback", "sandbox"]) {
       test(`${notice} aligns with ${variant} composer at ${width}px`, async ({ page }, info) => {
         await page.setViewportSize({ width, height: 1000 });
         await page.emulateMedia({ reducedMotion: "reduce" });
@@ -81,18 +114,9 @@ for (const width of [1440, 390]) {
           await expect(input).toHaveValue("Keep this unsent draft / 保留草稿");
           await page.screenshot({ path: info.outputPath("sandbox-notice.png") });
         }
-        if (notice === "recovery") {
-          await expect(alert).toContainText(width === 390 ? "模型提供商验证失败" : "Model provider authorization failed");
-          await alert.getByRole("button").first().click();
-          await expect(page.getByLabel("Fixture action")).toHaveText("settings");
-          await alert.getByRole("button").last().click();
-          await expect(alert).toBeHidden();
-          await expect(page.getByLabel("Fixture action")).toHaveText("continued");
-        } else {
-          await alert.getByRole("button").last().click();
-          await expect(alert).toBeHidden();
-          await expect(page.getByLabel("Fixture action")).toHaveText("dismissed");
-        }
+        await alert.getByRole("button").last().click();
+        await expect(alert).toBeHidden();
+        await expect(page.getByLabel("Fixture action")).toHaveText("dismissed");
       });
     }
   }

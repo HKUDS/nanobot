@@ -884,7 +884,6 @@ class SubagentManager:
                 hook=hook,
                 max_iterations_message="Task stopped at its iteration limit before producing a final response.",
                 finalize_on_max_iterations=False,
-                error_message=None,
                 checkpoint_callback=_on_checkpoint,
                 injection_callback=partial(self._drain_inbox, record),
                 session_key=record.session.key,

@@ -2348,7 +2348,11 @@
     "askAboutSelection": "詢問選文"
   },
   "recovery": {
-    "actionFailed": "復原操作失敗，請再試一次。",
+    "details": "詳情",
+    "restart": "任務完成前閘道已重新啟動",
+    "uncertainTool": "工具可能已經執行",
+    "interruptedAgain": "任務再次中斷",
+    "actionFailed": "請重試復原操作",
     "interrupted": "任務已中斷",
     "completed": "任務已完成",
     "failed": "任務復原失敗",
@@ -2506,6 +2510,8 @@
       "imageInputTitle": "此預設的圖像輸入已關閉",
       "imageRequestRejectedTitle": "模型拒絕了含有圖片的請求",
       "imageInputBody": "這次請求包含圖片。請檢查此預設，或使用支援圖片的預設。",
+      "emptyFinalResponseLength": "模型因輸出上限未能產生最終答覆",
+      "emptyFinalResponse": "模型未傳回最終答覆",
       "unknownTitle": "模型供應商請求失敗",
       "bodyWithAttempt": "已嘗試 {{attempts}} 次，仍未成功。可稍後繼續或切換模型。",
       "body": "可稍後繼續或切換模型。"

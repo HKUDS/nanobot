@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
@@ -163,43 +163,13 @@ async def test_delivery_maps_model_error_to_failed_turn_completion() -> None:
     )
     delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
     delivery.record_stop_reason("error", failure_error_kind="billing")
-
-    await delivery.complete(
-        OutboundMessage(
-            channel="websocket",
-            chat_id="chat-a",
-            content="Sorry, I encountered an error calling the AI model.",
-        ),
-        publish_completion=True,
-    )
+    await delivery.complete(None, publish_completion=True)
 
     assert len(seen) == 1
     assert seen[0].outcome == "failed"
     assert seen[0].failure_kind == "model"
     assert seen[0].failure_error_kind == "billing"
     assert bus.outbound_size == 0
-
-
-@pytest.mark.asyncio
-async def test_delivery_keeps_model_error_message_for_ordinary_channels() -> None:
-    bus = MessageBus()
-    msg = InboundMessage(
-        channel="telegram",
-        sender_id="user",
-        chat_id="chat-a",
-        content="hello",
-    )
-    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
-    delivery.record_stop_reason("error")
-    response = OutboundMessage(
-        channel="telegram",
-        chat_id="chat-a",
-        content="Sorry, I encountered an error calling the AI model.",
-    )
-
-    await delivery.complete(response, publish_completion=True)
-
-    assert await bus.consume_outbound() is response
 
 
 @pytest.mark.parametrize("channel", ["telegram", "cli", "websocket"])
@@ -488,7 +458,7 @@ async def test_cross_session_display_route_rejects_stale_lifetime(tmp_path):
     await delivery.bind_session_generation(source.generation)
     assert delivery.route.metadata[HISTORY_GENERATION_METADATA_KEY] == target.generation
     assert delivery.delivery_message.session_generation == source.generation
-    response = delivery.background_response("done", stop_reason="end_turn", streamed=False, latency_ms=1)
+    response = delivery.background_response("done", streamed=False, latency_ms=1)
     assert response.metadata[HISTORY_GENERATION_METADATA_KEY] == target.generation
     await sessions.state.reset(target.key)
     with pytest.raises(SessionConflictError):

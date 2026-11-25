@@ -2531,7 +2531,11 @@
     }
   },
   "recovery": {
-    "actionFailed": "恢复操作失败，请重试。",
+    "details": "详情",
+    "restart": "任务完成前网关已重启",
+    "uncertainTool": "工具可能已经运行",
+    "interruptedAgain": "任务再次中断",
+    "actionFailed": "请重试恢复操作",
     "interrupted": "任务已中断",
     "completed": "任务已完成",
     "failed": "任务恢复失败",
@@ -2689,6 +2693,8 @@
       "imageInputTitle": "此预设的图像输入已关闭",
       "imageRequestRejectedTitle": "含图请求被模型拒绝",
       "imageInputBody": "这次请求包含图片。请检查此预设，或使用支持图片的预设。",
+      "emptyFinalResponseLength": "模型因输出上限未能生成最终答复",
+      "emptyFinalResponse": "模型未返回最终答复",
       "unknownTitle": "模型提供商请求失败",
       "bodyWithAttempt": "已尝试 {{attempts}} 次，仍未成功。可稍后继续或切换模型。",
       "body": "可稍后继续或切换模型。"

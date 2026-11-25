@@ -56,6 +56,7 @@ class RunResult:
     stop_reason: str | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    failure_error_kind: str | None = None
 
 
 @dataclass(slots=True)
@@ -147,5 +148,6 @@ def result_from_response(response: Any, capture: Any) -> RunResult:
         usage=capture.usage,
         stop_reason=capture.stop_reason,
         error=capture.error,
+        failure_error_kind=capture.failure_error_kind,
         metadata=metadata,
     )

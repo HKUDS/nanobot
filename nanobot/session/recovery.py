@@ -488,6 +488,16 @@ def append_recovery_interruption(session: Session, *, superseded: bool = False) 
     session.updated_at = datetime.now()
 
 
+def public_recovery_failure_kind(value: object) -> str | None:
+    """Failure categories shared by live recovery events and attach snapshots."""
+    if isinstance(value, str) and value in {
+        "authentication", "billing", "connection", "timeout", "rate_limit", "server", "unknown",
+        "unsupported_image", "image_request_rejected", "empty_final_response", "empty_final_response_length",
+    }:
+        return value
+    return None
+
+
 def recovery_state_from_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any] | None:
     """Return a sanitized recovery state suitable for the WebSocket wire."""
     value = metadata.get(RECOVERY_METADATA_KEY) if metadata else None
@@ -508,11 +518,7 @@ def recovery_state_from_metadata(metadata: Mapping[str, Any] | None) -> dict[str
     can_continue = state.get("can_continue")
     if isinstance(can_continue, bool):
         payload["can_continue"] = can_continue
-    failure_error_kind = state.get("failure_error_kind")
-    if isinstance(failure_error_kind, str) and failure_error_kind in {
-        "authentication", "billing", "connection", "timeout", "rate_limit", "server", "unknown",
-        "unsupported_image", "image_request_rejected",
-    }:
+    if (failure_error_kind := public_recovery_failure_kind(state.get("failure_error_kind"))) is not None:
         payload["failure_error_kind"] = failure_error_kind
     if state.get("reply_preserved") is True:
         payload["reply_preserved"] = True

@@ -67,3 +67,37 @@ test("inferred files wrap without losing copy text or preview actions", async ({
   await files.nth(6).hover();
   await expect(page.getByTestId("file-image-quick-look").locator("img")).toBeVisible();
 });
+
+for (const copied of [true, false]) {
+  test(`a narrow preview shows ${copied ? "success" : "failure"} after copying a tab path`, async ({ page, context }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.addInitScript((success) => {
+      localStorage.setItem("nanobot.locale", "en");
+      if (!success) {
+        navigator.clipboard.writeText = async () => { throw new Error("Clipboard denied"); };
+        document.execCommand = () => false;
+      }
+    }, copied);
+    await page.route("**/api/commands", route => route.fulfill({ json: { commands: [] } }));
+    await page.route("**/api/sessions/*/webui-thread?*", route => route.fulfill({ json: {
+      schemaVersion: 3, projection: "events", events: [{ event: "message", projection_id: "file", chat_id: "loading-preview", text: "See [notes.txt](notes.txt)." }],
+    } }));
+    await page.route("**/file-preview?*", route => {
+      const query = new URL(route.request().url()).searchParams;
+      return route.fulfill({ json: query.has("probe") ? { available: true } : query.has("metadata")
+        ? { path: "/workspace/notes.txt", relative_path: "notes.txt" }
+        : { path: "/workspace/notes.txt", display_path: "notes.txt", project_path: "/workspace", kind: "text", language: "text", content: "File contents", size: 13, truncated: false } });
+    });
+    await page.goto("/browser/fixture.html?case=thread-loading");
+    await page.getByRole("button", { name: "notes.txt" }).click();
+    const preview = page.getByTestId("preview-pane");
+    await expect(page.locator(".thread-conversation")).toBeHidden();
+    await preview.getByRole("tab", { name: "notes.txt" }).click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Copy absolute path" }).click();
+    const feedback = preview.getByRole(copied ? "status" : "alert").filter({ hasText: copied ? "Copied" : "Could not copy" });
+    await expect(feedback).toBeVisible();
+    await expect(feedback).toBeInViewport();
+    if (copied) expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("/workspace/notes.txt");
+  });
+}

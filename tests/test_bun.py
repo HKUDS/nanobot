@@ -1,7 +1,10 @@
 import hashlib
 import io
 import os
+import subprocess
+import sys
 import zipfile
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
@@ -76,3 +79,34 @@ def test_private_bun_path_does_not_modify_parent_environment(monkeypatch, tmp_pa
         assert env["PATH"].endswith(os.pathsep + "original")
     assert not alias_dir.exists()
     assert os.environ["PATH"] == "original"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows denies deletion of an open executable")
+@pytest.mark.parametrize("exit_code", [0, 17])
+def test_locked_node_cleanup_preserves_command_result(monkeypatch, tmp_path, caplog, exit_code):
+    runtime = tmp_path / "bun.exe"
+    runtime.write_bytes(b"runtime")
+    monkeypatch.setattr(bun.tempfile, "tempdir", str(tmp_path))
+    with ExitStack() as handles:
+        handles.callback(bun.logger.remove, bun.logger.add(caplog.handler, level="WARNING", format="{message}"))
+        if exit_code:
+            error = handles.enter_context(pytest.raises(subprocess.CalledProcessError))
+        with bun.bun_environment(str(runtime)) as env:
+            alias_dir = Path(env["PATH"].split(os.pathsep)[0])
+            handles.enter_context((alias_dir / "node.exe").open("rb"))
+            subprocess.run([sys.executable, "-c", f"raise SystemExit({exit_code})"], check=True, env=env)
+    if exit_code:
+        assert error.value.returncode == exit_code
+    assert str(alias_dir) in caplog.text
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows denies deletion of an open executable")
+def test_node_alias_is_removed_when_windows_releases_lock_during_retry(monkeypatch, tmp_path):
+    runtime = tmp_path / "bun.exe"
+    runtime.write_bytes(b"runtime")
+    with ExitStack() as handles:
+        with bun.bun_environment(str(runtime)) as env:
+            alias_dir = Path(env["PATH"].split(os.pathsep)[0])
+            lock = handles.enter_context((alias_dir / "node.exe").open("rb"))
+            monkeypatch.setattr(bun.time, "sleep", lambda _: lock.close())
+    assert not alias_dir.exists()

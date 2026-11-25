@@ -6,7 +6,10 @@ import { useClient } from "@/providers/ClientProvider";
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { ApiError, fetchWebuiThread, fetchWebuiThreadTraceDetail } from "@/lib/api";
 import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
-import { isImageRequestFailure } from "@/lib/model-request-failure";
+import { useTranslation } from "react-i18next";
+import { useToast } from "@/components/ui/toast";
+import { nonModelFailureLine } from "../../../packages/client-events/turn-failure";
+import { emptyFinalMessageKey, resolveModelRequestFailureCopy, isImageRequestFailure } from "@/lib/model-request-failure";
 import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
 import { historyContentSnapshot, sameHistoryContent } from "@/lib/thread-display-projection";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
@@ -160,6 +163,8 @@ export function useNanobotStream(
   dismissStreamError: () => void;
 } {
   const { client, getToken } = useClient();
+  const { i18n } = useTranslation();
+  const showToast = useToast();
   const historyKey = history?.key ?? null;
   const temporary = history?.temporary === true;
   const messageCache = history?.cache;
@@ -597,7 +602,18 @@ export function useNanobotStream(
 
     // A request may start before its acceptance frame reaches this tab.
     const startedInputs = new Set<string>();
+    const notifyFailure = (failure: { failure_kind?: string; failure_error_kind?: string }) => {
+      const emptyFinal = emptyFinalMessageKey(failure.failure_error_kind);
+      const message = failure.failure_kind === "model"
+        ? emptyFinal ? i18n.t(emptyFinal) : resolveModelRequestFailureCopy({ errorKind: failure.failure_error_kind }, i18n.t).title
+        : nonModelFailureLine(failure.failure_kind, i18n.resolvedLanguage ?? i18n.language);
+      showToast?.({ tone: "error", message });
+    };
     const handle = (ev: InboundEvent) => {
+      if (ev.event === "turn_failure_notice") {
+        notifyFailure(ev);
+        return;
+      }
       if (ev.event === "error") {
         if (ev.detail === "message_too_big") {
           applyStreamError({
@@ -778,6 +794,7 @@ export function useNanobotStream(
           setGoalState(ev.goal_state);
         }
         setRetryStatus(null);
+        if (ev.outcome === "failed" && ev.failure_kind !== "model") notifyFailure(ev);
         const modelRequestFailed = ev.outcome === "failed" && ev.failure_kind === "model";
         const failureAttempts =
           typeof ev.failure_attempts === "number"
@@ -901,6 +918,8 @@ export function useNanobotStream(
     drainStreamEvents,
     flushPendingStreamEvents,
     isSideChannelEvent,
+    i18n,
+    showToast,
     onTurnEnd,
     onStreamDetach,
     messageCache,

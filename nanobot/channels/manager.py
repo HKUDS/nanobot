@@ -8,6 +8,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
@@ -25,6 +26,7 @@ from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
+    TurnFailureNotice,
     replace_outbound_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -37,6 +39,7 @@ from nanobot.channels.contracts import (
     resolve_channel_action_target,
 )
 from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
+from nanobot.channels.turn_notices import turn_failure_notice_text
 from nanobot.command.results import command_result
 from nanobot.config.schema import Config
 from nanobot.security.workspace_access import WorkspaceScopeResolver
@@ -166,7 +169,7 @@ class ChannelManager:
         self._origin_reply_fingerprints: OrderedDict[tuple[str, str, str], str] = OrderedDict()
         self._outbox = DeliveryOutbox(self._config_path.parent / "delivery" / "outbox.sqlite3")
         self._scheduled_deliveries: set[str] = set()
-        self.bus.outbound_recorder = self._record_scheduled
+        self.bus.prepare_outbound = self._prepare_outbound
 
         self._init_channels()
         self._remove_delivery_check: Callable[[], None] | None = (
@@ -741,10 +744,15 @@ class ChannelManager:
 
         return False
 
-    def _record_scheduled(self, msg: OutboundMessage) -> None:
+    def _prepare_outbound(self, msg: OutboundMessage) -> OutboundMessage:
+        if isinstance(notice := msg.event, TurnFailureNotice) and msg.channel != "websocket":
+            channel = self.channels.get(msg.channel)
+            text = channel.format_turn_failure_notice(notice, msg) if channel else turn_failure_notice_text(notice)
+            msg = replace(msg, content=text, event=None)
         if msg.delivery is not None:
             with self.bus.admission.activity():
                 self._outbox.record(msg)
+        return msg
 
     @property
     def has_pending_delivery(self) -> bool:
