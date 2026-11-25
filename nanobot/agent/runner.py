@@ -63,6 +63,10 @@ from nanobot.utils.runtime import (
 )
 
 
+def _empty_final_kind(response: LLMResponse) -> str:
+    return "empty_final_response_length" if response.finish_reason == "length" else "empty_final_response"
+
+
 def _raise_if_cancelling() -> None:
     """Do not resume model work when a dependency suppresses cancellation."""
     task = asyncio.current_task()
@@ -862,7 +866,7 @@ class AgentRunner:
                     had_injections = True
                     length_recovery_parts.clear()
                     continue
-                failure_error_kind = "empty_final_response_length" if response.finish_reason == "length" else stop_reason
+                failure_error_kind = _empty_final_kind(response)
                 break
 
             if is_blank_text(clean):
@@ -887,7 +891,7 @@ class AgentRunner:
             terminal_content = None
             if not reply_delivered:
                 if spec.finalize_on_max_iterations:
-                    terminal_content, usage = await self._try_finalize_after_max_iterations(
+                    terminal_content, usage, finalization_failure = await self._try_finalize_after_max_iterations(
                         spec,
                         hook,
                         messages,
@@ -896,16 +900,21 @@ class AgentRunner:
                         request_state=request_state,
                         round_usages=round_usages,
                     )
-                if terminal_content is not None and goal_overrun:
-                    stop_reason = "completed"
-                    pending_stream_content = terminal_content
-                if terminal_content is None:
-                    if goal_overrun and spec.finalize_on_max_iterations:
-                        stop_reason = "empty_final_response"
-                        failure_error_kind = stop_reason
-                        error = stop_reason
-                    else:
-                        terminal_content = self._max_iterations_fallback(spec)
+                    if goal_overrun:
+                        failure_error_kind = finalization_failure
+                        if finalization_failure is None:
+                            stop_reason = "completed"
+                            pending_stream_content = terminal_content
+                        elif finalization_failure in {"empty_final_response", "empty_final_response_length"}:
+                            stop_reason = "empty_final_response"
+                            error = stop_reason
+                        else:
+                            stop_reason = "error"
+                            error = (_ARREARAGE_ERROR_MESSAGE if finalization_failure == "billing"
+                                     else spec.error_message or _DEFAULT_ERROR_MESSAGE)
+                            self._append_model_error_placeholder(messages)
+                if stop_reason == "max_iterations" and terminal_content is None:
+                    terminal_content = self._max_iterations_fallback(spec)
             if length_recovery_parts and terminal_content is not None:
                 terminal_tail = f"\n\n{terminal_content.lstrip()}"
                 final_content = (
@@ -913,7 +922,7 @@ class AgentRunner:
                 ).strip()
                 pending_stream_content = terminal_tail
             else:
-                final_content = terminal_content
+                final_content = error if stop_reason == "error" else terminal_content
             self._append_final_message(messages, terminal_content, response_input_ids)
 
         return AgentRunResult(
@@ -1339,7 +1348,7 @@ class AgentRunner:
         iteration: int,
         request_state: ModelRequestState,
         round_usages: list[LLMUsage],
-    ) -> tuple[str | None, LLMUsage | None]:
+    ) -> tuple[str | None, LLMUsage | None, str | None]:
         compaction = request_state.compaction
         request_messages = await self.prepare_prompt(compaction.request_messages, messages)
         retry_messages = (
@@ -1362,7 +1371,7 @@ class AgentRunner:
                 "Budget-exhausted finalization failed for {}; using fallback",
                 spec.session_key or "default",
             )
-            return None, usage
+            return None, usage, "unknown"
 
         raw_usage = await self._record_request_usage(spec, request_state, response)
         round_usages.append(raw_usage)
@@ -1375,7 +1384,8 @@ class AgentRunner:
                 len(response.tool_calls),
                 spec.session_key or "default",
             )
-            return None, usage
+            kind = LLMProvider.public_error_kind(response) if response.finish_reason == "error" else "unknown"
+            return None, usage, kind
 
         context = AgentHookContext(
             iteration=iteration,
@@ -1386,8 +1396,8 @@ class AgentRunner:
         )
         clean = hook.finalize_content(context, response.content)
         if is_blank_text(clean):
-            return None, usage
-        return clean, usage
+            return None, usage, _empty_final_kind(response)
+        return clean, usage, None
 
     async def _request_no_tools(
         self,
