@@ -9,9 +9,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Activity, Check, ChevronRight, CircleAlert, Clock3, Copy, Quote, Wrench } from "lucide-react";
+import { Activity, Check, ChevronRight, CircleAlert, Copy, Quote, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DisclosureContent } from "@/components/ui/disclosure";
+import { LoadingRing } from "@/components/ui/loading-ring";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
@@ -274,18 +275,7 @@ function UserDeliveryStatus({
   errorDetail?: string;
 }) {
   const { t } = useTranslation();
-  if (status !== "sending" && status !== "failed") return null;
-  if (status === "sending") {
-    return (
-      <span
-        role="status"
-        className="inline-flex items-center gap-1 text-[12px] leading-none text-muted-foreground"
-      >
-        <Clock3 className="h-3.5 w-3.5" aria-hidden />
-        {t("message.delivery.sending")}
-      </span>
-    );
-  }
+  if (status !== "failed") return null;
 
   if (errorDetail === "temporary_chat_command_rejected") {
     return <span role="alert" className="text-[12px] text-destructive">{t("errors.turnRejected.temporaryCommand")}</span>;
@@ -410,8 +400,8 @@ export function MessageBubble({
     const parsedMessage = parseQuotedUserMessage(message.content);
     const userContent = parsedMessage.content;
     const hasText = userContent.trim().length > 0;
-    const showDeliveryStatus =
-      message.deliveryStatus === "sending" || message.deliveryStatus === "failed";
+    const isSending = message.deliveryStatus === "sending";
+    const isFailed = message.deliveryStatus === "failed";
     const processingStatus = message.processingStatus;
     const showProcessingStatus = !temporary && processingStatus === "pending";
     const mediaEdgeState: PendingEdgeState = !hasText ? edgeState : "solid";
@@ -419,8 +409,17 @@ export function MessageBubble({
     const userMedia = hasImages
       ? <ImageGallery images={images} align="right" size="compact" edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
       : hasMedia
-        ? <MessageMedia media={media} align="right" pending={message.deliveryStatus === "sending"} edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
+        ? <MessageMedia media={media} align="right" pending={isSending} edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
         : null;
+    const sendingIndicator = isSending ? (
+      <span
+        aria-hidden="true"
+        data-sending-indicator
+        className="user-message-sending-indicator pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground/65"
+      >
+        <LoadingRing className="size-3.5" strokeWidth="2.4" />
+      </span>
+    ) : null;
     const quotedContext = parsedMessage.quotedContext;
     const slashCommand = matchingSlashCommand(userContent, slashCommands);
     const bangPrefix = /^(\s*)!/.exec(userContent);
@@ -455,7 +454,14 @@ export function MessageBubble({
         className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5"
       >
         {!hasText ? contextMenu : null}
-        {userMedia}
+        {!hasText ? sendingIndicator : null}
+        {userMedia ? (
+          !hasText ? (
+            <div className={cn("transition-opacity duration-200 ease-out motion-reduce:transition-none", isSending && "opacity-65")}>
+              {userMedia}
+            </div>
+          ) : userMedia
+        ) : null}
         {quotedContext ? (
           <UserQuotedContext
             text={quotedContext}
@@ -467,6 +473,7 @@ export function MessageBubble({
             messageId={message.id}
             contentKey={userContent}
             temporary={temporary}
+            sendingIndicator={sendingIndicator}
             showProcessingStatus={showProcessingStatus}
             edgeState={edgeState}
             onSealEnd={completeSeal}
@@ -475,13 +482,17 @@ export function MessageBubble({
             {messageText}
           </UserTextBubble>
         ) : null}
-        {!showDeliveryStatus && showProcessingStatus ? (
+        {isSending ? (
+          <span role="status" className="sr-only">
+            {t("message.delivery.sending")}
+          </span>
+        ) : !isFailed && showProcessingStatus ? (
           <span role="status" className="sr-only">
             {t("message.delivery.waiting")}
           </span>
         ) : null}
-        {showDeliveryStatus ? (
-            <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
+        {isFailed ? (
+            <div className="flex min-h-6 items-center justify-end gap-1.5 text-muted-foreground">
               <UserDeliveryStatus
                 status={message.deliveryStatus}
                 errorKind={message.deliveryErrorKind}
@@ -555,6 +566,7 @@ interface UserTextBubbleProps {
   messageId: string;
   contentKey: string;
   temporary: boolean;
+  sendingIndicator: ReactNode;
   showProcessingStatus: boolean;
   edgeState: PendingEdgeState;
   onSealEnd: () => void;
@@ -566,6 +578,7 @@ function UserTextBubble({
   messageId,
   contentKey,
   temporary,
+  sendingIndicator,
   showProcessingStatus,
   edgeState,
   onSealEnd,
@@ -680,6 +693,7 @@ function UserTextBubble({
       className="relative ml-auto w-fit max-w-full min-w-0"
     >
       {contextMenu}
+      {sendingIndicator}
       <p
         ref={bubbleRef}
         id={isCollapsible ? contentId : undefined}
@@ -693,6 +707,8 @@ function UserTextBubble({
             ? "border border-dashed border-muted-foreground/40 bg-transparent"
             : "user-message-surface bg-secondary/70",
           showProcessingStatus && "user-message-surface-dashed",
+          "transition-opacity duration-200 ease-out motion-reduce:transition-none",
+          sendingIndicator && "opacity-65",
           isCollapsible && "user-message-collapsible",
         )}
       >

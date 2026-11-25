@@ -512,12 +512,18 @@ describe("MessageBubble", () => {
       deliveryStatus: "sending",
     };
 
-    const { rerender } = render(<MessageBubble message={message} />);
+    const { container, rerender } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Sending");
+    const sendingStatus = screen.getByRole("status");
+    expect(sendingStatus).toHaveClass("sr-only");
+    expect(sendingStatus).toHaveTextContent("Sending");
+    expect(screen.getByText("hello")).toHaveClass("opacity-65");
+    expect(container.querySelector("[data-sending-indicator]")).toBeInTheDocument();
 
     rerender(<MessageBubble message={{ ...message, deliveryStatus: "accepted" }} />);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByText("hello")).not.toHaveClass("opacity-65");
+    expect(container.querySelector("[data-sending-indicator]")).not.toBeInTheDocument();
 
     rerender(
       <MessageBubble
