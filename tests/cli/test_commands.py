@@ -1622,7 +1622,7 @@ def test_one_shot_agent_reports_turn_failure_as_a_notice(mock_agent_runtime, kin
         event=TurnFailureNotice(failure_kind=kind, failure_error_kind=error_kind),
     )
     result = runner.invoke(app, ["agent", "-m", "hello"])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == (1 if kind == "model" else 0), result.output
     assert " ".join(result.output.split()).count(notice) == 1
     mock_agent_runtime["print_response"].assert_not_called()
 
@@ -1693,18 +1693,58 @@ def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path, mon
     assert mock_agent_runtime["load_config"].call_args.args == (config_path.resolve(),)
 
 
-def test_one_shot_agent_assembles_goal_without_background_queue(monkeypatch, tmp_path: Path) -> None:
-    from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
-    from nanobot.session.manager import SessionManager
+@pytest.fixture
+def one_shot_runtime(monkeypatch, tmp_path: Path):
+    from nanobot.providers.base import GenerationSettings
 
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
-    config.agents.defaults.max_tool_iterations = 1
     config.bind_source_path(tmp_path / "instance" / "config.json")
     provider = _fake_provider()
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.estimate_prompt_tokens.return_value = (100, "test")
+    monkeypatch.setattr("nanobot.cli.agent._load_runtime_config", lambda *_args: config)
+    monkeypatch.setattr("nanobot.cli.agent.sync_workspace_templates", lambda *_args: None)
+    monkeypatch.setattr("nanobot.cli.agent.is_default_workspace", lambda *_args: False)
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda *_args: provider)
+    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "home")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "instance" / "config.json")
+
+    return config, provider
+
+
+@pytest.mark.parametrize(("finish_reason", "streamed"), [("error", True), ("error", False), ("stop", True)])
+def test_one_shot_final_model_response(one_shot_runtime, finish_reason, streamed):
+    from nanobot.providers.base import LLMResponse
+
+    _, provider = one_shot_runtime
+    failed = finish_reason == "error"
+    final = "Request rejected" if failed else "Streamed answer"
+
+    async def respond(*, on_content_delta, **_kwargs):
+        if streamed:
+            await on_content_delta("Partial answer" if failed else final)
+        return LLMResponse(content=final, finish_reason=finish_reason)
+
+    provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    result = runner.invoke(app, ["agent", "-m", "hello", "--no-markdown"])
+
+    if streamed and failed:
+        assert "Partial answer" in result.stdout, result.output
+    if failed:
+        assert final not in result.stdout, result.output
+    expected = "The model request failed." if failed else final
+    assert " ".join(result.stdout.split()).count(expected) == 1, result.output
+    assert result.exit_code == (1 if failed else 0), result.output
+
+
+def test_one_shot_agent_assembles_goal_without_background_queue(one_shot_runtime, tmp_path: Path) -> None:
+    from nanobot.providers.base import LLMResponse, ToolCallRequest
+    from nanobot.session.manager import SessionManager
+
+    config, provider = one_shot_runtime
+    config.agents.defaults.max_tool_iterations = 1
     provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(content=None, tool_calls=[ToolCallRequest(
             id="goal", name="create_goal", arguments={"objective": "Do the synthetic task."},
@@ -1714,13 +1754,6 @@ def test_one_shot_agent_assembles_goal_without_background_queue(monkeypatch, tmp
         )]),
         LLMResponse(content="Verified."),
     ])
-    monkeypatch.setattr("nanobot.cli.agent._load_runtime_config", lambda *_args: config)
-    monkeypatch.setattr("nanobot.cli.agent.sync_workspace_templates", lambda *_args: None)
-    monkeypatch.setattr("nanobot.cli.agent.is_default_workspace", lambda *_args: False)
-    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda *_args: provider)
-    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "home")
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "instance" / "config.json")
-
     result = runner.invoke(app, ["agent", "--classic", "-m", "/goal Do the synthetic task."])
     assert result.exit_code == 0, result.output
     assert provider.chat_stream_with_retry.await_count == 3

@@ -49,8 +49,9 @@ def test_high_uses_enabled_with_budget() -> None:
     assert kw["max_tokens"] >= kw["thinking"]["budget_tokens"] + 4096
 
 
-def test_low_uses_small_budget() -> None:
-    kw = _build(_make_provider(), "low")
+@pytest.mark.parametrize("model", ["claude-sonnet-4-6", "claude-haiku-4-5"])
+def test_low_uses_small_budget(model: str) -> None:
+    kw = _build(_make_provider(model), "low")
     assert kw["thinking"] == {"type": "enabled", "budget_tokens": 1024}
 
 
@@ -132,6 +133,35 @@ def test_sonnet_5_omits_temperature_none() -> None:
     assert "temperature" not in kw
     assert kw["thinking"] == {"type": "disabled"}
     assert "output_config" not in kw
+
+
+@pytest.mark.parametrize(
+    ("effort", "thinking", "output_config"),
+    [
+        ("medium", {"type": "adaptive"}, {"effort": "medium"}),
+        ("adaptive", {"type": "adaptive"}, None),
+        ("none", {"type": "disabled"}, None),
+        (None, None, None),
+    ],
+)
+def test_haiku_5_5_thinking_request(effort, thinking, output_config) -> None:
+    kw = _build(_make_provider("anthropic/claude-haiku-5-5"), effort)
+    assert kw.get("thinking") == thinking
+    assert kw.get("output_config") == output_config
+    assert "temperature" not in kw
+    assert kw["max_tokens"] == 4096
+
+
+def test_haiku_5_5_disable_on_reopening_session_with_thinking() -> None:
+    history = [
+        {"role": "user", "content": "Question"},
+        {"role": "assistant", "content": "Answer", "_meta": {"thinking_prefix_rewritten": True},
+         "thinking_blocks": [{"type": "thinking", "thinking": "", "signature": "old"}]},
+        {"role": "user", "content": "Continue"},
+    ]
+    kw = _build(_make_provider("claude-haiku-5-5"), "none", messages=history)
+    assert kw["thinking"] == {"type": "disabled"}
+    assert kw["messages"][1]["content"] == [{"type": "text", "text": "Answer"}]
 
 
 def test_mythos_preview_omits_temperature_but_keeps_manual_budget() -> None:

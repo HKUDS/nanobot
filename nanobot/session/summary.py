@@ -15,6 +15,23 @@ def is_empty_summary(text: str) -> bool:
     return text.strip() in ("(nothing)", "`(nothing)`")
 
 
+_THINKING_PREFIX_REWRITTEN = "thinking_prefix_rewritten"
+
+
+def mark_checkpoint_thinking(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Identify blocks carried across a prefix rewrite without changing the source transcript."""
+    return [
+        {**msg, "_meta": {**msg.get("_meta", {}), _THINKING_PREFIX_REWRITTEN: True}}
+        if msg.get("thinking_blocks") else msg
+        for msg in messages
+    ]
+
+
+def has_checkpoint_thinking(message: dict[str, Any]) -> bool:
+    meta = message.get("_meta")
+    return isinstance(meta, dict) and cast(dict[str, object], meta).get(_THINKING_PREFIX_REWRITTEN) is True
+
+
 def is_summary_checkpoint(message: Mapping[str, Any]) -> bool:
     """Identify the durable boundary of a replacement summary."""
     return (
