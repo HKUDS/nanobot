@@ -139,3 +139,15 @@ html[data-custom-background] .user-message-stack:not([data-temporary="true"]) .u
   background-color: hsl(var(--settings-surface) / 0.38);
   backdrop-filter: blur(10px);
 }
+
+.user-message-sending-indicator {
+  opacity: 0;
+  animation: pending-edge-fade-in 180ms ease-out 180ms forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .user-message-sending-indicator {
+    opacity: 1;
+    animation: none;
+  }
+}
