@@ -142,12 +142,21 @@ test("author directives, links, HTML and external images cannot execute or fetch
   }
 });
 
-test("the renderer load failure above the source retries in place", async ({ page }) => {
+test("the retry icon beside Copy explains the load failure and retries in place", async ({ page }) => {
   const renderer = "**/MermaidBlock.tsx*";
   await page.route(renderer, (route) => route.abort());
   await page.goto("/browser/fixture.html?case=diagrams");
   const retry = page.getByRole("button", { name: "Couldn't load the diagram renderer. Try again." });
   await expect(retry).toBeVisible();
+  const copy = page.getByRole("button", { name: "Copy code" });
+  const retryBox = (await retry.boundingBox())!;
+  const copyBox = (await copy.boundingBox())!;
+  expect(retryBox.y).toBe(copyBox.y);
+  const gap = copyBox.x - (retryBox.x + retryBox.width);
+  expect(gap).toBeGreaterThanOrEqual(0);
+  expect(gap).toBeLessThanOrEqual(8);
+  await retry.hover();
+  await expect(page.getByRole("tooltip", { name: "Couldn't load the diagram renderer. Try again." })).toBeVisible();
   await expect(page.getByText("开始：接收用户请求", { exact: false })).toBeVisible();
   await page.unroute(renderer);
   await retry.click();

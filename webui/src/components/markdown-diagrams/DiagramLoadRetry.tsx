@@ -1,9 +1,14 @@
 import { RotateCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { HoverHint } from "@/components/ui/hover-hint";
+
 export function DiagramLoadRetry({ onRetry }: { onRetry: () => void }) {
   const { t } = useTranslation();
-  return <button type="button" onClick={onRetry} className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-    <RotateCw aria-hidden="true" className="size-3.5 shrink-0" />{t("diagram.errors.load")}
-  </button>;
+  const hint = t("diagram.errors.load");
+  return <HoverHint content={hint}>
+    <button type="button" onClick={onRetry} className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+      <RotateCw aria-hidden className="size-4" /><span className="sr-only">{hint}</span>
+    </button>
+  </HoverHint>;
 }

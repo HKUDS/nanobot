@@ -18,7 +18,7 @@ export function HighlightedCode({ language = "text", code, chrome, showLineNumbe
   const lines = resource.read();
   return <pre data-testid="highlighted-code" data-language={language} style={{
     background: "transparent", margin: 0,
-    padding: viewportHighlight ? "0.75rem 1rem 0.75rem 0.5rem" : chrome === "none" ? "0.75rem 1rem" : "1rem 3.5rem 1rem 1.25rem",
+    padding: viewportHighlight ? "0.75rem 1rem 0.75rem 0.5rem" : chrome === "none" ? "0.75rem 1rem" : "1rem var(--code-action-gutter, 3.5rem) 1rem 1.25rem",
     fontFamily: "inherit", fontSize: "inherit", lineHeight: "inherit", tabSize: 2,
     whiteSpace: wrapLongLines ? "pre-wrap" : "pre", overflow: viewportHighlight ? "visible" : "auto",
     overflowWrap: wrapLongLines ? "anywhere" : undefined,
