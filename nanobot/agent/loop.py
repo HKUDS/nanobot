@@ -408,6 +408,7 @@ class AgentLoop:
             max_concurrent_subagents=max_concurrent_subagents,
             consolidator=self.consolidator,
             session_manager=self.sessions,
+            exec_session_manager=self._exec_session_manager,
         )
         self._running = False
         self._runtime_context_providers: list[RuntimeContextProvider] = []

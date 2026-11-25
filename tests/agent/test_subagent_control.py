@@ -577,9 +577,52 @@ async def test_provider_suppressed_cancellation_cannot_execute_returned_tools(tm
 
 
 @pytest.mark.asyncio
+async def test_inflight_exec_cannot_launch_after_child_cleanup(tmp_path, monkeypatch):
+    manager, provider, ctx = setup(tmp_path)
+    exec_manager = manager._exec_session_manager
+    entered, cleaned = asyncio.Event(), asyncio.Event()
+    terminate = exec_manager.terminate_by_owner
+    execute = ExecTool._execute_session
+
+    async def cleanup(owner):
+        count = await terminate(owner)
+        cleaned.set()
+        return count
+
+    async def delayed_exec(self, *args, **kwargs):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await cleaned.wait()
+        return await execute(self, *args, **kwargs)
+
+    monkeypatch.setattr(exec_manager, "terminate_by_owner", cleanup)
+    monkeypatch.setattr(ExecTool, "_execute_session", delayed_exec)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content=None, tool_calls=[
+        ToolCallRequest("late", "exec", {"command": "echo late", "yield_time_ms": 0}),
+    ]))
+    start = AsyncMock(wraps=exec_manager.start)
+    monkeypatch.setattr(exec_manager, "start", start)
+    try:
+        task_id = await spawn(manager, ctx)
+        await asyncio.wait_for(entered.wait(), 10)
+        status = await manager.cancel(task_id, "owner")
+        assert status.state == "cancelled"
+        assert task_id not in manager._tasks
+        start.assert_not_awaited()
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("ending", ["done", "error", "cancel"])
-async def test_real_task_process_cleanup_preserves_sibling_parent_and_work_products(tmp_path, ending):
-    manager, _, ctx = setup(tmp_path)
+async def test_real_task_process_cleanup_preserves_sibling_parent_and_work_products(tmp_path, loop_factory, ending):
+    loop = loop_factory()
+    manager = loop.subagents
+    exec_manager = loop._exec_session_manager
+    runtime = LLMRuntime.capture(loop.provider, "test", context_window_tokens=128000)
+    ctx = RequestContext("websocket", "route", session_key="owner", runtime=runtime)
     script = tmp_path / "worker.py"
     script.write_text("import sys\nprint('READY', flush=True)\nfor line in sys.stdin:\n print(line.strip(), flush=True)\n")
     argv = [sys.executable, "-u", str(script)]
@@ -599,8 +642,6 @@ async def test_real_task_process_cleanup_preserves_sibling_parent_and_work_produ
         output = await spec.tools.execute("exec", kwargs)
         assert not is_tool_error_result(output), output
         exec_ids[name] = re.search(r"session_id: (\w+)", output).group(1)
-        exec_manager = spec.tools.get("exec")._session_manager
-        processes[name] = exec_manager._sessions[exec_ids[name]].process
         events[name].set()
         await releases[name].wait()
         if name == "one" and ending == "error":
@@ -608,15 +649,21 @@ async def test_real_task_process_cleanup_preserves_sibling_parent_and_work_produ
         return AgentRunResult(messages=[], final_content="finished")
 
     manager.runner.run = run
-    parent_exec = ExecTool(working_dir=str(tmp_path), session_manager=manager._exec_session_manager)
     try:
         with request_context(ctx):
-            output = await parent_exec.execute(**kwargs)
+            output = await loop.tools.execute("exec", kwargs)
         parent_id = re.search(r"session_id: (\w+)", output).group(1)
         one = await spawn(manager, ctx, "one")
         two = await spawn(manager, ctx, "two")
         await asyncio.wait_for(asyncio.gather(*(event.wait() for event in events.values())), 15)
-        one_exec_manager = manager._tasks[one].exec_manager
+        for name, session_id in {**exec_ids, "parent": parent_id}.items():
+            processes[name] = exec_manager._sessions[session_id].process
+        assert [s.session_id for s in await exec_manager.list(owner_session_key="owner")] == [parent_id]
+        with pytest.raises(KeyError):
+            await exec_manager.write(
+                session_id=parent_id, chars=None, close_stdin=False, terminate=True,
+                yield_time_ms=0, max_output_chars=1000, owner_session_key=f"subagent:{one}",
+            )
         if ending == "cancel":
             await control(manager, ctx, one, "cancel")
         else:
@@ -626,14 +673,11 @@ async def test_real_task_process_cleanup_preserves_sibling_parent_and_work_produ
         assert json.loads(await control(manager, ctx, one))["state"] == expected
         assert await asyncio.wait_for(processes["one"].wait(), timeout=5) is not None
         with pytest.raises(KeyError):
-            await one_exec_manager.write(
+            await exec_manager.write(
                 session_id=exec_ids["one"], chars=None, close_stdin=False, terminate=False,
                 yield_time_ms=0, max_output_chars=1000, owner_session_key=f"subagent:{one}",
             )
-        for session_id, owner, exec_manager in [
-            (exec_ids["two"], f"subagent:{two}", manager._tasks[two].exec_manager),
-            (parent_id, "owner", manager._exec_session_manager),
-        ]:
+        for session_id, owner in [(exec_ids["two"], f"subagent:{two}"), (parent_id, "owner")]:
             poll = await exec_manager.write(
                 session_id=session_id, chars="SURVIVED\n", close_stdin=False, terminate=False,
                 yield_time_ms=1000, max_output_chars=1000, owner_session_key=owner,
@@ -643,13 +687,16 @@ async def test_real_task_process_cleanup_preserves_sibling_parent_and_work_produ
         assert script.exists()
         assert await manager.cancel_by_session("owner") == 1
         assert manager.bus.inbound_size == 1
-        parent_poll = await manager._exec_session_manager.write(
+        await manager.close()
+        parent_poll = await exec_manager.write(
             session_id=parent_id, chars="STILL ALIVE\n", close_stdin=False, terminate=False,
             yield_time_ms=1000, max_output_chars=1000, owner_session_key="owner",
         )
         assert not parent_poll.done and "STILL ALIVE" in parent_poll.output
     finally:
-        await manager.close()
+        await loop.aclose()
+    assert all(proc.returncode is not None for proc in processes.values())
+    assert not exec_manager.has_pending_work
     assert script.exists()
     assert (tmp_path / "one-output.txt").read_text() == "one"
     assert (tmp_path / "two-output.txt").read_text() == "two"
@@ -690,15 +737,15 @@ async def test_completion_wins_cancel_race_and_rejects_late_messages(tmp_path, s
     manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="finished"))
     cleaning, release = asyncio.Event(), asyncio.Event()
     task_id = await spawn(manager, ctx)
-    exec_manager = manager._tasks[task_id].exec_manager
-    cleanup = exec_manager.close_all
+    exec_manager = manager._exec_session_manager
+    cleanup = exec_manager.terminate_by_owner
 
-    async def gated_cleanup():
+    async def gated_cleanup(owner):
         cleaning.set()
         await release.wait()
-        return await cleanup()
+        return await cleanup(owner)
 
-    exec_manager.close_all = gated_cleanup
+    exec_manager.terminate_by_owner = gated_cleanup
     message_id = json.loads(await control(manager, ctx, task_id, "send", "too late"))["message_id"]
     await cleaning.wait()
     assert json.loads(await control(manager, ctx, task_id))["state"] == "stopping"
@@ -780,9 +827,9 @@ async def test_cleanup_failure_survives_status_eviction_and_shutdown_retries(tmp
         messages=[], final_content="x" * (manager.max_tool_result_chars + 1),
     ))
     task_id = await spawn(manager, ctx)
-    exec_manager = manager._tasks[task_id].exec_manager
-    original_cleanup = exec_manager.close_all
-    exec_manager.close_all = AsyncMock(side_effect=RuntimeError("cleanup failed"))
+    exec_manager = manager._exec_session_manager
+    original_cleanup = exec_manager.terminate_by_owner
+    exec_manager.terminate_by_owner = AsyncMock(side_effect=RuntimeError("cleanup failed"))
     message_id = json.loads(await control(manager, ctx, task_id, "send", "pending"))["message_id"]
     await settled(manager)
     state = json.loads(await control(manager, ctx, task_id))
@@ -790,7 +837,8 @@ async def test_cleanup_failure_survives_status_eviction_and_shutdown_retries(tmp
     assert "cleanup failed" in state["error"]
     assert state["receipts"][message_id] == "undelivered"
     assert json.loads(await control(manager, ctx, task_id, "cancel")) == state
-    exec_manager.close_all.assert_awaited_once()
+    exec_manager.terminate_by_owner.assert_awaited_once_with(f"subagent:{task_id}")
+    exec_manager.terminate_by_owner = original_cleanup
     assert manager.bus.inbound_size == 1
     assert task_id in manager._tasks
     assert len(manager._tasks[task_id].outcome.result) == manager.max_tool_result_chars
@@ -801,7 +849,6 @@ async def test_cleanup_failure_survives_status_eviction_and_shutdown_retries(tmp
     manager.MAX_ACTIVE = 1
     with request_context(ctx):
         assert is_tool_error_result(await SubagentTool(manager).execute(action="create", task="over capacity"))
-    exec_manager.close_all = original_cleanup
     await manager.close()
     assert not manager._tasks
     assert list(manager.runtime_statuses()) == [newer]
@@ -917,7 +964,6 @@ async def test_resistant_dependency_has_bounded_stop_and_no_late_result(tmp_path
         assert manager.get_running_count() == 1
         assert manager._run_slots.locked()
         assert record.cleanup_task.done()
-        assert record.exec_manager._closed
         assert is_tool_error_result(await control(manager, ctx, task_id, "send", "rejected"))
         assert json.loads(await control(manager, ctx, task_id, "cancel"))["state"] == "stopping"
         assert manager.bus.inbound_size == 0
@@ -962,14 +1008,14 @@ async def test_cleanup_wait_is_bounded_and_repeated_cancel_does_not_interrupt_it
     task_id = await spawn(manager, ctx)
     record = manager._tasks[task_id]
     status = record.status
-    original = record.exec_manager.close_all
+    original = manager._exec_session_manager.terminate_by_owner
 
-    async def cleanup():
+    async def cleanup(owner):
         cleaning.set()
         await release.wait()
-        return await original()
+        return await original(owner)
 
-    record.exec_manager.close_all = cleanup
+    manager._exec_session_manager.terminate_by_owner = cleanup
     await cleaning.wait()
     try:
         assert json.loads(await asyncio.wait_for(control(manager, ctx, task_id, "cancel"), 1))["state"] == "stopping"

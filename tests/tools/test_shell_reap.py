@@ -149,15 +149,15 @@ async def test_execute_cancellation_kills_process_tree():
     process = _MockProcess(pid=1005, returncode=None)
     manager = ExecSessionManager()
     waiting = asyncio.Event()
-    poll = _ExecSession.poll
+    wait_yield = _ExecSession.wait_yield
 
-    async def initial_poll(session: _ExecSession, *args, **kwargs):
+    async def initial_wait(session: _ExecSession, ms: int):
         waiting.set()
-        return await poll(session, *args, **kwargs)
+        await wait_yield(session, ms)
 
     with (
         patch.object(processes, "spawn_process_tree", return_value=_fake_tree(process)) as spawn,
-        patch.object(_ExecSession, "poll", new=initial_poll),
+        patch.object(_ExecSession, "wait_yield", new=initial_wait),
         patch("nanobot.execution.processes._reap_pid") as reap,
     ):
         execution = asyncio.create_task(
