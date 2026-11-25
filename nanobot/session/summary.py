@@ -11,6 +11,10 @@ SUMMARY_CONTINUATION_TEXT = (
     "Continue the active task from the working-memory checkpoint above."
 )
 
+def is_empty_summary(text: str) -> bool:
+    return text.strip() in ("(nothing)", "`(nothing)`")
+
+
 def is_summary_checkpoint(message: Mapping[str, Any]) -> bool:
     """Identify the durable boundary of a replacement summary."""
     return (
