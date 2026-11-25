@@ -50,8 +50,12 @@ for (const width of [360, 1024]) {
     await page.mouse.move(0, 0);
     await longPath.focus();
     await expect(hint).toHaveText(longEditPath);
+    const diff = page.getByTestId("file-edit-diff");
+    await filename.click();
+    await expect(diff).toBeVisible();
+    await expect(page.getByLabel("Opened file")).toBeEmpty();
     await longPath.press("Enter");
-    await expect(page.getByLabel("Opened file")).toHaveText(longEditPath);
+    await expect(diff).toBeHidden();
     await expect(hint).toBeHidden();
     // Check hover before expanding the diff above it, which moves the image row.
     const imagePath = references.nth(3);
@@ -69,6 +73,9 @@ for (const width of [360, 1024]) {
     await imagePath.press("Escape");
     await expect(hint).toBeHidden();
     const toggle = page.getByRole("button", { name: `View changes ${longEditPath}`, exact: true });
+    await marker.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     const arrow = (await toggle.boundingBox())!;
     const counts = (await page.getByTestId("activity-diff-pair").first().boundingBox())!;
