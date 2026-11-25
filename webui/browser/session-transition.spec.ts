@@ -275,6 +275,45 @@ test("rapid navigation and cold history keep the latest target and its draft usa
   await expect(page.locator("main[data-session]")).toHaveAttribute("data-session", "cold");
 });
 
+test("switching between standalone and split sessions fades panes at their own widths", async ({ page }) => {
+  await installPreview(page);
+  await page.goto("/browser/fixture.html?case=session-transition&workbench&topic=plain");
+  await expect(page.getByText("Question for plain", { exact: true })).toBeVisible();
+  for (const topic of ["goal", "tasks", "goal", "plain"]) {
+    const sample = await page.evaluate(async topic => {
+      const root = document.documentElement;
+      const pane = () => document.querySelector<HTMLElement>(".workbench-pane")!;
+      const snapshot = () => getComputedStyle(pane()).getPropertyValue("--session-thread-name").trim();
+      const oldName = snapshot();
+      const oldWidth = pane().offsetWidth;
+      const start = document.startViewTransition.bind(document);
+      const ready = new Promise<void>((resolve, reject) => {
+        document.startViewTransition = callback => {
+          const transition = start(callback);
+          void transition.ready.then(resolve, reject);
+          return transition;
+        };
+      });
+      const button = [...document.querySelectorAll("nav button")].find(el => el.textContent === topic) as HTMLButtonElement;
+      button.click();
+      await ready;
+      document.startViewTransition = start;
+      const groupWidth = (name: string) => parseFloat(getComputedStyle(root, `::view-transition-group(${name})`).width);
+      return {
+        oldWidth, newWidth: pane().offsetWidth,
+        outgoing: groupWidth(oldName), incoming: groupWidth(snapshot()),
+        incomingAnimation: getComputedStyle(root, `::view-transition-new(${snapshot()})`).animationName,
+        paneMotion: [...document.querySelectorAll(".workbench-pane")].some(el => el.getAnimations().length > 0),
+      };
+    }, topic);
+    expect(sample.paneMotion).toBe(false);
+    expect(sample.incomingAnimation).toBe("session-thread-in");
+    expect(Math.abs(sample.outgoing - sample.oldWidth)).toBeLessThanOrEqual(1);
+    expect(Math.abs(sample.incoming - sample.newWidth)).toBeLessThanOrEqual(1);
+    await expect.poll(() => page.evaluate(() => document.documentElement.hasAttribute("data-session-transition"))).toBe(false);
+  }
+});
+
 for (const width of [390, 1440]) {
   test(`goal notch follows the active workbench pane at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
