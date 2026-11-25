@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "פתח את הגדרות האותות",
+    "officialLabel": "פתח את מדריך אות־cli",
+    "fields": {
+      "phoneNumber": {
+        "label": "מספר טלפון",
+        "placeholder": "+1234567890"
+      },
+      "daemonHost": {
+        "label": "מארח דימון",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "נמל דימון",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "משתמשי DM מותרים",
+        "placeholder": "מספרי טלפון או UUID"
+      },
+      "group_allowFrom": {
+        "label": "קבוצות מותרות",
+        "placeholder": "מזהי קבוצה"
+      },
+      "groupMessageBufferSize": {
+        "label": "הודעות הקשר"
+      },
+      "attachmentsDir": {
+        "label": "ספריית קבצים מצורפים"
+      },
+      "dm_enabled": {
+        "label": "אפשר הודעות ישירות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "dm_policy": {
+        "label": "גישה ישירה להודעות",
+        "choices": {
+          "allowlist": "רשימת מורשים",
+          "open": "פתיחה"
+        }
+      },
+      "group_enabled": {
+        "label": "אפשר קבוצות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "group_policy": {
+        "label": "גישה לקבוצה",
+        "choices": {
+          "allowlist": "רשימת מורשים",
+          "open": "פתיחה"
+        }
+      },
+      "group_requireMention": {
+        "label": "דורש אזכור קבוצתי",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      }
+    }
+  }
+}

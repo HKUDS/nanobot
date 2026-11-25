@@ -330,7 +330,7 @@ function IncomingSessionMessage({
   return (
     <div
       data-session-message
-      className="group relative mr-auto w-fit min-w-0 max-w-[min(85%,36rem)] text-reading"
+      className="group relative me-auto w-fit min-w-0 max-w-[min(85%,36rem)] text-reading"
     >
       <div className="mb-1.5 flex items-center px-4 text-[12px] text-muted-foreground">
         <SessionHandleLabel id={handle.id}>{handleName}</SessionHandleLabel>
@@ -451,7 +451,7 @@ export function MessageBubble({
     );
     return (
       <div
-        className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5"
+        className="group relative ms-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5"
       >
         {!hasText ? contextMenu : null}
         {!hasText ? sendingIndicator : null}
@@ -690,19 +690,20 @@ function UserTextBubble({
       data-user-text-bubble
       data-user-message-collapsible={isCollapsible ? "true" : undefined}
       data-user-message-collapsed={isCollapsed ? "true" : undefined}
-      className="relative ml-auto w-fit max-w-full min-w-0"
+      className="relative ms-auto w-fit max-w-full min-w-0"
     >
       {contextMenu}
       {sendingIndicator}
       <p
         ref={bubbleRef}
+        dir="auto"
         id={isCollapsible ? contentId : undefined}
         data-theme-surface
         data-temporary-message={temporary ? "true" : undefined}
         data-pending-edge={edgeState !== "solid" ? edgeState : undefined}
         className={cn(
-          "relative ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
-          "text-left text-reading whitespace-pre-wrap [overflow-wrap:anywhere]",
+          "relative w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
+          "text-start [unicode-bidi:plaintext] text-reading whitespace-pre-wrap [overflow-wrap:anywhere]",
           temporary
             ? "border border-dashed border-muted-foreground/40 bg-transparent"
             : "user-message-surface bg-secondary/70",

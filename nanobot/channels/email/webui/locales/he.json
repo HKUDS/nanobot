@@ -1,0 +1,164 @@
+{
+  "setup": {
+    "docsLabel": "פתח את הגדרת האימייל",
+    "officialLabel": "פתח את מדריך סיסמאות האפליקציה",
+    "presetLabel": "מילוי מהיר",
+    "sections": {
+      "receiving": "מקבל דואר",
+      "sending": "שולח דואר"
+    },
+    "presets": {
+      "gmail": "Gmail",
+      "outlook": "השקפה",
+      "icloud": "iCloud"
+    },
+    "fields": {
+      "consentGranted": {
+        "label": "גישה לאימייל",
+        "choices": {
+          "true": "נכון",
+          "false": "לא ניתן"
+        }
+      },
+      "imapHost": {
+        "label": "מארח IMAP",
+        "placeholder": "imap.gmail.com"
+      },
+      "imapUsername": {
+        "label": "שם משתמש IMAP",
+        "placeholder": "bot@example.com"
+      },
+      "imapPassword": {
+        "label": "סיסמת IMAP",
+        "placeholder": "סיסמת אפליקציה"
+      },
+      "smtpHost": {
+        "label": "מארח SMTP",
+        "placeholder": "smtp.gmail.com"
+      },
+      "smtpUsername": {
+        "label": "שם משתמש SMTP",
+        "placeholder": "bot@example.com"
+      },
+      "smtpPassword": {
+        "label": "סיסמת SMTP",
+        "placeholder": "סיסמת אפליקציה"
+      },
+      "imapPort": {
+        "label": "יציאת IMAP",
+        "placeholder": "993"
+      },
+      "smtpPort": {
+        "label": "יציאת SMTP",
+        "placeholder": "587"
+      },
+      "fromAddress": {
+        "label": "מהכתובת",
+        "placeholder": "bot@example.com"
+      },
+      "pollIntervalSeconds": {
+        "label": "מרווח בדיקה (שניות)",
+        "placeholder": "30"
+      },
+      "allowFrom": {
+        "label": "שולחים מותרים",
+        "placeholder": "כתובות אימייל, מופרדות בפסיק"
+      },
+      "verifyDkim": {
+        "label": "אמת את DKIM",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "verifySpf": {
+        "label": "אמת SPF",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "imapMailbox": {
+        "label": "תיבת דואר IMAP"
+      },
+      "imapUseSsl": {
+        "label": "הצפנת SSL ל־IMAP",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "smtpUseTls": {
+        "label": "הצפנת TLS ל־SMTP",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "הצפנת SSL ל־SMTP",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "תשובות אוטומטיות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "markSeen": {
+        "label": "סמן כנקרא",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "postAction": {
+        "label": "לאחר עיבוד",
+        "choices": {
+          "delete": "מחיקה",
+          "move": "מהלך"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "תיבת דואר יעד"
+      },
+      "postActionExpunge": {
+        "label": "מחיקה לצמיתות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "שמור על דואר שדילג",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "maxBodyChars": {
+        "label": "הגבלת אורך הגוף (תווים)"
+      },
+      "subjectPrefix": {
+        "label": "קידומת נושא"
+      },
+      "allowedAttachmentTypes": {
+        "label": "סוגי קבצים מצורפים"
+      },
+      "maxAttachmentSize": {
+        "label": "מגבלת קבצים מצורפים (בתים)"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "מגבלת ספירת קבצים מצורפים"
+      },
+      "trustedAuthservIds": {
+        "label": "שירותי אימות מהימנים",
+        "placeholder": "mx.google.com, מופרד בפסיק"
+      }
+    }
+  }
+}

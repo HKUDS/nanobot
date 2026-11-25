@@ -1,0 +1,78 @@
+{
+  "setup": {
+    "docsLabel": "פתח את המדריך להגדרת סוכן",
+    "officialLabel": "פתח את עזרה לסוכן WhatsApp",
+    "privacyNotice": "שיחות של סוכן אינם מוצפנים מקצה לקצה. ההודעות מעובדות על ידי nanobot וספק המודל המוגדר שלך.",
+    "fields": {
+      "token": {
+        "label": "אסימון API",
+        "placeholder": "ב־WhatsApp, פתח את הגדרות → סוכנים, צור את הסוכן, ולאחר מכן העתק את המפתח מצ'אט הסוכן → פרטי שיחה → מפתח API."
+      },
+      "allowFrom": {
+        "label": "שולחים מותרים",
+        "placeholder": "משתמש:1234567890"
+      },
+      "stateDir": {
+        "label": "ספריית המדינה",
+        "placeholder": "~/.nanobot/whatsapp-agent"
+      },
+      "pollTimeout": {
+        "label": "פסק זמן לסקר (שניות)",
+        "placeholder": "25"
+      },
+      "maxMediaMb": {
+        "label": "גודל מדיה מקסימלי (MB)",
+        "placeholder": "16"
+      },
+      "markRead": {
+        "label": "שלח אישורי קריאה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "typingIndicator": {
+        "label": "הצג מחוון הקלדה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "downloadMedia": {
+        "label": "הורד מדיה נכנסת",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "deleteMediaAfterDownload": {
+        "label": "מחק מדיה לאחר ההורדה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "retryAmbiguousSends": {
+        "label": "נסה שוב תוצאות שליחה לא ידועות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "sendProgress": {
+        "label": "שלח הודעות התקדמות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "sendToolHints": {
+        "label": "שלח רמזים לכלי",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      }
+    }
+  }
+}

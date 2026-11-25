@@ -233,6 +233,7 @@ export function CredentialForm({
                 aria-invalid={Boolean(error)}
                 aria-describedby={describedBy}
                 type={inputType}
+                dir={field.secret || inputType === "url" ? "ltr" : undefined}
                 autoComplete={field.secret ? "new-password" : undefined}
                 inputMode={field.inputType === "number" ? "numeric" : undefined}
                 placeholder={

@@ -11,6 +11,7 @@ const locales = [
   { code: "pt-BR", label: "Português (Brasil)", title: "Galeria de componentes", search: "Buscar componentes", preview: "Prévia do componente" },
   { code: "vi", label: "Tiếng Việt", title: "Thư viện thành phần", search: "Tìm thành phần", preview: "Xem trước thành phần" },
   { code: "id", label: "Bahasa Indonesia", title: "Galeri komponen", search: "Cari komponen", preview: "Pratinjau komponen" },
+  { code: "he", label: "עברית", title: "גלריית רכיבים", search: "חיפוש רכיבים", preview: "תצוגה מקדימה של הרכיב" },
 ];
 
 for (const locale of locales) {
@@ -36,6 +37,7 @@ for (const locale of locales) {
     await expect(page.locator(".gallery-code").first()).toHaveText(code);
     expect(inventoryRequests).toBe(1);
     await expect(page.locator("html")).toHaveAttribute("lang", locale.code);
+    await expect(page.locator("html")).toHaveAttribute("dir", locale.code === "he" ? "rtl" : "ltr");
     expect(await page.evaluate(() => localStorage.getItem("nanobot.locale"))).toBe(locale.code);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 

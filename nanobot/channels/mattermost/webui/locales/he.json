@@ -1,0 +1,112 @@
+{
+  "setup": {
+    "docsLabel": "פתח את הגדרת Mattermost",
+    "officialLabel": "פתח את מדריך הבוטים של Mattermos",
+    "fields": {
+      "serverUrl": {
+        "label": "שרת URL",
+        "placeholder": "https://mattermost.example.com"
+      },
+      "token": {
+        "label": "אסימון גישה של הבוט",
+        "placeholder": "אסימון הבוט הכי חשוב"
+      },
+      "teamId": {
+        "label": "מזהה צוות",
+        "placeholder": "זיהוי צוות אופציונלי"
+      },
+      "groupPolicy": {
+        "label": "חוקי הערוץ",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות",
+          "allowlist": "רשימת מורשים"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "חוקי השרשור",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות (אין צורך באזכור)",
+          "allowlist": "רשימת מורשים"
+        }
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי משתמש, מופרדים בפסיקים"
+      },
+      "allowFromMatchMode": {
+        "label": "התאמת משתמש",
+        "choices": {
+          "email": "אלקטרוני",
+          "id": "מזהה משתמש",
+          "username": "שם משתמש"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "ערוצים מותרים"
+      },
+      "replyInThread": {
+        "label": "תשובות לשרשור",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "includeThreadContext": {
+        "label": "הקשר בשרשור",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "threadContextLimit": {
+        "label": "מגבלת הקשר"
+      },
+      "streaming": {
+        "label": "הזרמה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "reactEmoji": {
+        "label": "אימוג׳י לסימון הודעה כנקראה"
+      },
+      "doneEmoji": {
+        "label": "אמוג'י בוצע"
+      },
+      "sendProgress": {
+        "label": "שלח התקדמות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "sendToolHints": {
+        "label": "רמזים לכלים",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "dm_enabled": {
+        "label": "אפשר הודעות ישירות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "dm_policy": {
+        "label": "גישה ישירה להודעות",
+        "choices": {
+          "allowlist": "רשימת מורשים",
+          "open": "פתיחה"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "משתמשי DM מותרים"
+      }
+    }
+  }
+}

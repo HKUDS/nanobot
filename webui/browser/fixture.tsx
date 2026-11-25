@@ -25,6 +25,10 @@ async function withClient(fixture: ReactElement, webuiCapabilities?: string[]) {
 // Load and install only the selected scene's mocks before i18n and React mount.
 async function loadFixture() {
   switch (fixtureCase) {
+    case "bidi": {
+      const { BidiFixture } = await import("./bidi-fixture");
+      return withClient(<BidiFixture />);
+    }
     case "model-options": {
       const { ModelOptionsFixture, installModelOptionsPreviewApi } = await import("./model-options-fixture");
       installModelOptionsPreviewApi();

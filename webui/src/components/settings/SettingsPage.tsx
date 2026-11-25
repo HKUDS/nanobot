@@ -782,7 +782,7 @@ export function SettingsPage({
                 onClick={backToChat}
                 className="touch-target mb-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors settings-hover hover:text-foreground lg:hidden"
               >
-                <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+                <ChevronLeft className="h-3.5 w-3.5 rtl:rotate-180" aria-hidden />
                 {t("settings.backToChat")}
               </button>
               {activeSection !== "automations" ? <h1 className="text-[24px] font-normal leading-tight tracking-normal text-foreground sm:text-[28px]">

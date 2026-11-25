@@ -829,6 +829,7 @@ export function ProvidersSettings({
                     {editingKey ? (
                       <>
                         <Input
+                          dir="ltr"
                           type={keyVisible ? "text" : "password"}
                           value={form.apiKey}
                           onChange={(event) =>
@@ -884,6 +885,7 @@ export function ProvidersSettings({
                     {t("settings.byok.apiBase")}
                   </span>
                   <Input
+                    dir="ltr"
                     value={form.apiBase}
                     onChange={(event) =>
                       onChangeProviderForm(provider.name, { apiBase: event.target.value })
@@ -980,6 +982,7 @@ export function ProvidersSettings({
             {t("settings.byok.apiBase")}
           </span>
           <Input
+            dir="ltr"
             value={customProviderDraft.apiBase}
             onChange={(event) =>
               setCustomProviderDraft((current) => ({
@@ -1001,6 +1004,7 @@ export function ProvidersSettings({
           </span>
           <div className="relative">
             <Input
+              dir="ltr"
               type={customProviderKeyVisible ? "text" : "password"}
               value={customProviderDraft.apiKey}
               onChange={(event) =>

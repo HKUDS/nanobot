@@ -12,6 +12,7 @@ import {
 import { ArrowRight, CircleHelp, Eye, EyeOff, Loader2 } from "lucide-react";
 import { ThemeToggleIcon } from "@/components/icons/ThemeToggleIcon";
 import { Trans, useTranslation } from "react-i18next";
+import { localeDirection } from "@/i18n/config";
 import { ChannelPairing } from "@/components/pairing/ChannelPairing";
 import { StarPrompt } from "@/components/StarPrompt";
 import { Sidebar } from "@/components/Sidebar";
@@ -233,6 +234,7 @@ function AuthForm({ onSecret }: {
                 ref={inputRef}
                 id="webui-access-password"
                 name="webui-access-password"
+                dir="ltr"
                 type={passwordVisible ? "text" : "password"}
                 autoComplete="current-password"
                 placeholder={passwordLabel}
@@ -2268,7 +2270,7 @@ function Shell({
                   event.preventDefault();
                   mobileSidebarRef.current?.focus({ preventScroll: true });
                 }}
-                side="left"
+                side={localeDirection(i18n.language) === "rtl" ? "right" : "left"}
                 showCloseButton={false}
                 aria-describedby={undefined}
                 className="p-0 lg:hidden"

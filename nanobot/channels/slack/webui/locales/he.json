@@ -1,0 +1,92 @@
+{
+  "setup": {
+    "docsLabel": "פתח את הגדרות Slack",
+    "officialLabel": "פתח את אפליקציות Slack",
+    "actions": {
+      "slack-manifest": "העתק את מניפסט האפליקציה"
+    },
+    "fields": {
+      "appToken": {
+        "label": "אסימון אפליקציה",
+        "placeholder": "xapp-..."
+      },
+      "botToken": {
+        "label": "אסימון גישה של הבוט",
+        "placeholder": "xoxb-..."
+      },
+      "groupPolicy": {
+        "label": "כללי הקבוצה",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות",
+          "allowlist": "רשימת מורשים"
+        }
+      },
+      "mode": {
+        "label": "מצב חיבור",
+        "choices": {
+          "socket": "מצב שקע"
+        }
+      },
+      "webhookPath": {
+        "label": "נתיב Webhook"
+      },
+      "replyInThread": {
+        "label": "תשובות לשרשור",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "reactEmoji": {
+        "label": "אימוג׳י לסימון הודעה כנקראה"
+      },
+      "doneEmoji": {
+        "label": "אמוג'י בוצע"
+      },
+      "includeThreadContext": {
+        "label": "הקשר בשרשור",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "threadContextLimit": {
+        "label": "מגבלת הקשר"
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים"
+      },
+      "groupAllowFrom": {
+        "label": "ערוצים מותרים"
+      },
+      "groupRequireMention": {
+        "label": "דורש אזכור ערוץ",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "dm_enabled": {
+        "label": "אפשר הודעות ישירות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "dm_policy": {
+        "label": "גישה ישירה להודעות",
+        "choices": {
+          "allowlist": "רשימת מורשים",
+          "open": "פתיחה"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "משתמשי DM מותרים"
+      },
+      "useProxy": {
+        "label": "שימוש בשרת פרוקסי"
+      }
+    }
+  }
+}

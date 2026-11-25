@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "פתח את הגדרות Teams",
+    "officialLabel": "פתח את פורטל המפתחים של Teams",
+    "fields": {
+      "appId": {
+        "label": "מזהה אפליקציה",
+        "placeholder": "מזהה אפליקציה של Microsoft"
+      },
+      "appPassword": {
+        "label": "סוד הלקוח",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "זיהוי דייר",
+        "placeholder": "זיהוי דייר אופציונלי"
+      },
+      "path": {
+        "label": "נתיב התקשרות חוזרת",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי משתמש של Teams, מופרדים בפסיקים"
+      },
+      "host": {
+        "label": "תקשיב מארח"
+      },
+      "port": {
+        "label": "האזנה נמל"
+      },
+      "replyInThread": {
+        "label": "תשובות לשרשור",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "תשובה לאזכור בלבד"
+      },
+      "validateInboundAuth": {
+        "label": "אמת בקשות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "refTtlDays": {
+        "label": "משך חיי התייחסות (ימים)"
+      },
+      "pruneWebChatRefs": {
+        "label": "נקה הפניות ל־Web Chat",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "הפניות ברורות לקבוצה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "מרווח רענון (שניות)"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "מארחים מהימנים"
+      }
+    }
+  }
+}

@@ -45,7 +45,7 @@ export const ToggleButton = forwardRef<HTMLButtonElement, ToggleButtonProps>(fun
         className={cn(
           "h-4 w-4 rounded-full bg-background shadow-sm",
           "transition-transform duration-200 ease-out motion-reduce:transition-none",
-          checked ? "translate-x-[16px]" : "translate-x-0",
+          checked ? "translate-x-[16px] rtl:-translate-x-[16px]" : "translate-x-0",
         )}
       />
       <span className="sr-only">{label}</span>

@@ -838,6 +838,7 @@ function McpAppsCatalogRow({
             </label>
             <Textarea
               id={callbackInputId}
+              dir="ltr"
               value={oauthCallbackUrl}
               onChange={(event) => onOAuthCallbackUrlChange(event.target.value)}
               placeholder={t("settings.oauth.callbackUrlPlaceholder")}
@@ -1162,6 +1163,7 @@ function McpCustomServerPanel({
                   {tx("settings.mcp.serverUrl", "URL")}
                 </span>
                 <Input
+                  dir="ltr"
                   value={form.url}
                   onChange={(event) => update("url", event.target.value)}
                   placeholder={form.transport === "sse" ? "https://example.com/sse" : "https://example.com/mcp"}

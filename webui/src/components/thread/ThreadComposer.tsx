@@ -1900,7 +1900,7 @@ export function ThreadComposer({
     ? renderContextUsage?.({ showLabel: usageInMeta, compactLabel: mobileWorkspaceControls }) : null;
   const inputTextClasses = cn(
     // The native input and its reference overlay must wrap and space text alike.
-    "inset-scrollbar w-full resize-none bg-transparent text-composer [scrollbar-gutter:stable] [text-autospace:no-autospace]",
+    "inset-scrollbar w-full resize-none bg-transparent text-composer text-start [unicode-bidi:plaintext] [scrollbar-gutter:stable] [text-autospace:no-autospace]",
     compactControls
       ? "min-h-[52px] px-4 pb-2 pt-3"
       : isHero
@@ -2112,6 +2112,7 @@ export function ThreadComposer({
             />
           ) : null}
           <textarea
+            dir="auto"
             id={textareaId}
             ref={textareaRef}
             value={mentionInput.value}
@@ -2423,6 +2424,7 @@ function ComposerInlineReferenceOverlay({
     <div
       ref={overlayRef}
       aria-hidden
+      dir="auto"
       className={cn(
         className,
         "pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words text-foreground",

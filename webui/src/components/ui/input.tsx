@@ -12,6 +12,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
     return (
       <input
         type={type}
+        dir={type === "password" || type === "url" ? "ltr" : undefined}
         className={cn(
           "touch-text-input flex h-10 w-full rounded-full border border-input bg-background px-3 py-2 text-ui-body file:border-0 file:bg-transparent file:text-control-label placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
           variant === "search" || type === "search"

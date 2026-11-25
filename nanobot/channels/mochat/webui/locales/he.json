@@ -1,0 +1,85 @@
+{
+  "setup": {
+    "docsLabel": "פתח את מדריך ההתקנה של MoChat",
+    "officialLabel": "פתח את MoChat",
+    "fields": {
+      "clawToken": {
+        "label": "אסימון טופר",
+        "placeholder": "אסימון MoChat Claw"
+      },
+      "baseUrl": {
+        "label": "שרת URL",
+        "placeholder": "https://mochat.io"
+      },
+      "agentUserId": {
+        "label": "מזהה משתמש של סוכן",
+        "placeholder": "מזהה משתמש אופציונלי של סוכן"
+      },
+      "sessions": {
+        "label": "שיחות",
+        "placeholder": "מזהי הפעלה, מופרדים בפסיקים"
+      },
+      "panels": {
+        "label": "פאנלים",
+        "placeholder": "מזהי לוח, מופרדים בפסיק"
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי משתמש, מופרדים בפסיקים"
+      },
+      "socketUrl": {
+        "label": "שקע URL"
+      },
+      "socketPath": {
+        "label": "נתיב שקע"
+      },
+      "socketDisableMsgpack": {
+        "label": "השבת את MessagePack",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "socketReconnectDelayMs": {
+        "label": "עיכוב חיבור מחדש"
+      },
+      "socketMaxReconnectDelayMs": {
+        "label": "מגבלת עיכוב חיבור מחדש (ms)"
+      },
+      "socketConnectTimeoutMs": {
+        "label": "פסק זמן לחיבור"
+      },
+      "refreshIntervalMs": {
+        "label": "מרווח רענון"
+      },
+      "watchTimeoutMs": {
+        "label": "פסק זמן לצפייה"
+      },
+      "watchLimit": {
+        "label": "גודל אצווה"
+      },
+      "retryDelayMs": {
+        "label": "נסה להשהות שוב"
+      },
+      "maxRetryAttempts": {
+        "label": "מגבלת ניסיון חוזר"
+      },
+      "mention_requireInGroups": {
+        "label": "דורש אזכור קבוצתי",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "groups": {
+        "label": "חוקי הקבוצה (JSON)"
+      },
+      "replyDelayMode": {
+        "label": "מצב עיכוב תשובה"
+      },
+      "replyDelayMs": {
+        "label": "עיכוב בתשובה"
+      }
+    }
+  }
+}

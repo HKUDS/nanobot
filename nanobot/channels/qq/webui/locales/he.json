@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "פתח את הגדרות QQ",
+    "officialLabel": "פתח את קונסולת הבוט של QQ",
+    "sections": {
+      "credentials": "אישורים ידניים",
+      "advanced": "מתקדם"
+    },
+    "fields": {
+      "appId": {
+        "label": "מזהה אפליקציה",
+        "placeholder": "מזהה אפליקציה של בוט QQ"
+      },
+      "secret": {
+        "label": "סוד",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "פתח מזהים, מופרדים בפסיק"
+      },
+      "msgFormat": {
+        "label": "פורמט הודעה",
+        "choices": {
+          "plain": "טקסט רגיל",
+          "markdown": "Markdown"
+        }
+      },
+      "ackMessage": {
+        "label": "הודעת אישור"
+      },
+      "mediaDir": {
+        "label": "ספריית מדיה"
+      },
+      "downloadChunkSize": {
+        "label": "גודל נתח (בתים)"
+      },
+      "downloadMaxBytes": {
+        "label": "מגבלת הורדה (בתים)"
+      },
+      "showCompactionNotices": {
+        "label": "הודעות דחיסה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "קוד QR מחייב QQ",
+    "scanTitle": "סרוק עם QQ נייד",
+    "waiting": "ממתין לסריקה…",
+    "connected": "הכריכה הושלמה",
+    "stopped": "בוטלה",
+    "connecting": "מכין קוד QR...",
+    "scanAgainWarning": "חיבור מחדש עלול להפריע לאפליקציות אחרות באמצעות בוט QQ זה. אם סוד האפליקציה מאופס, הסוד הישן הופך לבלתי חוקי והאפליקציות הללו זקוקות לסוד החדש.",
+    "configured": "מוגדר",
+    "bind": "קשר בוט QQ",
+    "rebind": "בוט מחדש",
+    "refresh": "רענן קוד QR",
+    "retry": "ניסיון חוזר",
+    "expired": "תוקף קוד QR פג",
+    "failed": "הכריכה נכשלה",
+    "cancelFailed": "לא ניתן לבטל",
+    "retrying": "מנסה שוב…",
+    "manualSetup": "הזן אישורים באופן ידני"
+  }
+}

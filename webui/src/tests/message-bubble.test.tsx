@@ -329,9 +329,9 @@ describe("MessageBubble", () => {
     const row = container.firstElementChild;
     const pill = screen.getByText("hello");
 
-    expect(row).toHaveClass("ml-auto", "flex");
+    expect(row).toHaveClass("ms-auto", "flex");
     expect(pill.parentElement).toHaveAttribute("data-user-text-bubble", "true");
-    expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-floating");
+    expect(pill).toHaveClass("w-fit", "rounded-floating");
     expect(pill).toHaveTextContent("hello");
   });
 
@@ -355,7 +355,7 @@ describe("MessageBubble", () => {
     const row = container.querySelector("[data-session-message]")!;
     const handle = screen.getByText("@mira-0123456789");
     const bubble = row.querySelector("[data-assistant-selectable]")!.parentElement!;
-    expect(row).toHaveClass("mr-auto", "w-fit", "max-w-[min(85%,36rem)]");
+    expect(row).toHaveClass("me-auto", "w-fit", "max-w-[min(85%,36rem)]");
     expect(handle.parentElement!.parentElement).toBe(row);
     expect(bubble).toHaveClass("relative", "rounded-floating", "bg-secondary/70", "px-4", "py-2");
     expect(bubble).toContainElement(screen.getByText("Please review this."));

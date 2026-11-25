@@ -183,6 +183,7 @@ export function WebSettings({
                 {showKeyInput ? (
                   <>
                     <Input
+                      dir="ltr"
                       type={keyVisible ? "text" : "password"}
                       value={form.apiKey ?? ""}
                       onChange={(event) =>
@@ -239,6 +240,7 @@ export function WebSettings({
               description={t("settings.byok.webSearch.baseUrlHelp")}
             >
               <Input
+                dir="ltr"
                 value={form.baseUrl ?? ""}
                 onChange={(event) =>
                   onChangeForm((prev) => ({ ...prev, baseUrl: event.target.value }))

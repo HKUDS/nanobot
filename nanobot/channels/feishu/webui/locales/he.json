@@ -1,0 +1,88 @@
+{
+  "setup": {
+    "primaryAction": "התחבר עם Feishu",
+    "docsLabel": "פתח את הגדרות Feishu",
+    "officialLabel": "פתח את קונסולת Feishu",
+    "fields": {
+      "appId": {
+        "label": "מזהה אפליקציה",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "סוד האפליקציה",
+        "placeholder": "השאר ריק כדי לשמור על הסוד הנוכחי"
+      },
+      "domain": {
+        "label": "אזור",
+        "choices": {
+          "feishu": "פיישו",
+          "lark": "להשתעשע"
+        }
+      },
+      "groupPolicy": {
+        "label": "כללי הקבוצה",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות",
+          "allowlist": "רשימת מורשים"
+        }
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי משתמש, מופרדים בפסיקים"
+      },
+      "topicIsolation": {
+        "label": "מפגשי נושא",
+        "choices": {
+          "true": "מפגשים נפרדים",
+          "false": "הפעלה משותפת"
+        }
+      },
+      "name": {
+        "label": "שם חשבון"
+      },
+      "encryptKey": {
+        "label": "מפתח הצפנה"
+      },
+      "verificationToken": {
+        "label": "אסימון אימות"
+      },
+      "reactEmoji": {
+        "label": "אימוג׳י לסימון הודעה כנקראה"
+      },
+      "doneEmoji": {
+        "label": "אמוג'י בוצע"
+      },
+      "toolHintPrefix": {
+        "label": "קידומת רמז"
+      },
+      "replyToMessage": {
+        "label": "מענה להודעה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "streaming": {
+        "label": "הזרמה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      }
+    }
+  },
+  "custom": {
+    "addAssistant": "הוסף עוזר נוסף",
+    "toggleAssistant": "עוזר {{name}}",
+    "configured": "מחובר",
+    "needsSetup": "צריך אישור",
+    "qrAlt": "קוד QR של חיבור Feishu",
+    "scanTitle": "סרוק עם Feishu",
+    "scanDescription": "השתמש ב- Feishu או Lark בטלפון שלך כדי לסרוק את הקוד הזה. nanobot יסיים את ההגדרה באופן אוטומטי לאחר האישור.",
+    "waiting": "ממתין לאישור…",
+    "connected": "פיישו מחובר.",
+    "stopped": "החיבור הופסק.",
+    "connecting": "מקשר…"
+  }
+}

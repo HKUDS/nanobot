@@ -1,0 +1,23 @@
+{
+  "setup": {
+    "docsLabel": "פתח את הגדרות WeCom",
+    "officialLabel": "פתח את קונסולת WeCom",
+    "fields": {
+      "botId": {
+        "label": "מזהה בוט",
+        "placeholder": "מזהה בוט של WeCom"
+      },
+      "secret": {
+        "label": "סוד",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי משתמש, מופרדים בפסיקים"
+      },
+      "welcomeMessage": {
+        "label": "הודעת ברוכים הבאים"
+      }
+    }
+  }
+}

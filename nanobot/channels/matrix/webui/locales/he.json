@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "פתח את הגדרת מטריקס",
+    "officialLabel": "פתח לקוחות מטריקס",
+    "fields": {
+      "homeserver": {
+        "label": "שרת ביתי",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "מזהה משתמש",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "סיסמה",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "אסימון גישה",
+        "placeholder": "הזן אסימון גישה"
+      },
+      "deviceId": {
+        "label": "מזהה מכשיר",
+        "placeholder": "נדרש עם אסימון גישה"
+      },
+      "groupPolicy": {
+        "label": "כללי הקבוצה",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות",
+          "allowlist": "רשימת מורשים",
+          "listen": "האזינו (השב על אזכור)"
+        }
+      },
+      "groupPolicyOverrides": {
+        "label": "עקיפת מדיניות חדרים (JSON)"
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים"
+      },
+      "e2eeEnabled": {
+        "label": "הצפנה מקצה לקצה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "sasVerification": {
+        "label": "אימות SAS",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "הסנכרון עצירת המתנה (שניות)"
+      },
+      "maxMediaBytes": {
+        "label": "מגבלת גודל מדיה (בתים)"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "הורדות מקבילות"
+      },
+      "groupAllowFrom": {
+        "label": "קבוצות מותרות"
+      },
+      "allowRoomMentions": {
+        "label": "אזכורים בחדר",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "replyToMessage": {
+        "label": "ציטוט תשובות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "streaming": {
+        "label": "הזרמה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "useProxy": {
+        "label": "שימוש בשרת פרוקסי"
+      }
+    }
+  }
+}

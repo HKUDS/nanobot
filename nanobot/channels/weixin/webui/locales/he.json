@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "primaryAction": "חבר WeChat",
+    "docsLabel": "פתח את הגדרת WeChat",
+    "officialLabel": "פתח את WeChat",
+    "fields": {
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי משתמש, מופרדים בפסיקים"
+      },
+      "token": {
+        "label": "אסימון",
+        "placeholder": "נשמר על ידי התחברות QR"
+      },
+      "sendProgress": {
+        "label": "שלח התקדמות"
+      },
+      "sendToolHints": {
+        "label": "רמזים לכלים"
+      },
+      "streaming": {
+        "label": "השתמש בסטרימינג API"
+      },
+      "replyProgressMessages": {
+        "label": "התקדמות מפורטת"
+      },
+      "replyProgressMaxMessages": {
+        "label": "מגבלת הודעות התקדמות"
+      },
+      "contextMessageBudget": {
+        "label": "מגבלת הודעת הקשר"
+      },
+      "blockStreaming": {
+        "label": "השב בבלוקים"
+      },
+      "blockStreamingMinChars": {
+        "label": "אורך בלוק מינימלי (תווים)"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "מגבלת ספירת חסימות"
+      },
+      "baseUrl": {
+        "label": "כתובת API"
+      },
+      "cdnBaseUrl": {
+        "label": "כתובת CDN"
+      },
+      "routeTag": {
+        "label": "תג מסלול"
+      },
+      "stateDir": {
+        "label": "ספריית המדינה"
+      },
+      "pollTimeout": {
+        "label": "פסק זמן לסקר (שניות)"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "קוד QR לכניסה ל־WeChat",
+    "scanTitle": "סרוק עם WeChat",
+    "waiting": "מחכה שתסרוק עם WeChat...",
+    "connected": "WeChat מחובר.",
+    "stopped": "הכניסה ל־WeChat הופסקה.",
+    "connecting": "מקשר…",
+    "verifyTitle": "נדרש אימות",
+    "verifyDescription": "הזן את המספר המוצג ב־WeChat כדי להמשיך.",
+    "verifyMismatch": "הקוד הזה לא תאם. הזן את המספר החדש המוצג ב־WeChat.",
+    "expired": "פג תוקף הכניסה ל־WeChat. סרוק שוב כדי להתחבר מחדש.",
+    "failed": "לא ניתן להתחבר ל־WeChat. נסה שוב.",
+    "verifyPlaceholder": "קוד",
+    "verifySubmit": "לאמת"
+  }
+}

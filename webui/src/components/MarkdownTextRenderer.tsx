@@ -741,6 +741,10 @@ export default function MarkdownTextRenderer({
           </div>
         );
       },
+      blockquote({ node: _node, ...props }) {
+        void _node;
+        return <blockquote {...props} dir="auto" />;
+      },
       li({ children: markdownChildren, className: itemClassName, node }) {
         const preview = node?.properties as InlineLinkPreviewProperties | undefined;
         if (!documentPath && preview?.["data-link-preview-href"]) {
@@ -758,6 +762,7 @@ export default function MarkdownTextRenderer({
         const taskItem = itemClassName?.includes("task-list-item");
         return (
           <li
+            dir="auto"
             className={cn(
               itemClassName,
               taskItem

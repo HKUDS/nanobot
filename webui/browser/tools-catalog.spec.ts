@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { supportedLocales } from "../src/i18n/config";
+import { localeDirection, supportedLocales } from "../src/i18n/config";
 
 async function selectRadio(page: Page, group: string, name: string) {
   const radio = page.getByRole("radiogroup", { name: group }).getByRole("radio", { name, exact: true });
@@ -142,7 +142,7 @@ for (const { code: locale } of supportedLocales) {
     await cli.locator("..").click();
     await expect(cli).toBeChecked();
     await expect(cli).toBeFocused();
-    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press(localeDirection(locale) === "rtl" ? "ArrowLeft" : "ArrowRight");
     await expect(types.nth(2)).toBeChecked();
     await expect(types.nth(2)).toBeFocused();
     await page.keyboard.press("Tab");

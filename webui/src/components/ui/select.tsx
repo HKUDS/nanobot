@@ -1,14 +1,19 @@
 import * as React from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { floatingSurfaceElevationClassName, floatingItemClassName } from "@/components/ui/floating-surface";
 import { useFloatingPortal } from "@/components/ui/floating-portal";
 import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 import { ControlChevron } from "@/components/ui/control-chevron";
+import { localeDirection } from "@/i18n/config";
 
-export const Select = SelectPrimitive.Root;
+export function Select(props: React.ComponentPropsWithoutRef<typeof SelectPrimitive.Root>) {
+  const { i18n } = useTranslation();
+  return <SelectPrimitive.Root dir={localeDirection(i18n.language)} {...props} />;
+}
 export const SelectValue = SelectPrimitive.Value;
 export const SelectSeparator = SelectPrimitive.Separator;
 
@@ -45,9 +50,9 @@ export function SelectContent({ children, ...props }: Pick<
 
 export function SelectItem({ children, className, ...props }: React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>) {
   return (
-    <SelectPrimitive.Item {...props} className={cn(floatingItemClassName, "h-9 py-0 pl-2 pr-8 data-[state=checked]:bg-muted data-[highlighted]:bg-muted data-[disabled]:opacity-50", className)}>
+    <SelectPrimitive.Item {...props} className={cn(floatingItemClassName, "h-9 py-0 ps-2 pe-8 data-[state=checked]:bg-muted data-[highlighted]:bg-muted data-[disabled]:opacity-50", className)}>
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-      <SelectPrimitive.ItemIndicator className="absolute right-2 flex items-center"><Check className="h-3.5 w-3.5" aria-hidden /></SelectPrimitive.ItemIndicator>
+      <SelectPrimitive.ItemIndicator className="absolute end-2 flex items-center"><Check className="h-3.5 w-3.5" aria-hidden /></SelectPrimitive.ItemIndicator>
     </SelectPrimitive.Item>
   );
 }

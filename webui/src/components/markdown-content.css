@@ -26,6 +26,10 @@
   .markdown-content h4 { font-size: 1.125em; }
   .markdown-content :is(h5, h6) { font-size: 1em; }
   .markdown-content :is(p, ul, ol) { margin-block: 0.8em; }
+  .markdown-content :is(p, li, h1, h2, h3, h4, h5, h6, blockquote) {
+    unicode-bidi: plaintext;
+    text-align: start;
+  }
   .markdown-content li { margin-block: 0.25em; }
   .markdown-content :is(li > ul, li > ol) { margin-block: 0; }
   .markdown-content strong { font-weight: 600; }
@@ -49,11 +53,11 @@
   }
 
   .markdown-content .contains-task-list {
-    @apply list-none pl-0;
+    @apply list-none ps-0;
   }
 
   .markdown-content .task-list-item {
-    @apply list-none pl-0;
+    @apply list-none ps-0;
   }
 
   .markdown-content :is(h1, h2, h3, h4, h5, h6) {
@@ -99,6 +103,32 @@
     max-width: 100%;
     overflow-x: auto;
   }
+}
+
+.markdown-content :is(ul, ol):has(> li:first-child:dir(rtl)) {
+  direction: rtl;
+  padding-inline-end: 0;
+}
+
+.markdown-content :is(ul, ol):not(.contains-task-list):has(> li:first-child:dir(rtl)) {
+  padding-inline-start: 1.625em;
+}
+
+.markdown-content :is(ul, ol):has(> li:first-child:dir(ltr)):dir(rtl) {
+  direction: ltr;
+}
+
+.markdown-content blockquote:dir(rtl) {
+  padding-inline-start: 1em;
+  padding-inline-end: 0;
+  border-inline-start-width: 2px;
+  border-inline-end-width: 0;
+}
+
+pre, code {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: isolate;
 }
 
 html[data-custom-background] .markdown-inline-code {

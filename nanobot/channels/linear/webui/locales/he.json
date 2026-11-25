@@ -1,0 +1,117 @@
+{
+  "setup": {
+    "docsLabel": "פתח את מדריך ההגדרה ליניארי",
+    "officialLabel": "צור אפליקציית OAuth ליניארית",
+    "fields": {
+      "clientId": {
+        "label": "מזהה לקוח OAuth",
+        "placeholder": "מזהה לקוח ליניארי OAuth"
+      },
+      "clientSecret": {
+        "label": "סוד לקוח OAuth",
+        "placeholder": "••••••"
+      },
+      "webhookSigningSecret": {
+        "label": "סוד חתימת Webhook",
+        "placeholder": "••••••"
+      },
+      "publicBaseUrl": {
+        "label": "HTTPS ציבורי URL",
+        "placeholder": "https://nanobot.example.com"
+      },
+      "host": {
+        "label": "תקשיב מארח",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "האזנה נמל",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "נתיב Webhook",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "OAuth נתיב התקשרות חזרה",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "משתמשים לינאריים מותרים",
+        "placeholder": "מזהי משתמש לינאריים, מופרדים בפסיקים"
+      },
+      "showReasoning": {
+        "label": "הצג נימוקים"
+      }
+    }
+  },
+  "custom": {
+    "secretSaved": "נשמר",
+    "replaceSecret": "להחליף",
+    "replaceSecretLabel": "החלף את {{name}}",
+    "enterSecret": "הזן סוד",
+    "secretSaveFailed": "לא ניתן לאשר את השמירה. נסה שוב או בטל.",
+    "authorizeTitle": "אישור בלינארית",
+    "authorizeDescription": "הרשאה בלינארית, ואז חזור לכאן.\n\nהמשך בלינארית כדי לבחור סביבת עבודה ולאשר את nanobot. חזור לכאן כשתסיים.",
+    "waiting": "ממתין להרשאה לינארית…",
+    "connected": "ליניארי מחובר.",
+    "stopped": "ההרשאה הופסקה.",
+    "connecting": "מקשר…",
+    "connect": "חבר ליניארי",
+    "openLinear": "המשך בלינארית",
+    "createApp": "צור אפליקציה ליניארית",
+    "savePublicUrl": "הזן HTTPS ציבורי URL כדי ליצור אפליקציה לינארית.",
+    "retrySave": "ניסיון חוזר",
+    "channelRunning": "הערוץ פועל",
+    "configureTools": "הגדר ליניארי MCP",
+    "workspacesTitle": "חללי עבודה מורשים",
+    "refreshWorkspaces": "רענון חללי עבודה",
+    "loadingWorkspaces": "טעינת חללי עבודה",
+    "noWorkspaces": "אין שטחי עבודה מורשים. חבר סביבת עבודה כדי לקבל בקשות לסוכן ליניארי.",
+    "refreshRequired": "נדרש רענון הרשאה",
+    "missingScopes": "התחבר מחדש להענקה: {{scopes}}",
+    "authorized": "מוסמך",
+    "confirmDisconnect": "הסר סביבת עבודה",
+    "disconnect": "הסר סביבת עבודה",
+    "workspaceActions": "נהל את {{name}}",
+    "reauthorize": "הרשאה מחדש",
+    "disconnectTitle": "להסיר את {{name}}?",
+    "disconnectDescription": "הסר גישה למרחב העבודה; שמור היסטוריה.\n\nבטל את ההרשאה של סביבת עבודה זו ונקה את הגדרות הגישה לחברים שלו ב־nanobot. בעיות ליניאריות, הערות והיסטוריית שיחות nanobot יישמרו. אזורי עבודה אחרים אינם מושפעים. תוכל לאשר שוב את סביבת העבודה הזו מאוחר יותר.",
+    "disconnectLast": "זהו סביבת העבודה המחוברת האחרונה, כך שגם הערוץ הליניארי יכובה.",
+    "disconnecting": "מסיר…",
+    "addWorkspace": "חבר סביבת עבודה",
+    "addWorkspaceDetails": "על חיבור חללי עבודה",
+    "addWorkspaceHelp": "משתמש באפליקציה Linear הנוכחית. כדי לחבר סביבת עבודה אחרת, האפליקציה חייבת לאפשר התקנה בסביבות עבודה אחרות; אפליקציות פרטיות פועלות רק בסביבת העבודה שלהן. הרשאה של סביבת עבודה קיימת מעדכנת את החיבור שלה מבלי ליצור שכפול.",
+    "resetConnection": "אפס חיבור ליניארי",
+    "resetTitle": "לאפס ליניארי?",
+    "resetDescription": "נתק את כל סביבות העבודה המקושרות דרך האפליקציה הזו והפסק את הערוץ.",
+    "resetClears": "מנקה",
+    "resetClearsDetail": "הגדרות גישת חבר ותצורת האפליקציה של מופע זה, כולל אישורים שמורים.",
+    "resetKeeps": "שומרת",
+    "resetKeepsDetail": "אפליקציה לינארית, בעיות, הערות, היסטוריית שיחה ואישורי התאמה.",
+    "resetConfirm": "אתחול",
+    "resetting": "מאפס…",
+    "resetIncomplete": "האיפוס לא הושלם. סביבות עבודה שכבר הוסרו נשארות מוסרות; נסה שוב כדי לסיים את השלבים הנותרים.",
+    "resetInspectFailed": "לא ניתן היה לאמת סביבות עבודה מחוברות. הגדרות האפליקציה נשמרו.",
+    "resetChanged": "חלל עבודה נוסף חובר. בדוק את החיבורים ונסה שוב.",
+    "resetStopFailed": "לא ניתן היה לעצור את הערוץ הליניארי. הגדרות האפליקציה נשמרו.",
+    "resetSaveFailed": "לא ניתן היה לנקות את הגדרות האפליקציה. נא לנסות שוב."
+  },
+  "members": {
+    "title": "גישה לחבר",
+    "help": "אפשר לחברים להשתמש ב־nanobot ללא קוד זיווג. ההרשאה הקיימת של Linear עדיין תקפה. זה לא מעניק גישה לממשק הניהול של nanobot. כיבוי הגישה חוסם בקשות חדשות, לא משימות שכבר פועלות.",
+    "allowAll": "הגדרות מתקדמות מאפשרות כרגע את כל החברים (*), כולל חברים חדשים. מתגי כיבוי בודדים עדיין מקבלים עדיפות. הסר את * כדי לדרוש אישור לחברים חדשים.",
+    "search": "חפש חברים",
+    "refresh": "רענן את החברים",
+    "working": "חסכון…",
+    "saved": "נשמר",
+    "retry": "רענן את החברים כדי לבדוק את המצב הנוכחי ונסה שוב.",
+    "empty": "אין חברים פעילים תואמים.",
+    "allow": "אפשר ל־{{name}} להשתמש ב־nanobot",
+    "saveUnconfirmed": "הגישה לא אושרה. רענן את החברים לפני שתנסה שוב.",
+    "guide": "השתמש בגישת חבר כדי לאשר חברים לקבוצה ללא קודי זיווג. האישורים הקיימים עדיין פועלים אלא אם הם כבויים. חבר Linear MCP כדי לחפש או לערוך בעיות.",
+    "details": "לגבי גישת חברים",
+    "summary": "{{allowed}} מופעל",
+    "loading": "מחפש חברים…",
+    "refreshing": "מחפש עדכונים…"
+  }
+}

@@ -11,6 +11,7 @@ export const supportedLocales = [
   { code: "pt-BR", nativeLabel: "Português (Brasil)" },
   { code: "vi", nativeLabel: "Tiếng Việt" },
   { code: "id", nativeLabel: "Bahasa Indonesia" },
+  { code: "he", nativeLabel: "עברית" },
 ] as const;
 
 export type SupportedLocale = (typeof supportedLocales)[number]["code"];
@@ -79,4 +80,9 @@ export function persistLocale(locale: SupportedLocale): void {
 export function applyDocumentLocale(locale: SupportedLocale): void {
   if (typeof document === "undefined") return;
   document.documentElement.lang = locale;
+  document.documentElement.dir = localeDirection(locale);
+}
+
+export function localeDirection(locale: string): "rtl" | "ltr" {
+  return normalizeLocale(locale) === "he" ? "rtl" : "ltr";
 }
