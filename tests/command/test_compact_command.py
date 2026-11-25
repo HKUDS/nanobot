@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 import threading
 from datetime import datetime, timedelta
@@ -201,7 +202,7 @@ async def test_compacted_session_waits_for_new_input_without_continuation(
         channel="cli", session_summary=expected_summary, has_cron=False,
     )
     assert sent[1]["content"].startswith("hi\n\n")
-    assert "File access: no workspace restriction." in sent[1]["content"]
+    assert f"Current project (JSON path): {json.dumps(str(loop.workspace.resolve()), ensure_ascii=False)}" in sent[1]["content"]
 
     loop.sessions.invalidate(key)
     resumed = loop.sessions.get_or_create(key)

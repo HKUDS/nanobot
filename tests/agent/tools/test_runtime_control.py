@@ -428,7 +428,6 @@ async def test_workspace_context_uses_request_scope_not_active_tool_scope(
         assert "old-project" not in block.content
         assert ("File access: project and tool-specific allowed paths only." in block.content) is restricted
         assert ("Shell sandbox configured" in block.content) is bool(sandbox)
-        assert "OS permissions" in block.content
         assert "system-enforced" not in block.content
     finally:
         reset_workspace_scope(token)
@@ -454,7 +453,7 @@ async def test_workspace_context_does_not_require_my_tool(tmp_path: Path) -> Non
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
     await loop.process_direct("Read the current project", ephemeral=True)
     message = provider.chat_stream_with_retry.await_args.kwargs["messages"][-1]
-    assert "File access: no workspace restriction." in message["content"]
+    assert f"Current project (JSON path): {json.dumps(str(tmp_path.resolve()), ensure_ascii=False)}" in message["content"]
 
 
 @pytest.mark.asyncio
@@ -479,7 +478,11 @@ async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_p
     first, second, third = [LLMProvider._sanitize_empty_content(call.kwargs["messages"]) for call in calls]
     assert json.dumps(second[:len(first)]) == json.dumps(first)
     assert "File access: project and tool-specific allowed paths only." in first[-1]["content"]
-    assert "File access: no workspace restriction." in second[-1]["content"]
+    assert second[-1]["content"].endswith(
+        f"{RUNTIME_CONTEXT_TAG}\n"
+        f"Current project (JSON path): {json.dumps(str(project.resolve()), ensure_ascii=False)}\n"
+        f"{RUNTIME_CONTEXT_END}"
+    )
     assert json.dumps(str(other.resolve())) in third[-1]["content"]
     assert json.dumps(str(project.resolve())) not in third[-1]["content"]
     assert all(call.kwargs["tools"] == calls[0].kwargs["tools"] for call in calls)
@@ -593,7 +596,6 @@ async def test_workspace_context_compaction_reuses_serialized_prefix(
         await loop.process_direct("Check again", session_key=session.key)
     current = provider.chat_stream_with_retry.await_args.kwargs["messages"][-1]["content"]
     assert current.count("Current project (JSON path):") == 1
-    assert "File access: no workspace restriction." in current
 
 
 @pytest.mark.asyncio
