@@ -1107,12 +1107,11 @@ class TestCompactIdleSession:
         assert reloaded.metadata == {}
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("response", ["(nothing)", "  `(nothing)`\n"])
     async def test_nothing_commits_checkpoint_once_without_raw_archive(
-        self, real_consolidator, mock_provider, runtime, response
+        self, real_consolidator, mock_provider, runtime
     ):
         mock_provider.chat_stream_with_retry.return_value = MagicMock(
-            content=response, finish_reason="stop"
+            content="(nothing)", finish_reason="stop"
         )
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:nothing")

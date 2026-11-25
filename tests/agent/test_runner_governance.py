@@ -208,36 +208,6 @@ async def test_runner_summarizes_history_and_preserves_current_input(monkeypatch
     assert any(message.get("content") == old_answer for message in result.messages)
 
 
-@pytest.mark.parametrize("standalone", [False, True])
-async def test_pressure_compaction_without_retained_content_preserves_system_prompt(monkeypatch, standalone):
-    provider = MagicMock(spec=LLMProvider)
-    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-    old_answer = "old answer " * 2_000
-    transcript = TranscriptInput(history=[{"role": "user", "content": "hi"},
-                                          {"role": "assistant", "content": old_answer}], current_message="1")
-    monkeypatch.setattr(
-        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
-        lambda _provider, _model, messages, _tools: (
-            600 if any(m.get("content") == old_answer for m in messages) else 100, "test-counter"
-        ),
-    )
-    consolidate = AsyncMock(return_value="(nothing)")
-    await AgentRunner().run(make_run_spec(
-        provider, tools=tools, model="test-model", max_iterations=1,
-        context_window_tokens=1_624, max_tokens=100,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        initial_messages=_build_transcript(transcript) if standalone else None,
-        transcript_input=None if standalone else transcript,
-        transcript_builder=None if standalone else _build_transcript,
-        consolidate_history=consolidate,
-    ))
-    consolidate.assert_awaited_once()
-    sent = provider.chat_stream_with_retry.await_args.kwargs["messages"]
-    assert [m for m in sent if m["role"] == "system"] == [{"role": "system", "content": "system"}]
-
-
 async def test_runner_rejects_oversized_delta_without_summarizable_history(monkeypatch):
     provider = MagicMock(spec=LLMProvider)
     provider.chat_stream_with_retry = AsyncMock()

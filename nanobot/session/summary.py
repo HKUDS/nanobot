@@ -11,12 +11,8 @@ SUMMARY_CONTINUATION_TEXT = (
     "Continue the active task from the working-memory checkpoint above."
 )
 
-EMPTY_SUMMARY = "(nothing)"
-
-
 def is_empty_summary(text: str) -> bool:
-    """Recognize only a whole archive marker, including older Markdown-wrapped output."""
-    return text.strip() in (EMPTY_SUMMARY, f"`{EMPTY_SUMMARY}`")
+    return text.strip() in ("(nothing)", "`(nothing)`")
 
 
 def is_summary_checkpoint(message: Mapping[str, Any]) -> bool:
@@ -50,7 +46,7 @@ def session_summary_from_metadata(
         return None
     summary_data = cast(Mapping[str, object], raw)
     text = summary_data.get("text")
-    if not isinstance(text, str) or not text or is_empty_summary(text):
+    if not isinstance(text, str) or not text:
         return None
     raw_last_active = summary_data.get("last_active")
     if isinstance(raw_last_active, str):

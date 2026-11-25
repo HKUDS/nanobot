@@ -681,8 +681,7 @@ class TestAutoCompactEdgeCases:
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(session_after.messages) == 13
         assert session_after.get_history(max_messages=12) == []
-        _, summary = await loop.auto_compact.prepare_session(session_after, "cli:test")
-        assert summary is None
+        assert loop.auto_compact._summaries["cli:test"]["text"] == "(nothing)"
         assert session_after.metadata["_last_summary"]["text"] == "(nothing)"
 
         await loop.aclose()
