@@ -132,11 +132,7 @@ class ContextBuilder:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary, track_source=True))
 
         if session_summary and not is_empty_summary(session_summary["text"]):
-            parts.append(
-                "[Archived Context Summary]\n\n"
-                f"Previous conversation summary (last active {session_summary['last_active']}):\n"
-                f"{session_summary['text']}"
-            )
+            parts.append(f"[Archived Context Summary]\n\n{session_summary['text']}")
 
         return "\n\n---\n\n".join(parts)
 
