@@ -480,7 +480,7 @@ async for event in bot.stream("Generate a long answer"):
 | `await wait()` | Wait for the run to finish and return `RunResult`. |
 | `await text()` | Wait for the run to finish and return `RunResult.content`. |
 | `await cancel()` | Cancel the run and release stream resources. |
-| `await aclose()` | Close the stream; equivalent cleanup primitive for `async with` / manual lifecycle code. |
+| `await aclose()` | Close the stream and cancel the run if it is still active. Use `contextlib.aclosing(run)` for cleanup with `async with`. |
 
 SDK runs with different session keys may overlap, including runs with per-run `model` or `model_preset` overrides. Each run receives an immutable runtime without mutating the instance default. Runs sharing one session key remain serialized.
 
@@ -497,7 +497,7 @@ SDK runs with different session keys may overlap, including runs with per-run `m
 | `arguments` | `dict \| None` | Tool arguments when available. |
 | `iteration` | `int \| None` | Agent loop iteration when available. |
 | `resuming` | `bool \| None` | Whether a text segment ended before more tool work. |
-| `usage` | `dict[str, int]` | Token usage on completion events. |
+| `usage` | `LLMUsage \| None` | Token usage on completion events, when available. |
 | `error` | `str \| None` | Error text on failed events. |
 | `metadata` | `dict` | Additional event metadata. |
 
@@ -534,11 +534,13 @@ async with Nanobot.from_config() as bot:
 | `content` | `str` | The agent's final text response. |
 | `tools_used` | `list[str]` | Tool names used during the run. |
 | `messages` | `list[dict]` | Final message list from the run. |
-| `usage` | `dict[str, int]` | Token usage reported or estimated by the runtime. |
+| `usage` | `LLMUsage \| None` | Token usage reported or estimated by the runtime, when available. |
 | `stop_reason` | `str \| None` | Why the run stopped, such as `"completed"` or `"max_iterations"`. |
 | `error` | `str \| None` | Diagnostic for the caller when the run failed. Don't display it as an assistant reply. |
 | `failure_error_kind` | `str \| None` | Public category for a model failure, such as `billing`, `server`, or `empty_final_response_length`. Use this to select user-facing copy; `content` is empty on a terminal model failure. |
 | `metadata` | `dict` | Outbound metadata such as latency. |
+
+When `usage` is available, use `usage.to_dict()` to serialize it.
 
 ## Session, Memory, And Runtime Helpers
 
@@ -577,10 +579,12 @@ Ingested messages must include `role` and `content`. Roles may be `user`, `assis
 | `workspace` | Current runtime workspace path. |
 | `add_context_provider(provider)` | Register an async per-turn context provider and return an unsubscribe callback. |
 | `on_session_turn_persisted(handler)` | Register a best-effort sync or async callback for locally persisted turns and return an unsubscribe callback. |
-| `await compact_session(session_key)` | Run token-based consolidation for a session. |
-| `await compact_idle_session(session_key, max_suffix=0)` | Run idle-session compaction and return its summary. The legacy `max_suffix` argument has no effect. |
+| `await compact_session(session_key)` | Compact a session and return its snapshot. |
+| `await compact_idle_session(session_key)` | Run session compaction and return its summary. |
 
 Both compaction methods serialize with turns for the same session key. Call them after `bot.run()` returns, or from a separate task that can wait for the active turn to finish.
+
+The legacy `max_suffix` keyword is accepted for compatibility but has no effect. Omit it in new calls.
 
 ### Host integration context and persisted-turn callbacks
 
