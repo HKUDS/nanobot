@@ -11,6 +11,10 @@
   container: thread-toast / inline-size;
 }
 
+/* Keep the two label gaps equal without shrinking either button's hit area. */
+.toast-recovery-actions > :first-child { padding-inline: 0.75rem 0.5rem; }
+.toast-recovery-actions > :last-child { padding-inline: 0.5rem 0.75rem; }
+
 /* A recovery decision must not truncate the reason or push actions offscreen. */
 .toast-card[data-toast-timed="false"][data-toast-tone="error"] [role="alert"] {
   white-space: normal;

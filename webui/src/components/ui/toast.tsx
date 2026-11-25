@@ -108,6 +108,7 @@ function ToastCard({ notice, step, paused, unavailable, onAction, onSecondaryAct
   const Icon = tone === "error" ? TriangleAlert : tone === "pending" ? Trash2 : Check;
   const hasActions = Boolean(action || secondaryAction);
   const interactive = Boolean(hasActions || details);
+  const recoveryPair = persistent && tone === "error" && !details && action && secondaryAction;
   return (
     <Popover open={Boolean(details) && detailsOpen} onOpenChange={setDetailsOpen}>
       <PopoverAnchor asChild>
@@ -149,7 +150,7 @@ function ToastCard({ notice, step, paused, unavailable, onAction, onSecondaryAct
             <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-border/80" />
           )}
           {hasActions && (
-            <div className={`flex shrink-0 items-center gap-0.5${details ? "" : " -ms-1"}`}>
+            <div className={`flex shrink-0 items-center${details ? "" : " -ms-1"} ${recoveryPair ? "toast-recovery-actions" : "gap-0.5"}`}>
               {secondaryAction && (
                 <Button
                   key={`secondary-${step}`}
