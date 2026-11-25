@@ -14,6 +14,7 @@ export const diagramExamples = {
 export function DiagramFixture({ parameters }: { parameters: URLSearchParams }) {
   const { theme, toggle } = useTheme();
   const [streaming, setStreaming] = useState(parameters.has("stream"));
+  const [closed, setClosed] = useState(!streaming);
   const [identity, setIdentity] = useState("first");
   const [source, setSource] = useState(diagramExamples[parameters.get("type") as keyof typeof diagramExamples] ?? diagramExamples.flowchart);
   const examples = parameters.has("many")
@@ -21,10 +22,11 @@ export function DiagramFixture({ parameters }: { parameters: URLSearchParams }) 
     : parameters.has("multiple") ? Object.values(diagramExamples).slice(0, 3) : [source];
   const replies = parameters.has("many")
     ? [examples.map((example) => `\`\`\`mermaid\n${example}\n\`\`\``).join("\n\n")]
-    : examples.map((example, index) => `A ${index + 1} diagram.\n\n\`\`\`mermaid\n${example}\n\`\`\`\n\nThe source stays available.`);
+    : examples.map((example, index) => `A ${index + 1} diagram.\n\n\`\`\`mermaid\n${example}${closed ? "\n```\n\nThe source stays available." : ""}`);
   return <ThemeProvider theme={theme}><main className="mx-auto max-w-3xl space-y-4 p-4 sm:p-6">
     <div className="flex flex-wrap gap-3">
       <button onClick={toggle}>Toggle theme</button>
+      <button onClick={() => setClosed(true)}>Close fence</button>
       <button onClick={() => setStreaming(false)}>Complete message</button>
       <button onClick={() => { setIdentity((value) => value === "first" ? "second" : "first"); setSource(diagramExamples.state); }}>Switch conversation</button>
     </div>

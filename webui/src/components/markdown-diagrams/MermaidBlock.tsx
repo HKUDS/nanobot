@@ -9,6 +9,7 @@ import { ImageViewport } from "@/components/ui/image-viewport";
 import { useToast } from "@/components/ui/toast";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
+import { DiagramLoadRetry } from "./DiagramLoadRetry";
 import { useDiagramScope } from "./context";
 import { requestDiagram, type DiagramPalette, type DiagramRequest, type DiagramState } from "./runtime";
 import type { DiagramInput } from "./types";
@@ -140,8 +141,8 @@ export default function MermaidBlock({ source }: { source: string }) {
       </Dialog>
     </div>
     {state.kind === "failed" && <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground" role="status">
-      <span>{t(`diagram.errors.${state.reason}`)}</span>
-      {["load", "worker", "deadline", "image"].includes(state.reason) && <button type="button" className={buttonClass} onClick={() => request.current?.retry()}>{t("common.retry")}</button>}
+      {state.reason === "load" ? <DiagramLoadRetry onRetry={() => request.current?.retry()} /> : <span>{t(`diagram.errors.${state.reason}`)}</span>}
+      {["worker", "deadline", "image"].includes(state.reason) && <button type="button" className={buttonClass} onClick={() => request.current?.retry()}>{t("common.retry")}</button>}
     </div>}
     {showSource ? <CodeBlock language="mermaid" code={source} chrome="none" highlight={false} showLineNumbers={source.includes("\n")} />
       : image ? <div className="flex justify-center p-3"><img src={image.url} alt={image.label || t("diagram.title")} width={image.width} height={image.height} className="max-h-[28rem] max-w-full object-contain" /></div>

@@ -36,15 +36,17 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("Mermaid message fences", () => {
-  it("renders identical source at actual completion through preserved Streamdown layout", async () => {
-    const message = { id: "diagram", role: "assistant" as const, content: markdown, createdAt: 1, isStreaming: true };
+  it.each(["```", "~~~~"])("renders when the %s fence closes and keeps the image as prose streams", async (delimiter) => {
+    const start = `Before the graph.\n\n${delimiter}mermaid\n${code}\n`;
+    const message = { id: "diagram", role: "assistant" as const, content: start + delimiter.slice(1), createdAt: 1, isStreaming: true };
     const view = render(<MessageBubble message={message} />);
     await waitFor(() => expect(view.container.querySelector(".markdown-content")).toBeInTheDocument());
     const tree = view.container.querySelector(".markdown-content");
     expect(runtime.request).not.toHaveBeenCalled();
     expect(view.container).toHaveTextContent("开始 --> 完成");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    view.rerender(<MessageBubble message={{ ...message, isStreaming: false }} />);
+    expect(view.container.querySelector('[aria-busy="true"]')).toHaveTextContent("开始 --> 完成");
+    view.rerender(<MessageBubble message={{ ...message, content: start + delimiter }} />);
     await waitFor(() => expect(jobs).toHaveLength(1));
     expect(jobs[0].input.source).toBe(code);
     expect(view.container.querySelector(".markdown-content")).toBe(tree);
@@ -52,7 +54,12 @@ describe("Mermaid message fences", () => {
     expect(screen.getByRole("img", { name: "A real diagram result" })).toHaveAttribute("src", "blob:completed-diagram");
     expect(screen.getByRole("button", { name: "Enlarge diagram" })).not.toBeDisabled();
     expect(view.container).toHaveTextContent("Before the graph.");
+    const content = `${start}${delimiter}\n\nAfter the graph.`;
+    view.rerender(<MessageBubble message={{ ...message, content }} />);
     expect(view.container).toHaveTextContent("After the graph.");
+    view.rerender(<MessageBubble message={{ ...message, content, isStreaming: false }} />);
+    expect(screen.getByRole("img")).toHaveAttribute("src", "blob:completed-diagram");
+    expect(jobs).toHaveLength(1);
   });
 
   it("keeps errors local and makes failed source available", async () => {
