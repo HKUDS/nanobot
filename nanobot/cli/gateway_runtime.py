@@ -755,6 +755,7 @@ def _run_claimed_gateway(
         webui_recovery_action=recovery.handle_action,
         webui_subagent_manager=agent.subagents,
         webui_discard_session=agent.discard_session,
+        webui_stop_session=agent.stop_session,
         config_path=Path(config_path),
     )
 

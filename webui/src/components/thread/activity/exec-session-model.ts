@@ -71,7 +71,7 @@ function parseSessionObservation(value: unknown, expectedId?: string): SessionOb
   if (/(?:^|\n)Error: Output silence limit reached; session was terminated\. Reason: idle_timeout\.$/.test(beforeExit)) {
     return { kind: "idle-timeout", exitCode };
   }
-  if (/(?:^|\n)Session terminated\. Reason: (?:cancelled|owner_closed|shutdown)\.$/.test(beforeExit)) {
+  if (/(?:^|\n)Session terminated\. Reason: (?:cancelled|owner_closed|shutdown|preempted_capacity)\.$/.test(beforeExit)) {
     return { kind: "terminated", exitCode };
   }
   return { kind: "exited", exitCode };

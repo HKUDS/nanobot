@@ -871,7 +871,7 @@ class SessionState:
         self._archives_imported = True
         return imported
 
-    async def set_archived_keys(self, keys: Sequence[str]) -> list[str]:
+    async def set_archived_keys(self, keys: Sequence[str]) -> tuple[list[str], list[str]]:
         values = list(dict.fromkeys(keys))
         return await self._execute(
             None, lambda: self._store.set_archived_keys(values), operation_name="set_archived_keys",

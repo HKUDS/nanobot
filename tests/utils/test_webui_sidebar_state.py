@@ -401,3 +401,38 @@ async def test_failed_archive_read_drains_preference_write_before_releasing_admi
             await write
         await manager.state.aclose()
     assert json.loads(webui_sidebar_state_path().read_text(encoding="utf-8"))["view"]["density"] == "compact"
+
+
+@pytest.mark.parametrize("cancel_request", [False, True])
+async def test_archive_stop_failure_retries_only_unfinished_keys(tmp_path, monkeypatch, cancel_request):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    manager = SessionManager(tmp_path)
+    calls = []
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def stop(key):
+        calls.append(key)
+        if len(calls) == 1:
+            entered.set()
+            await release.wait()
+            raise OSError("cleanup failed")
+
+    first, second = "websocket:a", "websocket:b"
+    sidebar = WebUISidebarState(manager.state, stop_session=stop)
+    try:
+        await manager.state.get(first)
+        await manager.state.get(second)
+        state = {"archived_keys": [first, second]}
+        write = asyncio.create_task(sidebar.write(state))
+        await asyncio.wait_for(entered.wait(), 3)
+        if cancel_request:
+            write.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError if cancel_request else OSError):
+            await write
+        assert calls == [first, second]
+        await sidebar.write(state)
+        await sidebar.write(state)
+        assert calls == [first, second, first]
+    finally:
+        await manager.state.aclose()

@@ -419,6 +419,7 @@ async def test_hard_budget_counts_down_despite_output_and_repeated_waits(tmp_pat
         pytest.param(False, "max_runtime", id="ordinary-root-hard-budget"),
         pytest.param(True, "max_runtime", id="early-root-hard-budget"),
         pytest.param(True, "owner_closed", id="early-root-owner-close"),
+        pytest.param(True, "preempted_capacity", id="early-root-preemption"),
     ],
 )
 async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
@@ -462,17 +463,19 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
 
     monkeypatch.setattr(processes, "spawn_process_tree", spawn_with_exit_order)
     owner = RequestContext(channel="cli", chat_id="pipe-budget", session_key="cli:pipe-budget")
-    manager = ExecSessionManager()
-    max_runtime = 12 if stop_reason == "owner_closed" else 2
+    manager = ExecSessionManager(max_sessions=1)
+    preempt = stop_reason == "preempted_capacity"
+    max_runtime = 2 if stop_reason == "max_runtime" else 12
     tool = ExecTool(
         working_dir=str(tmp_path), max_runtime=max_runtime, max_runtime_limit=max_runtime,
         idle_timeout=1, session_manager=manager,
     )
     initial_exec_task = None
+    initial = ""
     try:
         with request_context(owner):
             initial_exec_task = asyncio.create_task(tool.execute(
-                command=_python(parent_code), yield_time_ms=10000,
+                command=_python(parent_code), yield_time_ms=0 if preempt else 10000,
             ))
         await asyncio.wait_for(spawn_returned.wait(), timeout=5)
         parent_pid = int(await _file_text(parent_pidfile))
@@ -480,7 +483,13 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
         release_root.write_text("root may exit")
         await _pid_stopped(parent_pid, timeout=1)
         assert _pid_running(child_pid)
-        assert not initial_exec_task.done()
+        if preempt:
+            initial = await initial_exec_task
+            monkeypatch.setattr(processes, "spawn_process_tree", real_spawn)
+            promoted = await tool.execute(command=_python("input()"), yield_time_ms=0)
+            assert _session_id(promoted) != _session_id(initial)
+        else:
+            assert not initial_exec_task.done()
 
         if stop_reason == "owner_closed":
             assert await asyncio.wait_for(
@@ -488,7 +497,11 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
             ) == 1
         await _pid_stopped(child_pid, timeout=5)
         release_child.write_text("perform the delayed write")
-        final = await asyncio.wait_for(initial_exec_task, timeout=3)
+        if preempt:
+            with request_context(owner):
+                final = await ExecSessionTool(manager=manager).execute(session_id=_session_id(initial))
+        else:
+            final = await asyncio.wait_for(initial_exec_task, timeout=3)
 
         if stop_reason == "max_runtime":
             assert is_tool_error_result(final), final
@@ -496,8 +509,8 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
             assert 1.5 <= _elapsed_seconds(final) <= 3.5
         else:
             assert not is_tool_error_result(final), final
-            assert "Session terminated. Reason: owner_closed." in final
-        assert "worker launched" in final
+            assert f"Session terminated. Reason: {stop_reason}." in final
+        assert "worker launched" in initial + final
         assert _exit_code(final) == 0
         assert not delayed_effect.exists()
         assert await manager.list(owner_session_key=owner.session_key) == []
@@ -600,19 +613,18 @@ async def test_owner_close_stops_inline_tree_and_preserves_other_owner_work(tmp_
             ))
             parent_pid = int(await _file_text(parent_pidfile))
             child_pid = int(await _file_text(child_pidfile))
-            owner_listing = await list_tool.execute()
-            owner_ids = _listed_ids(owner_listing)
-            assert len(owner_ids) == 1, owner_listing
-            sid_a = owner_ids[0]
+            assert await list_tool.execute() == "No active exec sessions."
 
         with request_context(owner_b):
             initial_b = await tool.execute(command=_python(survivor_code), yield_time_ms=0)
             sid_b = _session_id(initial_b)
             survivor_pid = int(await _file_text(survivor_pidfile))
             assert _listed_ids(await list_tool.execute()) == [sid_b]
-            denied = await session_tool.execute(session_id=sid_a, terminate=True)
+
+        with request_context(owner_a):
+            denied = await session_tool.execute(session_id=sid_b, terminate=True)
             assert is_tool_error_result(denied), denied
-            assert denied == f"Error: exec session not found: {sid_a!r}"
+            assert denied == f"Error: exec session not found: {sid_b!r}"
 
         assert _pid_running(parent_pid)
         assert _pid_running(child_pid)

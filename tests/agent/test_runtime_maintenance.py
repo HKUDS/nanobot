@@ -611,16 +611,15 @@ async def test_subagent_execution_and_cleanup_are_both_busy(agent, monkeypatch):
     manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="finished"))
     runtime = LLMRuntime.capture(agent.provider, "test-model", context_window_tokens=4096)
     await manager.spawn("child", runtime=runtime)
-    record = next(iter(manager._tasks.values()))
     cleaning, release = asyncio.Event(), asyncio.Event()
-    original = record.exec_manager.close_all
+    original = agent._exec_session_manager.terminate_by_owner
 
-    async def cleanup():
+    async def cleanup(owner):
         cleaning.set()
         await release.wait()
-        return await original()
+        return await original(owner)
 
-    monkeypatch.setattr(record.exec_manager, "close_all", cleanup)
+    monkeypatch.setattr(agent._exec_session_manager, "terminate_by_owner", cleanup)
     try:
         with pytest.raises(RuntimeBusyError):
             with agent.maintenance():
