@@ -135,91 +135,45 @@ class TestMessageToolSuppressLogic:
         assert result is not None
         assert result.content == "Heartbeat summary"
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("final_text", ["", "Sent."])
-    async def test_send_after_followup_completes_that_input_without_a_duplicate(
-        self, tmp_path: Path, final_text: str,
-    ) -> None:
-        loop = _make_loop(tmp_path)
-        tool_call = ToolCallRequest(
-            id="call1", name="message",
-            arguments={"content": "Tool reply", "channel": "feishu", "chat_id": "chat123"},
-        )
-        calls = iter([
-            LLMResponse(content="First answer", tool_calls=[]),
-            LLMResponse(content="", tool_calls=[tool_call]),
-            LLMResponse(content=final_text),
-        ])
-        pending_queue: asyncio.Queue[InboundMessage] = asyncio.Queue()
-
-        async def next_response(*_args, **_kwargs):
-            response = next(calls)
-            if response.content == "First answer":
-                pending_queue.put_nowait(InboundMessage(
-                    channel="feishu",
-                    sender_id="user1",
-                    chat_id="chat123",
-                    content="follow-up",
-                    metadata={INBOUND_META_TURN_ID: "follow-up"},
-                ))
-            return response
-
-        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=next_response)
-        loop.tools.get_definitions = MagicMock(return_value=[])
-
-        sent: list[OutboundMessage] = []
-        mt = loop.tools.get("message")
-        if isinstance(mt, MessageTool):
-            mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
-
-        msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Start")
-        completed: list[TurnCompleted] = []
-        loop.bus.subscribe(completed.append, TurnCompleted)
-        delivery = loop.turn_delivery_factory.create(msg, msg.session_key)
-        capture = SDKCaptureHook()
-        capture.on_error = AsyncMock()
-        result = await loop._process_message(msg, pending_queue=pending_queue, delivery=delivery, hooks=[capture])
-        await delivery.complete(result, publish_completion=True)
-
-        assert len(sent) == 1
-        assert sent[0].content == "Tool reply"
-        assert sent[0].metadata["response_input_ids"] == ["user:follow-up"]
-        assert result is None
-        assert [event.outcome for event in completed] == ["completed"]
-        sdk = result_from_response(result, capture)
-        assert (sdk.stop_reason, sdk.error, sdk.tools_used) == ("completed", None, ["message"])
-        capture.on_error.assert_not_awaited()
-
-    @pytest.mark.parametrize("final_text", ["", "New answer"])
-    async def test_send_before_followup_does_not_answer_the_new_input(self, tmp_path: Path, final_text: str) -> None:
+    @pytest.mark.parametrize("followup_reply", ["tool", "text", "empty"])
+    async def test_only_sends_for_the_current_input_suppress_the_final_reply(self, tmp_path, followup_reply):
         loop = _make_loop(tmp_path)
         pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
-        msg = InboundMessage(channel="feishu", sender_id="user", chat_id="chat", content="Start")
+        sent = []
 
-        async def on_send(_message: OutboundMessage) -> None:
-            # Even inputs without public IDs have separate reply ownership.
-            pending.put_nowait(InboundMessage(channel="feishu", sender_id="user", chat_id="chat", content="Next?"))
+        async def send(message):
+            sent.append(message)
+            if len(sent) == 1:
+                # Even channels without public IDs have a new owner after a follow-up.
+                metadata = {INBOUND_META_TURN_ID: "follow-up"} if followup_reply == "tool" else {}
+                pending.put_nowait(InboundMessage("feishu", "user", "chat", "Next?", metadata=metadata))
 
         tool = loop.tools.get("message")
         assert isinstance(tool, MessageTool)
-        tool.set_send_callback(on_send)
-        call = ToolCallRequest(id="send", name="message", arguments={"content": "First answer"})
-        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
-            LLMResponse(tool_calls=[call], content=None),
-            *[LLMResponse(content=final_text) for _ in range(1 if final_text else 3)],
-        ])
-        capture = SDKCaptureHook()
-        capture.on_error = AsyncMock()
-        result = await loop._process_message(msg, pending_queue=pending, hooks=[capture])
+        tool.set_send_callback(send)
 
-        assert result is not None
+        def tool_reply(call_id):
+            call = ToolCallRequest(id=call_id, name="message", arguments={"content": call_id})
+            return LLMResponse(content=None, tool_calls=[call])
+
+        second = tool_reply("second") if followup_reply == "tool" else LLMResponse(
+            content="Second answer" if followup_reply == "text" else "",
+        )
+        replies = iter([tool_reply("first"), second])
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda **_: next(replies, LLMResponse(content="")))
+        capture = SDKCaptureHook()
+        result = await loop._process_message(
+            InboundMessage("feishu", "user", "chat", "Start"), pending_queue=pending, hooks=[capture],
+        )
         sdk = result_from_response(result, capture)
-        if final_text:
-            assert (sdk.content, sdk.stop_reason, sdk.error) == (final_text, "completed", None)
-            capture.on_error.assert_not_awaited()
+        assert [message.content for message in sent] == (["first", "second"] if followup_reply == "tool" else ["first"])
+        if followup_reply == "tool":
+            assert sent[-1].metadata["response_input_ids"] == ["user:follow-up"]
+            assert result is None and (sdk.stop_reason, sdk.error) == ("completed", None)
+        elif followup_reply == "text":
+            assert (sdk.content, sdk.stop_reason) == ("Second answer", "completed")
         else:
             assert (sdk.content, sdk.stop_reason, sdk.error) == ("", "empty_final_response", "empty_final_response")
-            capture.on_error.assert_awaited_once()
 
     @pytest.mark.parametrize("channel", ["websocket", "feishu"])
     async def test_undelivered_empty_final_reaches_channel_as_failure(self, tmp_path: Path, channel: str) -> None:

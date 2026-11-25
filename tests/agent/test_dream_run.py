@@ -112,6 +112,11 @@ async def test_one_dream_reads_full_pages_and_defers_new_history(tmp_path):
         next_prompt, next_cursor = store.build_dream_prompt()
         assert "Read lines 27-27" in next_prompt
         assert next_cursor == 27
+
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="", finish_reason="length"))
+        retry = await run_dream(loop, commit_prefix="dream: manual run")
+        assert retry.error == "stop_reason: empty_final_response"
+        assert store.get_last_dream_cursor() == 26
     finally:
         await loop.sessions.state.aclose()
 
@@ -184,24 +189,3 @@ async def test_overlapping_manual_and_periodic_runs_do_not_repeat_history(tmp_pa
     assert all(outcome.error is None for outcome in outcomes)
     assert [outcome.had_input for outcome in outcomes] == [True, False]
     assert store.get_last_dream_cursor() == 1
-
-
-@pytest.mark.asyncio
-async def test_dream_empty_final_response_reports_stop_reason(tmp_path):
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.queue import MessageBus
-    from nanobot.providers.base import GenerationSettings, LLMResponse
-
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-    provider.supports_tools = True
-    provider.generation = GenerationSettings()
-    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="", finish_reason="length"))
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path)
-    loop.context.memory.append_history("pending record")
-    try:
-        result = await run_dream(loop, commit_prefix="dream: manual run")
-        assert result.error == "stop_reason: empty_final_response"
-        assert loop.context.memory.get_last_dream_cursor() == 0
-    finally:
-        await loop.sessions.state.aclose()

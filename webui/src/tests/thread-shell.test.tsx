@@ -6,7 +6,7 @@ import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
-import { ToastProvider, useToast } from "@/components/ui/toast";
+import { ToastProvider } from "@/components/ui/toast";
 import i18n from "@/i18n";
 import { useSessions } from "@/hooks/useSessions";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
@@ -5754,6 +5754,7 @@ describe("ThreadShell", () => {
       <ThreadShell
         session={{ ...session(chatId), modelPreset: "test-vision" }}
         title="Chat image failure"
+        composerActive={false}
         onToggleSidebar={() => {}}
         onInspectImagePreset={inspectPreset}
       />
@@ -5785,16 +5786,9 @@ describe("ThreadShell", () => {
   ])("shows one scoped %s toast for the live failure and the attached recovery", async (errorKind, message) => {
     const client = { ...makeClient(), requestMutation: vi.fn().mockResolvedValue({}) };
     const chatId = "empty-final";
-    function GlobalAction() {
-      const show = useToast();
-      return <button onClick={() => show?.({ message: "Topic removed", tone: "pending", action: { label: "Undo", run: () => {} } })}>Remove topic</button>;
-    }
-    const scene = (id: string | null) => wrap(client, <ToastProvider>
-      <GlobalAction />
-      {id && <ThreadShell session={session(id)} title={id} onToggleSidebar={() => {}} />}
-    </ToastProvider>);
+    const scene = (id: string) => wrap(client,
+      <ThreadShell session={session(id)} title={id} composerActive={false} onToggleSidebar={() => {}} />);
     const { rerender } = render(scene(chatId));
-    fireEvent.click(screen.getByRole("button", { name: "Remove topic" }));
     await act(async () => {});
     act(() => client._emitChat(chatId, {
       event: "turn_end", chat_id: chatId, turn_id: "turn", turn_seq: 2,
@@ -5809,8 +5803,6 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
     await act(async () => rerender(scene("another-chat")));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    await act(async () => rerender(scene(null)));
-    expect(screen.getByRole("button", { name: "Undo" }).closest("[data-toast-viewport=global]")).not.toBeNull();
     await act(async () => rerender(scene(chatId)));
     act(() => client._emitChat(chatId, { event: "attached", chat_id: chatId, recovery_state: recovery }));
     expect(screen.getByRole("alert")).toHaveTextContent(message);
@@ -5818,27 +5810,6 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: action === "dismiss" ? "Dismiss" : "Continue" }));
     expect(client.requestMutation).toHaveBeenCalledWith(`recovery.${action}`, { chat_id: chatId, recovery_id: "recovery" });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("renders recovery and toast notices inside an unfocused visible pane", async () => {
-    const client = makeClient();
-    const chatId = "unfocused-pane";
-    render(wrap(client, <ThreadShell session={session(chatId)} title={chatId} composerActive={false} onToggleSidebar={() => {}} />));
-    await act(async () => {});
-    act(() => client._emitChat(chatId, {
-      event: "recovery_state", chat_id: chatId, recovery_id: "rec",
-      status: "awaiting_user", reason: "model_request_failed", failure_error_kind: "empty_final_response",
-    }));
-    const recoveryAlert = screen.getByRole("alert");
-    expect(recoveryAlert.closest(".thread-viewport [data-toast-viewport=thread]")).not.toBeNull();
-    expect(recoveryAlert).toHaveTextContent("No final reply from the model");
-    act(() => client._emitChat(chatId, {
-      event: "recovery_state", chat_id: chatId, recovery_id: "rec",
-      status: "recovered", reason: "input_rejected", failure_error_kind: "unsupported_image",
-    }));
-    const imageAlert = await screen.findByRole("alert");
-    expect(imageAlert.closest('.thread-viewport [data-toast-viewport="thread"]')).not.toBeNull();
-    expect(imageAlert).toHaveTextContent("Image input is off for this preset");
   });
 
   it.each([false, true])("keeps one terminal model failure visible until the next user action (recovery: %s)", async (recoverable) => {

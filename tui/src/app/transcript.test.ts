@@ -16,69 +16,43 @@ describe("NanobotTui transcript", () => {
   const createRenderer = (rendererOptions: Parameters<typeof createTestRenderer>[0]) => (
     createTestRenderer(rendererOptions)
   )
-  test.each([
-    ["empty_final_response", "The model did not return a final reply.", "Le modèle n’a pas fourni de réponse finale."],
-    ["empty_final_response_length", "The model reached its output limit before returning a final answer.",
-      "Le modèle a atteint sa limite de sortie avant de donner une réponse finale."],
-  ])("renders %s live and on reattach in the current locale", async (errorKind, live, replay) => {
-    setup = await createRenderer({ width: 100, height: 24, screenMode: "alternate-screen" })
-    const end = { event: "turn_end", chat_id: "chat", turn_id: "empty", outcome: "failed",
-      failure_kind: "model", failure_error_kind: errorKind } as const
-    const original = globalThis.fetch
-    const lang = process.env.LC_ALL
-    globalThis.fetch = Object.assign(async () => Response.json({
-      schemaVersion: 3, projection: "events", events: [end],
-    }), { preconnect: original.preconnect })
-    try {
-      process.env.LC_ALL = "en"
-      const app = NanobotTui.mount(setup.renderer, { ...options, apiUrl: "http://fixture", apiToken: "fixture" }, client())
-      app.accept({ event: "attached", chat_id: "chat" })
-      app.accept(end)
-      await setup.flush()
-      expect(setup.captureCharFrame()).toContain(live)
-      process.env.LC_ALL = "fr_FR.UTF-8"
-      app.accept({ event: "attached", chat_id: "chat" })
-      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
-      await setup.flush()
-      expect(setup.captureCharFrame()).toContain(replay)
-    } finally {
-      globalThis.fetch = original
-      if (lang === undefined) delete process.env.LC_ALL
-      else process.env.LC_ALL = lang
-    }
-  })
 
-  test("keeps localized help syntax literal live and after reattaching to the thread", async () => {
-    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
-    const help = {
+  const helpText = ["Commandes nanobot", "/model [preset]", "/dream-prompt [init]"]
+  const failedTurn = (failure_error_kind: string) => ({
+    event: "turn_end", chat_id: "chat", turn_id: "empty", outcome: "failed", failure_kind: "model", failure_error_kind,
+  }) as const
+  test.each([
+    { name: "literal help syntax", event: {
       event: "message", chat_id: "chat", turn_id: "help", side_channel: true, render_as: "text",
       text: "Commandes nanobot :\n/model [preset]\n/dream-prompt [init]", command_result: { command: "/help", parts: [
         { key: "help.title", values: {} }, { text: "/model [preset]" }, { text: "/dream-prompt [init]" },
       ] },
-    } as const
+    } as const, liveText: helpText, replayText: helpText },
+    { name: "empty reply", event: failedTurn("empty_final_response"),
+      liveText: ["Le modèle n’a pas fourni de réponse finale."], replayText: ["模型未傳回最終答覆。"] },
+    { name: "output limit", event: failedTurn("empty_final_response_length"),
+      liveText: ["Le modèle a atteint sa limite de sortie avant de donner une réponse finale."], replayText: ["模型在給出最終答覆前已達輸出上限。"] },
+  ])("renders $name live and after reattach", async ({ event, liveText, replayText }) => {
+    setup = await createRenderer({ width: 100, height: 24, screenMode: "alternate-screen" })
     const original = globalThis.fetch
     const lang = process.env.LC_ALL
     globalThis.fetch = Object.assign(async () => Response.json({
-      schemaVersion: 3, projection: "events", events: [help],
+      schemaVersion: 3, projection: "events", events: [event],
     }), { preconnect: original.preconnect })
     try {
       process.env.LC_ALL = "fr_FR.UTF-8"
       const app = NanobotTui.mount(setup.renderer, { ...options, apiUrl: "http://fixture", apiToken: "fixture" }, client())
       app.accept({ event: "attached", chat_id: "chat" })
-      app.accept(help)
+      app.accept(event)
       await setup.flush()
       const live = setup.captureCharFrame()
-      expect(live).toContain("Commandes nanobot")
-      expect(live).toContain("/model [preset]")
-      expect(live).toContain("/dream-prompt [init]")
+      for (const text of liveText) expect(live).toContain(text)
       process.env.LC_ALL = "zh_TW.UTF-8"
       app.accept({ event: "attached", chat_id: "chat" })
       await waitUntil(() => (app as unknown as { ready: boolean }).ready)
       await setup.flush()
       const replay = setup.captureCharFrame()
-      expect(replay).toContain("Commandes nanobot")
-      expect(replay).toContain("/model [preset]")
-      expect(replay).toContain("/dream-prompt [init]")
+      for (const text of replayText) expect(replay).toContain(text)
     } finally {
       globalThis.fetch = original
       if (lang === undefined) delete process.env.LC_ALL
