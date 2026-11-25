@@ -9,6 +9,7 @@ import { ImageViewport } from "@/components/ui/image-viewport";
 import { useToast } from "@/components/ui/toast";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
+import { DiagramLoadRetry } from "./DiagramLoadRetry";
 import { useDiagramScope } from "./context";
 import { requestDiagram, type DiagramPalette, type DiagramRequest, type DiagramState } from "./runtime";
 import type { DiagramInput } from "./types";
@@ -124,6 +125,7 @@ export default function MermaidBlock({ source }: { source: string }) {
       <span className="mr-auto px-1 text-xs text-muted-foreground">Mermaid</span>
       <button type="button" aria-pressed={view === "diagram"} className={cn(buttonClass, view === "diagram" && "bg-muted text-foreground")} onClick={() => setView("diagram")}>{t("diagram.graph")}</button>
       <button type="button" aria-pressed={view === "source"} className={cn(buttonClass, view === "source" && "bg-muted text-foreground")} onClick={() => setView("source")}>{t("diagram.source")}</button>
+      {state.kind === "failed" && state.reason === "load" && <DiagramLoadRetry onRetry={() => request.current?.retry()} />}
       <HoverHint content={t("diagram.copy")}>
         <button type="button" className={buttonClass} aria-label={t("diagram.copy")} onClick={() => void copy()}>
           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
@@ -139,9 +141,9 @@ export default function MermaidBlock({ source }: { source: string }) {
         </DialogContent>
       </Dialog>
     </div>
-    {state.kind === "failed" && <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground" role="status">
+    {state.kind === "failed" && state.reason !== "load" && <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground" role="status">
       <span>{t(`diagram.errors.${state.reason}`)}</span>
-      {["load", "worker", "deadline", "image"].includes(state.reason) && <button type="button" className={buttonClass} onClick={() => request.current?.retry()}>{t("common.retry")}</button>}
+      {["worker", "deadline", "image"].includes(state.reason) && <button type="button" className={buttonClass} onClick={() => request.current?.retry()}>{t("common.retry")}</button>}
     </div>}
     {showSource ? <CodeBlock language="mermaid" code={source} chrome="none" highlight={false} showLineNumbers={source.includes("\n")} />
       : image ? <div className="flex justify-center p-3"><img src={image.url} alt={image.label || t("diagram.title")} width={image.width} height={image.height} className="max-h-[28rem] max-w-full object-contain" /></div>

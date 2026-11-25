@@ -1,25 +1,27 @@
 import { Component, lazy, Suspense, useContext, type ReactNode } from "react";
-import { useTranslation } from "react-i18next";
 
 import { CodeBlock } from "@/components/CodeBlock";
+import { DiagramLoadRetry } from "./DiagramLoadRetry";
 import { MarkdownCodeContext } from "./context";
 
-const MermaidBlock = lazy(() => import("./MermaidBlock"));
+const loadMermaidBlock = () => import("./MermaidBlock");
 
-class DiagramBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
+class DiagramBoundary extends Component<{ code: string; source: (action?: ReactNode) => ReactNode }> {
+  state = { failed: false, Renderer: lazy(loadMermaidBlock) };
   static getDerivedStateFromError() { return { failed: true }; }
-  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+  retry = () => this.setState({ failed: false, Renderer: lazy(loadMermaidBlock) });
+  render() {
+    const { Renderer, failed } = this.state;
+    const { source, code } = this.props;
+    if (failed) return source(<DiagramLoadRetry onRetry={this.retry} />);
+    return <Suspense fallback={source()}><Renderer source={code} /></Suspense>;
+  }
 }
 
-export function MarkdownCodeBlock({ code, language }: { code: string; language?: string }) {
-  const { t } = useTranslation();
+export function MarkdownCodeBlock({ code, language, closed }: { code: string; language?: string; closed: boolean }) {
   const { streaming, highlight } = useContext(MarkdownCodeContext);
-  const source = <CodeBlock language={language || "text"} code={code} className="my-3" highlight={highlight} showLineNumbers={code.includes("\n")} />;
-  if (language?.toLowerCase() !== "mermaid") return source;
-  const preparing = <div aria-busy={streaming}>{source}</div>;
-  if (streaming) return preparing;
-  return <DiagramBoundary key={code} fallback={<><p className="text-xs text-muted-foreground" role="status">{t("diagram.errors.load")}</p>{source}</>}>
-    <Suspense fallback={preparing}><MermaidBlock source={code} /></Suspense>
-  </DiagramBoundary>;
+  const source = (action?: ReactNode) => <CodeBlock copyAdjacentAction={action} language={language || "text"} code={code} className="my-3" highlight={highlight} showLineNumbers={code.includes("\n")} />;
+  if (language?.toLowerCase() !== "mermaid") return source();
+  if (streaming && !closed) return <div aria-busy>{source()}</div>;
+  return <DiagramBoundary key={code} code={code} source={source} />;
 }

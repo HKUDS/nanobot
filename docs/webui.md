@@ -123,6 +123,8 @@ When a conversation grows long, nanobot summarizes earlier turns while keeping y
 
 ### File and diagram previews
 
+In a streaming reply, a Mermaid block shows source until its closing fence arrives. The visible diagram then renders while the rest of the reply continues. If the renderer fails to load, a retry icon appears next to Copy. Hover over it or focus it to read the error, or click it to render the diagram again without refreshing the chat.
+
 File edits show the path and changed line counts. Change **Settings → Appearance → File edit display** between **Summary**, inline **Diff**, and **Collapsed diff**. Click any filename to open a read-only preview tab (text previews up to 384 KiB; PNG/JPEG/GIF/WebP images up to 8 MiB; Markdown renders with a **Source** toggle; Mermaid diagrams render automatically). Right-click a file reference or tab to copy its path.
 
 ### Model failures

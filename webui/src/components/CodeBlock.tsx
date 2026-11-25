@@ -17,6 +17,7 @@ interface CodeBlockProps {
   code: string;
   className?: string;
   chrome?: "default" | "none";
+  copyAdjacentAction?: ReactNode;
   highlight?: boolean;
   ansi?: boolean;
   showLineNumbers?: boolean;
@@ -96,7 +97,7 @@ function CodeTextBlock({
         compact ? "overflow-visible" : "overflow-x-auto",
         showLineNumbers ? "whitespace-pre" : "whitespace-pre-wrap",
         chrome === "default"
-          ? "py-4 pl-5 pr-14"
+          ? "py-4 pl-5 pr-[var(--code-action-gutter,3.5rem)]"
           : compact ? "py-3 pl-2 pr-4" : "p-3",
         className,
       )}
@@ -135,6 +136,7 @@ export const CodeBlock = memo(function CodeBlock({
   code,
   className,
   chrome = "default",
+  copyAdjacentAction,
   highlight = true,
   ansi = true,
   showLineNumbers = false,
@@ -211,6 +213,7 @@ export const CodeBlock = memo(function CodeBlock({
         "not-prose relative code-content font-mono text-code",
         useViewportHighlight ? "overflow-visible" : "overflow-hidden",
         hasChrome && "rounded-floating bg-secondary/70",
+        hasChrome && copyAdjacentAction && "[--code-action-gutter:5.75rem]",
         className,
       )}
       data-language={language || t("code.fallbackLanguage")}
@@ -239,23 +242,26 @@ export const CodeBlock = memo(function CodeBlock({
         </CodeHighlightBoundary>
       ) : plainBlock}
       {hasChrome ? (
-        <button
-          type="button"
-          onClick={onCopy}
-          className={cn(
-            "absolute right-2.5 top-2.5 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full",
-            "text-muted-foreground transition-colors hover:text-foreground",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-          )}
-          aria-label={copyLabel}
-          title={copyLabel}
-        >
-          {copied ? (
-            <Check className="h-4 w-4" aria-hidden />
-          ) : (
-            <Copy className="h-4 w-4" aria-hidden />
-          )}
-        </button>
+        <div className="absolute right-2.5 top-2.5 z-10 flex items-center gap-1">
+          {copyAdjacentAction}
+          <button
+            type="button"
+            onClick={onCopy}
+            className={cn(
+              "inline-flex h-8 w-8 items-center justify-center rounded-full",
+              "text-muted-foreground transition-colors hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+            )}
+            aria-label={copyLabel}
+            title={copyLabel}
+          >
+            {copied ? (
+              <Check className="h-4 w-4" aria-hidden />
+            ) : (
+              <Copy className="h-4 w-4" aria-hidden />
+            )}
+          </button>
+        </div>
       ) : null}
     </div>
   );
