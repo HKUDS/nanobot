@@ -68,6 +68,8 @@ export function SessionTransitionFixture() {
   };
   const workbench = new URLSearchParams(location.search).has("workbench");
   const [topic, setTopic] = useState(new URLSearchParams(location.search).get("topic") ?? (workbench ? "goal" : "plain"));
+  const groups = [["plain"], ["goal", "blocked"], ["tasks", "together"]];
+  const panes = groups.find(group => group.includes(topic)) ?? [topic];
   const [cache] = useState(() => new ThreadMessageCache(() => false));
   const [drafts] = useState(() => new ComposerDraftStore());
   const dark = new URLSearchParams(location.search).has("dark");
@@ -75,7 +77,7 @@ export function SessionTransitionFixture() {
   return <ClientProvider client={client} token="fixture" webuiCapabilities={["webui.core.v1", "webui.subagents.v1"]}>
     <main className="thread-workspace flex min-w-0 flex-col overflow-hidden bg-background text-foreground" style={{ height: "100dvh" }} data-session={topic}>
       <nav aria-label="Sessions" className="flex shrink-0 flex-wrap gap-4 px-4 py-2 text-xs">
-        {(workbench ? ["goal", "blocked"] : ["plain", "goal", "tasks", "together", "blocked", "cold"]).map(key => <button key={key} onClick={() => transitionSession(() => setTopic(key), !workbench && key !== topic)}>{key}</button>)}
+        {(workbench ? groups.flat() : ["plain", "goal", "tasks", "together", "blocked", "cold"]).map(key => <button key={key} onClick={() => transitionSession(() => setTopic(key), key !== topic && (!workbench || !panes.includes(key)))}>{key}</button>)}
         <button onClick={() => receive({ event: "goal_state", chat_id: topic, goal_state: {
           ...client.getGoalState(topic), active: false, status: "blocked", recap: "Waiting for a workspace permission decision.",
         } })}>Block goal</button>
@@ -95,7 +97,8 @@ export function SessionTransitionFixture() {
         </> : null}
       </nav>
       {workbench ? <PaneWorkbench
-        panes={["goal", "blocked"].map(key => ({ key, title: key }))} activePaneKey={topic} layout="columns"
+        panes={panes.map((key, index) => ({ key, reactKey: index === 0 ? "tab-root" : key, title: key }))}
+        activePaneKey={topic} layout={panes.includes("tasks") ? "rows" : "columns"}
         showLayoutControl={false} onActivatePane={setTopic} onAddPane={() => {}} onLayoutChange={() => {}} onPaneOrderChange={() => {}}
         renderPane={(pane, context) => <ThreadShell
           session={{ key: `websocket:${pane.key}`, channel: "websocket", chatId: pane.key, createdAt: null, updatedAt: null, preview: "" }}

@@ -1418,7 +1418,7 @@ function Shell({
         view: "chat",
         activeKey: paneKey,
         settingsSection: "overview",
-      });
+      }, { animate: false });
       if (scope) {
         setWorkspaceOverrides((current) => ({
           ...current,
