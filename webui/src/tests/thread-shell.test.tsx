@@ -5780,8 +5780,8 @@ describe("ThreadShell", () => {
   });
 
   it.each([
-    ["empty_final_response", "The model did not return a final reply."],
-    ["empty_final_response_length", "The model reached its output limit before giving a final reply."],
+    ["empty_final_response", "No final reply from the model"],
+    ["empty_final_response_length", "Output limit reached before the final reply"],
   ])("shows one scoped %s toast for the live failure and the attached recovery", async (errorKind, message) => {
     const client = { ...makeClient(), requestMutation: vi.fn().mockResolvedValue({}) };
     const chatId = "empty-final";
@@ -5831,7 +5831,7 @@ describe("ThreadShell", () => {
     }));
     const recoveryAlert = screen.getByRole("alert");
     expect(recoveryAlert.closest(".thread-viewport [data-toast-viewport=thread]")).not.toBeNull();
-    expect(recoveryAlert).toHaveTextContent("The model did not return a final reply.");
+    expect(recoveryAlert).toHaveTextContent("No final reply from the model");
     act(() => client._emitChat(chatId, {
       event: "recovery_state", chat_id: chatId, recovery_id: "rec",
       status: "recovered", reason: "input_rejected", failure_error_kind: "unsupported_image",

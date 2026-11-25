@@ -57,7 +57,7 @@ describe("RecoveryNotice", () => {
   it("keeps the uncertain tool decision available and explains that tools are not replayed", () => {
     render(<RecoveryNotice state={INTERRUPTED} onContinue={vi.fn()} onDismiss={vi.fn()} />);
     const notice = screen.getByRole("alert");
-    expect(notice).toHaveTextContent("A tool may already have run.");
+    expect(notice).toHaveTextContent("A tool may already have run");
     expect(notice.closest(".toast-card")).toHaveAttribute("data-toast-timed", "false");
     openDetails();
     expect(screen.getByRole("dialog")).toHaveTextContent("Tools will not be replayed automatically.");
@@ -77,7 +77,7 @@ describe("RecoveryNotice", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("Recovery action failed");
+      expect(screen.getByRole("alert")).toHaveTextContent("Try the recovery action again");
     });
   });
 
