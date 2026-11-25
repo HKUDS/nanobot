@@ -84,7 +84,7 @@ function FileEditRow({
   const hasCountedDiff = !failed && !edit.binary && hasVisibleDiffStats(edit);
   const showDiff = canRenderDiff(edit, displayMode);
 
-  const summary = (
+  const renderSummary = (onActivatePath = onOpenFilePreview) => (
     <ActivityStep
       icon={fileIconForPath(edit.absolute_path || edit.path)}
       markerLabel={action}
@@ -96,12 +96,12 @@ function FileEditRow({
         ? t("message.fileEditPreparing", { defaultValue: "Preparing file edit…" })
         : (
           <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
-            <span className="z-10 flex min-w-0 shrink overflow-hidden">
+            <span className="flex min-w-0 shrink overflow-hidden">
               <FileReferenceChip
                 path={edit.path}
                 tooltipPath={edit.absolute_path || edit.path}
                 previewPath={edit.absolute_path || edit.path}
-                onOpen={onOpenFilePreview}
+                onOpen={onActivatePath}
                 display="path"
                 showIcon={false}
                 active={editing}
@@ -116,16 +116,15 @@ function FileEditRow({
         )}
     />
   );
-  if (!showDiff) return summary;
+  if (!showDiff) return renderSummary();
   return (
     <FileUnifiedDiff
       diff={edit.diff!}
       collapsed={displayMode === "collapsed_diff"}
       previewPath={edit.absolute_path || edit.path}
       onOpenFilePreview={onOpenFilePreview}
-    >
-      {summary}
-    </FileUnifiedDiff>
+      renderSummary={renderSummary}
+    />
   );
 }
 
@@ -156,13 +155,13 @@ function canRenderDiff(edit: FileEditSummary, displayMode: FileEditDisplayMode):
 }
 
 function FileUnifiedDiff({
-  children,
+  renderSummary,
   diff,
   collapsed,
   previewPath,
   onOpenFilePreview,
 }: {
-  children: ReactNode;
+  renderSummary: (onToggle?: () => void) => ReactNode;
   diff: UIFileDiff;
   collapsed: boolean;
   previewPath: string;
@@ -207,7 +206,7 @@ function FileUnifiedDiff({
     setExpandedLines(false);
   }, []);
 
-  if (totalLineCount === 0) return children;
+  if (totalLineCount === 0) return renderSummary();
 
   const renderBody = () => (
     <div
@@ -279,20 +278,22 @@ function FileUnifiedDiff({
     </div>
   );
 
-  if (!startsCollapsed) return <div className="min-w-0">{children}{renderBody()}</div>;
+  if (!startsCollapsed) return <div className="min-w-0">{renderSummary()}{renderBody()}</div>;
 
   return (
     <div className="min-w-0">
-      <div className="relative isolate grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1 rounded-md hover:bg-muted/35 [&_[data-activity-marker]]:z-10">
+      <div
+        className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-center gap-1 rounded-md hover:bg-muted/35"
+        onClick={handleToggleOpen}
+      >
         <button
           type="button"
           aria-label={formatActivityTarget(t, viewDiffLabel, previewPath)}
           aria-expanded={open}
           aria-controls={contentId}
           data-testid="file-edit-diff-toggle"
-          onClick={handleToggleOpen}
           className={cn(
-            "cursor-pointer rounded-sm text-muted-foreground after:absolute after:inset-0 after:z-[1]",
+            "cursor-pointer rounded-sm text-muted-foreground",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           )}
         >
@@ -301,7 +302,7 @@ function FileUnifiedDiff({
             aria-hidden
           />
         </button>
-        {children}
+        {renderSummary(handleToggleOpen)}
       </div>
       <DisclosureContent id={contentId} open={open} onExitComplete={releaseBody}>
         {shouldRenderBody ? renderBody() : null}
