@@ -468,11 +468,7 @@ class WebUICommandRouter:
                 )
                 return
             try:
-                with self._http_router.bus.admission.activity():
-                    saved_state = await self._http_router.sidebar_state.write(cast(dict[str, Any], state))
-            except RuntimeMaintenanceError:
-                await self._transport.webui_send_event(connection, "error", detail="Gateway update is being verified. Retry shortly.")
-                return
+                saved_state = await self._http_router.sidebar_state.write(cast(dict[str, Any], state))
             except (OSError, ValueError):
                 await self._transport.webui_send_event(
                     connection,

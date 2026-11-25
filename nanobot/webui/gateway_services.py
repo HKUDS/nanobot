@@ -82,7 +82,6 @@ def build_gateway_services(
     recovery_action: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
     subagent_manager: SubagentManager | None = None,
     discard_session: Callable[[str], Awaitable[None]] | None = None,
-    stop_session: Callable[[str], Awaitable[None]] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     settings = WebUISettingsServices.create(
@@ -158,7 +157,6 @@ def build_gateway_services(
         recovery_action=recovery_action,
         subagent_manager=subagent_manager,
         discard_session=discard_session,
-        stop_session=stop_session,
         log=logger,
     )
     endpoint = WebUIGatewayEndpoint(config=config, http=http, tokens=tokens)

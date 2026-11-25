@@ -749,12 +749,11 @@ class SqliteSessionStore:
         with self.transaction() as db:
             if self.archives_imported():
                 return self.archived_keys()
-            imported, _ = self.set_archived_keys(keys)
+            imported = self.set_archived_keys(keys)
             db.execute("INSERT INTO storage_meta (key, value) VALUES ('session_archives_imported', '1')")
             return imported
 
-    def set_archived_keys(self, keys: list[str]) -> tuple[list[str], list[str]]:
-        """Return the committed membership and the keys added by this transaction."""
+    def set_archived_keys(self, keys: list[str]) -> list[str]:
         with self.transaction() as db:
             current = set(self.archived_keys())
             requested = set(keys)
@@ -768,8 +767,8 @@ class SqliteSessionStore:
             target = (requested & current) | added
             db.executemany("DELETE FROM session_archives WHERE key=?", ((key,) for key in current - target))
             now = datetime.now().isoformat()
-            db.executemany("INSERT INTO session_archives (key, archived_at) VALUES (?, ?)", ((key, now) for key in added))
-            return sorted(target), sorted(added)
+            db.executemany("INSERT INTO session_archives (key, archived_at) VALUES (?, ?)", ((key, now) for key in target - current))
+            return sorted(target)
 
     def delete(self, key: str, *, preserve_archive: bool = False) -> bool:
         with self.transaction() as db:

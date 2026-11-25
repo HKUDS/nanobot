@@ -984,19 +984,9 @@ class AgentLoop:
             # it began. Gateway shutdown uses aclose() directly and keeps this
             # journal intact for startup recovery.
             await self.sessions.state.acknowledge_followups(key, journaled_followup_ids)
-        return cancelled + await self._stop_owned_tools(key)
-
-    async def _stop_owned_tools(self, key: str) -> int:
-        try:
-            sub_cancelled = await self.subagents.cancel_by_session(key)
-        finally:
-            exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
-        return sub_cancelled + exec_cancelled
-
-    async def stop_session(self, key: str) -> None:
-        """Stop a session's work without dropping the conversation or its runtime policy."""
-        with self.bus.admission.activity():
-            await self._cancel_active_tasks(key)
+        sub_cancelled = await self.subagents.cancel_by_session(key)
+        exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
+        return cancelled + sub_cancelled + exec_cancelled
 
     async def discard_session(self, key: str) -> None:
         """Stop active work for *key* and forget its cached session."""
@@ -2657,22 +2647,13 @@ class AgentLoop:
                         return as_text_message(response) if response is not None else None
                     finally:
                         if temporary_parent:
-                            await shield_and_drain(self._dispose_temporary_parent(session_key))
+                            parent = self.sessions.state.peek_header(session_key)
+                            if parent is not None and not parent.policy.persist:
+                                await self.sessions.state.delete(session_key, expected_generation=parent.generation)
             finally:
                 await self.runtime_event_publisher.run_status_changed(msg, session_key, "idle")
                 if delivery is not None:
                     self.runtime_event_publisher.clear_turn(session_key, run_id=delivery.run_id)
-
-    async def _dispose_temporary_parent(self, key: str) -> None:
-        parent = self.sessions.state.peek_identity(key)
-        if parent is not None and parent.policy.persist:
-            return
-        # process_direct still owns the session lock. Stop its detached tools,
-        # not a queued worker waiting to use the same key for its next turn.
-        await self._stop_owned_tools(key)
-        self.discard_session_file_state(key)
-        if parent is not None:
-            await self.sessions.state.delete(key, expected_generation=parent.generation)
 
     def _get_session_lock(self, session_key: str) -> asyncio.Lock:
         lock = self._session_locks.get(session_key)

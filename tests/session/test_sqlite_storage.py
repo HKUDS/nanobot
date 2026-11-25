@@ -799,9 +799,7 @@ async def test_archive_state_survives_reopen_for_persisted_sessions_only(tmp_pat
         manager.get_or_create("websocket:draft")
         original = manager.read_session_snapshot("websocket:active")
         assert await state.import_archives(["websocket:active"]) == ["websocket:active"]
-        assert await state.set_archived_keys(["websocket:active", "websocket:empty", "websocket:draft", "websocket:missing"]) == (
-            ["websocket:active", "websocket:empty"], ["websocket:empty"],
-        )
+        assert await state.set_archived_keys(["websocket:active", "websocket:empty", "websocket:draft", "websocket:missing"]) == ["websocket:active", "websocket:empty"]
         assert manager.read_session_snapshot("websocket:draft") is None
         assert manager.read_session_snapshot("websocket:missing") is None
         assert manager.read_session_snapshot("websocket:empty") == fork
@@ -815,7 +813,7 @@ async def test_archive_state_survives_reopen_for_persisted_sessions_only(tmp_pat
         await reopened.reset("websocket:active")
         assert await reopened.archived_keys() == ["websocket:active", "websocket:empty"]
         assert (await reopened.read("websocket:active")).messages == []
-        assert await reopened.set_archived_keys(["websocket:empty"]) == (["websocket:empty"], [])
+        assert await reopened.set_archived_keys(["websocket:empty"]) == ["websocket:empty"]
         # A repeated legacy import must not revive a restored session.
         assert await reopened.import_archives(["websocket:active"]) == ["websocket:empty"]
         assert await reopened.delete("websocket:empty") is True

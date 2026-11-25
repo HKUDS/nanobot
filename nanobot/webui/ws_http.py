@@ -358,14 +358,11 @@ class GatewayHTTPHandler:
         ) = None,
         subagent_manager: SubagentManager | None = None,
         discard_session: Callable[[str], Awaitable[None]] | None = None,
-        stop_session: Callable[[str], Awaitable[None]] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
         self.session_manager = session_manager
-        self.sidebar_state = WebUISidebarState(
-            session_manager.state if session_manager is not None else None, stop_session=stop_session,
-        )
+        self.sidebar_state = WebUISidebarState(session_manager.state if session_manager is not None else None)
         self.static_dist_path = static_dist_path
         self.runtime_model_name = runtime_model_name
         self.bus = bus

@@ -57,7 +57,6 @@ describe("exec session activity", () => {
     [exit(0), "Command completed"],
     [exit(7), "Command failed (exit 7)"],
     [`Session terminated. Reason: cancelled.\nExit code: -15\nElapsed: 3.0s`, "Command exited (exit -15)"],
-    [`Session terminated. Reason: preempted_capacity.\nExit code: -9\nElapsed: 3.0s`, "Command exited (exit -9)"],
   ])("shows the observed command state rather than tool-return success", (result, label) => {
     expect(present(event({}, "end", result))).toMatchObject({ label, active: false });
   });

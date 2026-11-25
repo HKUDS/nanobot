@@ -12,7 +12,7 @@ import math
 import os
 import threading
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -338,12 +338,8 @@ async def ensure_webui_session_archives(sessions: SessionState) -> list[str]:
 
 
 class WebUISidebarState:
-    def __init__(
-        self, sessions: SessionState | None, *, stop_session: Callable[[str], Awaitable[None]] | None = None,
-    ) -> None:
+    def __init__(self, sessions: SessionState | None) -> None:
         self._sessions = sessions
-        self._stop_session = stop_session
-        self._pending_stops: set[str] = set()
         self._lock = asyncio.Lock()
         self._readers = 0
         self._readers_drained = asyncio.Event()
@@ -397,23 +393,5 @@ class WebUISidebarState:
             target = _clean_string_list(raw["archived_keys"])
             # Unchanged flags complete at the committed read, without a writer.
             if set(target) != set(archived):
-                archived, added = await self._sessions.set_archived_keys(target)
-                self._pending_stops.update(added)
-            await self._drain_archive_stops(archived)
+                archived = await self._sessions.set_archived_keys(target)
         return {**preferences, "archived_keys": archived}
-
-    async def _drain_archive_stops(self, archived: list[str]) -> None:
-        # A failed stop remains retryable on a repeated archive snapshot, but
-        # never stop an owner restored in the meantime. Writes are serialized.
-        self._pending_stops.intersection_update(archived)
-        failure = None
-        for key in sorted(self._pending_stops):
-            try:
-                if self._stop_session is not None:
-                    await self._stop_session(key)
-            except (Exception, asyncio.CancelledError) as exc:
-                failure = exc
-            else:
-                self._pending_stops.remove(key)
-        if failure is not None:
-            raise failure
