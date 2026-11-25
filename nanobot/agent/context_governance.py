@@ -43,6 +43,7 @@ from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.summary import (
     SUMMARY_CONTINUATION_TEXT,
     SessionSummaryCheckpoint,
+    is_empty_summary,
 )
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import (
@@ -57,7 +58,7 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
 TranscriptBuilder = Callable[[TranscriptInput], list[dict[str, Any]]]
-SummaryTranscriptBuilder = Callable[[str], list[dict[str, Any]]]
+SummaryTranscriptBuilder = Callable[[str | None], list[dict[str, Any]]]
 HistoryConsolidator = Callable[
     [list[dict[str, Any]], str | None],
     Awaitable[str | None],
@@ -159,14 +160,14 @@ class ContextCompactionState:
         messages = list(transcript_builder(transcript_input))
         accepted_history_boundary = 1 + len(transcript_input.history)
 
-        def build_summary_transcript(summary: str) -> list[dict[str, Any]]:
+        def build_summary_transcript(summary: str | None) -> list[dict[str, Any]]:
             return transcript_builder(
                 replace(
                     transcript_input,
                     history=[],
                     current_message=None,
                     media=None,
-                    session_summary={
+                    session_summary=None if summary is None else {
                         "text": summary,
                         "last_active": datetime.now().astimezone().isoformat(),
                     },
@@ -203,13 +204,15 @@ class ContextCompactionState:
                 break
             instruction_prefix.append(dict(message))
 
-        def build_summary_transcript(summary: str) -> list[dict[str, Any]]:
+        def build_summary_transcript(summary: str | None) -> list[dict[str, Any]]:
+            prefix = deepcopy(instruction_prefix)
+            if summary is None:
+                return prefix
             archived_context = (
                 "[Archived Context Summary]\n\n"
                 "Previous conversation summary:\n"
                 f"{summary}"
             )
-            prefix = deepcopy(instruction_prefix)
             for index in range(len(prefix) - 1, -1, -1):
                 content = prefix[index].get("content")
                 if isinstance(content, str):
@@ -560,7 +563,7 @@ class ContextGovernor:
         summary: str,
     ) -> list[dict[str, Any]]:
         """Rebuild only the stable system prefix around a replacement summary."""
-        return compaction.summary_transcript_builder(summary)
+        return compaction.summary_transcript_builder(None if is_empty_summary(summary) else summary)
 
     async def summarize_provider_compaction(
         self,
