@@ -6,20 +6,19 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
-  type ReactNode,
 } from "react";
 import { ArrowRight, CircleHelp, Eye, EyeOff, Loader2 } from "lucide-react";
-import { ThemeToggleIcon } from "@/components/icons/ThemeToggleIcon";
 import { Trans, useTranslation } from "react-i18next";
 import { ChannelPairing } from "@/components/pairing/ChannelPairing";
 import { StarPrompt } from "@/components/StarPrompt";
-import { Sidebar } from "@/components/Sidebar";
+import { WorkspaceTopBar } from "@/components/session/WorkspaceTopBar";
+import { MissionControlView } from "@/components/session/MissionControlView";
+import { ActiveSessionDrawer } from "@/components/session/ActiveSessionDrawer";
+import { HostSwitcher } from "@/components/remote/HostSwitcher";
 import { RemoteInstances } from "@/components/remote/RemoteInstances";
 import { useRemoteConnections } from "@/components/remote/remote-context";
 import { LazyRemoteConnectionsPage } from "@/components/remote/LazyRemoteConnectionsPage";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import { invalidateToolsCatalog } from "@/lib/tools-catalog-cache";
 import type { SidebarDeleteItem } from "@/components/ChatList";
@@ -27,12 +26,13 @@ import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { StartupShell } from "@/components/StartupShell";
 import { ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
-import { isAppsSection, type SettingsExitGuard, type SettingsFocusTarget } from "@/components/settings/contracts";
+import { type SettingsExitGuard, type SettingsFocusTarget } from "@/components/settings/contracts";
 import {
   RESTART_ROUTE_KEY,
   RESTART_STARTED_KEY,
   changesSettingsSurface,
   defaultShellRoute,
+  overviewShellRoute,
   readShellRoute,
   rememberRestartRoute,
   shellViewForSettingsSection,
@@ -41,13 +41,11 @@ import {
   type ShellView,
 } from "@/shell-route";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
-import { transitionSession } from "@/components/thread/session-transition";
+import { transitionSession, type ShellTransitionKind } from "@/components/thread/session-transition";
 import {
   MAX_WORKBENCH_PANES,
   addWorkbenchPane,
-  attachWorkbenchPane,
   createWorkbenchTab,
-  detachWorkbenchPane,
   dissolveWorkbenchTab,
   orderWorkbenchTabs,
   reconcileWorkbench,
@@ -64,10 +62,10 @@ import {
   AutomationDeleteToastDetails,
   type AutomationDeleteSessionGroup,
 } from "@/components/AutomationDeleteToastDetails";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 import { useLocalGateway } from "@/hooks/useLocalGateway";
 import { useSessions } from "@/hooks/useSessions";
+import { useSessionAutomationCounts } from "@/hooks/useSessionAutomationCounts";
 import { useReconnectRuns } from "@/hooks/useReconnectRuns";
 import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
 import { useSidebarState } from "@/hooks/useSidebarState";
@@ -79,6 +77,7 @@ import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { useReadingTypography } from "@/hooks/useReadingTypography";
 import { cn } from "@/lib/utils";
 import { displayTitle, sortSessions } from "@/lib/chat-groups";
+import { buildSessionIntelligence } from "@/lib/session-intelligence";
 import { deriveTitle } from "@/lib/format";
 import { BrowserNotifications, useBrowserNotificationLifecycle } from "@/components/BrowserNotifications";
 import { switchModelPreset } from "@/lib/switch-model-preset";
@@ -109,18 +108,18 @@ import {
   deriveTemporaryChatTitle,
 } from "@/lib/temporary-chat";
 
-const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
+const ACTIVE_DRAWER_PINNED_STORAGE_KEY = "nanobot-webui.active-drawer.pinned.v1";
 const SESSION_UPDATES_STORAGE_KEY = "nanobot-webui.sidebar.session-updates.v1";
 const LEGACY_COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
-const SIDEBAR_WIDTH = 272;
-const SIDEBAR_WIDTH_STORAGE_KEY = "nanobot-webui.sidebar.width";
-const SIDEBAR_RAIL_WIDTH = 56;
-const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const loadThreadShell = () => import("@/components/thread/ThreadShell");
 const ThreadShell = lazy(() => loadThreadShell().then(
   (module) => ({ default: module.ThreadShell }),
 ));
-const loadSettingsView = () => import("@/components/settings/SettingsView");
+let settingsViewLoaded = false;
+const loadSettingsView = () => import("@/components/settings/SettingsView").then((module) => {
+  settingsViewLoaded = true;
+  return module;
+});
 const SettingsView = lazy(async () => {
   const module = await loadSettingsView();
   return { default: module.SettingsView };
@@ -290,24 +289,12 @@ function AuthForm({ onSecret }: {
   );
 }
 
-function readSidebarWidth(): number {
+function readDrawerPinned(): boolean {
+  if (typeof window === "undefined") return false;
   try {
-    const width = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
-    return Number.isFinite(width) && width >= SIDEBAR_MIN_WIDTH
-      ? Math.min(SIDEBAR_MAX_WIDTH, width) : SIDEBAR_WIDTH;
+    return window.localStorage.getItem(ACTIVE_DRAWER_PINNED_STORAGE_KEY) === "1";
   } catch {
-    return SIDEBAR_WIDTH;
-  }
-}
-
-function readSidebarOpen(): boolean {
-  if (typeof window === "undefined") return true;
-  try {
-    const raw = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
-    if (raw === null) return true;
-    return raw === "1";
-  } catch {
-    return true;
+    return false;
   }
 }
 
@@ -346,24 +333,9 @@ function normalizeWorkspaceScope(scope: WorkspaceScopePayload): WorkspaceScopePa
   };
 }
 
-function HostChrome({
-  rightAction,
-}: {
-  rightAction?: ReactNode;
-}) {
-  return (
-    <header className="host-drag-region pointer-events-none absolute inset-x-0 top-0 z-40 h-11 bg-transparent text-foreground/90">
-      {rightAction ? (
-        <div className="host-no-drag pointer-events-auto absolute right-3 top-2">
-          {rightAction}
-        </div>
-      ) : null}
-    </header>
-  );
-}
-
 function prefetchChat() {
-  if (readShellRoute().view === "chat") void loadThreadShell().catch(() => {});
+  const route = readShellRoute();
+  if (route.view === "chat" && !route.landing) void loadThreadShell().catch(() => {});
 }
 
 export default function App() {
@@ -467,7 +439,6 @@ function Shell({
   const {
     sessions,
     loading,
-    initialLoading: sessionsInitialLoading,
     error: sessionsError,
     refresh,
     createChat,
@@ -506,15 +477,22 @@ function Shell({
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
   const [settingsFocus, setSettingsFocus] = useState<SettingsFocusTarget | undefined>(initialRouteRef.current.settingsFocus);
-  const [preferredSidebarOpen, setPreferredSidebarOpen] = useState(readSidebarOpen);
-  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
-  const [sidebarDragging, setSidebarDragging] = useState(false);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerPinned, setDrawerPinned] = useState(readDrawerPinned);
+  const [topBarThreadActionsHost, setTopBarThreadActionsHost] = useState<HTMLDivElement | null>(null);
+  const desktopDrawer = useMediaQuery("(min-width: 1024px)");
+  const effectiveDrawerPinned = drawerPinned && desktopDrawer;
+  const [overviewTab, setOverviewTab] = useState<"open" | "done">("open");
+  const [overviewProjectId, setOverviewProjectId] = useState<string | null>(null);
+  const landingConsumedRef = useRef(false);
+  const waitingForLanding = Boolean(
+    initialRouteRef.current?.landing
+    && !landingConsumedRef.current
+    && (!sessionsLoaded || sidebarStateLoading),
+  );
   useEffect(() => {
-    // The drawer portals outside the local host panel; don't leave it over a remote view.
-    if (!localActive || managingConnections) setMobileSidebarOpen(false);
-  }, [localActive, managingConnections]);
-  const mobileSidebarRef = useRef<HTMLDivElement>(null);
+    if (!localActive || managingConnections || effectiveDrawerPinned) setDrawerOpen(false);
+  }, [effectiveDrawerPinned, localActive, managingConnections]);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const mobileWorkbench = useMediaQuery("(max-width: 767px)");
   const workbenchState = sidebarState.workbench;
@@ -556,7 +534,7 @@ function Shell({
   const [settingsLoading, setSettingsLoading] = useState(true);
   const settingsSnapshotRef = useRef(settingsSnapshot);
   settingsSnapshotRef.current = settingsSnapshot;
-  const settingsOwnsSnapshot = view !== "chat" && view !== "remote";
+  const settingsOwnsSnapshot = view === "settings" || view === "apps" || view === "automations";
   const settingsRefreshGenerationRef = useRef(0);
   const [pendingAutomationMessage, setPendingAutomationMessage] = useState<{
     id: string;
@@ -598,13 +576,11 @@ function Shell({
     )),
     [temporarySessions],
   );
-  // Start each confirmed empty period collapsed without overwriting the saved preference.
-  const [emptySidebarOpen, setEmptySidebarOpen] = useState<boolean | null>(null);
-  const hasSessions = sessions.length > 0 || temporarySessionList.length > 0;
-  if (hasSessions && emptySidebarOpen !== null) setEmptySidebarOpen(null);
-  if (!hasSessions && sessionsLoaded && emptySidebarOpen === null) setEmptySidebarOpen(false);
-  const hostSidebarOpen = emptySidebarOpen ?? preferredSidebarOpen;
-  const setHostSidebarOpen = emptySidebarOpen === null ? setPreferredSidebarOpen : setEmptySidebarOpen;
+  const automationCountsByKey = useSessionAutomationCounts(
+    getToken,
+    topicSessions.length,
+    localActive,
+  );
 
   const temporaryChatIds = useMemo(
     () => temporarySessionList.map((session) => session.chatId),
@@ -649,24 +625,36 @@ function Shell({
     return workbenchTabForPane(workbenchState, current.activeKey).tabKey
       !== workbenchTabForPane(workbenchState, next.activeKey).tabKey;
   }, [mobileWorkbench, workbenchState]);
+  const shellTransitionFor = useCallback((current: ShellRoute, next: ShellRoute): ShellTransitionKind | null => {
+    if (changesVisibleSession(current, next)) return "session";
+    if (current.view === next.view) return null;
+    if (!settingsViewLoaded && (next.view === "settings" || next.view === "apps" || next.view === "automations")) {
+      return null;
+    }
+    if (next.view === "settings") return "enter-settings";
+    if (current.view === "settings") return "exit-settings";
+    return "switch-view";
+  }, [changesVisibleSession]);
   const navigate = useCallback(
     (route: ShellRoute, options?: { replace?: boolean; animate?: boolean }) => {
       const current = currentShellRouteRef.current;
+      const transitionKind = shellTransitionFor(current, route);
       const leave = () => transitionSession(
         () => commitNavigation(route, options),
-        options?.animate !== false && changesVisibleSession(current, route),
+        options?.animate !== false && transitionKind !== null,
+        transitionKind ?? "session",
       );
       if (changesSettingsSurface(current, route) && settingsExitGuardRef.current) {
         settingsExitGuardRef.current(leave, { promptRestart: current.view !== route.view });
       } else leave();
     },
-    [commitNavigation, changesVisibleSession],
+    [commitNavigation, shellTransitionFor],
   );
 
   useEffect(() => {
     const applyRoute = () => {
       const route = readShellRoute();
-      if (route.view === "remote") setMobileSidebarOpen(false);
+      if (route.view === "remote") setDrawerOpen(false);
       const current = currentShellRouteRef.current;
       if (changesSettingsSurface(current, route) && settingsExitGuardRef.current) {
         writeShellRoute(current, true);
@@ -681,6 +669,7 @@ function Shell({
         }, { promptRestart: current.view !== route.view });
         return;
       }
+      const transitionKind = shellTransitionFor(current, route);
       transitionSession(() => {
         setActiveKey(route.activeKey);
         setView(route.view);
@@ -690,7 +679,7 @@ function Shell({
         if (route.view === "chat" && !route.activeKey) {
           setDraftWorkspaceScope(null);
         }
-      }, changesVisibleSession(current, route));
+      }, transitionKind !== null, transitionKind ?? "session");
     };
     window.addEventListener("hashchange", applyRoute);
     window.addEventListener("popstate", applyRoute);
@@ -698,7 +687,7 @@ function Shell({
       window.removeEventListener("hashchange", applyRoute);
       window.removeEventListener("popstate", applyRoute);
     };
-  }, [changesVisibleSession]);
+  }, [shellTransitionFor]);
 
   useEffect(() => {
     temporarySessionsRef.current = temporarySessions;
@@ -745,18 +734,13 @@ function Shell({
   useEffect(() => {
     try {
       window.localStorage.setItem(
-        SIDEBAR_STORAGE_KEY,
-        preferredSidebarOpen ? "1" : "0",
+        ACTIVE_DRAWER_PINNED_STORAGE_KEY,
+        drawerPinned ? "1" : "0",
       );
     } catch {
       // ignore storage errors (private mode, etc.)
     }
-    try {
-      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-    } catch {
-      // Storage can be unavailable in private browsing.
-    }
-  }, [preferredSidebarOpen, sidebarWidth]);
+  }, [drawerPinned]);
 
   useEffect(() => {
     writeSessionUpdateChatIds(updatedChatIds);
@@ -945,24 +929,40 @@ function Shell({
     }
   }, [client, loading, sessions]);
 
-  const openHostSidebar = useCallback(() => {
-    setHostSidebarOpen(true);
-  }, [setHostSidebarOpen]);
-
   const closeMobileSidebar = useCallback(() => {
-    setMobileSidebarOpen(false);
+    setDrawerOpen(false);
   }, []);
 
   const toggleSidebar = useCallback(() => {
-    const isNativeHost =
-      typeof window !== "undefined" &&
-      window.matchMedia("(min-width: 1024px)").matches;
-    if (isNativeHost) {
-      setHostSidebarOpen(!hostSidebarOpen);
-    } else {
-      setMobileSidebarOpen((v) => !v);
+    if (effectiveDrawerPinned) {
+      setDrawerPinned(false);
+      setDrawerOpen(false);
+      return;
     }
-  }, [hostSidebarOpen, setHostSidebarOpen]);
+    setDrawerOpen((open) => !open);
+  }, [effectiveDrawerPinned]);
+
+  const togglePinDrawer = useCallback(() => {
+    if (!desktopDrawer) return;
+    setDrawerPinned((pinned) => {
+      const next = !pinned;
+      if (next) setDrawerOpen(false);
+      return next;
+    });
+  }, [desktopDrawer]);
+
+  useEffect(() => {
+    if (
+      landingConsumedRef.current
+      || !initialRouteRef.current?.landing
+      || !sessionsLoaded
+      || sidebarStateLoading
+    ) return;
+    landingConsumedRef.current = true;
+    if (sessions.length > 0 || temporarySessionList.length > 0) {
+      navigate(overviewShellRoute(null), { replace: true, animate: false });
+    }
+  }, [navigate, sessions.length, sessionsLoaded, sidebarStateLoading, temporarySessionList.length]);
 
   const applyWorkspaceScope = useCallback(
     (scope: WorkspaceScopePayload) => {
@@ -1002,7 +1002,7 @@ function Shell({
         activeKey: key,
         settingsSection: "overview",
       });
-      setMobileSidebarOpen(false);
+      setDrawerOpen(false);
       if (scope) {
         setWorkspaceOverrides((current) => ({
           ...current,
@@ -1079,7 +1079,7 @@ function Shell({
         settingsSection: "overview",
         temporary: true,
       });
-      setMobileSidebarOpen(false);
+      setDrawerOpen(false);
       return nextSession.chatId;
     },
     [client, navigate],
@@ -1104,7 +1104,7 @@ function Shell({
         activeKey: `websocket:${chatId}`,
         settingsSection: "overview",
       });
-      setMobileSidebarOpen(false);
+      setDrawerOpen(false);
       return chatId;
     } catch (e) {
       console.error("Failed to fork chat", e);
@@ -1118,7 +1118,7 @@ function Shell({
     setDraftWorkspaceScope(null);
     setWorkspaceError(null);
     setSessionSearchOpen(false);
-    setMobileSidebarOpen(false);
+    setDrawerOpen(false);
   }, [navigate]);
 
   const onTemporaryChatEnabledChange = useCallback((enabled: boolean) => {
@@ -1145,7 +1145,7 @@ function Shell({
         restrict_to_workspace: base.access_mode === "restricted",
       }));
       setWorkspaceError(null);
-      setMobileSidebarOpen(false);
+      setDrawerOpen(false);
     },
     [activeWorkspaceScope, navigate, onNewChat, workspaces?.default_scope],
   );
@@ -1177,7 +1177,7 @@ function Shell({
         settingsSection: "overview",
         ...(selectedTemporary ? { temporary: true } : {}),
       });
-      setMobileSidebarOpen(false);
+      setDrawerOpen(false);
     },
     [deletingKeys, navigate, sessions],
   );
@@ -1203,7 +1203,7 @@ function Shell({
         ...(remaining[0] ? { temporary: true } : {}),
       }, { replace: true, animate: false });
     }
-    setMobileSidebarOpen(false);
+    setDrawerOpen(false);
   }, [activeKey, client, navigate, temporarySessionList]);
 
   const onTogglePin = useCallback(
@@ -1321,7 +1321,6 @@ function Shell({
           ? [...new Set([...current.archived_keys, ...affected])]
           : current.archived_keys.filter((key) => !affected.has(key)),
       });
-      setMobileSidebarOpen(false);
       void saveSidebarState((current) => {
         for (const key of keys) {
           if (persistedSessions.has(key) && current.archived_keys.includes(key) !== archive) selected.add(key);
@@ -1368,30 +1367,37 @@ function Shell({
         });
         const route = currentShellRouteRef.current;
         if (archive && canNavigateArchiveRef.current && route.view === "chat" && route.activeKey && selected.has(route.activeKey)) {
-          const next = topicSessions.find((session) => !archivedAfterSave.includes(session.key));
-          navigate({ view: "chat", activeKey: next?.key ?? null, settingsSection: "overview" });
+          setDrawerOpen(false);
+          const siblingPaneKey = activeTabState?.paneKeys.find(
+            (key) => key !== route.activeKey && !archivedAfterSave.includes(key),
+          );
+          navigate(siblingPaneKey
+            ? { view: "chat", activeKey: siblingPaneKey, settingsSection: "overview" }
+            : overviewShellRoute(null));
         }
       }, reportFailure);
     },
-    [navigate, saveSidebarState, showToast, sidebarStateLoading, t, titleForSession, topicSessions],
+    [activeTabState, navigate, saveSidebarState, showToast, sidebarStateLoading, t, titleForSession, topicSessions],
   );
 
   const onToggleArchive = useCallback((key: string) => {
     onArchiveMany([key], !sidebarState.archived_keys.includes(key));
   }, [onArchiveMany, sidebarState.archived_keys]);
 
-  const onToggleArchived = useCallback(() => {
-    void updateSidebarState((current) => ({
-      ...current,
-      view: {
-        ...current.view,
-        show_archived: !current.view.show_archived,
-      },
-    }));
-  }, [updateSidebarState]);
+  const onOpenOverview = useCallback((projectId?: string | null, tab: "open" | "done" = "open") => {
+    setSessionSearchOpen(false);
+    setDrawerOpen(false);
+    if (projectId !== undefined) setOverviewProjectId(projectId);
+    setOverviewTab(tab);
+    navigate(overviewShellRoute(activeKey));
+  }, [activeKey, navigate]);
+
+  const onOpenOverviewDone = useCallback(() => {
+    onOpenOverview(null, "done");
+  }, [onOpenOverview]);
 
   const onOpenSessionSearch = useCallback(() => {
-    setMobileSidebarOpen(false);
+    setDrawerOpen(false);
     setSessionSearchOpen(true);
   }, []);
 
@@ -1405,7 +1411,7 @@ function Shell({
       || (activeTabState?.paneKeys.length ?? 0) >= MAX_WORKBENCH_PANES
       || temporarySessionsRef.current[activeKey]
     ) return;
-    setMobileSidebarOpen(false);
+    setDrawerOpen(false);
     setSessionSearchOpen(false);
     setCreatingPane(true);
     try {
@@ -1457,7 +1463,7 @@ function Shell({
   const onOpenSettings = useCallback((section: SettingsSectionKey = "overview") => {
     setSessionSearchOpen(false);
     navigate({ view: shellViewForSettingsSection(section), activeKey, settingsSection: section });
-    setMobileSidebarOpen(false);
+    setDrawerOpen(false);
   }, [activeKey, navigate]);
 
   const onSettingsIntent = useCallback(() => {
@@ -1470,29 +1476,59 @@ function Shell({
   const onInspectImagePreset = useCallback((name: string) => {
     setSessionSearchOpen(false);
     navigate({ view: "settings", activeKey, settingsSection: "models", settingsFocus: `image-input:${name}` });
-    setMobileSidebarOpen(false);
+    setDrawerOpen(false);
   }, [activeKey, navigate]);
   const onOpenSandboxSettings = useCallback((target: SettingsFocusTarget) => {
     setSessionSearchOpen(false);
     navigate({ view: "settings", activeKey, settingsSection: "advanced", settingsFocus: target });
-    setMobileSidebarOpen(false);
+    setDrawerOpen(false);
   }, [activeKey, navigate]);
 
   const onOpenApps = useCallback(() => {
     setSessionSearchOpen(false);
     navigate({ view: "apps", activeKey, settingsSection: "apps" });
-    setMobileSidebarOpen(false);
+    setDrawerOpen(false);
   }, [activeKey, navigate]);
 
   const onOpenAutomations = useCallback(() => {
     setSessionSearchOpen(false);
     navigate({ view: "automations", activeKey, settingsSection: "automations" });
-    setMobileSidebarOpen(false);
+    setDrawerOpen(false);
   }, [activeKey, navigate]);
 
+  const onBackToChat = useCallback(() => {
+    setDrawerOpen(false);
+    const nextKey = (() => {
+      if (!activeKey) return null;
+      if (temporarySessionsRef.current[activeKey]) return activeKey;
+      if (topicSessions.some((session) => session.key === activeKey)) return activeKey;
+      return null;
+    })();
+    if (!nextKey && topicSessions.length > 0) {
+      navigate(overviewShellRoute(null));
+      return;
+    }
+    navigate({
+      view: "chat",
+      activeKey: nextKey,
+      temporary: Boolean(nextKey && temporarySessionsRef.current[nextKey]),
+      settingsSection: "overview",
+    });
+  }, [activeKey, navigate, topicSessions]);
+
   useEffect(() => {
-    const actions = { newChat: onNewChat, search: onOpenSessionSearch, apps: onOpenApps,
-      automations: onOpenAutomations, settings: () => onOpenSettings() };
+    const actions = {
+      newChat: onNewChat,
+      search: onOpenSessionSearch,
+      overview: () => {
+        if (view === "overview" && activeKey) onBackToChat();
+        else onOpenOverview();
+      },
+      drawer: toggleSidebar,
+      apps: onOpenApps,
+      automations: onOpenAutomations,
+      settings: () => onOpenSettings(),
+    };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (!localActive) return;
       const action = matchSidebarShortcut(event);
@@ -1502,7 +1538,7 @@ function Shell({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [localActive, onNewChat, onOpenSessionSearch, onOpenApps, onOpenAutomations, onOpenSettings]);
+  }, [activeKey, localActive, onBackToChat, onNewChat, onOpenApps, onOpenAutomations, onOpenOverview, onOpenSessionSearch, onOpenSettings, toggleSidebar, view]);
 
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
@@ -1513,22 +1549,6 @@ function Shell({
     },
     [activeKey, commitNavigation, navigate],
   );
-
-  const onBackToChat = useCallback(() => {
-    setMobileSidebarOpen(false);
-    const nextKey = (() => {
-      if (!activeKey) return null;
-      if (temporarySessionsRef.current[activeKey]) return activeKey;
-      if (topicSessions.some((session) => session.key === activeKey)) return activeKey;
-      return null;
-    })();
-    navigate({
-      view: "chat",
-      activeKey: nextKey,
-      temporary: Boolean(nextKey && temporarySessionsRef.current[nextKey]),
-      settingsSection: "overview",
-    });
-  }, [activeKey, navigate, topicSessions]);
 
   const onRestart = useCallback(() => {
     const chatId = activeSession?.chatId ?? client.defaultChatId;
@@ -1849,10 +1869,6 @@ function Shell({
     if (notice) showToast(notice);
   }, [getSessionAutomations, prepareStagedDelete, showAutomationDeleteConfirmToast, showToast]);
 
-  const onRequestDelete = useCallback((key: string, label: string) => {
-    void onRequestDeleteMany([{ key, label }]);
-  }, [onRequestDeleteMany]);
-
   const automaticSidebarSort = sidebarState.view.sort === "manual"
     ? "updated_desc"
     : sidebarState.view.sort;
@@ -1910,10 +1926,6 @@ function Shell({
       }];
     });
   }, [orderedWorkbenchTabs, topicSessions, titleForSession]);
-  const sidebarTopicSessions = useMemo(
-    () => sidebarTabPresentations.map((presentation) => presentation.session),
-    [sidebarTabPresentations],
-  );
 
   const headerTitle = temporaryChatActive
     ? deriveTemporaryChatTitle(activeSession?.preview, t("temporaryChat.title"))
@@ -2020,25 +2032,6 @@ function Shell({
     if (paneKey) onSelectChat(paneKey);
   }, [deletingKeys, onSelectChat, workbenchState]);
 
-  const onSelectSidebarItem = useCallback((key: string) => {
-    if (
-      temporarySessionsRef.current[key]
-      || sessions.some((session) => session.key === key)
-    ) {
-      onSelectChat(key);
-      return;
-    }
-    onSelectSidebarTab(key);
-  }, [onSelectChat, onSelectSidebarTab, sessions]);
-
-  const onSelectSidebarPane = useCallback((_tabKey: string, paneKey: string) => {
-    onSelectChat(paneKey);
-  }, [onSelectChat]);
-
-  const onDetachWorkbenchPane = useCallback((tabKey: string, paneKey: string) => {
-    updateWorkbenchState((current) => detachWorkbenchPane(current, tabKey, paneKey));
-  }, [updateWorkbenchState]);
-
   const onCreateWorkbenchTab = useCallback((paneKey: string) => {
     updateWorkbenchState((current) => createWorkbenchTab(current, paneKey));
   }, [updateWorkbenchState]);
@@ -2047,23 +2040,12 @@ function Shell({
     updateWorkbenchState((current) => dissolveWorkbenchTab(current, tabKey));
   }, [updateWorkbenchState]);
 
-  const onAttachWorkbenchPane = useCallback((
-    paneKey: string,
-    tabKey: string,
-  ) => {
-    updateWorkbenchState((current) => {
-      const target = workbenchTab(current, tabKey);
-      if (
-        !target
-        || (!target.explicit && target.paneKeys.length < 2)
-        || (!target.paneKeys.includes(paneKey) && target.paneKeys.length >= MAX_WORKBENCH_PANES)
-      ) return current;
-      return attachWorkbenchPane(current, tabKey, paneKey);
-    });
-  }, [updateWorkbenchState]);
-
   useEffect(() => {
     if (!localActive) return;
+    if (view === "overview") {
+      document.title = t("app.documentTitle.base");
+      return;
+    }
     if (view === "settings") {
       document.title = t("app.documentTitle.chat", {
         title: t("settings.sidebar.title"),
@@ -2091,83 +2073,72 @@ function Shell({
       : t("app.documentTitle.base");
   }, [localActive, activeSession, headerTitle, i18n.resolvedLanguage, t, view]);
 
-  const pinnedPaneKeys = useMemo(
-    () => new Set(sidebarState.pinned_keys),
-    [sidebarState.pinned_keys],
+  const sessionIntelligence = useMemo(
+    () => buildSessionIntelligence(sidebarStateLoading ? [] : topicSessions, {
+      pinnedKeys: sidebarState.pinned_keys,
+      archivedKeys: sidebarState.archived_keys,
+      runningChatIds: runningChatIdList,
+      updatedChatIds: updatedChatIdList,
+      recoveryChatIds: recoveryChatIdList,
+      titleOverrides: sidebarState.title_overrides,
+      projectNameOverrides: sidebarState.project_name_overrides,
+      automationCountsByKey,
+      paneGroups: sidebarPaneGroups,
+      activeKey: view === "chat" ? activeKey : null,
+      defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
+      generalLabel: t("chat.groups.all", { defaultValue: "Topics" }),
+      fallbackTitle: t("chat.newChat"),
+    }),
+    [
+      activeKey,
+      automationCountsByKey,
+      recoveryChatIdList,
+      runningChatIdList,
+      sidebarPaneGroups,
+      sidebarState.archived_keys,
+      sidebarState.pinned_keys,
+      sidebarState.project_name_overrides,
+      sidebarState.title_overrides,
+      sidebarStateLoading,
+      t,
+      topicSessions,
+      updatedChatIdList,
+      view,
+      workspaces?.default_scope.project_path,
+    ],
   );
-  const archivedPaneKeys = useMemo(
-    () => new Set(sidebarState.archived_keys),
-    [sidebarState.archived_keys],
-  );
-  const sidebarPinnedTabKeys = useMemo(() => sidebarTabPresentations
-    .filter(({ orderedTab }) => orderedTab.paneKeys.some((key) => pinnedPaneKeys.has(key)))
-    .map(({ rowKey }) => rowKey), [pinnedPaneKeys, sidebarTabPresentations]);
-  const sidebarArchivedTabKeys = useMemo(() => sidebarTabPresentations
-    .filter(({ orderedTab }) => orderedTab.paneKeys.every((key) => archivedPaneKeys.has(key)))
-    .map(({ rowKey }) => rowKey), [archivedPaneKeys, sidebarTabPresentations]);
-  const activeSidebarKey = activeTabKey
-    ? sidebarTabPresentations.find(({ orderedTab }) => (
-        orderedTab.tabKey === activeTabKey
-      ))?.rowKey ?? activeKey
-    : activeKey;
 
-  const sidebarProps = {
-    sessions: sidebarStateLoading ? [] : sidebarTopicSessions,
-    temporarySessions: sidebarStateLoading ? [] : temporarySessionList,
-    activeKey: !managingConnections && view === "chat"
-      ? (temporaryChatActive ? activeKey : activeSidebarKey)
-      : null,
-    loading: loading || sidebarStateLoading,
-    initialLoading: sessionsInitialLoading || sidebarStateLoading,
-    onNewChat,
-    onSelect: onSelectSidebarItem,
-    onCloseTemporaryChat,
-    onRequestDelete,
-    onRequestDeleteMany: (items: SidebarDeleteItem[]) => { void onRequestDeleteMany(items); },
-    onTogglePin,
-    onRequestRename,
-    onToggleArchive,
-    onArchiveMany,
-    onRequestRenameTab,
-    paneGroups: sidebarPaneGroups,
-    onSelectPane: onSelectSidebarPane,
-    onCreateTab: mobileWorkbench ? undefined : onCreateWorkbenchTab,
-    onDetachPane: mobileWorkbench ? undefined : onDetachWorkbenchPane,
-    onDissolveTab: mobileWorkbench ? undefined : onDissolveWorkbenchTab,
-    onAttachPane: mobileWorkbench ? undefined : onAttachWorkbenchPane,
-    onToggleGroup,
-    onRequestRenameProject,
-    onNewChatInProject,
-    onOpenSettings,
-    onOpenUpdates: () => onOpenSettings("about"),
-    availableUpdate: localActive && !isNativeRuntime(effectiveRuntimeSurface)
-      && versionCheck.result?.type === "update" && versionCheck.result.latestVersion !== versionCheck.dismissedVersion
-      ? { version: versionCheck.result.latestVersion, onDismiss: versionCheck.dismiss, onRequestUpdate: updateFlow.open,
-        installationMethod: updateFlow.pending ? null : versionCheck.installationMethod }
-      : undefined,
-    onOpenApps,
-    onOpenAutomations,
-    onSettingsIntent,
-    onOpenSearch: onOpenSessionSearch,
-    activeUtility: !managingConnections && (view === "apps" || view === "automations") ? view : null,
-    onToggleArchived,
-    pinnedKeys: sidebarPinnedTabKeys,
-    archivedKeys: sidebarArchivedTabKeys,
-    pinnedPaneKeys: sidebarState.pinned_keys,
-    archivedPaneKeys: sidebarState.archived_keys,
-    sessionOrder: sidebarState.session_order,
-    titleOverrides: sidebarState.title_overrides,
-    projectNameOverrides: sidebarState.project_name_overrides,
-    collapsedGroups: sidebarState.collapsed_groups,
-    runningChatIds: runningChatIdList,
-    updatedChatIds: updatedChatIdList,
-    recoveryChatIds: recoveryChatIdList,
-    viewState: { ...sidebarState.view, sort: automaticSidebarSort },
-    showArchived: sidebarState.view.show_archived,
-    archivedCount: sidebarArchivedTabKeys.length,
-    defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
-  };
-  const hostSidebarFlowWidth = hostSidebarOpen ? sidebarWidth : SIDEBAR_RAIL_WIDTH;
+  const activeEnrichedSession = useMemo(
+    () => (activeKey && !temporaryChatActive ? sessionIntelligence.byKey.get(activeKey) ?? null : null),
+    [activeKey, sessionIntelligence.byKey, temporaryChatActive],
+  );
+  const activeWorkbenchGroup = useMemo(
+    () => (activeTabKey
+      ? sessionIntelligence.workbenchGroups.find((group) => group.tabKey === activeTabKey) ?? null
+      : null),
+    [activeTabKey, sessionIntelligence.workbenchGroups],
+  );
+  const splitSpansMultipleProjects = useMemo(() => {
+    if (workbenchPaneSessions.length <= 1) return false;
+    const projectIds = new Set(
+      workbenchPaneSessions.map((session) => (
+        sessionIntelligence.byKey.get(session.key)?.project.id
+        ?? session.workspaceScope?.project_path
+        ?? "__general__"
+      )),
+    );
+    return projectIds.size > 1;
+  }, [sessionIntelligence.byKey, workbenchPaneSessions]);
+
+  const availableUpdate = localActive && !isNativeRuntime(effectiveRuntimeSurface)
+    && versionCheck.result?.type === "update" && versionCheck.result.latestVersion !== versionCheck.dismissedVersion
+    ? {
+        version: versionCheck.result.latestVersion,
+        onDismiss: versionCheck.dismiss,
+        onRequestUpdate: updateFlow.open,
+        installationMethod: updateFlow.pending ? null : versionCheck.installationMethod,
+      }
+    : undefined;
 
   useEffect(() => {
     document.documentElement.classList.toggle("native-host", showHostChrome);
@@ -2181,112 +2152,65 @@ function Shell({
       <StarPrompt ready={localActive && !managingConnections && !loading && !sidebarStateLoading} />
       <div
         className={cn(
-          "relative h-full w-full overflow-hidden",
+          "relative flex h-full w-full flex-col overflow-hidden",
           showHostChrome && "host-window-shell",
         )}
       >
-        {showHostChrome ? (
-          <HostChrome
-            rightAction={
-              view === "chat" ? undefined : (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t("thread.header.toggleTheme")}
-                  onClick={toggle}
-                  className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
-                >
-                  <ThemeToggleIcon theme={theme} />
-                </Button>
-              )
-            }
-          />
-        ) : null}
-        <div
-          className={cn(
-            "relative flex h-full w-full overflow-hidden",
-          )}
-        >
-          {showMainSidebar ? (
-            <aside
-              data-testid="host-sidebar-flow"
-              data-resizing={sidebarDragging || undefined}
-              data-collapsed={!hostSidebarOpen || undefined}
-              id="main-sidebar"
-              className={cn(
-                "sidebar-dock-frame group/sidebar relative z-20 hidden shrink-0 overflow-hidden bg-background lg:block",
-                sidebarDragging && "select-none",
-              )}
-              data-theme-surface
-              style={{
-                width: hostSidebarFlowWidth,
-                "--sidebar-open-width": `${sidebarWidth}px`,
-              } as CSSProperties}
-            >
-              <div
-                aria-hidden
-                data-theme-surface
-                className={cn(
-                  "sidebar-dock-surface pointer-events-none absolute inset-0",
-                  showHostChrome ? "host-sidebar-glass" : "bg-sidebar",
-                )}
-              />
-              <div className="absolute inset-0">
-                <Sidebar
-                  {...sidebarProps}
-                  collapsed={!hostSidebarOpen}
-                  hostChromeInset={showHostChrome}
-                  onExpand={openHostSidebar}
-                  onCollapse={() => setHostSidebarOpen(false)}
-                  desktopDock
-                />
-              </div>
-              <SidebarResizeHandle
-                width={sidebarWidth}
-                open={hostSidebarOpen}
-                onDraggingChange={setSidebarDragging}
-                onResize={(width, open) => {
-                  if (open) setSidebarWidth(width);
-                  setHostSidebarOpen(open);
-                }}
-              />
-            </aside>
-          ) : null}
+        <WorkspaceTopBar
+          view={view}
+          intelligence={sessionIntelligence}
+          activeSession={activeEnrichedSession}
+          activeTemporaryTitle={temporaryChatActive ? headerTitle : null}
+          activeWorkbenchGroup={activeWorkbenchGroup}
+          drawerOpen={drawerOpen}
+          drawerPinned={effectiveDrawerPinned && showMainSidebar}
+          theme={theme}
+          hostChromeInset={showHostChrome}
+          availableUpdate={availableUpdate}
+          onOpenOverview={(projectId) => onOpenOverview(projectId, "open")}
+          onToggleDrawer={toggleSidebar}
+          onSelectSession={onSelectChat}
+          onNewChat={onNewChat}
+          onDoneSession={(key) => onArchiveMany([key], true)}
+          onOpenSearch={onOpenSessionSearch}
+          onOpenApps={() => (!managingConnections && view === "apps" ? onBackToChat() : onOpenApps())}
+          onOpenAutomations={() => (!managingConnections && view === "automations" ? onBackToChat() : onOpenAutomations())}
+          onOpenSettings={() => (!managingConnections && view === "settings" ? onBackToChat() : onOpenSettings())}
+          onOpenUpdates={() => onOpenSettings("about")}
+          onSettingsIntent={onSettingsIntent}
+          onToggleTheme={toggle}
+          onThreadActionsHostChange={setTopBarThreadActionsHost}
+        />
 
-          {showMainSidebar ? (
-            <Sheet
-              open={mobileSidebarOpen}
-              onOpenChange={(open) => setMobileSidebarOpen(open)}
-            >
-              <SheetContent
-                ref={mobileSidebarRef}
-                onEscapeKeyDown={(event) => {
-                  if (event.target instanceof Element
-                    && event.target.closest("[data-sidebar-topic-rename]")) {
-                    event.preventDefault();
-                  }
-                }}
-                onOpenAutoFocus={(event) => {
-                  // Keep opening navigation from focusing the search tooltip trigger.
-                  event.preventDefault();
-                  mobileSidebarRef.current?.focus({ preventScroll: true });
-                }}
-                side="left"
-                showCloseButton={false}
-                aria-describedby={undefined}
-                className="p-0 lg:hidden"
-                style={{ width: MOBILE_SIDEBAR_WIDTH, maxWidth: MOBILE_SIDEBAR_WIDTH }}
-              >
-                <SheetTitle className="sr-only">{t("sidebar.navigation")}</SheetTitle>
-                <Sidebar
-                  {...sidebarProps}
-                  onCollapse={closeMobileSidebar}
-                  containActionMenus
-                />
-              </SheetContent>
-            </Sheet>
-          ) : null}
+        <div className="relative flex min-h-0 flex-1 w-full overflow-hidden">
+          <ActiveSessionDrawer
+            open={drawerOpen}
+            pinned={effectiveDrawerPinned && showMainSidebar}
+            loading={sidebarStateLoading}
+              intelligence={sessionIntelligence}
+              temporarySessions={sidebarStateLoading ? [] : temporarySessionList}
+              activeKey={!managingConnections && view === "chat" ? activeKey : null}
+              collapsedGroups={sidebarState.collapsed_groups}
+              onClose={closeMobileSidebar}
+              onTogglePinDrawer={togglePinDrawer}
+              onSelectSession={onSelectChat}
+              onCloseTemporaryChat={onCloseTemporaryChat}
+              onToggleGroup={onToggleGroup}
+              onNewChat={onNewChat}
+              onNewChatInProject={onNewChatInProject}
+              onTogglePinSession={onTogglePin}
+              onArchiveSession={(key) => onArchiveMany([key], true)}
+              onRequestRename={onRequestRename}
+              onRequestDeleteMany={(items) => { void onRequestDeleteMany(items); }}
+              onCreateTab={mobileWorkbench ? undefined : onCreateWorkbenchTab}
+              onOpenOverviewDone={onOpenOverviewDone}
+            mobileFooterExtra={(
+              <HostSwitcher
+                menuSide="top"
+                className="h-7 w-full justify-start rounded-lg px-2 py-1 text-[12px] text-muted-foreground/75 hover:bg-foreground/[0.04] hover:text-foreground"
+              />
+            )}
+          />
 
           {sessionSearchOpen ? (
             <Suspense fallback={null}>
@@ -2297,97 +2221,200 @@ function Shell({
                 activeKey={activeKey}
                 loading={loading}
                 titleOverrides={sidebarState.title_overrides}
+                projectNameOverrides={sidebarState.project_name_overrides}
+                archivedKeys={sidebarState.archived_keys}
+                runningChatIds={runningChatIdList}
+                updatedChatIds={updatedChatIdList}
+                recoveryChatIds={recoveryChatIdList}
+                automationCountsByKey={automationCountsByKey}
+                defaultWorkspacePath={workspaces?.default_scope.project_path ?? null}
                 messageCache={threadMessageCache}
                 onSelect={onSelectSearchResult}
+                onToggleArchive={onToggleArchive}
               />
             </Suspense>
           ) : null}
-        <main ref={managementMain}
-          data-theme-surface
-          aria-hidden={managingConnections && remoteConnections?.embeddedManagement || undefined}
-          {...(managingConnections && remoteConnections?.embeddedManagement ? { inert: "" } : {})}
-          className={cn(
-            "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
-          )}
-        >
-          <div className={cn("absolute inset-0 flex flex-col", managingConnections && "hidden")}
-            aria-hidden={managingConnections || undefined} {...(managingConnections ? { inert: "" } : {})}>
-            {(view === "chat" || chatVisited) && <div
-              className={cn(
-                "absolute inset-0 flex flex-col",
-                view !== "chat" && "hidden",
-              )}
-            >
-              <ThreadVisibilityContext.Provider value={localActive && !managingConnections && view === "chat"}>
-                <Suspense fallback={<StartupShell embedded surface="chat" sidebarExpanded={hostSidebarOpen} />}>
-                  <PaneWorkbench
-                    panes={renderedWorkbenchPanes}
-                    activePaneKey={renderedActivePaneKey}
-                    layout={renderedWorkbenchLayout}
-                    splitRatios={renderedWorkbenchSplitRatios}
-                    chrome={paneChromeEnabled}
-                    showLayoutControl={activeTabVisible}
-                    addPaneDisabled={creatingPane || activePaneLimitReached}
-                    addPaneDisabledLabel={activePaneLimitReached
-                      ? t("workbench.paneLimit", {
-                          count: MAX_WORKBENCH_PANES,
-                        })
-                      : undefined}
-                    onActivatePane={onActivateWorkbenchPane}
-                    onAddPane={onAddPane}
-                    onLayoutChange={(layout) => {
-                      if (!activeTabKey) return;
-                      updateWorkbenchState((current) => (
-                        setWorkbenchLayout(current, activeTabKey, layout)
-                      ));
-                    }}
-                    onPaneOrderChange={(paneKeys) => {
-                      if (!activeTabKey) return;
-                      updateWorkbenchState((current) => (
-                        setWorkbenchPaneLayoutOrder(current, activeTabKey, paneKeys)
-                      ));
-                    }}
-                    onSplitRatiosChange={(splitRatios) => {
-                      if (!activeTabKey) return;
-                      updateWorkbenchState((current) => (
-                        setWorkbenchSplitRatios(current, activeTabKey, splitRatios)
-                      ));
-                    }}
-                    renderPane={(pane, context) => {
-                      if (!paneChromeEnabled) {
+
+          <main ref={managementMain}
+            data-theme-surface
+            data-workspace-stage=""
+            aria-hidden={managingConnections && remoteConnections?.embeddedManagement || undefined}
+            {...(managingConnections && remoteConnections?.embeddedManagement ? { inert: "" } : {})}
+            className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background"
+          >
+            <div className={cn("absolute inset-0 flex flex-col", managingConnections && "hidden")}
+              aria-hidden={managingConnections || undefined} {...(managingConnections ? { inert: "" } : {})}>
+              {view === "overview" ? (
+                <MissionControlView
+                  intelligence={sessionIntelligence}
+                  activeKey={activeKey}
+                  initialTab={overviewTab}
+                  selectedProjectId={overviewProjectId}
+                  onSelectedProjectChange={setOverviewProjectId}
+                  onSelectSession={onSelectChat}
+                  onSelectWorkbenchGroup={onSelectSidebarTab}
+                  onNewChat={onNewChat}
+                  onNewChatInProject={onNewChatInProject}
+                  onTogglePin={onTogglePin}
+                  onArchiveMany={onArchiveMany}
+                  onRequestDeleteMany={(items) => { void onRequestDeleteMany(items); }}
+                  onRequestRename={onRequestRename}
+                  onRequestRenameProject={onRequestRenameProject}
+                  onRequestRenameTab={onRequestRenameTab}
+                  onCreateTab={mobileWorkbench ? undefined : onCreateWorkbenchTab}
+                  onDissolveTab={mobileWorkbench ? undefined : onDissolveWorkbenchTab}
+                />
+              ) : null}
+              {(view === "chat" || chatVisited) && !waitingForLanding && <div
+                className={cn(
+                  "absolute inset-0 flex flex-col",
+                  view !== "chat" && "hidden",
+                )}
+              >
+                <ThreadVisibilityContext.Provider value={localActive && !managingConnections && view === "chat"}>
+                  <Suspense fallback={<StartupShell embedded surface="chat" sidebarExpanded={effectiveDrawerPinned} />}>
+                    <PaneWorkbench
+                      panes={renderedWorkbenchPanes}
+                      activePaneKey={renderedActivePaneKey}
+                      layout={renderedWorkbenchLayout}
+                      splitRatios={renderedWorkbenchSplitRatios}
+                      chrome={paneChromeEnabled}
+                      hideHeaderHost
+                      showLayoutControl={activeTabVisible}
+                      addPaneDisabled={creatingPane || activePaneLimitReached}
+                      addPaneDisabledLabel={activePaneLimitReached
+                        ? t("workbench.paneLimit", {
+                            count: MAX_WORKBENCH_PANES,
+                          })
+                        : undefined}
+                      onActivatePane={onActivateWorkbenchPane}
+                      onAddPane={onAddPane}
+                      onLayoutChange={(layout) => {
+                        if (!activeTabKey) return;
+                        updateWorkbenchState((current) => (
+                          setWorkbenchLayout(current, activeTabKey, layout)
+                        ));
+                      }}
+                      onPaneOrderChange={(paneKeys) => {
+                        if (!activeTabKey) return;
+                        updateWorkbenchState((current) => (
+                          setWorkbenchPaneLayoutOrder(current, activeTabKey, paneKeys)
+                        ));
+                      }}
+                      onSplitRatiosChange={(splitRatios) => {
+                        if (!activeTabKey) return;
+                        updateWorkbenchState((current) => (
+                          setWorkbenchSplitRatios(current, activeTabKey, splitRatios)
+                        ));
+                      }}
+                      renderPane={(pane, context) => {
+                        if (!paneChromeEnabled) {
+                          return (
+                            <ThreadShell
+                              session={activeSession}
+                              sessions={topicSessions}
+                              titleOverrides={sidebarState.title_overrides}
+                              title={headerTitle}
+                              temporary={temporaryChatRequested}
+                              temporaryChatIds={temporaryChatIds}
+                              messageCache={threadMessageCache}
+                              filePreviewStore={filePreviewStore}
+                              draftStore={draftStore}
+                              temporaryChatEnabled={temporaryChatEnabled}
+                              onTemporaryChatEnabledChange={
+                                !activeKey ? onTemporaryChatEnabledChange : undefined
+                              }
+                              onToggleSidebar={toggleSidebar}
+                              onCreateChat={
+                                temporaryChatEnabled ? onCreateTemporaryChat : onCreateChat
+                              }
+                              pendingFirstMessage={pendingAutomationMessage}
+                              onPendingFirstMessageConsumed={onPendingAutomationMessageConsumed}
+                              onForkChat={temporaryChatActive ? undefined : onForkChat}
+                              onTurnEnd={onTurnEnd}
+                              theme={theme}
+                              onToggleTheme={toggle}
+                              hideSidebarToggle
+                              hideThemeButton
+                              hideHeaderTitle
+                              hideHeader={false}
+                              actionsPortalTarget={topBarThreadActionsHost}
+                              headerActive={view === "chat"}
+                              workspaceScope={activeWorkspaceScope}
+                              workspaceDefaultScope={workspaces?.default_scope ?? null}
+                              workspaceControls={workspaces?.controls ?? null}
+                              workspaceScopeDisabled={activeChatRunning}
+                              workspaceError={workspaceError}
+                              onWorkspaceScopeChange={applyWorkspaceScope}
+                              settingsSnapshot={settingsSnapshot}
+                              settingsLoading={settingsLoading}
+                              onOpenModelSettings={onOpenModelSettings}
+                              onInspectImagePreset={onInspectImagePreset}
+                              onOpenSandboxSettings={onOpenSandboxSettings}
+                              skills={skills}
+                            />
+                          );
+                        }
+
+                        const paneSession = workbenchPaneSessions.find(
+                          (session) => session.key === pane.key,
+                        );
+                        if (!paneSession) return null;
+                        const paneScope = workspaceOverrides[paneSession.chatId]
+                          ?? paneSession.workspaceScope
+                          ?? workspaces?.default_scope
+                          ?? null;
+                        const paneRunning = runningChatIds.has(paneSession.chatId);
                         return (
                           <ThreadShell
-                            session={activeSession}
+                            session={paneSession}
                             sessions={topicSessions}
                             titleOverrides={sidebarState.title_overrides}
-                            title={headerTitle}
-                            temporary={temporaryChatRequested}
+                            title={pane.title}
                             temporaryChatIds={temporaryChatIds}
                             messageCache={threadMessageCache}
                             filePreviewStore={filePreviewStore}
                             draftStore={draftStore}
-                            temporaryChatEnabled={temporaryChatEnabled}
-                            onTemporaryChatEnabledChange={
-                              !activeKey ? onTemporaryChatEnabledChange : undefined
-                            }
                             onToggleSidebar={toggleSidebar}
-                            onCreateChat={
-                              temporaryChatEnabled ? onCreateTemporaryChat : onCreateChat
-                            }
+                            onCreateChat={onCreateChat}
                             pendingFirstMessage={pendingAutomationMessage}
                             onPendingFirstMessageConsumed={onPendingAutomationMessageConsumed}
-                            onForkChat={temporaryChatActive ? undefined : onForkChat}
-                            onTurnEnd={onTurnEnd}
+                            onForkChat={onForkChat}
+                            onTurnEnd={context.active ? onTurnEnd : () => void refresh()}
                             theme={theme}
                             onToggleTheme={toggle}
-                            hideSidebarToggleForHostChrome
-                            hideHeader={false}
-                            workspaceScope={activeWorkspaceScope}
+                            hideSidebarToggle
+                            hideThemeButton
+                            hideHeaderTitle
+                            inlineHandle={!mobileWorkbench && workbenchPaneSessions.length > 1}
+                            showPaneProject={splitSpansMultipleProjects}
+                            headerActions={context.headerActions}
+                            headerPortalTarget={context.headerPortalTarget}
+                            actionsPortalTarget={topBarThreadActionsHost}
+                            headerActive={view === "chat" && context.active}
+                            composerPortalTarget={context.composerPortalTarget}
+                            navigationFrame={context.navigationFrame}
+                            composerActive={context.active}
+                            multiplePanes={context.multiplePanes}
+                            composerInputAriaLabel={t("workbench.composerAria", {
+                              title: pane.title,
+                            })}
+                            emptyComposerVariant="thread"
+                            workspaceScope={paneScope}
                             workspaceDefaultScope={workspaces?.default_scope ?? null}
                             workspaceControls={workspaces?.controls ?? null}
-                            workspaceScopeDisabled={activeChatRunning}
-                            workspaceError={workspaceError}
-                            onWorkspaceScopeChange={applyWorkspaceScope}
+                            workspaceScopeDisabled={paneRunning}
+                            workspaceError={context.active ? workspaceError : null}
+                            onWorkspaceScopeChange={(scope) => {
+                              if (paneRunning) return;
+                              const next = normalizeWorkspaceScope(scope);
+                              setWorkspaceError(null);
+                              setWorkspaceOverrides((current) => ({
+                                ...current,
+                                [paneSession.chatId]: next,
+                              }));
+                              client.setWorkspaceScope(paneSession.chatId, next);
+                            }}
                             settingsSnapshot={settingsSnapshot}
                             settingsLoading={settingsLoading}
                             onOpenModelSettings={onOpenModelSettings}
@@ -2396,122 +2423,56 @@ function Shell({
                             skills={skills}
                           />
                         );
-                      }
-
-                      const paneSession = workbenchPaneSessions.find(
-                        (session) => session.key === pane.key,
-                      );
-                      if (!paneSession) return null;
-                      const paneScope = workspaceOverrides[paneSession.chatId]
-                        ?? paneSession.workspaceScope
-                        ?? workspaces?.default_scope
-                        ?? null;
-                      const paneRunning = runningChatIds.has(paneSession.chatId);
-                      return (
-                        <ThreadShell
-                          session={paneSession}
-                          sessions={topicSessions}
-                          titleOverrides={sidebarState.title_overrides}
-                          title={pane.title}
-                          temporaryChatIds={temporaryChatIds}
-                          messageCache={threadMessageCache}
-                          filePreviewStore={filePreviewStore}
-                          draftStore={draftStore}
-                          onToggleSidebar={toggleSidebar}
-                          onCreateChat={onCreateChat}
-                          pendingFirstMessage={pendingAutomationMessage}
-                          onPendingFirstMessageConsumed={onPendingAutomationMessageConsumed}
-                          onForkChat={onForkChat}
-                          onTurnEnd={context.active ? onTurnEnd : () => void refresh()}
-                          theme={theme}
-                          onToggleTheme={toggle}
-                          hideSidebarToggle={!context.active}
-                          hideSidebarToggleForHostChrome={context.active}
-                          hideThemeButton={!context.active}
-                          hideHeaderTitle
-                          inlineHandle={!mobileWorkbench && workbenchPaneSessions.length > 1}
-                          headerActions={context.headerActions}
-                          headerPortalTarget={context.headerPortalTarget}
-                          headerActive={context.active}
-                          composerPortalTarget={context.composerPortalTarget}
-                          navigationFrame={context.navigationFrame}
-                          composerActive={context.active}
-                          multiplePanes={context.multiplePanes}
-                          composerInputAriaLabel={t("workbench.composerAria", {
-                            title: pane.title,
-                          })}
-                          emptyComposerVariant="thread"
-                          workspaceScope={paneScope}
-                          workspaceDefaultScope={workspaces?.default_scope ?? null}
-                          workspaceControls={workspaces?.controls ?? null}
-                          workspaceScopeDisabled={paneRunning}
-                          workspaceError={context.active ? workspaceError : null}
-                          onWorkspaceScopeChange={(scope) => {
-                            if (paneRunning) return;
-                            const next = normalizeWorkspaceScope(scope);
-                            setWorkspaceError(null);
-                            setWorkspaceOverrides((current) => ({
-                              ...current,
-                              [paneSession.chatId]: next,
-                            }));
-                            client.setWorkspaceScope(paneSession.chatId, next);
-                          }}
-                          settingsSnapshot={settingsSnapshot}
-                          settingsLoading={settingsLoading}
-                          onOpenModelSettings={onOpenModelSettings}
-                          onInspectImagePreset={onInspectImagePreset}
-                          onOpenSandboxSettings={onOpenSandboxSettings}
-                          skills={skills}
-                        />
-                      );
-                    }}
-                  />
-                </Suspense>
-              </ThreadVisibilityContext.Provider>
-            </div>}
-            {view !== "chat" && (
-              <div className="absolute inset-0 flex flex-col">
-                {view === "remote" ? <LazyRemoteConnectionsPage
-                  mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
-                  hostChromeInset={showHostChrome}
-                  onBackToChat={onBackToChat}
-                /> : <Suspense fallback={<StartupShell embedded surface={view === "apps" && isAppsSection(settingsInitialSection) ? settingsInitialSection : view} sidebarExpanded={hostSidebarOpen} />}>
-                  <SettingsView
-                    registerExitGuard={registerSettingsExitGuard}
-                    themePreference={themePreference}
-                    initialSection={settingsInitialSection}
-                    focusTarget={settingsFocus}
-                    initialSettings={settingsSnapshot}
-                    showSidebar={view === "settings"}
-                    mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
-                    onChangeTheme={setTheme}
-                    onBackToChat={onBackToChat}
-                    onModelNameChange={onModelNameChange}
-                    onSettingsChange={setSettingsSnapshot}
-                    skills={skills}
-                    skillsLoading={skillsLoading}
-                    skillsError={skillsError}
-                    onStartAutomationChat={onStartAutomationChat}
-                    titleOverrides={sidebarState.title_overrides}
-                    sessions={topicSessions}
-                    onSectionChange={onSettingsSectionChange}
-                    onLogout={onLogout}
-                    onRestart={onRestart}
-                    onNativeEngineRestart={onNativeEngineRestart}
-                    isRestarting={isRestarting}
+                      }}
+                    />
+                  </Suspense>
+                </ThreadVisibilityContext.Provider>
+              </div>}
+              {view !== "chat" && view !== "overview" && (
+                <div className="absolute inset-0 flex flex-col">
+                  {view === "remote" ? <LazyRemoteConnectionsPage
+                    mainNavigationExpanded={showMainSidebar && effectiveDrawerPinned}
                     hostChromeInset={showHostChrome}
-                  />
-                </Suspense>}
-              </div>
-            )}
-          </div>
-          {managingConnections && !remoteConnections?.embeddedManagement && <div className="absolute inset-0 flex flex-col">
-            <LazyRemoteConnectionsPage
-              mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
-              hostChromeInset={showHostChrome}
-              onBackToChat={() => remoteConnections?.closeManagement()}
-            />
-          </div>}
+                    onBackToChat={onBackToChat}
+                  /> : <Suspense fallback={<div className="flex-1 bg-settings-canvas" />}>
+                    <SettingsView
+                      registerExitGuard={registerSettingsExitGuard}
+                      themePreference={themePreference}
+                      initialSection={settingsInitialSection}
+                      focusTarget={settingsFocus}
+                      initialSettings={settingsSnapshot}
+                      showSidebar={view === "settings"}
+                      mainNavigationExpanded={showMainSidebar && effectiveDrawerPinned}
+                      onChangeTheme={setTheme}
+                      onBackToChat={onBackToChat}
+                      onModelNameChange={onModelNameChange}
+                      onSettingsChange={setSettingsSnapshot}
+                      skills={skills}
+                      skillsLoading={skillsLoading}
+                      skillsError={skillsError}
+                      onStartAutomationChat={onStartAutomationChat}
+                      titleOverrides={sidebarState.title_overrides}
+                      sessions={topicSessions}
+                      onSectionChange={onSettingsSectionChange}
+                      onLogout={onLogout}
+                      onRestart={onRestart}
+                      onNativeEngineRestart={onNativeEngineRestart}
+                      isRestarting={isRestarting}
+                      hostChromeInset={false}
+                      hideHostSwitcher
+                      hideBackButton
+                    />
+                  </Suspense>}
+                </div>
+              )}
+            </div>
+            {managingConnections && !remoteConnections?.embeddedManagement && <div className="absolute inset-0 flex flex-col">
+              <LazyRemoteConnectionsPage
+                mainNavigationExpanded={showMainSidebar && effectiveDrawerPinned}
+                hostChromeInset={showHostChrome}
+                onBackToChat={() => remoteConnections?.closeManagement()}
+              />
+            </div>}
           </main>
         </div>
 

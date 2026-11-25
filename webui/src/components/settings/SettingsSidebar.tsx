@@ -60,6 +60,8 @@ interface SettingsSidebarProps {
   isRestarting?: boolean;
   restartPending?: boolean;
   isNativeHost?: boolean;
+  hideHostSwitcher?: boolean;
+  hideBackButton?: boolean;
 }
 
 export function SettingsSidebar(props: SettingsSidebarProps) {
@@ -73,6 +75,8 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
     isRestarting,
     restartPending,
     isNativeHost,
+    hideHostSwitcher = false,
+    hideBackButton = false,
   } = props;
   const { t } = useTranslation();
   const hostNavigation = useContext(HostNavigationContext);
@@ -96,21 +100,23 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
   return (
     <aside
       className={cn(
-        "flex w-full shrink-0 select-none flex-col bg-settings-surface px-3 pb-2 lg:w-48 lg:px-3 lg:pb-4",
+        "flex w-full shrink-0 select-none flex-col bg-settings-surface px-3 pb-2 lg:w-48 lg:border-r lg:border-border/40 lg:px-3 lg:pb-4",
         hostChromeInset ? "pt-10 lg:pt-10" : "pt-4 lg:pt-4",
       )}
     >
-      <button
-        type="button"
-        onClick={onBackToChat}
-        aria-label={t("settings.backToChat")}
-        className={cn(
-          "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-xl text-ui text-sidebar-content transition-colors duration-150 motion-reduce:transition-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ring hover:text-foreground lg:mb-3",
-          hostChromeInset && "-ml-1",
-        )}
-      >
-        <ChevronLeft className="h-4 w-4" aria-hidden />
-      </button>
+      {!hideBackButton ? (
+        <button
+          type="button"
+          onClick={onBackToChat}
+          aria-label={t("settings.backToChat")}
+          className={cn(
+            "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-xl text-ui text-sidebar-content transition-colors duration-150 motion-reduce:transition-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ring hover:text-foreground lg:mb-3",
+            hostChromeInset && "-ml-1",
+          )}
+        >
+          <ChevronLeft className="h-4 w-4" aria-hidden />
+        </button>
+      ) : null}
 
       <nav
         aria-label={t("settings.sidebar.ariaLabel")}
@@ -179,13 +185,13 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
             type="button"
             variant="ghost"
             onClick={onLogout}
-            className={cn(SIDEBAR_ROW, "text-sidebar-content hover:bg-destructive/8 hover:text-destructive")}
+            className={cn(SIDEBAR_ROW, "text-sidebar-content hover:bg-destructive/10 hover:text-destructive")}
           >
             <LogOut className="h-4 w-4" aria-hidden />
             <span>{t("app.account.logout")}</span>
           </Button>
         ) : null}
-        {hostNavigation && <HostSwitcher className={SIDEBAR_ROW} />}
+        {!hideHostSwitcher && hostNavigation && <HostSwitcher className={SIDEBAR_ROW} />}
       </div>
     </aside>
   );
@@ -202,6 +208,8 @@ function MobileSettingsNavigation({
   onRestart,
   isRestarting,
   restartPending,
+  hideHostSwitcher = false,
+  hideBackButton = false,
 }: SettingsSidebarProps & {
   navSection: SettingsSectionKey;
   activeLabel: string;
@@ -227,21 +235,23 @@ function MobileSettingsNavigation({
   ) : null;
 
   return (
-    <aside className={cn("shrink-0 border-b border-border/50 bg-settings-canvas",
+    <aside className={cn("shrink-0 border-b border-border/35 bg-settings-canvas dark:border-white/[0.06]",
       hostChromeInset ? "pt-10" : "pt-[env(safe-area-inset-top)]")}
     >
-      <div className="grid h-14 grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center px-3">
-        <Button size="icon" type="button" variant="ghost" onClick={onBackToChat}
-          aria-label={t("settings.backToChat")}
-          className="h-11 w-11 rounded-xl p-0 text-sidebar-content"
-        >
-          <ChevronLeft className="h-5 w-5" aria-hidden />
-        </Button>
+      <div className="grid h-11 grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] items-center px-3">
+        {!hideBackButton ? (
+          <Button size="icon" type="button" variant="ghost" onClick={onBackToChat}
+            aria-label={t("settings.backToChat")}
+            className="h-9 w-9 rounded-xl p-0 text-sidebar-content"
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+          </Button>
+        ) : <span aria-hidden />}
         <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="ghost"
               aria-label={`${t("settings.sidebar.title")}: ${activeLabel}`}
-              className="h-11 min-w-0 max-w-full justify-self-center gap-1.5 px-2 text-base font-medium"
+              className="h-9 min-w-0 max-w-full justify-self-center gap-1.5 px-2.5 text-[14.5px] font-medium"
             >
               <span className="truncate">{activeLabel}</span>
               <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-150 motion-reduce:transition-none", open && "rotate-180")} aria-hidden />
@@ -276,7 +286,7 @@ function MobileSettingsNavigation({
             </> : null}
           </DropdownMenuContent>
         </DropdownMenu>
-        {hostNavigation && <HostSwitcher collapsed />}
+        {!hideHostSwitcher && hostNavigation && <HostSwitcher collapsed />}
       </div>
       {onRestart && (restartPending || isRestarting) ? (
         <div className="flex min-h-11 items-center justify-between gap-2 px-4 pb-1">

@@ -77,6 +77,8 @@ interface SettingsPageProps {
   onLogout?: () => void;
   isRestarting: boolean;
   hostChromeInset: boolean;
+  hideHostSwitcher?: boolean;
+  hideBackButton?: boolean;
 }
 
 export function SettingsPage({
@@ -97,6 +99,8 @@ export function SettingsPage({
   onLogout,
   isRestarting,
   hostChromeInset,
+  hideHostSwitcher = false,
+  hideBackButton = false,
 }: SettingsPageProps) {
   const { client, webuiCapabilities } = useClient();
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
@@ -646,7 +650,7 @@ export function SettingsPage({
 
   return (
     <DialogLayoutContext.Provider value={dialogLayoutAnchor}>
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-settings-canvas lg:flex-row">
+    <div className="zen-surface-enter flex min-h-0 flex-1 flex-col overflow-hidden bg-settings-canvas lg:flex-row">
       <Dialog open={pendingExit !== null} onOpenChange={(open) => { if (!open) setPendingExit(null); }}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>
@@ -670,6 +674,8 @@ export function SettingsPage({
           isRestarting={restartInProgress}
           restartPending={settings?.requires_restart}
           isNativeHost={(settings?.surface ?? settings?.runtime_surface) === "native"}
+          hideHostSwitcher={hideHostSwitcher}
+          hideBackButton={hideBackButton}
         />
       ) : null}
 
@@ -767,8 +773,8 @@ export function SettingsPage({
           data-settings-section={activeSection}
           data-main-navigation-expanded={mainNavigationExpanded}
           className={cn(
-            "mx-auto w-full animate-in fade-in-0 slide-in-from-bottom-1 py-6 duration-200 ease-out",
-            "motion-reduce:animate-none sm:py-8 lg:py-12",
+            "zen-settings-section-enter mx-auto w-full py-6",
+            "sm:py-8 lg:py-12",
             "settings-grid",
             activeSection === "about" && "flex min-h-full flex-col",
             !showSidebar && "settings-feature-page",

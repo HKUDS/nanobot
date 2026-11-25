@@ -1,0 +1,162 @@
+/* Calm, tactile motion primitives for Mission Control & Active Drawer. */
+
+@keyframes zen-breathe {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.38);
+  }
+}
+
+.zen-breathe-halo {
+  animation: zen-breathe 2.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zen-breathe-halo {
+    animation: none;
+    opacity: 0.35;
+  }
+}
+
+/* Smooth accordion disclosure for project groups & cleanup list. */
+.zen-disclosure {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 200ms ease-out;
+}
+
+.zen-disclosure[data-collapsed="true"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.zen-disclosure > .zen-disclosure-inner {
+  overflow: hidden;
+}
+
+/* Floating drawer enter/exit slide + backdrop fade. */
+.zen-drawer-backdrop {
+  transition: opacity 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.zen-drawer-panel {
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease-out;
+  will-change: transform;
+}
+
+/* Row completion ritual: gentle settle before archiving. */
+.zen-completing {
+  opacity: 0.35;
+  transform: translateX(6px);
+  transition: opacity 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Tactile completion circle pop. */
+@keyframes zen-done-pop {
+  0% {
+    transform: scale(0.88);
+  }
+  55% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.zen-done-pop {
+  animation: zen-done-pop 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Soft view transition between Open / Tidy / Done. */
+@keyframes zen-tab-enter {
+  from {
+    opacity: 0.65;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.zen-tab-enter {
+  animation: zen-tab-enter 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Fallback surface entrance when View Transitions are unavailable or after lazy chunk mount. */
+@keyframes zen-surface-bloom {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+:root:not([data-shell-transition]) .zen-surface-enter {
+  animation: zen-surface-bloom 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Calm in-page Settings section switch (suppressed during shell View Transitions so the new snapshot never captures frame-0 opacity). */
+@keyframes zen-settings-section-in {
+  from {
+    opacity: 0.35;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+:root:not([data-shell-transition]) .zen-settings-section-enter {
+  animation: zen-settings-section-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:root[data-shell-transition] .zen-surface-enter,
+:root[data-shell-transition] .zen-settings-section-enter,
+:root[data-shell-transition] .zen-tab-enter {
+  animation: none;
+}
+
+/* Clean hidden scrollbar for horizontal project tab rails. */
+.zen-no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.zen-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Soft right-edge fade so overflowing horizontal tab rails never hard-clip mid-glyph. */
+.zen-scroll-fade-x {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zen-disclosure,
+  .zen-drawer-backdrop,
+  .zen-drawer-panel,
+  .zen-completing {
+    transition: none;
+  }
+
+  .zen-done-pop,
+  .zen-tab-enter,
+  :root:not([data-shell-transition]) .zen-surface-enter,
+  .zen-settings-section-enter {
+    animation: none;
+  }
+}

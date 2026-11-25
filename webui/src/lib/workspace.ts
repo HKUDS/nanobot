@@ -37,7 +37,10 @@ export function selectedProjectScope(
 }
 
 export function normalizeWorkspacePath(path: string | null | undefined): string {
-  const normalized = (path ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalized = (path ?? "")
+    .replace(/\\/g, "/")
+    .replace(/^([a-z]):/, (_, drive: string) => `${drive.toUpperCase()}:`)
+    .replace(/\/+$/, "");
   return normalized || "/";
 }
 
@@ -58,8 +61,25 @@ export function workspacePathCompletionQuery(path: string): { path: string; quer
 }
 
 export function workspaceDirectoryPrefix(path: string): string {
-  const separator = path.includes("\\") ? "\\" : "/";
-  return path.replace(/[\\/]+$/, "") + separator;
+  const isWindows = /^[A-Za-z]:[\\/]/.test(path) || path.includes("\\");
+  const separator = isWindows ? "\\" : "/";
+  const normalized = isWindows ? path.replace(/\//g, "\\") : path;
+  return normalized.replace(/[\\/]+$/, "") + separator;
+}
+
+export function windowsDriveRoot(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const match = /^([A-Za-z]):[\\/]/.exec(path.trim());
+  return match ? `${match[1].toUpperCase()}:\\` : null;
+}
+
+export function collectWindowsDriveRoots(paths: readonly (string | null | undefined)[]): string[] {
+  const drives = new Set<string>();
+  for (const candidate of paths) {
+    const root = windowsDriveRoot(candidate);
+    if (root) drives.add(root);
+  }
+  return Array.from(drives).sort();
 }
 
 /** Build navigation from the gateway path, never the browser's operating system. */

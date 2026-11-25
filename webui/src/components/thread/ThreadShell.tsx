@@ -34,7 +34,7 @@ import {
   modelPresetOptionsFromSettings,
   toModelBadgeInfo,
 } from "@/components/thread/model-preset";
-import { ThreadHeader } from "@/components/thread/ThreadHeader";
+import { ThreadHeader, ThreadHeaderActions } from "@/components/thread/ThreadHeader";
 import { GoalIsland } from "@/components/thread/GoalIsland";
 import { ThreadLoadingSkeleton } from "@/components/thread/ThreadLoadingSkeleton";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
@@ -226,9 +226,11 @@ interface ThreadShellProps {
   hideThemeButton?: boolean;
   hideHeaderTitle?: boolean;
   inlineHandle?: boolean;
+  showPaneProject?: boolean;
   hideHeader?: boolean;
   headerActions?: ReactNode;
   headerPortalTarget?: HTMLElement | null;
+  actionsPortalTarget?: HTMLElement | null;
   headerActive?: boolean;
   composerPortalTarget?: HTMLElement | null;
   navigationFrame?: HTMLElement | null;
@@ -367,9 +369,11 @@ export function ThreadShell({
   hideThemeButton = false,
   hideHeaderTitle = false,
   inlineHandle = false,
+  showPaneProject = true,
   hideHeader = false,
   headerActions,
   headerPortalTarget,
+  actionsPortalTarget,
   headerActive = true,
   composerPortalTarget,
   navigationFrame,
@@ -1378,12 +1382,28 @@ export function ThreadShell({
     />
   ) : undefined;
 
-  const threadHeader = !hideHeader ? (
+  const goalElement = currentGoalState && (currentGoalState.active || currentGoalState.status === "blocked")
+    ? <GoalIsland key={historyKey} goal={currentGoalState} cancelDisabled={!online} onCancel={cancelGoal} />
+    : undefined;
+  const actionsPortaled = actionsPortalTarget !== undefined;
+  const threadHeaderActions = (
+    <ThreadHeaderActions
+      sessionInfoAction={sessionInfoAction}
+      promptNavigatorAction={promptNavigatorAction}
+      actions={headerActions}
+      temporaryChatEnabled={temporaryChatEnabled}
+      temporaryChatDisabled={booting || turnActive}
+      onTemporaryChatEnabledChange={
+        showTemporaryChatControl ? onTemporaryChatEnabledChange : undefined
+      }
+    />
+  );
+
+  const threadHeader = !hideHeader && (!actionsPortaled || Boolean(goalElement)) ? (
     <ThreadHeader
       className={previewOpen ? "h-10" : undefined}
       title={title}
-      goal={currentGoalState && (currentGoalState.active || currentGoalState.status === "blocked")
-        ? <GoalIsland key={historyKey} goal={currentGoalState} cancelDisabled={!online} onCancel={cancelGoal} /> : undefined}
+      goal={goalElement}
       onToggleSidebar={onToggleSidebar}
       theme={theme}
       onToggleTheme={onToggleTheme}
@@ -1391,14 +1411,14 @@ export function ThreadShell({
       hideSidebarToggle={hideSidebarToggle}
       hideThemeButton={hideThemeButton}
       hideTitle={hideHeaderTitle}
-      actions={headerActions}
+      actions={actionsPortaled ? undefined : headerActions}
       minimal={!session && !loading}
-      promptNavigatorAction={promptNavigatorAction}
-      sessionInfoAction={sessionInfoAction}
+      promptNavigatorAction={actionsPortaled ? undefined : promptNavigatorAction}
+      sessionInfoAction={actionsPortaled ? undefined : sessionInfoAction}
       temporaryChatEnabled={temporaryChatEnabled}
       temporaryChatDisabled={booting || turnActive}
       onTemporaryChatEnabledChange={
-        showTemporaryChatControl ? onTemporaryChatEnabledChange : undefined
+        !actionsPortaled && showTemporaryChatControl ? onTemporaryChatEnabledChange : undefined
       }
     />
   ) : null;
@@ -1417,7 +1437,49 @@ export function ThreadShell({
         "thread-conversation relative flex min-w-0 flex-1 flex-col overflow-hidden",
         headerPortalTarget === undefined && !hideHeader && "thread-workspace",
       )}>
-        {hideHeaderTitle && inlineHandle && !temporary && session?.handle ? (
+        {hideHeaderTitle && multiplePanes && !temporary ? (
+          <div
+            aria-label={session?.handle ? `Session @${session.handle.name}` : title}
+            className={cn(
+              "flex h-8 shrink-0 items-center gap-2 border-b px-3 text-[12px] transition-colors",
+              composerActive
+                ? "border-border/45 bg-background/90 dark:border-white/[0.08]"
+                : "border-border/30 bg-background/65 dark:border-white/[0.05]",
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "h-1.5 w-1.5 shrink-0 rounded-full transition-colors",
+                recoveryNeedsDecision
+                  ? "bg-amber-500 dark:bg-amber-400"
+                  : turnActive
+                    ? "bg-emerald-500/90 dark:bg-emerald-400"
+                    : composerActive
+                      ? "bg-foreground/45 dark:bg-white/50"
+                      : "bg-foreground/15 dark:bg-white/15",
+              )}
+            />
+            {showPaneProject && workspaceScope?.project_name ? (
+              <>
+                <span className="max-w-[8rem] shrink-0 truncate text-muted-foreground/75">
+                  {workspaceScope.project_name}
+                </span>
+                <span aria-hidden className="text-muted-foreground/35">/</span>
+              </>
+            ) : null}
+            <span className={cn("min-w-0 flex-1 truncate", composerActive ? "font-medium text-foreground" : "text-muted-foreground/80")}>
+              {title}
+            </span>
+            {inlineHandle && session?.handle ? (
+              <span className="shrink-0 text-[11px]">
+                <SessionHandleLabel id={session.handle.id}>
+                  @{session.handle.name}
+                </SessionHandleLabel>
+              </span>
+            ) : null}
+          </div>
+        ) : hideHeaderTitle && inlineHandle && !temporary && session?.handle ? (
           <div
             aria-label={`Session @${session.handle.name}`}
             className="flex h-8 shrink-0 items-center px-3 text-[12px]"
@@ -1482,6 +1544,9 @@ export function ThreadShell({
       </div>
       {headerPortalTarget && headerActive
         ? createPortal(threadHeader, headerPortalTarget)
+        : null}
+      {actionsPortalTarget && headerActive && !hideHeader
+        ? createPortal(threadHeaderActions, actionsPortalTarget)
         : null}
       <ComposerUsagePopover
         sessionKey={previewSessionKey}

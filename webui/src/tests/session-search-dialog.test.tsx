@@ -156,7 +156,7 @@ describe("SessionSearchDialog", () => {
     render(<SessionSearchDialog open sessions={[session(1), session(2)]}
       activeKey={null} loading={false} messageCache={cache}
       onOpenChange={() => {}} onSelect={onSelect} />);
-    expect(screen.getByPlaceholderText("Search loaded content")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Search topics, projects/i)).toBeInTheDocument();
     const input = screen.getByRole("textbox", { name: "Search" });
     for (const query of ["权限", "full access", "25%", "session_history.py"]) {
       fireEvent.change(input, { target: { value: query } });
@@ -234,5 +234,54 @@ describe("SessionSearchDialog", () => {
       block: "nearest",
       inline: "nearest",
     });
+  });
+
+  it("keeps keyboard navigation and Ctrl+E archive working after clicking status or project filters", () => {
+    const onToggleArchive = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <SessionSearchDialog
+        open
+        sessions={[
+          {
+            ...session(1),
+            workspaceScope: { project_path: "/code/alpha", project_name: "alpha", access_mode: "restricted" },
+            projectLocked: true,
+          },
+          {
+            ...session(2),
+            workspaceScope: { project_path: "/code/beta", project_name: "beta", access_mode: "restricted" },
+            projectLocked: true,
+          },
+          {
+            ...session(3),
+            workspaceScope: { project_path: "/code/beta", project_name: "beta", access_mode: "restricted" },
+            projectLocked: true,
+          },
+        ]}
+        activeKey={null}
+        loading={false}
+        archivedKeys={["websocket:chat-3"]}
+        onOpenChange={() => {}}
+        onSelect={onSelect}
+        onToggleArchive={onToggleArchive}
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(screen.getByRole("tab", { name: "beta" }));
+    expect(screen.queryByText("Chat 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Chat 2")).toBeInTheDocument();
+    expect(screen.getByText("Chat 3")).toBeInTheDocument();
+
+    fireEvent.keyDown(dialog, { key: "ArrowDown" });
+    fireEvent.keyDown(dialog, { key: "e", ctrlKey: true });
+    expect(onToggleArchive).toHaveBeenCalledWith("websocket:chat-3");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Active" }));
+    expect(screen.getByText("Chat 2")).toBeInTheDocument();
+    expect(screen.queryByText("Chat 3")).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Search" }), { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("websocket:chat-2");
   });
 });
