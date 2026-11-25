@@ -5812,6 +5812,27 @@ describe("ThreadShell", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("shows localized delivery failures without ending the active turn, then shows its own failure", async () => {
+    await i18n.changeLanguage("zh-CN");
+    const client = makeClient();
+    const chatId = "delivery-failure";
+    const onTurnEnd = vi.fn();
+    render(wrap(client, <ThreadShell session={session(chatId)} title="Failures" onToggleSidebar={() => {}} onTurnEnd={onTurnEnd} />));
+    await act(async () => {});
+    act(() => client._emitChat(chatId, { event: "goal_status", chat_id: chatId, turn_id: "current", status: "running", started_at: 1234 }));
+    const before = client.getRunState(chatId);
+    expect(before.active).toBe(true);
+    act(() => client._emitChat(chatId, { event: "turn_failure_notice", chat_id: chatId, failure_kind: "internal" }));
+    expect(screen.getByText("请求因内部错误未能完成")).toBeVisible();
+    expect(client.getRunState(chatId)).toEqual(before);
+    expect(onTurnEnd).not.toHaveBeenCalled();
+
+    act(() => client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: "current", outcome: "failed", failure_kind: "tool" }));
+    expect(screen.getByText("工具执行失败")).toBeVisible();
+    expect(client.getRunState(chatId).active).toBe(false);
+    expect(onTurnEnd).toHaveBeenCalledOnce();
+  });
+
   it.each([false, true])("keeps one terminal model failure visible until the next user action (recovery: %s)", async (recoverable) => {
     const client = makeClient();
     await act(async () => {

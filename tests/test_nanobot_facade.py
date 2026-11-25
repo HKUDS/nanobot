@@ -910,6 +910,29 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_sdk_returns_structured_provider_failure(tmp_path, streamed):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMProvider, LLMResponse
+
+    provider = MagicMock(spec=LLMProvider, provider_name="test")
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="upstream unavailable", finish_reason="error", error_status_code=503,
+    ))
+    async with Nanobot(AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")) as bot:
+        if streamed:
+            run = await bot.run_streamed("hi")
+            events = [event async for event in run.stream_events()]
+            result = await run.wait()
+            assert events[-1].type == "run.completed" and events[-1].result is result
+        else:
+            result = await bot.run("hi")
+    assert result.content == ""
+    assert (result.stop_reason, result.error, result.failure_error_kind) == ("error", "upstream unavailable", "server")
+
+
+@pytest.mark.asyncio
 async def test_run_forwards_non_default_runtime_options(tmp_path):
     from nanobot.bus.events import OutboundMessage
 

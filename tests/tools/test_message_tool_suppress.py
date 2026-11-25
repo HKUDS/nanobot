@@ -9,7 +9,7 @@ from nanobot.agent.hook import SDKCaptureHook
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.message import MessageTool
 from nanobot.bus.events import INBOUND_META_TURN_ID, InboundMessage, OutboundMessage
-from nanobot.bus.outbound_events import EmptyFinalResponseNotice, TurnEndEvent
+from nanobot.bus.outbound_events import TurnEndEvent, TurnFailureNotice
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
 from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -197,11 +197,15 @@ class TestMessageToolSuppressLogic:
             assert (sdk.content, sdk.stop_reason, sdk.error) == ("", "empty_final_response", "empty_final_response")
 
     @pytest.mark.parametrize("channel", ["websocket", "feishu"])
-    async def test_undelivered_empty_final_reaches_channel_as_failure(self, tmp_path: Path, channel: str) -> None:
+    @pytest.mark.parametrize(("provider_result", "error_kind"), [
+        (LLMResponse(content="", finish_reason="length"), "empty_final_response_length"),
+        (LLMResponse(content="private provider diagnostic", finish_reason="error", error_status_code=402), "billing"),
+    ])
+    async def test_model_failure_reaches_channel(self, tmp_path: Path, channel: str, provider_result, error_kind) -> None:
         loop = _make_loop(tmp_path)
         from nanobot.session.webui_turns import WebuiTurnCoordinator
 
-        loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="", finish_reason="length"))
+        loop.provider.chat_stream_with_retry = AsyncMock(return_value=provider_result)
         msg = InboundMessage(channel=channel, sender_id="user", chat_id="chat", content="Start")
         completed: list[TurnCompleted] = []
         loop.bus.subscribe(completed.append, TurnCompleted)
@@ -211,17 +215,17 @@ class TestMessageToolSuppressLogic:
             await delivery.complete(result, publish_completion=True)
 
         assert result is not None and result.content == ""
-        assert result.event == EmptyFinalResponseNotice(output_limited=True)
+        assert result.event == TurnFailureNotice("model", error_kind)
         assert [(e.outcome, e.failure_kind, e.failure_error_kind) for e in completed] == [
-            ("failed", "model", "empty_final_response_length"),
+            ("failed", "model", error_kind),
         ]
         # The WebSocket coordinator projects the lifecycle completion; other channels get the routed event.
         routed = [loop.bus.outbound.get_nowait() for _ in range(loop.bus.outbound_size)]
-        terminal = [m.event for m in routed if isinstance(m.event, EmptyFinalResponseNotice | TurnEndEvent)]
+        terminal = [m.event for m in routed if isinstance(m.event, TurnFailureNotice | TurnEndEvent)]
         if channel == "websocket":
             [end] = terminal
             assert isinstance(end, TurnEndEvent)
-            assert (end.outcome, end.failure_error_kind, end.failure_message) == ("failed", "empty_final_response_length", None)
+            assert (end.outcome, end.failure_error_kind, end.failure_message) == ("failed", error_kind, None)
         else:
             assert terminal == [result.event]
 

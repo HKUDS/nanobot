@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import EmptyFinalResponseNotice
+from nanobot.bus.outbound_events import TurnFailureNotice
 from nanobot.bus.queue import MessageBus
 from nanobot.channels import manager as manager_module
 from nanobot.channels.base import BaseChannel
@@ -29,8 +29,8 @@ async def test_scheduled_delivery_admits_the_channels_own_failure_notice(tmp_pat
 
     manager, channel = make_manager(config_path=tmp_path / "config.json")
     manager.channels["telegram"] = channel
-    channel.format_empty_final_notice.return_value = "La réponse a atteint la limite de sortie."
-    notice = EmptyFinalResponseNotice(output_limited=True)
+    channel.format_turn_failure_notice.return_value = "La réponse a atteint la limite de sortie."
+    notice = TurnFailureNotice(failure_kind="model", failure_error_kind="empty_final_response_length")
     delivery = DeliveryRequest("run", "telegram:chat", "generation")
     await manager.bus.publish_outbound(OutboundMessage(
         "telegram", "chat", "", metadata={"message_thread_id": 42}, event=notice, delivery=delivery,
@@ -45,8 +45,10 @@ async def test_scheduled_delivery_admits_the_channels_own_failure_notice(tmp_pat
         msg = channel.send.await_args.args[0]
         assert (msg.channel, msg.chat_id, msg.metadata) == ("telegram", "chat", {"message_thread_id": 42})
         assert (msg.content, msg.delivery_id) == (pending.content, pending.delivery_id)
-        channel.format_empty_final_notice.assert_called_once()
-        assert channel.format_empty_final_notice.call_args.args[0] is notice
+        channel.format_turn_failure_notice.assert_called_once()
+        original_event, original_msg = channel.format_turn_failure_notice.call_args.args
+        assert original_msg.event is original_event is notice
+        assert original_msg.content == ""
     finally:
         await manager.stop_all()
 

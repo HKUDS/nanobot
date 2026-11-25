@@ -760,15 +760,6 @@ class WebuiTurnCoordinator:
                     failure_kind=failure_kind,
                     failure_error_kind=failure_error_kind,
                     failure_attempts=failure_attempts,
-                    failure_message=(
-                        None if failure_error_kind in {"empty_final_response", "empty_final_response_length"} else
-                        "Model provider request failed. Check the provider configuration or "
-                        "service status, then try again."
-                        if failure_kind == "model"
-                        else "This turn failed and has ended."
-                        if outcome == "failed"
-                        else None
-                    ),
                 ),
                 metadata=msg.metadata,
             )

@@ -89,10 +89,11 @@ class CommandResultEvent(SideChannelReplyEvent):
 
 
 @dataclass(frozen=True)
-class EmptyFinalResponseNotice(AgentEvent):
-    """A deliverable result, distinct from the turn's lifecycle completion."""
+class TurnFailureNotice(AgentEvent):
+    """Deliverable failure facts; the destination owns their presentation."""
 
-    output_limited: bool
+    failure_kind: Literal["model", "tool", "internal"]
+    failure_error_kind: str | None = None
 
 
 @dataclass(frozen=True)

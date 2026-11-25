@@ -519,15 +519,19 @@ async def test_cancel_preserves_completed_iteration_output_and_receipts(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_empty_final_response_is_a_failure(tmp_path):
+@pytest.mark.parametrize(("response", "stop_reason", "error"), [
+    (LLMResponse(content=""), "empty_final_response", "empty_final_response"),
+    (LLMResponse(content=None, finish_reason="error", error_status_code=503), "error", "server"),
+])
+async def test_failed_child_reports_error_to_parent(tmp_path, response, stop_reason, error):
     manager, provider, ctx = setup(tmp_path)
-    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content=""))
+    provider.chat_stream_with_retry = AsyncMock(return_value=response)
     task_id = await spawn(manager, ctx)
     await settled(manager)
     status = json.loads(await control(manager, ctx, task_id))
     assert status["state"] == "error"
-    assert status["stop_reason"] == "empty_final_response"
-    assert status["error"]
+    assert status["stop_reason"] == stop_reason
+    assert status["error"] == error
     notice = await manager.bus.consume_inbound()
     assert "completed successfully" not in notice.content
     assert notice.metadata["subagent_state"] == "error"

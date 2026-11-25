@@ -338,6 +338,12 @@ export class Transcript {
     this.writeRole(error ? "×" : "", content, error ? "error" : "muted")
   }
 
+  deliveryFailure(content: string): void {
+    // This notice can arrive mid-stream. Leave the current answer and activity row open.
+    this.noteOutput()
+    this.writeRole("×", content, "error")
+  }
+
   turnFailure(content: string, turnId?: string, index?: number): boolean {
     if (turnId && this.failedTurnIds.has(turnId)) return false
     if (index === undefined) this.notice(content, true)

@@ -137,7 +137,8 @@ async def test_llm_error_not_appended_to_session_messages():
     ))
 
     assert result.stop_reason == "error"
-    assert result.final_content == "429 rate limit exceeded"
+    assert result.final_content is None
+    assert result.error == "429 rate limit exceeded"
     assistant_msgs = [m for m in result.messages if m.get("role") == "assistant"]
     assert all("429" not in (m.get("content") or "") for m in assistant_msgs), \
         "Error content should not appear in session messages"
@@ -145,14 +146,20 @@ async def test_llm_error_not_appended_to_session_messages():
 
 
 @pytest.mark.asyncio
-async def test_llm_arrearage_error_surfaces_clear_message():
-    """Arrearage errors yield a clear user-facing message, not a raw dump (#3006)."""
-    from nanobot.agent.runner import _ARREARAGE_ERROR_MESSAGE, AgentRunner
+@pytest.mark.parametrize(("content", "status", "kind"), [
+    ("HTTP 402 insufficient_quota", 402, "billing"),
+    (None, None, "unknown"),
+])
+async def test_provider_failure_without_reply_notifies_error_hooks(content, status, kind):
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
-        content="HTTP 402 insufficient_quota", finish_reason="error", error_status_code=402,
+        content=content, finish_reason="error", error_status_code=status,
     ))
+    hook = AgentHook()
+    hook.after_iteration = AsyncMock()
+    hook.on_error = AsyncMock()
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -163,11 +170,16 @@ async def test_llm_arrearage_error_surfaces_clear_message():
         model="test-model",
         max_iterations=5,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
     ))
 
     assert result.stop_reason == "error"
-    assert result.final_content == _ARREARAGE_ERROR_MESSAGE
-    assert result.failure_error_kind == "billing"
+    assert result.final_content is None
+    assert result.error == result.failure_error_kind == kind
+    for callback in (hook.after_iteration, hook.on_error):
+        callback.assert_awaited_once()
+        ctx = callback.await_args.args[0]
+        assert ctx.error == kind and ctx.final_content is None
 
 
 @pytest.mark.asyncio
@@ -207,7 +219,11 @@ async def test_runner_ignores_tool_calls_when_finish_reason_blocks_execution(
     tools.execute.assert_not_awaited()
     assert result.stop_reason == expected_stop_reason
     assert result.tools_used == []
-    assert result.final_content == "Request blocked by provider policy."
+    if expected_stop_reason == "error":
+        assert result.final_content is None
+        assert result.error == "Request blocked by provider policy."
+    else:
+        assert result.final_content == "Request blocked by provider policy."
     assert not any(msg.get("role") == "tool" for msg in result.messages)
 
 

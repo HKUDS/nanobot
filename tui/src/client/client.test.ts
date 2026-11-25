@@ -982,7 +982,12 @@ describe("gateway protocol", () => {
         failure_attempts: 0,
       }) })
 
-      expect(events).toHaveLength(3)
+      const notice = { event: "turn_failure_notice", chat_id: "chat", failure_kind: "tool" } as const
+      for (const frame of [notice, { ...notice, failure_kind: "other" }, { ...notice, failure_error_kind: 1 }]) {
+        socket.emit("message", { data: JSON.stringify(frame) })
+      }
+      expect(events).toHaveLength(4)
+      expect(events[3]).toEqual(notice)
       expect(events[0]?.event).toBe("retry_status")
       expect(events[1]?.event).toBe("retry_status")
       expect(events[2]?.event).toBe("turn_end")

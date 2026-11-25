@@ -134,13 +134,13 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
     from nanobot.agent.tools.mcp import MCPProvider
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.bus.outbound_events import (
-        EmptyFinalResponseNotice,
         StreamDeltaEvent,
         StreamedResponseEvent,
         StreamEndEvent,
+        TurnFailureNotice,
     )
     from nanobot.bus.queue import MessageBus
-    from nanobot.channels.turn_notices import empty_final_notice_text
+    from nanobot.channels.turn_notices import turn_failure_notice_text
     from nanobot.cli import terminal as cli_terminal
     from nanobot.cli.stream import ThinkingSpinner
     from nanobot.command.results import as_text_message
@@ -263,16 +263,22 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                     bot_name=runtime_config.agents.defaults.bot_name,
                     bot_icon=runtime_config.agents.defaults.bot_icon,
                 )
-                response = await agent_loop.process_direct(
-                    message,
-                    session_id,
-                    on_progress=_make_progress(renderer),
-                    on_stream=renderer.on_delta,
-                    on_stream_end=renderer.on_end,
-                )
-                if response is not None and isinstance(response.event, EmptyFinalResponseNotice):
+                try:
+                    response = await agent_loop.process_direct(
+                        message,
+                        session_id,
+                        on_progress=_make_progress(renderer),
+                        on_stream=renderer.on_delta,
+                        on_stream_end=renderer.on_end,
+                    )
+                except Exception:
+                    # Unlike a bus turn, direct execution can raise before returning a notice.
                     await renderer.close()
-                    console.print(empty_final_notice_text(response.event))
+                    console.print(turn_failure_notice_text(TurnFailureNotice(failure_kind="internal")))
+                    raise typer.Exit(1) from None
+                if response is not None and isinstance(response.event, TurnFailureNotice):
+                    await renderer.close()
+                    console.print(turn_failure_notice_text(response.event))
                 elif not renderer.streamed:
                     await renderer.close()
                     print_kwargs: dict[str, Any] = {}
@@ -336,11 +342,11 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                         msg = as_text_message(await asyncio.wait_for(bus.consume_outbound(), timeout=1.0))
                         event = msg.event
 
-                        if isinstance(event, EmptyFinalResponseNotice):
+                        if isinstance(event, TurnFailureNotice):
                             if renderer:
                                 await renderer.close()
                                 renderer = None
-                            await cli_terminal._print_interactive_line(empty_final_notice_text(event))
+                            await cli_terminal._print_interactive_line(turn_failure_notice_text(event))
                             turn_done.set()
                             continue
 

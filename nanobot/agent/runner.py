@@ -94,11 +94,6 @@ ContinuationCallback = Callable[[], Awaitable[str | None]]
 CheckpointCallback = Callable[[AgentCheckpoint], Awaitable[None]]
 InjectionCallback = Callable[[], Awaitable[Iterable[Any] | None]]
 
-_DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
-_ARREARAGE_ERROR_MESSAGE = (
-    "The AI provider rejected the request because the API key is out of quota or the "
-    "account is in arrears. Please top up / check the billing status of your API key and try again."
-)
 _PERSISTED_MODEL_ERROR_PLACEHOLDER = "[Assistant reply unavailable due to model error.]"
 _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
@@ -128,7 +123,6 @@ class AgentRunSpec:
     transcript_input: TranscriptInput | None = None
     transcript_builder: TranscriptBuilder | None = None
     hook: AgentHook | None = None
-    error_message: str | None = _DEFAULT_ERROR_MESSAGE
     max_iterations_message: str | None = None
     concurrent_tools: bool = False
     workspace: Path | None = None
@@ -308,6 +302,7 @@ class AgentRunner:
                     context.usage = result.usage
                     context.stop_reason = result.stop_reason
                     context.error = result.error
+                    context.failure_error_kind = result.failure_error_kind
                     context.tool_events = deepcopy(result.tool_events)
                     context.had_injections = result.had_injections
                     context.exception = None
@@ -840,14 +835,11 @@ class AgentRunner:
                 continue
 
             if response.finish_reason == "error":
-                if LLMProvider.is_arrearage_response(response):
-                    final_content = _ARREARAGE_ERROR_MESSAGE
-                else:
-                    final_content = clean or spec.error_message or _DEFAULT_ERROR_MESSAGE
+                kind = LLMProvider.public_error_kind(response)
+                # Diagnostics belong to error consumers, never to the assistant reply.
+                error = kind if LLMProvider.is_arrearage_response(response) else clean or kind
                 stop_reason = "error"
-                error = final_content
                 self._append_model_error_placeholder(messages)
-                context.final_content = final_content
                 context.error = error
                 context.stop_reason = stop_reason
                 await hook.after_iteration(context)
@@ -855,7 +847,7 @@ class AgentRunner:
                     had_injections = True
                     length_recovery_parts.clear()
                     continue
-                failure_error_kind = LLMProvider.public_error_kind(response)
+                failure_error_kind = kind
                 break
             if is_blank_text(clean) and not reply_delivered:
                 final_content = None
@@ -913,8 +905,7 @@ class AgentRunner:
                             error = stop_reason
                         else:
                             stop_reason = "error"
-                            error = (_ARREARAGE_ERROR_MESSAGE if finalization_failure == "billing"
-                                     else spec.error_message or _DEFAULT_ERROR_MESSAGE)
+                            error = finalization_failure
                             self._append_model_error_placeholder(messages)
                 if stop_reason == "max_iterations" and terminal_content is None:
                     terminal_content = self._max_iterations_fallback(spec)
@@ -925,7 +916,7 @@ class AgentRunner:
                 ).strip()
                 pending_stream_content = terminal_tail
             else:
-                final_content = error if stop_reason == "error" else terminal_content
+                final_content = terminal_content
             self._append_final_message(messages, terminal_content, response_input_ids)
 
         return AgentRunResult(

@@ -1349,7 +1349,7 @@ class AgentLoop:
         elif result.stop_reason == "error":
             logger.error(
                 "LLM returned error: {}",
-                (result.final_content or "")[:200] if request_ctx.log_content else "[content hidden]",
+                (result.error or result.failure_error_kind or "unknown")[:200] if request_ctx.log_content else "[content hidden]",
             )
         return result
 
@@ -1689,9 +1689,12 @@ class AgentLoop:
                     logger.opt(exception=log_content).error(
                         "Error processing message for session {}", session_key,
                     )
-                    await delivery.fail(publish_completion=True)
-                    for coordinator in self._automation_turn_coordinators:
-                        coordinator.complete(msg, error=exc)
+                    try:
+                        await delivery.fail(publish_completion=True)
+                    finally:
+                        # A failed notice delivery must not strand the automation caller.
+                        for coordinator in self._automation_turn_coordinators:
+                            coordinator.complete(msg, error=exc)
                 finally:
                     if (processing or delivery.completed) and not skip_idle:
                         await delivery.idle()
@@ -1993,14 +1996,13 @@ class AgentLoop:
         self,
         msg: InboundMessage,
         final_content: str,
-        stop_reason: str,
         streamed_content: bool,
         *,
         turn_latency_ms: int | None = None,
     ) -> OutboundMessage | None:
         event = None
         meta = dict(msg.metadata or {})
-        if streamed_content and stop_reason not in {"error", "tool_error"}:
+        if streamed_content:
             event = StreamedResponseEvent()
         if turn_latency_ms is not None:
             meta["latency_ms"] = int(turn_latency_ms)
@@ -2338,19 +2340,18 @@ class AgentLoop:
             )
 
     async def _prepare_outbound(self, ctx: TurnContext) -> None:
-        ctx.delivery.record_stop_reason(
+        failure = ctx.delivery.record_stop_reason(
             ctx.stop_reason,
             failure_error_kind=ctx.failure_error_kind,
         )
         if ctx.suppress_response:
             ctx.outbound = None
             return
-        if ctx.stop_reason == "empty_final_response":
-            ctx.outbound = ctx.delivery.empty_final_response()
+        if failure:
+            ctx.outbound = ctx.delivery.failure_response(failure)
         elif ctx.kind is TurnKind.SYSTEM:
             ctx.outbound = ctx.delivery.background_response(
                 ctx.final_content,
-                stop_reason=ctx.stop_reason,
                 streamed=ctx.streamed_content,
                 latency_ms=ctx.turn_latency_ms,
             )
@@ -2359,7 +2360,6 @@ class AgentLoop:
             ctx.outbound = self._assemble_outbound(
                 ctx.delivery.delivery_message,
                 cast(str, ctx.final_content),
-                ctx.stop_reason,
                 ctx.streamed_content,
                 turn_latency_ms=ctx.turn_latency_ms,
             )

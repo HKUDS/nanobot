@@ -1,4 +1,4 @@
-import { emptyFinalResponseLine } from "../platform/locale"
+import { turnFailureLine } from "../platform/turn-failure"
 import { isRecoveryState } from "../../../packages/client-events/notifications"
 
 import type {
@@ -255,9 +255,8 @@ export async function fetchHistory(
         })
         break
       case "turn_end":
-        if (event.outcome === "failed" && event.failure_kind === "model") {
-          const notice = emptyFinalResponseLine(event.failure_error_kind)
-          if (notice) messages.push({ role: "error", content: notice, turnId: event.turn_id })
+        if (event.outcome === "failed") {
+          messages.push({ role: "error", content: turnFailureLine(event), turnId: event.turn_id })
         }
         stream = null
         lastAnswer = null

@@ -20,13 +20,13 @@ from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
     CommandResultEvent,
-    EmptyFinalResponseNotice,
     ProgressEvent,
     RetryWaitEvent,
     RuntimeModelUpdatedEvent,
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
+    TurnFailureNotice,
     replace_outbound_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -39,7 +39,7 @@ from nanobot.channels.contracts import (
     resolve_channel_action_target,
 )
 from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
-from nanobot.channels.turn_notices import empty_final_notice_text
+from nanobot.channels.turn_notices import turn_failure_notice_text
 from nanobot.command.results import command_result
 from nanobot.config.schema import Config
 from nanobot.security.workspace_access import WorkspaceScopeResolver
@@ -745,9 +745,9 @@ class ChannelManager:
         return False
 
     def _prepare_outbound(self, msg: OutboundMessage) -> OutboundMessage:
-        if isinstance(notice := msg.event, EmptyFinalResponseNotice):
+        if isinstance(notice := msg.event, TurnFailureNotice) and msg.channel != "websocket":
             channel = self.channels.get(msg.channel)
-            text = channel.format_empty_final_notice(notice, msg) if channel else empty_final_notice_text(notice)
+            text = channel.format_turn_failure_notice(notice, msg) if channel else turn_failure_notice_text(notice)
             msg = replace(msg, content=text, event=None)
         if msg.delivery is not None:
             with self.bus.admission.activity():

@@ -144,7 +144,8 @@ async def test_goal_closing_after_tool_overrun_gets_bounded_finalization(run_spe
         assert result.final_content is None
         assert result.messages[-1]["role"] == "tool"
     elif expected_stop == "error":
-        assert result.error == result.final_content and result.error
+        assert result.final_content is None
+        assert result.error == failure_kind
         assert content not in str(result.messages)
     else:
         assert result.final_content == (content if finalize else "limit reached")
@@ -175,7 +176,7 @@ async def test_runner_does_not_auto_continue_terminal_provider_response(run_spec
     result = await AgentRunner().run(run_spec)
 
     assert result.stop_reason == ("error" if finish_reason == "error" else "completed")
-    assert result.final_content == "Provider stopped this request."
+    assert result.final_content == (None if finish_reason == "error" else "Provider stopped this request.")
     assert run_spec.runtime.provider.chat_stream_with_retry.await_count == 1
     run_spec.tools.execute.assert_not_awaited()
     callback.assert_not_awaited()

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
+from nanobot.bus.outbound_events import TurnFailureNotice
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket import runtime
@@ -104,6 +105,25 @@ async def _wait_for_connection_cleanup(
 async def _wait_for_retire_tasks(channel: WebSocketChannel) -> None:
     while channel._outbound_retire_tasks:
         await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_rejected_followup_reaches_client_without_ending_active_turn() -> None:
+    channel = _channel()
+    connection = _RecordingConnection()
+    channel._attach(cast(Any, connection), "busy")
+    bus = MessageBus()
+    manager = ChannelManager(Config(), bus)
+    manager.channels["websocket"] = channel
+    dispatcher = asyncio.create_task(manager._dispatch_outbound())
+    try:
+        await bus.publish_event(TurnFailureNotice("internal"), channel="websocket", chat_id="busy")
+        raw = await asyncio.wait_for(connection.sent.get(), timeout=2)
+        assert json.loads(raw) == {"event": "turn_failure_notice", "chat_id": "busy", "failure_kind": "internal"}
+    finally:
+        dispatcher.cancel()
+        await asyncio.gather(dispatcher, return_exceptions=True)
+        await channel._cleanup_connection(cast(Any, connection))
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,7 @@ from nanobot.agent.session_inbox import SessionInbox
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.bus.outbound_events import CommandResultEvent
+from nanobot.bus.outbound_events import CommandResultEvent, TurnFailureNotice
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
 from nanobot.command.results import message_text
@@ -227,7 +227,7 @@ async def test_rejected_input_does_not_stop_other_sessions(loop, monkeypatch, re
         async with asyncio.timeout(5):
             while True:
                 message = await loop.bus.consume_outbound()
-                if message.chat_id == chat_id and message.event is None:
+                if message.chat_id == chat_id and (message.event is None or isinstance(message.event, TurnFailureNotice)):
                     return message
 
     original_list = loop.sessions._store.list_metadata
@@ -275,7 +275,8 @@ async def test_rejected_input_does_not_stop_other_sessions(loop, monkeypatch, re
                 metadata={"webui": True}, session_generation=session.generation,
             )
             await loop.bus.publish_inbound(rejected)
-            assert (await reply("busy")).content == "Sorry, I encountered an error."
+            notice = await reply("busy")
+            assert (notice.event, notice.content) == (TurnFailureNotice("internal"), "")
         assert not run_task.done()
 
         release_readers.set()
@@ -313,6 +314,21 @@ def _automation_message(kind: str, name: str) -> InboundMessage:
     return InboundMessage(
         channel="websocket", sender_id=kind, chat_id="test", content=name, metadata=metadata,
     )
+
+
+async def test_cron_failure_completes_even_if_its_notice_cannot_be_queued(loop):
+    msg = _automation_message("cron", "unavailable")
+    msg.channel = "telegram"
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=RuntimeError("turn failed"))
+
+    def reject_notice(outbound):
+        if isinstance(outbound.event, TurnFailureNotice):
+            raise RuntimeError("outbox full")
+        return outbound
+
+    loop.bus.prepare_outbound = reject_notice
+    with pytest.raises(AutomationTurnError, match="turn failed"):
+        await asyncio.wait_for(loop.submit_cron_turn(msg), timeout=3)
 
 
 @pytest.mark.parametrize("kind", ["cron", "local_trigger"])

@@ -8,10 +8,10 @@ from typer.testing import CliRunner
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
-    EmptyFinalResponseNotice,
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
+    TurnFailureNotice,
     outbound_message_for_event,
 )
 from nanobot.cli.commands import app
@@ -20,7 +20,7 @@ from nanobot.config.schema import Config
 runner = CliRunner()
 
 
-@pytest.mark.parametrize("reply", ["plain", "streamed", "empty_final"])
+@pytest.mark.parametrize("reply", ["plain", "streamed", "internal_failure"])
 def test_interactive_agent_routes_a_complete_user_turn(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -71,9 +71,13 @@ def test_interactive_agent_routes_a_complete_user_turn(
         async def run(self) -> None:
             message = await self.bus.consume_inbound()
             seen["inbound"] = message
-            if reply == "empty_final":
+            if reply == "internal_failure":
                 await self.bus.publish_event(
-                    EmptyFinalResponseNotice(output_limited=False),
+                    StreamDeltaEvent(content="partial answer"),
+                    channel=message.channel, chat_id=message.chat_id,
+                )
+                await self.bus.publish_event(
+                    TurnFailureNotice(failure_kind="internal"),
                     channel=message.channel, chat_id=message.chat_id,
                 )
             elif reply == "streamed":
@@ -152,8 +156,9 @@ def test_interactive_agent_routes_a_complete_user_turn(
     assert len(renderers) == 1
     renderer = renderers[0]
     assert isinstance(renderer, _Renderer)
-    if reply == "empty_final":
-        print_notice.assert_awaited_once_with("The model didn't return a final answer. Please try again.")
+    if reply == "internal_failure":
+        assert renderer.deltas == ["partial answer"]
+        print_notice.assert_awaited_once_with("An internal error prevented nanobot from completing the request. Please try again.")
         print_response.assert_not_called()
         assert renderer.closed == 1
     elif reply == "streamed":
