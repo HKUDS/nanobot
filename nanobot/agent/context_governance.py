@@ -207,11 +207,7 @@ class ContextCompactionState:
         def build_summary_transcript(summary: str) -> list[dict[str, Any]]:
             if is_empty_summary(summary):
                 return deepcopy(instruction_prefix)
-            archived_context = (
-                "[Archived Context Summary]\n\n"
-                "Previous conversation summary:\n"
-                f"{summary}"
-            )
+            archived_context = f"[Archived Context Summary]\n\n{summary}"
             prefix = deepcopy(instruction_prefix)
             for index in range(len(prefix) - 1, -1, -1):
                 content = prefix[index].get("content")
