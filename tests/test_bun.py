@@ -52,6 +52,18 @@ def test_bun_download_checks_hash_extracts_only_runtime_and_caches(download, tmp
     assert calls[0].startswith("https://github.com/oven-sh/bun/releases/download/bun-v")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows denies renaming files held by a reader")
+def test_bun_download_survives_reader_holding_version_checked_file(download, monkeypatch, tmp_path):
+    with ExitStack() as readers:
+        def check_version(path):
+            reader = readers.enter_context(Path(path).open("rb"))
+            return reader.read() == b"runtime"
+
+        monkeypatch.setattr(bun, "_matches_version", check_version)
+        executable = bun.ensure_bun(cache_dir=tmp_path)
+        assert Path(executable).read_bytes() == b"runtime"
+
+
 def test_bun_rejects_corrupt_download(download, monkeypatch, tmp_path):
     target, _ = download
     monkeypatch.setitem(bun._ARCHIVES, target, "0" * 64)
@@ -66,6 +78,9 @@ def test_bun_rejects_unrunnable_download(download, monkeypatch, tmp_path):
     with pytest.raises(bun.BunUnavailableError, match="cannot run"):
         bun.ensure_bun(cache_dir=tmp_path)
     assert not list(tmp_path.rglob(".install-*"))
+    target, _ = download
+    name = "bun.exe" if os.name == "nt" else "bun"
+    assert not (tmp_path / bun.BUN_VERSION / target / name).exists()
 
 
 def test_private_bun_path_does_not_modify_parent_environment(monkeypatch, tmp_path):

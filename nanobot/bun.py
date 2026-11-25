@@ -131,9 +131,10 @@ def ensure_bun(
                 candidate = Path(temporary) / executable.name
                 candidate.write_bytes(content)
                 candidate.chmod(0o755)
-                if not _matches_version(str(candidate)):
-                    raise BunUnavailableError("Downloaded Bun cannot run on this system.")
                 os.replace(candidate, executable)
+            if not _matches_version(str(executable)):
+                executable.unlink()
+                raise BunUnavailableError("Downloaded Bun cannot run on this system.")
         except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
             raise BunUnavailableError(f"Could not prepare Bun {BUN_VERSION}: {exc}") from exc
     return str(executable)
