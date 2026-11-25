@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Mapping
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -146,26 +147,19 @@ class RuntimeClient:
         """Register a persisted-turn callback and return an unsubscribe callback."""
         return self._loop.bus.subscribe(handler, SessionTurnPersisted)
 
+    @asynccontextmanager
+    async def _compaction(self, session_key: str) -> AsyncGenerator[str | None, None]:
+        async with self._loop._get_session_lock(session_key):  # pyright: ignore[reportPrivateUsage]
+            session = await self._loop.sessions.state.get(session_key)
+            runtime = await self._loop.runtime_for_session(session)
+            yield await self._loop.consolidator.compact_idle_session(session_key, runtime=runtime)
+
     async def compact_session(self, session_key: str) -> SessionSnapshot:
         """Summarize one session and exclude its archived messages from replay."""
-        async with self._loop._get_session_lock(session_key):  # pyright: ignore[reportPrivateUsage]
-            session = await self._loop.sessions.state.get(session_key)
-            runtime = await self._loop.runtime_for_session(session)
-            await self._loop.consolidator.compact_idle_session(
-                session_key,
-                runtime=runtime,
-            )
-            return snapshot_from_session(
-                await self._loop.sessions.state.get(session_key)
-            )
+        async with self._compaction(session_key):
+            return snapshot_from_session(await self._loop.sessions.state.get(session_key))
 
     async def compact_idle_session(self, session_key: str, *, max_suffix: int = 0) -> str | None:
-        """Return a replacement summary; legacy ``max_suffix`` no longer retains history."""
-        async with self._loop._get_session_lock(session_key):  # pyright: ignore[reportPrivateUsage]
-            session = await self._loop.sessions.state.get(session_key)
-            runtime = await self._loop.runtime_for_session(session)
-            return await self._loop.consolidator.compact_idle_session(
-                session_key,
-                runtime=runtime,
-                max_suffix=max_suffix,
-            )
+        """Return a replacement summary; legacy ``max_suffix`` is accepted but ignored."""
+        async with self._compaction(session_key) as summary:
+            return summary

@@ -578,7 +578,7 @@ Ingested messages must include `role` and `content`. Roles may be `user`, `assis
 | `add_context_provider(provider)` | Register an async per-turn context provider and return an unsubscribe callback. |
 | `on_session_turn_persisted(handler)` | Register a best-effort sync or async callback for locally persisted turns and return an unsubscribe callback. |
 | `await compact_session(session_key)` | Run token-based consolidation for a session. |
-| `await compact_idle_session(session_key, max_suffix=8)` | Run idle-session compaction and return its summary. |
+| `await compact_idle_session(session_key, max_suffix=0)` | Run idle-session compaction and return its summary. The legacy `max_suffix` argument has no effect. |
 
 Both compaction methods serialize with turns for the same session key. Call them after `bot.run()` returns, or from a separate task that can wait for the active turn to finish.
 
