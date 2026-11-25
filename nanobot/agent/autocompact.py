@@ -117,7 +117,9 @@ class AutoCompact:
                         session.metadata,
                         fallback_last_active=session.updated_at,
                     )
-                    if stored is not None:
+                    if stored is None:
+                        self._summaries.pop(key, None)
+                    else:
                         self._summaries[key] = stored
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)

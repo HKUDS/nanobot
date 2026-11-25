@@ -18,7 +18,7 @@ from nanobot.runtime_context import (
 )
 from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.session.manager import Session
-from nanobot.session.summary import SessionSummary
+from nanobot.session.summary import SessionSummary, is_empty_summary
 from nanobot.utils.helpers import detect_image_mime, load_bundled_template
 from nanobot.utils.prompt_templates import render_template
 
@@ -131,7 +131,7 @@ class ContextBuilder:
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary, track_source=True))
 
-        if session_summary and session_summary["text"] != "(nothing)":
+        if session_summary and not is_empty_summary(session_summary["text"]):
             parts.append(
                 "[Archived Context Summary]\n\n"
                 f"Previous conversation summary (last active {session_summary['last_active']}):\n"

@@ -302,16 +302,17 @@ class TestBuildSystemPrompt:
     def test_includes_session_summary(self, tmp_path):
         builder = _builder(tmp_path)
         summary = {
-            "text": "Previous chat about Python.",
+            "text": "Previous chat about handling `(nothing)` in Python.",
             "last_active": "2026-08-19T10:00:00",
         }
         result = builder.build_system_prompt(session_summary=summary)
-        assert "Previous chat about Python." in result
+        assert summary["text"] in result
         assert "[Archived Context Summary]" in result
 
-    def test_nothing_summary_builds_the_prompt_without_archived_context(self, tmp_path):
+    @pytest.mark.parametrize("text", ["(nothing)", " `(nothing)`\n"])
+    def test_nothing_summary_builds_the_prompt_without_archived_context(self, tmp_path, text):
         builder = _builder(tmp_path)
-        summary = {"text": "(nothing)", "last_active": "2026-08-19T10:00:00"}
+        summary = {"text": text, "last_active": "2026-08-19T10:00:00"}
         assert builder.build_system_prompt(session_summary=summary) == builder.build_system_prompt()
 
     def test_sections_separated_by_separator(self, tmp_path):

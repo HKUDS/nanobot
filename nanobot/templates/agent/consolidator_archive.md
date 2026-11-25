@@ -39,4 +39,6 @@ When space is limited, prioritize user corrections and preferences, then solutio
 Return one concise retained fact per line in this form:
 - [mark] fact
 
-Use `(nothing)` when neither the previous checkpoint nor the current conversation contains a qualifying fact or active working state.
+When neither the previous checkpoint nor the current conversation contains a qualifying fact or active working state, return only the following line, without backticks or other formatting:
+
+(nothing)

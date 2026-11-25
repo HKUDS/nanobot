@@ -26,7 +26,12 @@ from nanobot.providers.conversation_state import ProviderConversationStateContro
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.message_content import history_message_text
-from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
+from nanobot.session.summary import (
+    EMPTY_SUMMARY,
+    is_empty_summary,
+    is_summary_checkpoint,
+    session_summary_from_metadata,
+)
 from nanobot.utils.gitstore import MEMORY_CONTENT_PATHS, MEMORY_WIKI_PATH, GitStore
 from nanobot.utils.helpers import (
     atomic_write_lines,
@@ -763,7 +768,7 @@ class MemoryArchiver:
     ) -> str:
         """Return a bounded checkpoint that preserves prior and newly archived context."""
         token_limit = max(1, max_tokens)
-        if not previous_summary:
+        if not previous_summary or is_empty_summary(previous_summary):
             return truncate_text_to_tokens(raw, token_limit)
 
         combined = (
@@ -957,7 +962,9 @@ class MemoryArchiver:
                 "Memory archive provider summary was not safe to replay; using raw checkpoint"
             )
             return raw_fallback()
-        if persist and summary != "(nothing)":
+        if is_empty_summary(summary):
+            return EMPTY_SUMMARY
+        if persist:
             self.store.append_history(summary, session_key=session_key)
         return summary
 
