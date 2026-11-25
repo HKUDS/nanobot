@@ -349,6 +349,62 @@ async def test_sidebar_allocates_handles_then_reads_during_pending_write(tmp_pat
         await state.aclose()
 
 
+async def test_archive_filter_selects_rows_before_rendering_and_preserves_handles(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.bus.queue import MessageBus
+    from nanobot.channels.websocket.runtime import WebSocketConfig
+    from nanobot.webui.gateway_services import build_gateway_services
+    from nanobot.webui.sidebar_state import webui_sidebar_state_path
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    manager = SessionManager(tmp_path / "workspace")
+    active, archived = "websocket:active", "websocket:archived"
+    for key in (active, archived):
+        await manager.state.import_messages(key, [{"role": "user", "content": key}])
+        # A legacy import can reuse a name across the two partitions.
+        await manager.state.update_metadata(key, {"session_handle": "luma" if key == active else "@LUMA"})
+    legacy = webui_sidebar_state_path()
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(json.dumps({"archived_keys": [archived]}), encoding="utf-8")
+    gateway = build_gateway_services(
+        config=WebSocketConfig(), bus=MessageBus(), session_manager=manager,
+        static_dist_path=None, workspace_path=tmp_path / "workspace",
+        default_restrict_to_workspace=True, runtime_model_name=lambda: "test-model",
+        runtime_surface="gateway", runtime_capabilities_overrides=None,
+    )
+    token = gateway.tokens.issue_api_token(60)
+    headers = Headers({"Authorization": f"Bearer {token}"})
+    connection = SimpleNamespace(remote_address=("127.0.0.1", 12345))
+
+    async def get(query):
+        return await gateway.http.dispatch(connection, Request("/api/sessions" + query, headers))
+
+    try:
+        handles = {}
+        for value, key in ((False, active), (True, archived)):
+            query = "?archived=" + str(value).lower()
+            result = await get(query)
+            assert result.status_code == 200
+            row, = json.loads(result.body)["sessions"]
+            assert row["key"] == key and row["archived"] is value
+            handles[key] = row["handle"]
+            # The reader does not decode metadata or project the opposite partition.
+            assert [r["key"] for r in manager._store.list_metadata(archived=value)] == [key]
+        assert handles[active]["name"] == "luma"
+        assert handles[archived]["name"] != "luma"
+        rows = json.loads((await get("")).body)["sessions"]
+        assert {r["key"]: r["handle"] for r in rows} == handles
+        assert {r["key"]: r["archived"] for r in rows} == {active: False, archived: True}
+        for query in ("?archived=yes", "?archived=", "?archived=true&archived=false"):
+            assert (await get(query)).status_code == 400
+    finally:
+        await manager.state.aclose()
+
+
 def test_webui_session_list_fallback_time_when_missing(tmp_path: Path) -> None:
     legacy = tmp_path / "sessions"
     legacy.mkdir()

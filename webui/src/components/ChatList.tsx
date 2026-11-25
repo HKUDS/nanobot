@@ -1048,14 +1048,16 @@ export const ChatList = memo(function ChatList({
                             <SidebarActionMenuContent
                               portalContainer={actionMenuPortalContainer}
                             >
-                              <DropdownMenuItem onSelect={() => onTogglePin(s.key)}>
-                                {isPinned ? (
-                                  <PinOff className="h-4 w-4 shrink-0" />
-                                ) : (
-                                  <Pin className="h-4 w-4 shrink-0" />
-                                )}
-                                {isPinned ? t("chat.unpin") : t("chat.pin")}
-                              </DropdownMenuItem>
+                              {!isArchived && (
+                                <DropdownMenuItem onSelect={() => onTogglePin(s.key)}>
+                                  {isPinned ? (
+                                    <PinOff className="h-4 w-4 shrink-0" />
+                                  ) : (
+                                    <Pin className="h-4 w-4 shrink-0" />
+                                  )}
+                                  {isPinned ? t("chat.unpin") : t("chat.pin")}
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem
                                 onSelect={() => beginRename(s.key)}
                               >
@@ -1526,14 +1528,16 @@ function ActivePaneRows({
                 <SidebarActionMenuContent
                   portalContainer={actionMenuPortalContainer}
                 >
-                  <DropdownMenuItem onSelect={() => onTogglePin(pane.key)}>
-                    {isPinned ? (
-                      <PinOff className="h-4 w-4 shrink-0" />
-                    ) : (
-                      <Pin className="h-4 w-4 shrink-0" />
-                    )}
-                    {isPinned ? t("chat.unpin") : t("chat.pin")}
-                  </DropdownMenuItem>
+                  {!isArchived && (
+                    <DropdownMenuItem onSelect={() => onTogglePin(pane.key)}>
+                      {isPinned ? (
+                        <PinOff className="h-4 w-4 shrink-0" />
+                      ) : (
+                        <Pin className="h-4 w-4 shrink-0" />
+                      )}
+                      {isPinned ? t("chat.unpin") : t("chat.pin")}
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem
                     onSelect={() => onBeginRename(pane.key)}
                   >

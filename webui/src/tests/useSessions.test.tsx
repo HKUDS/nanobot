@@ -22,6 +22,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 
 function fakeClient() {
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
+  const archiveHandlers = new Set<() => void>();
   return {
     status: "open" as const,
     defaultChatId: null as string | null,
@@ -33,6 +34,11 @@ function fakeClient() {
       sessionUpdateHandlers.add(handler);
       return () => sessionUpdateHandlers.delete(handler);
     },
+    onSessionsChanged: (handler: () => void) => {
+      archiveHandlers.add(handler);
+      return () => archiveHandlers.delete(handler);
+    },
+    emitSessionsChanged: () => archiveHandlers.forEach(handler => handler()),
     emitSessionUpdate: (chatId: string, scope?: string) => {
       for (const handler of sessionUpdateHandlers) handler(chatId, scope);
     },
@@ -79,9 +85,27 @@ describe("useSessions", () => {
     await act(async () => { finish([]); await refresh; });
   });
 
+  it("loads the archive on demand and refreshes membership after another window restores a chat", async () => {
+    const row = { key: "websocket:a", channel: "websocket", chatId: "a", preview: "A", createdAt: null, updatedAt: null };
+    let archived = true;
+    vi.mocked(api.listSessions).mockImplementation(async (_token, requested) => requested === archived ? [row] : []);
+    const client = fakeClient();
+    const { result } = renderHook(() => useSessions(), { wrapper: wrap(client) });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.sessions).toEqual([]);
+    expect(vi.mocked(api.listSessions).mock.calls).toEqual([["tok", false]]);
+
+    act(() => result.current.loadArchived());
+    await waitFor(() => expect(result.current.archivedKeys).toEqual([row.key]));
+    archived = false;
+    act(() => client.emitSessionsChanged());
+    await waitFor(() => expect(result.current.archivedKeys).toEqual([]));
+    expect(result.current.sessions).toEqual([row]);
+  });
+
   it("shows tab-cached sessions while revalidating and removes server-deleted rows", async () => {
     activateReloadCache("ws://localhost:8765/");
-    writeReloadCache("sessions", [{
+    writeReloadCache("activeSessions", [{
       key: "websocket:cached", channel: "websocket", chatId: "cached", preview: "Saved answer",
       createdAt: null, updatedAt: null,
     }]);

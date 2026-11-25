@@ -93,7 +93,6 @@ import type {
   RuntimeSurface,
   SessionAutomationJob,
   SettingsPayload,
-  SidebarStatePayload,
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
@@ -467,6 +466,9 @@ function Shell({
   const {
     sessions,
     loading,
+    archivedKeys,
+    archivesLoaded,
+    loadArchived,
     initialLoading: sessionsInitialLoading,
     error: sessionsError,
     refresh,
@@ -477,14 +479,14 @@ function Shell({
   } = useSessions();
   // Failed reads retain an empty list or partial reload cache, not proof of deletion.
   const sessionsLoaded = !loading && sessionsError === null;
+  const catalogLoaded = sessionsLoaded && archivesLoaded;
   const {
     state: sidebarState,
     loading: sidebarStateLoading,
     update: updateSidebarState,
-    save: saveSidebarState,
     rename: onRequestRename,
   } =
-    useSidebarState(sessions, sessionsLoaded);
+    useSidebarState(sessions, catalogLoaded);
   const initialRouteRef = useRef<ShellRoute | null>(null);
   if (!initialRouteRef.current) initialRouteRef.current = readShellRoute();
   const [activeKey, setActiveKey] = useState<string | null>(
@@ -516,6 +518,9 @@ function Shell({
   }, [localActive, managingConnections]);
   const mobileSidebarRef = useRef<HTMLDivElement>(null);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
+  useEffect(() => {
+    if (sidebarState.view.show_archived || sessionSearchOpen) loadArchived();
+  }, [loadArchived, sessionSearchOpen, sidebarState.view.show_archived]);
   const mobileWorkbench = useMediaQuery("(max-width: 767px)");
   const workbenchState = sidebarState.workbench;
   const updateWorkbenchState = useCallback((
@@ -531,7 +536,26 @@ function Shell({
   const [deletingKeys, setDeletingKeys] = useState<Set<string>>(() => new Set());
   const topicSessions = useMemo(() => deletingKeys.size === 0 ? sessions
     : sessions.filter((session) => !deletingKeys.has(session.key)), [deletingKeys, sessions]);
-  const archiveUndoOwners = useRef(new Map<string, { operation: symbol; pinOrder?: string[] }>());
+  const archiveUndoOwners = useRef(new Map<string, {
+    operation: symbol; archived: boolean; observed: boolean; pinOrder?: string[];
+  }>());
+  const archivePending = useRef(new Set<string>());
+  const archivedPaneKeys = useMemo(() => new Set(archivedKeys), [archivedKeys]);
+  const archiveContext = useRef({ topicSessions, archivedPaneKeys });
+  archiveContext.current = { topicSessions, archivedPaneKeys };
+  useEffect(() => {
+    if (!sessionsLoaded || !archiveUndoOwners.current.size) return;
+    const listed = new Set(sessions.map((session) => session.key));
+    for (const [key, owner] of archiveUndoOwners.current) {
+      // Once our change appears in the list, a subsequent change (possibly
+      // from another window) ends our right to undo it or restore its pins.
+      const matches = owner.archived
+        ? archivesLoaded ? archivedPaneKeys.has(key) : !listed.has(key)
+        : listed.has(key) && !archivedPaneKeys.has(key);
+      if (matches) owner.observed = true;
+      else if (owner.observed) archiveUndoOwners.current.delete(key);
+    }
+  }, [archivedPaneKeys, archivesLoaded, sessions, sessionsLoaded]);
   const canNavigateArchiveRef = useRef(false);
   useEffect(() => {
     canNavigateArchiveRef.current = localActive && !managingConnections;
@@ -840,7 +864,7 @@ function Shell({
   }, [refreshWorkspaces]);
 
   useEffect(() => {
-    if (!sessionsLoaded) return;
+    if (!catalogLoaded) return;
     const knownChatIds = new Set(sessions.map((session) => session.chatId));
     setUpdatedChatIds((current) => {
       const next = new Set(
@@ -852,15 +876,26 @@ function Shell({
       const entries = Object.entries(current).filter(([chatId]) => knownChatIds.has(chatId));
       return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries);
     });
-  }, [sessionsLoaded, sessions]);
+  }, [catalogLoaded, sessions]);
 
   useEffect(() => {
     if (!sessionsLoaded || sidebarStateLoading) return;
     const validKeys = new Set(sessions.map((session) => session.key));
+    if (!archivesLoaded) {
+      // An active tab may contain archived panes. Load its siblings before
+      // projecting or pruning that tab against an incomplete list.
+      if (Object.values(workbenchState.tabs).some(({ paneKeys }) =>
+        paneKeys.some((key) => validKeys.has(key)) && paneKeys.some((key) => !validKeys.has(key))
+      )) loadArchived();
+      return;
+    }
     updateWorkbenchState((current) => {
       return reconcileWorkbench(current, validKeys);
     });
   }, [
+    archivesLoaded,
+    loadArchived,
+    workbenchState,
     sessionsLoaded,
     sidebarStateLoading,
     sessions,
@@ -885,7 +920,11 @@ function Shell({
     if (topicSessions.some((session) => session.key === activeKey)) return;
     // WebKit can commit the route before useSessions' optimistic insert.
     // Keep that just-created destination valid until the session list catches up.
-    if (pendingCreatedKey === activeKey) return;
+    if (pendingCreatedKey === activeKey || !sessionsLoaded) return;
+    if (!archivesLoaded) {
+      loadArchived();
+      return;
+    }
     navigate(
       currentRoute.view === "chat"
         ? defaultShellRoute()
@@ -895,7 +934,7 @@ function Shell({
           },
       { replace: true },
     );
-  }, [activeKey, loading, navigate, sessions, temporarySessions, topicSessions]);
+  }, [activeKey, archivesLoaded, loadArchived, loading, navigate, sessions, sessionsLoaded, temporarySessions, topicSessions]);
 
   useEffect(() => {
     return client.onSessionUpdate((chatId, scope, workspaceScope) => {
@@ -1300,85 +1339,85 @@ function Shell({
   const onArchiveMany = useCallback(
     (keys: string[], archive: boolean) => {
       if (sidebarStateLoading) return;
-      const persistedSessions = new Map(topicSessions
-        .filter((session) => session.projectLocked !== false)
-        .map((session) => [session.key, session]));
+      const candidates = new Set(keys);
+      const selected = topicSessions.filter((session) => candidates.has(session.key)
+        && session.projectLocked !== false && archivedPaneKeys.has(session.key) !== archive
+        && !archivePending.current.has(session.key)
+        && archiveUndoOwners.current.get(session.key)?.archived !== archive);
+      if (!selected.length) return;
+      const affected = selected.map((session) => session.key);
       const operation = Symbol();
-      const selected = new Set<string>();
-      let pinOrder: string[] = [];
-      let removedPins = new Set<string>();
-      let archivedAfterSave: string[] = [];
+      const release = () => {
+        for (const key of affected) {
+          if (archiveUndoOwners.current.get(key)?.operation === operation) archiveUndoOwners.current.delete(key);
+        }
+      };
       const reportFailure = () => showToast({
         message: t("toast.archiveFailed"), tone: "error", dedupeKey: "archive-failed",
       });
-      const owned = (key: string) => archiveUndoOwners.current.get(key)?.operation === operation;
-      const release = () => {
-        for (const key of selected) if (owned(key)) archiveUndoOwners.current.delete(key);
-      };
-      const changeArchive = (current: SidebarStatePayload, affected: ReadonlySet<string>, archived: boolean) => ({
-        ...current,
-        archived_keys: archived
-          ? [...new Set([...current.archived_keys, ...affected])]
-          : current.archived_keys.filter((key) => !affected.has(key)),
-      });
+      for (const key of affected) archivePending.current.add(key);
       setMobileSidebarOpen(false);
-      void saveSidebarState((current) => {
-        for (const key of keys) {
-          if (persistedSessions.has(key) && current.archived_keys.includes(key) !== archive) selected.add(key);
-        }
-        if (!selected.size) return null;
-        // Include pins removed by earlier, still-undoable operations so either undo order works.
-        removedPins = new Set(current.pinned_keys.filter((key) => selected.has(key)));
-        pinOrder = current.pinned_keys;
-        for (const [key, previous] of archiveUndoOwners.current) {
-          if (previous.pinOrder) pinOrder = restorePinOrder(pinOrder, previous.pinOrder, new Set([key]));
-        }
-        const apply = (state: SidebarStatePayload) => ({
-          ...changeArchive(state, selected, archive),
-          pinned_keys: state.pinned_keys.filter((key) => !selected.has(key)),
+      void client.archiveSessions(affected, archive).then(() => {
+        let pinOrder: string[] = [];
+        const removedPins = new Set<string>();
+        // Pins are ordinary preferences. Change them only after the database
+        // confirms the command, using the latest preference state on this window.
+        void updateSidebarState((current) => {
+          pinOrder = current.pinned_keys;
+          for (const key of affected) if (pinOrder.includes(key)) removedPins.add(key);
+          if (!removedPins.size) return current;
+          for (const [key, previous] of archiveUndoOwners.current) {
+            if (previous.pinOrder) pinOrder = restorePinOrder(pinOrder, previous.pinOrder, new Set([key]));
+          }
+          return { ...current, pinned_keys: current.pinned_keys.filter((key) => !removedPins.has(key)) };
         });
-        archivedAfterSave = apply(current).archived_keys;
-        return apply;
-      }).then(() => {
-        if (!selected.size) return;
-        for (const key of selected) {
-          archiveUndoOwners.current.set(key, { operation, pinOrder: removedPins.has(key) ? pinOrder : undefined });
-        }
-        const singleTopic = selected.size === 1 ? persistedSessions.get([...selected][0]) : undefined;
+        for (const key of affected) archiveUndoOwners.current.set(key, {
+          operation, archived: archive, observed: false, pinOrder: removedPins.has(key) ? pinOrder : undefined,
+        });
         showToast({
           tone: "success",
-          detail: singleTopic ? titleForSession(singleTopic) : undefined,
+          detail: selected.length === 1 ? titleForSession(selected[0]) : undefined,
           message: archive
-            ? t(selected.size === 1 ? "toast.archivedSingle" : "toast.archived", { count: selected.size })
-            : t(selected.size === 1 ? "toast.unarchivedSingle" : "toast.unarchived", { count: selected.size }),
+            ? t(selected.length === 1 ? "toast.archivedSingle" : "toast.archived", { count: selected.length })
+            : t(selected.length === 1 ? "toast.unarchivedSingle" : "toast.unarchived", { count: selected.length }),
           onExpire: release,
           action: { label: t("toast.undo"), run: () => {
-            void saveSidebarState((current) => {
-              const restoring = new Set([...selected].filter((key) => (
-                owned(key) && current.archived_keys.includes(key) === archive
-              )));
-              if (!restoring.size) return null;
-              const restoringPins = new Set([...restoring].filter((key) => removedPins.has(key)));
-              return (state) => ({
-                ...changeArchive(state, restoring, !archive),
-                pinned_keys: restorePinOrder(state.pinned_keys, pinOrder, restoringPins),
-              });
-            }).then(release, () => { release(); reportFailure(); });
+            const restoring = affected.filter((key) => archiveUndoOwners.current.get(key)?.operation === operation
+              && !archivePending.current.has(key));
+            if (!restoring.length) { release(); return; }
+            for (const key of restoring) archivePending.current.add(key);
+            void client.archiveSessions(restoring, !archive).then(() => {
+              void updateSidebarState((current) => ({
+                ...current,
+                pinned_keys: archive
+                  ? restorePinOrder(current.pinned_keys, pinOrder, new Set(restoring.filter((key) => removedPins.has(key))))
+                  : current.pinned_keys.filter((key) => !restoring.includes(key)),
+              }));
+              void refresh();
+            }, reportFailure).finally(() => {
+              release();
+              for (const key of restoring) archivePending.current.delete(key);
+            });
           } },
         });
-        const route = currentShellRouteRef.current;
-        if (archive && canNavigateArchiveRef.current && route.view === "chat" && route.activeKey && selected.has(route.activeKey)) {
-          const next = topicSessions.find((session) => !archivedAfterSave.includes(session.key));
-          navigate({ view: "chat", activeKey: next?.key ?? null, settingsSection: "overview" });
+        const route = readShellRoute();
+        if (archive && canNavigateArchiveRef.current && route.view === "chat" && route.activeKey && affected.includes(route.activeKey)) {
+          const live = archiveContext.current;
+          const next = live.topicSessions.find(({ key }) =>
+            !archiveUndoOwners.current.get(key)?.archived && !live.archivedPaneKeys.has(key));
+          navigate({ view: "chat", activeKey: next?.key ?? null, settingsSection: "overview" }, { animate: false });
         }
-      }, reportFailure);
+        void refresh();
+      }, reportFailure).finally(() => {
+        for (const key of affected) archivePending.current.delete(key);
+      });
     },
-    [navigate, saveSidebarState, showToast, sidebarStateLoading, t, titleForSession, topicSessions],
+    [archivedPaneKeys, client, navigate, refresh, showToast, sidebarStateLoading, t, titleForSession, topicSessions, updateSidebarState],
   );
 
   const onToggleArchive = useCallback((key: string) => {
-    onArchiveMany([key], !sidebarState.archived_keys.includes(key));
-  }, [onArchiveMany, sidebarState.archived_keys]);
+    onArchiveMany([key], !archivedPaneKeys.has(key));
+  }, [onArchiveMany, archivedPaneKeys]);
 
   const onToggleArchived = useCallback(() => {
     void updateSidebarState((current) => ({
@@ -2091,14 +2130,11 @@ function Shell({
       : t("app.documentTitle.base");
   }, [localActive, activeSession, headerTitle, i18n.resolvedLanguage, t, view]);
 
-  const pinnedPaneKeys = useMemo(
-    () => new Set(sidebarState.pinned_keys),
-    [sidebarState.pinned_keys],
-  );
-  const archivedPaneKeys = useMemo(
-    () => new Set(sidebarState.archived_keys),
-    [sidebarState.archived_keys],
-  );
+  // List and preference events can arrive separately in another window.
+  // A stale pin must never promote an archived pane, including in mixed tabs.
+  const visiblePins = useMemo(() => sidebarState.pinned_keys.filter((key) => !archivedPaneKeys.has(key)),
+    [archivedPaneKeys, sidebarState.pinned_keys]);
+  const pinnedPaneKeys = useMemo(() => new Set(visiblePins), [visiblePins]);
   const sidebarPinnedTabKeys = useMemo(() => sidebarTabPresentations
     .filter(({ orderedTab }) => orderedTab.paneKeys.some((key) => pinnedPaneKeys.has(key)))
     .map(({ rowKey }) => rowKey), [pinnedPaneKeys, sidebarTabPresentations]);
@@ -2153,8 +2189,8 @@ function Shell({
     onToggleArchived,
     pinnedKeys: sidebarPinnedTabKeys,
     archivedKeys: sidebarArchivedTabKeys,
-    pinnedPaneKeys: sidebarState.pinned_keys,
-    archivedPaneKeys: sidebarState.archived_keys,
+    pinnedPaneKeys: visiblePins,
+    archivedPaneKeys: archivedKeys,
     sessionOrder: sidebarState.session_order,
     titleOverrides: sidebarState.title_overrides,
     projectNameOverrides: sidebarState.project_name_overrides,
@@ -2164,7 +2200,6 @@ function Shell({
     recoveryChatIds: recoveryChatIdList,
     viewState: { ...sidebarState.view, sort: automaticSidebarSort },
     showArchived: sidebarState.view.show_archived,
-    archivedCount: sidebarArchivedTabKeys.length,
     defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
   };
   const hostSidebarFlowWidth = hostSidebarOpen ? sidebarWidth : SIDEBAR_RAIL_WIDTH;

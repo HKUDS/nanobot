@@ -116,7 +116,8 @@ describe("temporary chat navigation", () => {
       if (path === "/api/settings/pairing") {
         return Response.json({ requests: withPairing ? [{ code: "ABCD-EFGH", channel: "telegram", sender_id: "1" }] : [] });
       }
-      if (path === "/api/sessions") {
+      if (path === "/api/sessions?archived=true") return Response.json({ sessions: [] });
+      if (path === "/api/sessions?archived=false") {
         return Response.json({ sessions: ["regular", ...(groupedTopics ? ["child"] : [])].map((id) => ({
           key: `websocket:${id}`,
           title: id === "regular" ? "Regular topic" : "Second pane",

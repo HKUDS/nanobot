@@ -21,7 +21,7 @@ import type {
 
 const connectSpy = vi.fn();
 let clientOptions: NanobotClientOptions | undefined;
-const refreshSpy = vi.fn();
+const archiveSessionsSpy = vi.fn<(keys: string[], archived: boolean) => Promise<{ ok: true }>>();
 const createChatSpy = vi.fn().mockResolvedValue("chat-1");
 const deleteChatSpy = vi.fn();
 const getSessionAutomationsSpy = vi.fn<(key: string) => Promise<SessionAutomationJob[]>>().mockResolvedValue([]);
@@ -40,6 +40,11 @@ const runStatusHandlers = new Set<(chatId: string, state: RunState) => void>();
 const runState = (startedAt: number | null): RunState => ({
   active: startedAt !== null, startedAt, latestTurnId: null, generation: 0, unsettled: false,
 });
+const sessionsChangedHandlers = new Set<() => void>();
+function onSessionsChanged(handler: () => void) {
+  sessionsChangedHandlers.add(handler);
+  return () => { sessionsChangedHandlers.delete(handler); };
+}
 const sessionUpdateHandlers = new Set<(
   chatId: string,
   scope?: string,
@@ -49,6 +54,7 @@ const sidebarStateUpdateHandlers = new Set<(state: SidebarStatePayload) => void>
 const pairingChangeHandlers = new Set<() => void>();
 const readyHandlers = new Set<() => void>();
 let mockSessions: ChatSummary[] = [];
+let mockArchivedKeys: string[] = [];
 
 async function clickDeleteAction(action: HTMLElement) {
   fireEvent.click(action);
@@ -185,12 +191,20 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
   return {
     ...actual,
     useSessions: vi.fn(function useMockSessions() {
-      const [sessions, setSessions] = React.useState(mockSessions);
+      const [allSessions, setSessions] = React.useState(mockSessions);
+      const [archived, setArchived] = React.useState(mockArchivedKeys);
+      const [archivesLoaded, setArchivesLoaded] = React.useState(false);
+      const loadArchived = React.useCallback(() => setArchivesLoaded(true), []);
+      const sessions = React.useMemo(() => archivesLoaded ? allSessions
+        : allSessions.filter((session) => !archived.includes(session.key)), [allSessions, archived, archivesLoaded]);
+      const archivedKeys = React.useMemo(() => archivesLoaded ? archived : [], [archived, archivesLoaded]);
+      const refresh = React.useCallback(async () => { setArchived([...mockArchivedKeys]); }, []);
+      React.useEffect(() => onSessionsChanged(refresh), [refresh]);
       return {
-        sessions,
+        sessions, archivesLoaded, archivedKeys, loadArchived,
         loading: false,
         error: null,
-        refresh: refreshSpy,
+        refresh,
         createChat: async (scope?: WorkspaceScopePayload | null) => {
           const chatId = await createChatSpy(scope);
           const now = new Date().toISOString();
@@ -313,6 +327,8 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     newChat = vi.fn();
     newTemporaryChat = newTemporaryChatSpy;
     attach = attachSpy;
+    archiveSessions = archiveSessionsSpy;
+    onSessionsChanged = onSessionsChanged;
     setSidebarState = setSidebarStateSpy;
     requestMutation = requestMutationSpy;
     discardTemporaryChat = discardTemporaryChatSpy;
@@ -345,7 +361,12 @@ describe("App layout", () => {
     connectSpy.mockClear();
     clientOptions = undefined;
     updateUrlSpy.mockClear();
-    refreshSpy.mockReset();
+    mockArchivedKeys = [];
+    archiveSessionsSpy.mockReset().mockImplementation(async (keys, archived) => {
+      mockArchivedKeys = archived ? [...new Set([...mockArchivedKeys, ...keys])]
+        : mockArchivedKeys.filter((key) => !keys.includes(key));
+      return { ok: true };
+    });
     createChatSpy.mockClear();
     deleteChatSpy.mockReset();
     getSessionAutomationsSpy.mockReset().mockResolvedValue([]);
@@ -366,6 +387,7 @@ describe("App layout", () => {
     statusHandlers.clear();
     runStatusHandlers.clear();
     sessionUpdateHandlers.clear();
+    sessionsChangedHandlers.clear();
     sidebarStateUpdateHandlers.clear();
     pairingChangeHandlers.clear();
     readyHandlers.clear();
@@ -2001,7 +2023,7 @@ describe("App layout", () => {
       title: "Stored title", preview: "Original preview",
     }];
     const sidebarState: SidebarStatePayload = {
-      schema_version: 1, pinned_keys: [], archived_keys: [], session_order: [],
+      schema_version: 1, pinned_keys: [], session_order: [],
       title_overrides: { [key]: "推特大战场" }, project_name_overrides: {},
       tags_by_key: {}, collapsed_groups: {}, workbench: { version: 1, tabs: {} },
       view: { density: "comfortable", show_archived: false, sort: "updated_desc" },
@@ -2511,7 +2533,7 @@ describe("App layout", () => {
     expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "56px" });
   }, 15_000);
 
-  it.each([false, true])("archives only persisted selected topics in one sidebar update (draft=%s)", async (includeDraft) => {
+  it.each([false, true])("archives only persisted selected topics in one confirmed command (draft=%s)", async (includeDraft) => {
     mockSessions = ["a", "b", "c"].map((id) => ({
       key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`,
       createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
@@ -2534,14 +2556,13 @@ describe("App layout", () => {
     const dialog = await screen.findByRole("alertdialog", {
       name: includeDraft ? "Archive this topic?" : "Archive 2 topics?",
     });
-    expect(setSidebarStateSpy).not.toHaveBeenCalled();
+    expect(archiveSessionsSpy).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
 
-    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledTimes(1));
-    expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
-      archived_keys: includeDraft ? ["websocket:chat-b"] : ["websocket:chat-a", "websocket:chat-b"],
-      pinned_keys: includeDraft ? ["websocket:chat-a"] : [],
-    }));
+    const keys = includeDraft ? ["websocket:chat-b"] : ["websocket:chat-a", "websocket:chat-b"];
+    await waitFor(() => expect(archiveSessionsSpy).toHaveBeenCalledTimes(1));
+    expect(archiveSessionsSpy).toHaveBeenCalledWith(keys, true);
+    expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({ pinned_keys: includeDraft ? ["websocket:chat-a"] : [] }));
     expect(window.location.hash).toBe(includeDraft ? "#/chat/websocket%3Achat-a" : "#/chat/websocket%3Achat-c");
     expect(within(sidebar).getByRole("button", { name: "Topic c" })).toBeInTheDocument();
     if (includeDraft) expect(within(sidebar).getByRole("button", { name: "Topic a" })).toBeInTheDocument();
@@ -2551,11 +2572,10 @@ describe("App layout", () => {
     const undo = await screen.findByRole("button", { name: "Undo" });
     expect(screen.getByText(includeDraft ? "Topic archived" : "2 topics archived")).toBeVisible();
     fireEvent.click(undo);
-    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledTimes(2));
-    expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({
-      archived_keys: [], pinned_keys: ["websocket:chat-a", "websocket:chat-b"],
-    }));
-    expect(within(sidebar).getByRole("button", { name: "Topic b" })).toBeInTheDocument();
+    await waitFor(() => expect(archiveSessionsSpy).toHaveBeenCalledTimes(2));
+    expect(archiveSessionsSpy).toHaveBeenLastCalledWith(keys, false);
+    expect(await within(sidebar).findByRole("button", { name: "Topic b" })).toBeInTheDocument();
+    expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pinned_keys: ["websocket:chat-a", "websocket:chat-b"] }));
     expect(window.location.hash).toBe(fallback);
     expect(deleteChatSpy).not.toHaveBeenCalled();
   });
@@ -2568,13 +2588,13 @@ describe("App layout", () => {
     }];
     mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: [key] } });
     let rejectSave!: (error: Error) => void;
-    setSidebarStateSpy.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }));
+    archiveSessionsSpy.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }));
     render(<App />);
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
     act(() => statusHandlers.forEach((handler) => handler("open")));
     fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Review notes"), { button: 0 });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
-    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(archiveSessionsSpy).toHaveBeenCalledTimes(1));
     expect(within(sidebar).getByRole("button", { name: "Review notes" })).toBeVisible();
     expect(screen.queryByText("Topic archived")).not.toBeInTheDocument();
     await act(async () => rejectSave(new Error("Disk full")));
@@ -2582,16 +2602,57 @@ describe("App layout", () => {
     expect(within(sidebar).getByRole("button", { name: "Review notes" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
     act(() => statusHandlers.forEach((handler) => { handler("reconnecting"); handler("open"); }));
+    expect(archiveSessionsSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the topic archived and its pin removed when the inverse command fails", async () => {
+    const key = "websocket:a";
+    mockSessions = [{ key, channel: "websocket", chatId: "a", title: "Notes", preview: "", createdAt: null, updatedAt: null }];
+    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: [key] } });
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Notes"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    const undo = await screen.findByRole("button", { name: "Undo" });
+    let rejectUndo!: (error: Error) => void;
+    archiveSessionsSpy.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectUndo = reject; }));
+    fireEvent.click(undo);
+    expect(archiveSessionsSpy).toHaveBeenLastCalledWith([key], false);
+    expect(within(sidebar).queryByText("Notes")).not.toBeInTheDocument();
+    await act(async () => rejectUndo(new Error("Disk full")));
+    expect(await screen.findByText("Could not change archive status.")).toBeVisible();
     expect(setSidebarStateSpy).toHaveBeenCalledTimes(1);
+    expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({ pinned_keys: [] }));
+    expect(mockArchivedKeys).toEqual([key]);
+  });
+
+  it("does not reclaim a pin when another window manually restores the archived topic", async () => {
+    const key = "websocket:a";
+    mockSessions = [{ key, channel: "websocket", chatId: "a", title: "Notes", preview: "", createdAt: null, updatedAt: null }];
+    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: [key] } });
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Notes"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    const undo = await screen.findByRole("button", { name: "Undo" });
+    expect(within(sidebar).queryByText("Notes")).not.toBeInTheDocument();
+    mockArchivedKeys = [];
+    act(() => sessionsChangedHandlers.forEach((handler) => handler()));
+    expect(await within(sidebar).findByText("Notes")).toBeVisible();
+    fireEvent.click(undo);
+    expect(archiveSessionsSpy).toHaveBeenCalledTimes(1);
+    expect(within(sidebar).queryByRole("region", { name: "Pinned" })).not.toBeInTheDocument();
   });
 
   it.each([["a", "b"], ["b", "a"]])("restores pin order when undoing archives in %s, %s order", async (first, second) => {
-    const keys = ["a", "b", "c"].map((id) => `websocket:chat-${id}`);
-    mockSessions = ["a", "b", "c"].map((id, index) => ({
+    const keys = ["a", "b", "c", "d"].map((id) => `websocket:chat-${id}`);
+    mockSessions = ["a", "b", "c", "d"].map((id, index) => ({
       key: keys[index], channel: "websocket", chatId: `chat-${id}`, title: `Topic ${id}`, preview: "",
       createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
     }));
-    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: keys } });
+    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: keys.slice(0, 3) } });
     render(<App />);
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
     act(() => statusHandlers.forEach((handler) => handler("open")));
@@ -2600,13 +2661,17 @@ describe("App layout", () => {
       fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
       await waitFor(() => expect(within(sidebar).queryByRole("button", { name: `Topic ${id}` })).not.toBeInTheDocument());
     }
+    fireEvent.pointerDown(within(sidebar).getByLabelText("Topic actions for Topic d"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Pin" }));
     for (const id of [first, second]) {
       const card = screen.getByText(`Topic ${id}`, { selector: '[role="status"] span' }).closest<HTMLElement>("[data-toast-tone]")!;
       fireEvent.click(within(card).getByRole("button", { name: "Undo" }));
       await within(sidebar).findByRole("button", { name: `Topic ${id}` });
     }
-    expect(setSidebarStateSpy).toHaveBeenCalledTimes(4);
-    expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pinned_keys: keys, archived_keys: [] }));
+    expect(archiveSessionsSpy).toHaveBeenCalledTimes(4);
+    const pinned = within(sidebar).getByRole("region", { name: "Pinned" });
+    for (const id of ["a", "b", "c", "d"]) expect(within(pinned).getByRole("button", { name: `Topic ${id}` })).toBeVisible();
+    expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pinned_keys: keys }));
   });
 
   it("offers one Undo for a bulk topic deletion", async () => {
@@ -3110,10 +3175,10 @@ describe("App layout", () => {
         preview: "Second chat",
       },
     ];
+    mockArchivedKeys = ["websocket:chat-a"];
     const initialState = {
       schema_version: 1,
       pinned_keys: ["websocket:chat-b"],
-      archived_keys: ["websocket:chat-a"],
       title_overrides: { "websocket:chat-b": "Roadmap" },
       tags_by_key: {},
       collapsed_groups: {},
@@ -3165,7 +3230,6 @@ describe("App layout", () => {
     expect(setSidebarStateSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         pinned_keys: initialState.pinned_keys,
-        archived_keys: initialState.archived_keys,
         title_overrides: initialState.title_overrides,
         view: expect.objectContaining({ show_archived: true }),
       }),
@@ -3183,12 +3247,11 @@ describe("App layout", () => {
     }));
     if (cached) {
       activateReloadCache("ws://test");
-      writeReloadCache("sessions", sessions.slice(0, 1));
+      writeReloadCache("activeSessions", sessions.slice(0, 1));
     }
     const saved = {
       schema_version: 1,
       pinned_keys: ["websocket:chat-b", "websocket:deleted"],
-      archived_keys: ["websocket:deleted"],
       session_order: ["websocket:chat-a", "websocket:chat-b", "websocket:deleted"],
       title_overrides: {
         "websocket:chat-a": "Saved A", "websocket:chat-b": "Saved B", "websocket:deleted": "Old topic",
@@ -3216,7 +3279,8 @@ describe("App layout", () => {
     let sessionsFail = true;
     let serverSessions = sessions;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/sessions") {
+      if (String(input) === "/api/sessions?archived=true") return jsonResponse({ sessions: [] });
+      if (String(input) === "/api/sessions?archived=false") {
         return sessionsFail
           ? Response.json({}, { status: 503 })
           : jsonResponse({ sessions: serverSessions });
@@ -3251,7 +3315,6 @@ describe("App layout", () => {
       ...saved,
       view: expect.objectContaining(saved.view),
       pinned_keys: ["websocket:chat-b"],
-      archived_keys: [],
       session_order: ["websocket:chat-a", "websocket:chat-b"],
       title_overrides: { "websocket:chat-a": "Saved A", "websocket:chat-b": "Saved B" },
       tags_by_key: { "websocket:chat-b": ["important"] },
@@ -3273,7 +3336,7 @@ describe("App layout", () => {
     act(() => sessionUpdateHandlers.forEach((handler) => handler("chat-a")));
     await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith({
       ...saved, view: expect.objectContaining(saved.view),
-      pinned_keys: [], archived_keys: [], session_order: [],
+      pinned_keys: [], session_order: [],
       title_overrides: {}, tags_by_key: {}, workbench: { version: 1, tabs: {} },
     }));
     expect(JSON.parse(localStorage.getItem(markersKey)!)).toEqual([]);
@@ -3311,7 +3374,6 @@ describe("App layout", () => {
     const initialState = {
       schema_version: 1,
       pinned_keys: [],
-      archived_keys: [],
       title_overrides: {},
       tags_by_key: {},
       collapsed_groups: {},
@@ -4042,7 +4104,20 @@ describe("App layout", () => {
     expect(screen.getByTestId("thread-welcome-mark")).toBeInTheDocument();
   });
 
-  it("filters sessions in the centered search dialog", async () => {
+  it("opens a fresh archived deep link without revealing archived sidebar rows", async () => {
+    const key = "websocket:old";
+    mockSessions = [{ key, channel: "websocket", chatId: "old", title: "Old research", preview: "", createdAt: null, updatedAt: null }];
+    mockArchivedKeys = [key];
+    window.history.replaceState(null, "", "/#/chat/websocket%3Aold");
+    render(<App />);
+    await waitFor(() => expect(document.title).toContain("Old research"));
+    expect(window.location.hash).toBe("#/chat/websocket%3Aold");
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(within(sidebar).queryByRole("button", { name: "Old research" })).not.toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "Show archived" })).toBeInTheDocument();
+  });
+
+  it("searches active and archived sessions without showing archived rows in the sidebar", async () => {
     mockSessions = [
       {
         key: "websocket:chat-alpha",
@@ -4063,12 +4138,13 @@ describe("App layout", () => {
       },
     ];
 
+    mockArchivedKeys = ["websocket:chat-beta"];
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     expect(within(sidebar).getByText("Q2 roadmap")).toBeInTheDocument();
-    expect(within(sidebar).getByText("Travel ideas")).toBeInTheDocument();
+    expect(within(sidebar).queryByText("Travel ideas")).not.toBeInTheDocument();
     const newChatButton = within(sidebar).getByRole("button", { name: "New topic" });
     const searchButton = within(sidebar).getByRole("button", { name: "Search" });
     expect(
@@ -4093,7 +4169,7 @@ describe("App layout", () => {
 
     expect(within(dialog).getByText("Q2 roadmap")).toBeInTheDocument();
     expect(within(dialog).queryByText("Travel ideas")).not.toBeInTheDocument();
-    expect(within(sidebar).getByText("Travel ideas")).toBeInTheDocument();
+    expect(within(sidebar).queryByText("Travel ideas")).not.toBeInTheDocument();
 
     fireEvent.change(within(dialog).getByRole("textbox", { name: "Search" }), {
       target: { value: "road q2" },
@@ -4109,7 +4185,7 @@ describe("App layout", () => {
     );
   });
 
-  it("keeps panes adjacent and orders tabs by their latest updated pane", async () => {
+  it("keeps mixed active and archived panes adjacent and orders tabs by their latest updated pane", async () => {
     mockSessions = [
       {
         key: "websocket:alpha",
@@ -4139,6 +4215,7 @@ describe("App layout", () => {
         preview: "",
       },
     ];
+    mockArchivedKeys = ["websocket:alpha-child"];
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string | URL | Request) => {
       if (String(url) === "/api/webui/sidebar-state") {
         return {

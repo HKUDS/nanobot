@@ -34,7 +34,7 @@ def list_webui_sessions(
         activity = datetime.fromtimestamp(millis / 1000).isoformat() if millis else None
         selection = SessionModelPreset.from_metadata(metadata)
         rows.append({
-            "key": row["key"], "created_at": row["created_at"],
+            "key": row["key"], "created_at": row["created_at"], "archived": bool(row["archived"]),
             "updated_at": _visible_activity_updated_at(row["updated_at"], row["visible_updated_at"], activity),
             "title": row["title"], "preview": row["preview"] or row["history_preview"],
             "model_preset": selection.base_preset,

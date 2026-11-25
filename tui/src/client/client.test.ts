@@ -1322,7 +1322,6 @@ describe("gateway protocol", () => {
       if (url.endsWith("/api/webui/sidebar-state")) {
         return Promise.resolve(new Response(JSON.stringify({
           pinned_keys: ["websocket:chat-1"],
-          archived_keys: [],
           title_overrides: { "websocket:chat-1": "Pinned release" },
         })))
       }
@@ -1331,6 +1330,7 @@ describe("gateway protocol", () => {
           {
             key: "websocket:chat-1",
             handle: { id: "handle_plan", name: "luma" },
+            archived: true,
             title: "Release plan",
             preview: "Prepare the release",
             created_at: "2026-08-12T10:00:00Z",
@@ -1356,7 +1356,7 @@ describe("gateway protocol", () => {
         runStartedAt: 123,
         modelPreset: "Deep Research",
         pinned: true,
-        archived: false,
+        archived: true,
       }])
     } finally {
       globalThis.fetch = original

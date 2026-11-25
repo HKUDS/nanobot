@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { switchModelPreset } from "@/lib/switch-model-preset";
 import { useClient } from "@/providers/ClientProvider";
@@ -22,6 +22,9 @@ const CHAT_CREATE_TIMEOUT_MS = 60_000;
 
 export function useSessions(): {
   sessions: ChatSummary[];
+  archivedKeys: string[];
+  archivesLoaded: boolean;
+  loadArchived: () => void;
   loading: boolean;
   initialLoading: boolean;
   error: string | null;
@@ -38,7 +41,11 @@ export function useSessions(): {
   getSessionAutomations: (key: string) => Promise<SessionAutomationJob[]>;
 } {
   const { client, token } = useClient();
-  const [sessions, setSessions] = useState<ChatSummary[]>(readReloadSessions);
+  const [activeSessions, setSessions] = useState<ChatSummary[]>(readReloadSessions);
+  const [archive, setArchive] = useState<ChatSummary[] | null>(null);
+  const includeArchive = useRef(false);
+  const archivedKeys = useMemo(() => archive?.map(row => row.key) ?? [], [archive]);
+  const sessions = useMemo(() => archive?.length ? [...activeSessions, ...archive] : activeSessions, [activeSessions, archive]);
   const [loadedOnce, setLoadedOnce] = useState(() => sessions.length > 0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,8 +59,8 @@ export function useSessions(): {
   tokenRef.current = token;
 
   useEffect(() => {
-    if (sessions.length || !loading) writeReloadCache("sessions", sessions.slice(0, 200));
-  }, [sessions, loading]);
+    if (activeSessions.length || !loading) writeReloadCache("activeSessions", activeSessions.slice(0, 200));
+  }, [activeSessions, loading]);
 
   const refresh = useCallback((): Promise<void> => {
     refreshPendingRef.current = true;
@@ -64,7 +71,10 @@ export function useSessions(): {
         while (refreshPendingRef.current) {
           refreshPendingRef.current = false;
           try {
-            const rows = await listSessions(tokenRef.current);
+            const [rows, archived] = await Promise.all([
+              listSessions(tokenRef.current, false),
+              includeArchive.current ? listSessions(tokenRef.current, true) : null,
+            ]);
             setLoadedOnce(true);
             const serverKeys = new Set(rows.map((row) => row.key));
             setSessions((prev) => {
@@ -82,6 +92,9 @@ export function useSessions(): {
               ];
               return next.length === prev.length && next.every((row, index) => row === prev[index]) ? prev : next;
             });
+            if (archived !== null) {
+              setArchive(archived.filter(row => !serverKeys.has(row.key)));
+            }
             for (const key of Array.from(optimisticKeysRef.current)) {
               if (serverKeys.has(key)) optimisticKeysRef.current.delete(key);
             }
@@ -101,21 +114,37 @@ export function useSessions(): {
     return request;
   }, []);
 
+  const loadArchived = useCallback(() => {
+    if (includeArchive.current) return;
+    includeArchive.current = true;
+    void refresh();
+  }, [refresh]);
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const unsubscribe = client.onSessionUpdate(() => {
+    const scheduleRefresh = () => {
       if (timer !== undefined) return;
       timer = setTimeout(() => {
         timer = undefined;
         void refresh();
       }, 250);
+    };
+    const unsubscribe = client.onSessionUpdate(scheduleRefresh);
+    const unsubscribeArchive = client.onSessionsChanged(scheduleRefresh);
+    let opened = false;
+    const unsubscribeStatus = client.onStatus(status => {
+      if (status !== "open") return;
+      if (opened) scheduleRefresh(); // The window may have missed an archive while disconnected.
+      opened = true;
     });
     return () => {
       clearTimeout(timer);
+      unsubscribeStatus();
+      unsubscribeArchive();
       unsubscribe();
     };
   }, [client, refresh]);
@@ -193,6 +222,7 @@ export function useSessions(): {
       if (result.blocked_by_automations || (!result.deleted && !optimistic)) return result;
       optimisticKeysRef.current.delete(key);
       webuiThreadCache.delete(key);
+      setArchive(prev => prev?.filter(row => row.key !== key) ?? null);
       setSessions((prev) => prev.filter((s) => s.key !== key));
       // The gateway may have restarted and forgotten an unpersisted chat's
       // draft scope, but removing that optimistic session is still a deletion.
@@ -208,6 +238,9 @@ export function useSessions(): {
 
   return {
     sessions,
+    archivedKeys,
+    archivesLoaded: archive !== null,
+    loadArchived,
     loading,
     initialLoading: loading && !loadedOnce,
     error,

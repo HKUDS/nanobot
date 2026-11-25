@@ -1,8 +1,4 @@
-"""Compose sidebar preferences with session archive state.
-
-Layout and display preferences stay in the config-scoped JSON file. Archive
-flags live in the session database; the public sidebar payload combines both.
-"""
+"""Config-scoped sidebar preferences and one-time import of legacy archive flags."""
 
 from __future__ import annotations
 
@@ -360,38 +356,16 @@ class WebUISidebarState:
 
     async def read(self) -> dict[str, Any]:
         async with self._read_snapshot():
-            if self._sessions is None:
-                preferences = await asyncio.to_thread(read_webui_sidebar_state)
-                return {**preferences, "archived_keys": []}
-            await ensure_webui_archives_imported(self._sessions)
-            preferences, archived = await asyncio.gather(
-                asyncio.to_thread(read_webui_sidebar_state), self._sessions.archived_keys(),
-            )
-            return {**preferences, "archived_keys": archived}
+            if self._sessions is not None:
+                await ensure_webui_archives_imported(self._sessions)
+            return await asyncio.to_thread(read_webui_sidebar_state)
 
     async def write(self, raw: dict[str, Any]) -> dict[str, Any]:
-        # Keep each successful wire snapshot ordered across the two stores.
         async with self._lock:
             await self._readers_drained.wait()
             return await shield_and_drain(self._write_snapshot(raw))
 
     async def _write_snapshot(self, raw: dict[str, Any]) -> dict[str, Any]:
-        if self._sessions is None:
-            preferences = await asyncio.to_thread(write_webui_sidebar_preferences, raw)
-            return {**preferences, "archived_keys": []}
-        await ensure_webui_archives_imported(self._sessions)
-        preferences, archived = await asyncio.gather(
-            asyncio.to_thread(write_webui_sidebar_preferences, raw), self._sessions.archived_keys(),
-            return_exceptions=True,
-        )
-        # Settle both branches before releasing admission, including failed reads.
-        if isinstance(preferences, BaseException):
-            raise preferences
-        if isinstance(archived, BaseException):
-            raise archived
-        if "archived_keys" in raw:
-            target = _clean_string_list(raw["archived_keys"])
-            # Unchanged flags complete at the committed read, without a writer.
-            if set(target) != set(archived):
-                archived = await self._sessions.set_archived_keys(target)
-        return {**preferences, "archived_keys": archived}
+        if self._sessions is not None:
+            await ensure_webui_archives_imported(self._sessions)
+        return await asyncio.to_thread(write_webui_sidebar_preferences, raw)

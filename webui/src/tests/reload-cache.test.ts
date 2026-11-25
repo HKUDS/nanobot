@@ -101,7 +101,7 @@ describe("tab reload cache", () => {
     activateReloadCache("ws://localhost:8765/");
     writeReloadCache("thread", { key: "large", body: "x".repeat(600_000) });
     expect(sessionStorage.getItem("nanobot.reload.v1.thread")).toBeNull();
-    writeReloadCache("sessions", [{ key: "bad" }, {
+    writeReloadCache("activeSessions", [{ key: "bad" }, {
       key: "websocket:a", channel: "websocket", chatId: "a", preview: "Answer", title: "Topic",
     }]);
     expect(readReloadSessions()).toEqual([{

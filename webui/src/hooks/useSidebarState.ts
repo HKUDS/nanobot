@@ -8,7 +8,6 @@ import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
 const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
   schema_version: 1,
   pinned_keys: [],
-  archived_keys: [],
   session_order: [],
   title_overrides: {},
   project_name_overrides: {},
@@ -87,7 +86,6 @@ function normalizeSidebarState(raw: unknown): SidebarStatePayload {
   return {
     schema_version: 1,
     pinned_keys: uniqueStrings(value.pinned_keys),
-    archived_keys: uniqueStrings(value.archived_keys),
     session_order: uniqueStrings(value.session_order),
     title_overrides: stringMap(value.title_overrides),
     project_name_overrides: stringMap(value.project_name_overrides),
@@ -119,7 +117,6 @@ function pruneMissingSessions(
   return {
     ...state,
     pinned_keys: filterKeys(state.pinned_keys),
-    archived_keys: filterKeys(state.archived_keys),
     session_order: filterKeys(state.session_order),
     title_overrides: filterMap(state.title_overrides),
     tags_by_key: filterMap(state.tags_by_key),
@@ -155,14 +152,13 @@ type PendingSidebarSave = {
 
 export function useSidebarState(
   sessions: ChatSummary[],
-  sessionsLoaded: boolean,
+  catalogLoaded: boolean,
 ): {
   state: SidebarStatePayload;
   loading: boolean;
   update: (
     updater: (state: SidebarStatePayload) => SidebarStatePayload,
   ) => Promise<void>;
-  save: (prepare: PrepareSidebarSave) => Promise<void>;
   rename: (key: string, title: string) => Promise<void>;
 } {
   const { client, token } = useClient();
@@ -314,14 +310,14 @@ export function useSidebarState(
   }, [save]);
 
   const pruned = useMemo(() => {
-    if (!sessionsLoaded || loading) return state;
+    if (!catalogLoaded || loading) return state;
     return pruneMissingSessions(state, sessions);
-  }, [loading, sessions, sessionsLoaded, state]);
+  }, [loading, sessions, catalogLoaded, state]);
 
   useEffect(() => {
-    if (!sessionsLoaded || loading || sameState(pruned, state)) return;
+    if (!catalogLoaded || loading || sameState(pruned, state)) return;
     void update(() => pruned);
-  }, [loading, pruned, sessionsLoaded, state, update]);
+  }, [loading, pruned, catalogLoaded, state, update]);
 
-  return { state, loading, update, save, rename };
+  return { state, loading, update, rename };
 }

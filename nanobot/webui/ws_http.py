@@ -99,7 +99,7 @@ from nanobot.webui.mutation import MutationResult
 from nanobot.webui.recovery import RecoveryActionError
 from nanobot.webui.session_automations import serialize_automation_jobs
 from nanobot.webui.session_context import session_context_payload
-from nanobot.webui.session_identity import is_webui_session_key
+from nanobot.webui.session_identity import is_webui_session_key, webui_chat_id
 from nanobot.webui.session_list_index import (
     WEBUI_SESSION_INDEX_INTERNAL_FIELDS,
     indexed_workspace_scope,
@@ -457,6 +457,8 @@ class GatewayHTTPHandler:
             with self.bus.admission.activity():
                 if action.startswith("settings."):
                     return await self.settings_routes.dispatch_mutation(connection, headers, action, params)
+                if action == "sessions.archive":
+                    return await self._handle_sessions_archive(payload)
                 if action == "session.delete":
                     key = payload.get("key")
                     if not isinstance(key, str) or not key.strip():
@@ -916,20 +918,40 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         return _http_json_response(session_context_payload(session))
 
+    async def _handle_sessions_archive(self, payload: dict[str, Any]) -> MutationResult:
+        keys, archived = payload.get("keys"), payload.get("archived")
+        if not isinstance(archived, bool):
+            return MutationResult.failure(400, "archived must be a boolean")
+        if not isinstance(keys, list) or not all(
+            isinstance(key, str) and _API_KEY_RE.fullmatch(key) and webui_chat_id(key)
+            for key in keys
+        ):
+            return MutationResult.failure(400, "keys must be an array of WebUI session keys")
+        if self.session_manager is None:
+            return MutationResult.failure(503, "session manager unavailable")
+        await ensure_webui_archives_imported(self.session_manager.state)
+        await self.session_manager.state.set_archived(keys, archived)
+        return MutationResult.success({"ok": True})
+
     async def _handle_sessions_list(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
             return _http_error(503, "session manager unavailable")
+        values = parse_qs(urlsplit(request.path).query, keep_blank_values=True).get("archived")
+        if values is not None and values not in (["true"], ["false"]):
+            return _http_error(400, "archived must be true or false")
+        archived = None if values is None else values == ["true"]
+        await ensure_webui_archives_imported(self.session_manager.state)
         accept_encoding = _combined_list_header(request.headers, "Accept-Encoding")
 
         def render(stored: list[dict[str, Any]]) -> Response | None:
-            payload = self._sessions_list_from_snapshot(stored)
+            payload = self._sessions_list_from_snapshot(stored, partial=archived is not None)
             if payload is None:
                 return None
             return _http_json_response(payload, accept_encoding=accept_encoding)
 
-        response = await self.session_manager.state.query_metadata(render)
+        response = await self.session_manager.state.query_metadata(render, archived=archived)
         if response is None:
             handles = await SessionHandleResolver(self.session_manager).alist_all_by_key()
 
@@ -938,14 +960,14 @@ class GatewayHTTPHandler:
                     self._sessions_list_payload(handles, stored), accept_encoding=accept_encoding,
                 )
 
-            response = await self.session_manager.state.query_metadata(render_allocated)
+            response = await self.session_manager.state.query_metadata(render_allocated, archived=archived)
         return response
 
     def _sessions_list_from_snapshot(
-        self, stored_sessions: list[dict[str, Any]],
+        self, stored_sessions: list[dict[str, Any]], *, partial: bool,
     ) -> dict[str, Any] | None:
         assert self.session_manager is not None
-        handles = SessionHandleResolver(self.session_manager).handles_from_metadata(stored_sessions)
+        handles = SessionHandleResolver(self.session_manager).handles_from_metadata(stored_sessions, partial=partial)
         if handles is None:
             return None
         return self._sessions_list_payload(handles, stored_sessions)

@@ -1302,6 +1302,8 @@ class WebUICommandRouter:
                 if 200 <= response.status_code < 300:
                     if action == "sidebar.update":
                         await self.broadcast_webui_event("sidebar_state_updated", state=response.result)
+                    elif action == "sessions.archive":
+                        await self.broadcast_webui_event("sessions_changed")
                     return WebUIRequestResult(result=response.result)
                 return WebUIRequestResult(status=response.status_code, message=response.message)
         except asyncio.CancelledError:

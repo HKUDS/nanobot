@@ -196,7 +196,7 @@ function normalizeSessionHandle(value: unknown): SessionHandle | null {
 
 export async function listSessions(
   token: string,
-  base: string = "",
+  archived?: boolean,
 ): Promise<ChatSummary[]> {
   type Row = {
     key: string;
@@ -213,7 +213,7 @@ export async function listSessions(
     handle?: SessionHandle | null;
   };
   const body = await request<{ sessions: Row[] }>(
-    `${base}/api/sessions`,
+    archived === undefined ? "/api/sessions" : `/api/sessions?archived=${archived}`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,

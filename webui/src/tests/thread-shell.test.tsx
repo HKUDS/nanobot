@@ -107,6 +107,7 @@ function makeClient() {
         errorHandlers.delete(handler);
       };
     },
+    onSessionsChanged: () => () => {},
     onSessionUpdate: (handler: (chatId: string, scope?: string) => void) => {
       sessionUpdateHandlers.add(handler);
       return () => {

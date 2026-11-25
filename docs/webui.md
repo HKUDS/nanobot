@@ -62,7 +62,7 @@ On a local macOS desktop, `nanobot webui` adds a Dock shortcut to your running W
 Each topic in the sidebar keeps its own history, title, project folder, and linked automations. Use **New topic** for a fresh context, or **Fork** to branch off an existing conversation without changing the original.
 
 - **Organize:** Drag topics to reorder them, or use **Rename** to edit a title inline.
-- **Bulk actions:** Choose **Select** in a topic's menu to archive or delete multiple topics at once (press `Esc` to exit selection mode). Archived topics stay saved and can be restored from **Show archived**.
+- **Bulk actions:** Choose **Select** in a topic's menu to archive or delete multiple topics at once (press `Esc` to exit selection mode). Archived topics disappear from the ordinary list in every connected window. To bring one back, choose **Show archived** and restore it from its menu. Archiving keeps the conversation history and does not stop running tasks.
 - **Delete with undo:** Deleting a topic hides it with an 8-second **Undo** window. Topics with linked automations pause for confirmation in the toast before starting the undo countdown.
 - **Navigate long conversations:** Use the message rail on wide screens or prompt-summary search in the header to jump directly to earlier messages. Scroll past the top (or pull down on touch devices) to load older history.
 

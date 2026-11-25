@@ -1847,6 +1847,38 @@ describe("NanobotClient", () => {
     expect(client.hasUnsettledRun("chat-scope-control")).toBe(true);
   });
 
+  it("delivers a catalog change without inventing a per-chat update", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    const changed = vi.fn();
+    const threadUpdated = vi.fn();
+    const unsubscribe = client.onSessionsChanged(changed);
+    client.onSessionUpdate(threadUpdated);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({ event: "sessions_changed" });
+    unsubscribe();
+    lastSocket().fakeMessage({ event: "sessions_changed" });
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(threadUpdated).not.toHaveBeenCalled();
+  });
+
+  it("sends an acknowledged archive command for the selected session keys", async () => {
+    const client = new NanobotClient({
+      url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    const keys = ["websocket:a", "websocket:b"];
+    const pending = client.archiveSessions(keys, true);
+    const request = JSON.parse(lastSocket().sent[0]);
+    expect(request).toEqual({ type: "webui_request", request_id: expect.any(String),
+      action: "sessions.archive", payload: { keys, archived: true } });
+    lastSocket().fakeMessage({ event: "webui_response", request_id: request.request_id, ok: true, result: { ok: true } });
+    await expect(pending).resolves.toEqual({ ok: true });
+  });
+
   it("sends large sidebar ordering state as a correlated WebUI request", async () => {
     const client = new NanobotClient({
       url: "ws://test",
@@ -1860,7 +1892,6 @@ describe("NanobotClient", () => {
     const state: SidebarStatePayload = {
       schema_version: 1,
       pinned_keys: [],
-      archived_keys: [],
       session_order: sessionOrder,
       title_overrides: {},
       project_name_overrides: {},
@@ -1912,7 +1943,6 @@ describe("NanobotClient", () => {
     const state: SidebarStatePayload = {
       schema_version: 1,
       pinned_keys: [],
-      archived_keys: [],
       session_order: [],
       title_overrides: {},
       project_name_overrides: {},
