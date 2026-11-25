@@ -190,18 +190,16 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/useSessions")>();
   return {
     ...actual,
-    useSessions: vi.fn(function useMockSessions() {
+    useSessions: vi.fn(function useMockSessions(archivesLoaded = false) {
       const [allSessions, setSessions] = React.useState(mockSessions);
       const [archived, setArchived] = React.useState(mockArchivedKeys);
-      const [archivesLoaded, setArchivesLoaded] = React.useState(false);
-      const loadArchived = React.useCallback(() => setArchivesLoaded(true), []);
       const sessions = React.useMemo(() => archivesLoaded ? allSessions
         : allSessions.filter((session) => !archived.includes(session.key)), [allSessions, archived, archivesLoaded]);
       const archivedKeys = React.useMemo(() => archivesLoaded ? archived : [], [archived, archivesLoaded]);
       const refresh = React.useCallback(async () => { setArchived([...mockArchivedKeys]); }, []);
       React.useEffect(() => onSessionsChanged(refresh), [refresh]);
       return {
-        sessions, archivesLoaded, archivedKeys, loadArchived,
+        sessions, archivesLoaded, archivedKeys,
         loading: false,
         error: null,
         refresh,
@@ -2533,145 +2531,98 @@ describe("App layout", () => {
     expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "56px" });
   }, 15_000);
 
-  it.each([false, true])("archives only persisted selected topics in one confirmed command (draft=%s)", async (includeDraft) => {
-    mockSessions = ["a", "b", "c"].map((id) => ({
-      key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`,
-      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
-      title: `Topic ${id}`, preview: "",
-      projectLocked: includeDraft && id === "a" ? false : undefined,
-    }));
-    mockFetchRoutes({
-      "/api/webui/sidebar-state": { pinned_keys: ["websocket:chat-a", "websocket:chat-b"] },
-    });
-    window.history.replaceState(null, "", "/#/chat/websocket%3Achat-a");
+  const topicKey = (id: string) => `websocket:chat-${id}`;
+  async function archiveFixture(ids: string[], pinned: string[], draft?: string) {
+    mockSessions = ids.map(id => ({ key: topicKey(id), channel: "websocket", chatId: `chat-${id}`,
+      createdAt: null, updatedAt: null, title: `Topic ${id}`, preview: "", projectLocked: id !== draft }));
+    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: pinned.map(topicKey) } });
     render(<App />);
-    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    act(() => statusHandlers.forEach((handler) => handler("open")));
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    await within(sidebar).findByRole("button", { name: "Topic a" });
-    fireEvent.pointerDown(within(sidebar).getByLabelText("Topic actions for Topic a"), { button: 0 });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Topic b" }));
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Archive" }));
-    const dialog = await screen.findByRole("alertdialog", {
-      name: includeDraft ? "Archive this topic?" : "Archive 2 topics?",
-    });
+    const sidebar = within(await screen.findByRole("navigation", { name: "Sidebar navigation" }));
+    act(() => statusHandlers.forEach(handler => handler("open")));
+    const menu = async (id: string, name: string) => {
+      fireEvent.pointerDown(await sidebar.findByLabelText(`Topic actions for Topic ${id}`), { button: 0 });
+      const item = await screen.findByRole("menuitem", { name });
+      await act(async () => { fireEvent.click(item); });
+    };
+    return { sidebar, menu };
+  }
+
+  it.each([false, true])("archives only persisted selected topics in one confirmed command (draft=%s)", async (includeDraft) => {
+    window.history.replaceState(null, "", "/#/chat/websocket%3Achat-a");
+    const { sidebar, menu } = await archiveFixture(["a", "b", "c"], ["a", "b"], includeDraft ? "a" : undefined);
+    await menu("a", "Select");
+    fireEvent.click(sidebar.getByRole("button", { name: "Topic b" }));
+    fireEvent.click(sidebar.getByRole("button", { name: "Archive" }));
+    const dialog = await screen.findByRole("alertdialog", { name: includeDraft ? "Archive this topic?" : "Archive 2 topics?" });
     expect(archiveSessionsSpy).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
-
-    const keys = includeDraft ? ["websocket:chat-b"] : ["websocket:chat-a", "websocket:chat-b"];
-    await waitFor(() => expect(archiveSessionsSpy).toHaveBeenCalledTimes(1));
-    expect(archiveSessionsSpy).toHaveBeenCalledWith(keys, true);
-    expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({ pinned_keys: includeDraft ? ["websocket:chat-a"] : [] }));
-    expect(window.location.hash).toBe(includeDraft ? "#/chat/websocket%3Achat-a" : "#/chat/websocket%3Achat-c");
-    expect(within(sidebar).getByRole("button", { name: "Topic c" })).toBeInTheDocument();
-    if (includeDraft) expect(within(sidebar).getByRole("button", { name: "Topic a" })).toBeInTheDocument();
-    else expect(within(sidebar).queryByRole("button", { name: "Topic a" })).not.toBeInTheDocument();
-    expect(within(sidebar).queryByRole("button", { name: "Topic b" })).not.toBeInTheDocument();
-    const fallback = window.location.hash;
+    const keys = (includeDraft ? ["b"] : ["a", "b"]).map(topicKey);
     const undo = await screen.findByRole("button", { name: "Undo" });
+    expect(archiveSessionsSpy.mock.calls).toEqual([[keys, true]]);
+    expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({ pinned_keys: includeDraft ? [topicKey("a")] : [] }));
+    const fallback = includeDraft ? "#/chat/websocket%3Achat-a" : "#/chat/websocket%3Achat-c";
+    expect(window.location.hash).toBe(fallback);
+    expect(sidebar.getByRole("button", { name: "Topic c" })).toBeVisible();
+    expect(Boolean(sidebar.queryByRole("button", { name: "Topic a" }))).toBe(includeDraft);
+    expect(sidebar.queryByRole("button", { name: "Topic b" })).not.toBeInTheDocument();
     expect(screen.getByText(includeDraft ? "Topic archived" : "2 topics archived")).toBeVisible();
     fireEvent.click(undo);
-    await waitFor(() => expect(archiveSessionsSpy).toHaveBeenCalledTimes(2));
-    expect(archiveSessionsSpy).toHaveBeenLastCalledWith(keys, false);
-    expect(await within(sidebar).findByRole("button", { name: "Topic b" })).toBeInTheDocument();
-    expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pinned_keys: ["websocket:chat-a", "websocket:chat-b"] }));
+    expect(await sidebar.findByRole("button", { name: "Topic b" })).toBeVisible();
+    expect(archiveSessionsSpy.mock.calls).toEqual([[keys, true], [keys, false]]);
+    expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pinned_keys: ["a", "b"].map(topicKey) }));
     expect(window.location.hash).toBe(fallback);
     expect(deleteChatSpy).not.toHaveBeenCalled();
   });
 
-  it("keeps the topic and reports archive failure instead of retrying it silently", async () => {
-    const key = "websocket:chat-a";
-    mockSessions = [{
-      key, channel: "websocket", chatId: "chat-a", title: "Review notes", preview: "",
-      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
-    }];
-    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: [key] } });
-    let rejectSave!: (error: Error) => void;
-    archiveSessionsSpy.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }));
-    render(<App />);
-    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
-    act(() => statusHandlers.forEach((handler) => handler("open")));
-    fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Review notes"), { button: 0 });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
-    await waitFor(() => expect(archiveSessionsSpy).toHaveBeenCalledTimes(1));
-    expect(within(sidebar).getByRole("button", { name: "Review notes" })).toBeVisible();
-    expect(screen.queryByText("Topic archived")).not.toBeInTheDocument();
-    await act(async () => rejectSave(new Error("Disk full")));
+  it.each([false, true])("changes rows and pins only after acknowledgement (inverse=%s)", async (inverse) => {
+    const { sidebar, menu } = await archiveFixture(["a"], ["a"]);
+    if (inverse) await menu("a", "Archive");
+    let reject!: (error: Error) => void;
+    archiveSessionsSpy.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    if (inverse) fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+    else await menu("a", "Archive");
+    expect(archiveSessionsSpy).toHaveBeenLastCalledWith([topicKey("a")], !inverse);
+    const pinned = () => sidebar.queryByRole("region", { name: "Pinned" });
+    expect(Boolean(pinned())).toBe(!inverse);
+    await act(async () => reject(new Error("Disk full")));
     expect(await screen.findByText("Could not change archive status.")).toBeVisible();
-    expect(within(sidebar).getByRole("button", { name: "Review notes" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
-    act(() => statusHandlers.forEach((handler) => { handler("reconnecting"); handler("open"); }));
-    expect(archiveSessionsSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the topic archived and its pin removed when the inverse command fails", async () => {
-    const key = "websocket:a";
-    mockSessions = [{ key, channel: "websocket", chatId: "a", title: "Notes", preview: "", createdAt: null, updatedAt: null }];
-    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: [key] } });
-    render(<App />);
-    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
-    act(() => statusHandlers.forEach((handler) => handler("open")));
-    fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Notes"), { button: 0 });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
-    const undo = await screen.findByRole("button", { name: "Undo" });
-    let rejectUndo!: (error: Error) => void;
-    archiveSessionsSpy.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectUndo = reject; }));
-    fireEvent.click(undo);
-    expect(archiveSessionsSpy).toHaveBeenLastCalledWith([key], false);
-    expect(within(sidebar).queryByText("Notes")).not.toBeInTheDocument();
-    await act(async () => rejectUndo(new Error("Disk full")));
-    expect(await screen.findByText("Could not change archive status.")).toBeVisible();
-    expect(setSidebarStateSpy).toHaveBeenCalledTimes(1);
-    expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({ pinned_keys: [] }));
-    expect(mockArchivedKeys).toEqual([key]);
+    expect(Boolean(sidebar.queryByRole("button", { name: "Topic a" }))).toBe(!inverse);
+    expect(Boolean(pinned())).toBe(!inverse);
+    act(() => statusHandlers.forEach(handler => { handler("reconnecting"); handler("open"); }));
+    expect(archiveSessionsSpy).toHaveBeenCalledTimes(inverse ? 2 : 1);
+    expect(setSidebarStateSpy).toHaveBeenCalledTimes(inverse ? 1 : 0);
   });
 
   it("does not reclaim a pin when another window manually restores the archived topic", async () => {
-    const key = "websocket:a";
-    mockSessions = [{ key, channel: "websocket", chatId: "a", title: "Notes", preview: "", createdAt: null, updatedAt: null }];
-    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: [key] } });
-    render(<App />);
-    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
-    act(() => statusHandlers.forEach((handler) => handler("open")));
-    fireEvent.pointerDown(await within(sidebar).findByLabelText("Topic actions for Notes"), { button: 0 });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    const { sidebar, menu } = await archiveFixture(["a"], ["a"]);
+    await menu("a", "Archive");
     const undo = await screen.findByRole("button", { name: "Undo" });
-    expect(within(sidebar).queryByText("Notes")).not.toBeInTheDocument();
+    expect(sidebar.queryByRole("button", { name: "Topic a" })).not.toBeInTheDocument();
     mockArchivedKeys = [];
-    act(() => sessionsChangedHandlers.forEach((handler) => handler()));
-    expect(await within(sidebar).findByText("Notes")).toBeVisible();
+    act(() => sessionsChangedHandlers.forEach(handler => handler()));
+    expect(await sidebar.findByRole("button", { name: "Topic a" })).toBeVisible();
     fireEvent.click(undo);
     expect(archiveSessionsSpy).toHaveBeenCalledTimes(1);
-    expect(within(sidebar).queryByRole("region", { name: "Pinned" })).not.toBeInTheDocument();
+    expect(sidebar.queryByRole("region", { name: "Pinned" })).not.toBeInTheDocument();
   });
 
   it.each([["a", "b"], ["b", "a"]])("restores pin order when undoing archives in %s, %s order", async (first, second) => {
-    const keys = ["a", "b", "c", "d"].map((id) => `websocket:chat-${id}`);
-    mockSessions = ["a", "b", "c", "d"].map((id, index) => ({
-      key: keys[index], channel: "websocket", chatId: `chat-${id}`, title: `Topic ${id}`, preview: "",
-      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
-    }));
-    mockFetchRoutes({ "/api/webui/sidebar-state": { pinned_keys: keys.slice(0, 3) } });
-    render(<App />);
-    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
-    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const ids = ["a", "b", "c", "d"];
+    const { sidebar, menu } = await archiveFixture(ids, ids.slice(0, 3));
     for (const id of ["a", "b"]) {
-      fireEvent.pointerDown(await within(sidebar).findByLabelText(`Topic actions for Topic ${id}`), { button: 0 });
-      fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
-      await waitFor(() => expect(within(sidebar).queryByRole("button", { name: `Topic ${id}` })).not.toBeInTheDocument());
+      await menu(id, "Archive");
+      await waitFor(() => expect(sidebar.queryByRole("button", { name: `Topic ${id}` })).not.toBeInTheDocument());
     }
-    fireEvent.pointerDown(within(sidebar).getByLabelText("Topic actions for Topic d"), { button: 0 });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Pin" }));
+    await menu("d", "Pin");
     for (const id of [first, second]) {
       const card = screen.getByText(`Topic ${id}`, { selector: '[role="status"] span' }).closest<HTMLElement>("[data-toast-tone]")!;
       fireEvent.click(within(card).getByRole("button", { name: "Undo" }));
-      await within(sidebar).findByRole("button", { name: `Topic ${id}` });
+      await sidebar.findByRole("button", { name: `Topic ${id}` });
     }
-    expect(archiveSessionsSpy).toHaveBeenCalledTimes(4);
-    const pinned = within(sidebar).getByRole("region", { name: "Pinned" });
-    for (const id of ["a", "b", "c", "d"]) expect(within(pinned).getByRole("button", { name: `Topic ${id}` })).toBeVisible();
-    expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pinned_keys: keys }));
+    const pinned = within(sidebar.getByRole("region", { name: "Pinned" }));
+    for (const id of ids) expect(pinned.getByRole("button", { name: `Topic ${id}` })).toBeVisible();
+    expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pinned_keys: ids.map(topicKey) }));
   });
 
   it("offers one Undo for a bulk topic deletion", async () => {
@@ -3279,8 +3230,7 @@ describe("App layout", () => {
     let sessionsFail = true;
     let serverSessions = sessions;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/sessions?archived=true") return jsonResponse({ sessions: [] });
-      if (String(input) === "/api/sessions?archived=false") {
+      if (String(input).split("?")[0] === "/api/sessions") {
         return sessionsFail
           ? Response.json({}, { status: 503 })
           : jsonResponse({ sessions: serverSessions });
@@ -3602,7 +3552,8 @@ describe("App layout", () => {
     expect(within(sidebar).queryByRole("img", { name: "Agent running" })).not.toBeInTheDocument();
   });
 
-  it("restores the active chat from the URL hash after a page reload", async () => {
+  it.each([false, true])("restores a chat from the URL hash after reload (archived=%s)", async (archived) => {
+    if (archived) mockArchivedKeys = ["websocket:chat-a"];
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -3632,9 +3583,7 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     await waitFor(() => expect(document.title).toBe("Active after reload"));
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    expect(
-      within(sidebar).getByRole("button", { name: /^Active after reload$/ }),
-    ).toBeInTheDocument();
+    expect(Boolean(within(sidebar).queryByRole("button", { name: /^Active after reload$/ }))).toBe(!archived);
     expect(window.location.hash).toBe(
       `#/chat/${encodeURIComponent("websocket:chat-a")}`,
     );
@@ -4102,19 +4051,6 @@ describe("App layout", () => {
 
     await waitFor(() => expect(document.title).toBe("nanobot"));
     expect(screen.getByTestId("thread-welcome-mark")).toBeInTheDocument();
-  });
-
-  it("opens a fresh archived deep link without revealing archived sidebar rows", async () => {
-    const key = "websocket:old";
-    mockSessions = [{ key, channel: "websocket", chatId: "old", title: "Old research", preview: "", createdAt: null, updatedAt: null }];
-    mockArchivedKeys = [key];
-    window.history.replaceState(null, "", "/#/chat/websocket%3Aold");
-    render(<App />);
-    await waitFor(() => expect(document.title).toContain("Old research"));
-    expect(window.location.hash).toBe("#/chat/websocket%3Aold");
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    expect(within(sidebar).queryByRole("button", { name: "Old research" })).not.toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "Show archived" })).toBeInTheDocument();
   });
 
   it("searches active and archived sessions without showing archived rows in the sidebar", async () => {

@@ -872,11 +872,9 @@ class SessionState:
         return imported
 
     async def set_archived(self, keys: Sequence[str], archived: bool) -> None:
-        values = list(dict.fromkeys(keys))
+        values = list(keys)
         if values:
-            await self._execute(
-                values, lambda: self._store.set_archived(values, archived), operation_name="set_archived",
-            )
+            await self._execute(values, lambda: self._store.set_archived(values, archived), operation_name="set_archived")
 
     async def typed_session_headers(self, session_type: str) -> list[tuple[str, dict[str, Any]]]:
         return await self._execute(

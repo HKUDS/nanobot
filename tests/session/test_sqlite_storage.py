@@ -804,6 +804,7 @@ async def test_archive_state_survives_reopen_for_persisted_sessions_only(tmp_pat
         assert manager.read_session_snapshot("websocket:draft") is None
         assert manager.read_session_snapshot("websocket:missing") is None
         assert manager.read_session_snapshot("websocket:empty") == fork
+        assert manager.read_session_version(fork.key) == (fork.generation, fork.revision)
         assert manager.read_session_snapshot("websocket:active") == original
     finally:
         await state.aclose()

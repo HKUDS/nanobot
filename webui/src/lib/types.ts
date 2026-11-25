@@ -505,6 +505,7 @@ export interface ModelOptionsCapability {
 }
 
 export interface ChatSummary {
+  archived?: boolean;
   /** Server-side session key, e.g. ``websocket:abcd-...``. */
   key: string;
   /** Local channel + chat_id parts derived from ``key`` for convenience. */

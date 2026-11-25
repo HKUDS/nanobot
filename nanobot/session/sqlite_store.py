@@ -589,25 +589,15 @@ class SqliteSessionStore:
             finally:
                 rows.close()
 
-    def list_handle_metadata(self, *, outside: dict[str, str] | None = None) -> list[dict[str, Any]]:
-        """Read compact allocation headers, or only potential off-page name conflicts."""
-        where = ""
-        params: list[str] = [CONVERSATION.name]
-        if outside is not None:
-            # Public names are lowercase ASCII. Imported noncanonical spellings
-            # need the resolver's Python normalization (including Unicode casefold).
-            where = """WHERE key NOT IN (SELECT key FROM json_each(?)) AND (
-                json_extract(metadata, '$.session_handle') IN (SELECT value FROM json_each(?))
-                OR json_extract(metadata, '$.session_handle') GLOB '*[^a-z]*')"""
-            owners = _encode(outside)
-            params.extend((owners, owners))
+    def list_handle_metadata(self) -> list[dict[str, Any]]:
+        """Read just the allocation headers, irrespective of archive membership."""
         with self.transaction(write=False) as db:
             rows = db.execute(f"""
                 SELECT key, created_at, json_extract(metadata, '$.session_handle'),
                     CASE WHEN json_type(metadata, '$.{SESSION_TYPE_KEY}') IS NULL THEN ?
                          ELSE json_extract(metadata, '$.{SESSION_TYPE_KEY}') END
-                FROM sessions {where}
-            """, params)
+                FROM sessions
+            """, (CONVERSATION.name,))
             return [{"key": key, "created_at": created,
                      "metadata": {"session_handle": name, SESSION_TYPE_KEY: kind}}
                     for key, created, name, kind in rows]
@@ -770,10 +760,8 @@ class SqliteSessionStore:
 
     def import_archives(self, keys: list[str]) -> list[str]:
         with self.transaction() as db:
-            if self.archives_imported():
-                return self.archived_keys()
-            self.set_archived(keys, True)
-            db.execute("INSERT INTO storage_meta (key, value) VALUES ('session_archives_imported', '1')")
+            if db.execute("INSERT OR IGNORE INTO storage_meta (key, value) VALUES ('session_archives_imported', '1')").rowcount:
+                self.set_archived(keys, True)
             return self.archived_keys()
 
     def set_archived(self, keys: list[str], archived: bool) -> None:

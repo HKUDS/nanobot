@@ -619,9 +619,8 @@ class SessionManager:
         """
         return self._store.project_session_messages(key, project)
 
-    def other_handle_candidates(self, owners: dict[str, str]) -> list[dict[str, Any]]:
-        """Compact off-page candidates that may conflict with these public names."""
-        return self._store.list_handle_metadata(outside=owners)
+    def list_handle_metadata(self) -> list[dict[str, Any]]:
+        return self._store.list_handle_metadata()
 
     def project_session_handle_names(
         self, project: Callable[[Iterator[tuple[str, object]]], _T],
@@ -655,7 +654,7 @@ class SessionManager:
         self._require_offline_mutation()
 
         def ensure() -> dict[str, str]:
-            names, updates = allocate_session_handles(self._store.list_metadata(), self.types)
+            names, updates = allocate_session_handles(self.list_handle_metadata(), self.types)
             for key, name in updates.items():
                 self._store.update_metadata(key, {SESSION_HANDLE_METADATA_KEY: name})
             return names

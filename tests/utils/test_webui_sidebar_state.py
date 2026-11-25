@@ -266,7 +266,6 @@ async def test_sidebar_reads_and_preferences_do_not_wait_for_unrelated_session_w
     manager = SessionManager(tmp_path)
     sidebar = WebUISidebarState(manager.state)
     await manager.state.import_messages("websocket:busy", [{"role": "user", "content": "hello"}])
-    await manager.state.import_messages("websocket:archived", [{"role": "user", "content": "saved"}])
     saved = await sidebar.write({"pinned_keys": ["websocket:busy"]})
     held, release, entered = threading.Event(), threading.Event(), threading.Event()
 
@@ -327,45 +326,4 @@ async def test_archive_only_update_keeps_preferences_unchanged(tmp_path, monkeyp
             repaired = await sidebar.write(saved)
             assert json.loads(path.read_text(encoding="utf-8")) == repaired
     finally:
-        await manager.state.aclose()
-
-
-async def test_sidebar_readers_overlap_without_overtaking_queued_write(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    manager = SessionManager(tmp_path)
-    manager.save(Session(key="websocket:new"))
-    sidebar = WebUISidebarState(manager.state)
-    saved = await sidebar.write({"view": {"density": "compact"}, "archived_keys": []})
-    entered, release = threading.Event(), threading.Event()
-    counter_lock = threading.Lock()
-    count = 0
-    original = sidebar_state.read_webui_sidebar_state
-
-    def paused_read():
-        nonlocal count
-        with counter_lock:
-            count += 1
-            pause = count <= 2
-            if count == 2:
-                entered.set()
-        if pause:
-            assert release.wait(10)
-        return original()
-
-    monkeypatch.setattr(sidebar_state, "read_webui_sidebar_state", paused_read)
-    readers = [asyncio.create_task(sidebar.read()) for _ in range(2)]
-    pending = []
-    try:
-        assert await asyncio.to_thread(entered.wait, 2)
-        writer = asyncio.create_task(sidebar.write({**saved, "view": {"density": "comfortable"}, "archived_keys": ["websocket:new"]}))
-        later_read = asyncio.create_task(sidebar.read())
-        pending.extend([writer, later_read])
-        release.set()
-        before = await asyncio.gather(*readers)
-        assert all(snapshot["view"]["density"] == "compact" for snapshot in before)
-        written, after = await asyncio.gather(writer, later_read)
-        assert written["view"]["density"] == after["view"]["density"] == "comfortable"
-    finally:
-        release.set()
-        await asyncio.gather(*readers, *pending, return_exceptions=True)
         await manager.state.aclose()

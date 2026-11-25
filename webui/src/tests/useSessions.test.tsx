@@ -74,33 +74,17 @@ describe("useSessions", () => {
   it("distinguishes initial loading from revalidating a successfully loaded empty list", async () => {
     let finish!: (rows: Awaited<ReturnType<typeof api.listSessions>>) => void;
     vi.mocked(api.listSessions).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
-    const { result } = renderHook(() => useSessions(), { wrapper: wrap(fakeClient()) });
+    const { result, rerender } = renderHook((full: boolean) => useSessions(full), { initialProps: false, wrapper: wrap(fakeClient()) });
     expect(result.current.initialLoading).toBe(true);
     await act(async () => finish([]));
     expect(result.current.initialLoading).toBe(false);
-    let refresh!: Promise<void>;
-    act(() => { refresh = result.current.refresh(); });
+    expect(api.listSessions).toHaveBeenLastCalledWith("tok", false);
+    rerender(true);
     expect(result.current.loading).toBe(true);
     expect(result.current.initialLoading).toBe(false);
-    await act(async () => { finish([]); await refresh; });
-  });
-
-  it("loads the archive on demand and refreshes membership after another window restores a chat", async () => {
-    const row = { key: "websocket:a", channel: "websocket", chatId: "a", preview: "A", createdAt: null, updatedAt: null };
-    let archived = true;
-    vi.mocked(api.listSessions).mockImplementation(async (_token, requested) => requested === archived ? [row] : []);
-    const client = fakeClient();
-    const { result } = renderHook(() => useSessions(), { wrapper: wrap(client) });
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.sessions).toEqual([]);
-    expect(vi.mocked(api.listSessions).mock.calls).toEqual([["tok", false]]);
-
-    act(() => result.current.loadArchived());
-    await waitFor(() => expect(result.current.archivedKeys).toEqual([row.key]));
-    archived = false;
-    act(() => client.emitSessionsChanged());
-    await waitFor(() => expect(result.current.archivedKeys).toEqual([]));
-    expect(result.current.sessions).toEqual([row]);
+    expect(api.listSessions).toHaveBeenLastCalledWith("tok", undefined);
+    await act(async () => finish([{ key: "websocket:a", chatId: "a", channel: "websocket", archived: true, preview: "A", createdAt: null, updatedAt: null }]));
+    expect(result.current.archivedKeys).toEqual(["websocket:a"]);
   });
 
   it("shows tab-cached sessions while revalidating and removes server-deleted rows", async () => {
@@ -137,7 +121,8 @@ describe("useSessions", () => {
     try {
       for (let index = 0; index < 20; index++) {
         await act(async () => {
-          client.emitSessionUpdate("burst");
+          if (index % 2) client.emitSessionsChanged();
+          else client.emitSessionUpdate("burst");
           await vi.advanceTimersByTimeAsync(10);
         });
       }

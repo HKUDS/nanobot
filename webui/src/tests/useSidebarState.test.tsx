@@ -252,7 +252,7 @@ describe("useSidebarState", () => {
   });
 
   it("drains optimistic writes before renaming and preserves edits made during the rename", async () => {
-    const { result, writes, setSidebarState } = await renderLoadedSidebarState();
+    const { result, writes, setSidebarState, receive } = await renderLoadedSidebarState();
     let rename!: Promise<void>;
     act(() => {
       void result.current.update((current) => ({ ...current, pinned_keys: ["websocket:a"] }));
@@ -263,6 +263,8 @@ describe("useSidebarState", () => {
       }));
     });
     expect(setSidebarState).toHaveBeenCalledTimes(1);
+    act(() => receive(writes[0].state));
+    expect(result.current.state.session_order).toEqual(["websocket:b"]);
     await act(async () => { writes[0].resolve(); });
     expect(setSidebarState).toHaveBeenCalledTimes(2);
     expect(writes[1].state).toEqual(expect.objectContaining({
@@ -366,64 +368,5 @@ describe("useSidebarState", () => {
     expect(writes[1].state).toEqual(result.current.state);
     await act(async () => { writes[1].resolve(); });
     expect(setSidebarState).toHaveBeenCalledTimes(2);
-  });
-
-  it("serializes full-state writes so an older request cannot overwrite a newer update", async () => {
-    let resolveFirstWrite: (() => void) | null = null;
-    let sidebarStateUpdateHandler: ((state: SidebarStatePayload) => void) | null = null;
-    const setSidebarState = vi.fn()
-      .mockImplementationOnce((state: SidebarStatePayload) => new Promise<SidebarStatePayload>(
-        (resolve) => {
-          resolveFirstWrite = () => resolve(state);
-        },
-      ))
-      .mockImplementation(async (state: SidebarStatePayload) => state);
-    const client = {
-      status: "open" as const,
-      onStatus: () => () => {},
-      onSidebarStateUpdate: (handler: (state: SidebarStatePayload) => void) => {
-        sidebarStateUpdateHandler = handler;
-        return () => {
-          sidebarStateUpdateHandler = null;
-        };
-      },
-      setSidebarState,
-    } as unknown as NanobotClient;
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({}),
-    }));
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <ClientProvider client={client} token="token">
-        {children}
-      </ClientProvider>
-    );
-    const { result } = renderHook(() => useSidebarState([], false), { wrapper });
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    act(() => {
-      void result.current.update((current) => ({
-        ...current,
-        title_overrides: { "websocket:a": "First" },
-      }));
-      void result.current.update((current) => ({
-        ...current,
-        title_overrides: { "websocket:a": "Second" },
-      }));
-    });
-
-    expect(setSidebarState).toHaveBeenCalledTimes(1);
-    act(() => {
-      sidebarStateUpdateHandler?.(setSidebarState.mock.calls[0]?.[0]);
-    });
-    expect(result.current.state.title_overrides).toEqual({
-      "websocket:a": "Second",
-    });
-    act(() => resolveFirstWrite?.());
-    await waitFor(() => expect(setSidebarState).toHaveBeenCalledTimes(2));
-    expect(setSidebarState.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
-      title_overrides: { "websocket:a": "Second" },
-    }));
   });
 });

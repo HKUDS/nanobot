@@ -1651,10 +1651,9 @@ async def test_archive_request_broadcasts_list_invalidation_only_on_success(bus,
         return json.loads(connection.send.await_args.args[0])
 
     try:
-        for i in range(2):
-            result = await request(f"archive-{i}", ["websocket:a", "websocket:a", "websocket:absent"], True)
-            assert result["ok"] and result["result"] == {"ok": True}
-            assert json.loads(peer.send.await_args.args[0]) == {"event": "sessions_changed"}
+        result = await request("archive-a", ["websocket:a"], True)
+        assert result["ok"] and result["result"] == {"ok": True}
+        assert json.loads(peer.send.await_args.args[0]) == {"event": "sessions_changed"}
         assert (await request("archive-b", ["websocket:b"], True, peer))["ok"]
         assert await sessions.state.archived_keys() == ["websocket:a", "websocket:b"]
         assert (await request("restore", ["websocket:a"], False))["ok"]

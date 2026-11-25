@@ -18,7 +18,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeGuard, TypeVar, cast
 from urllib.parse import parse_qs, unquote, urlsplit, urlunsplit
 
 from loguru import logger
@@ -922,10 +922,7 @@ class GatewayHTTPHandler:
         keys, archived = payload.get("keys"), payload.get("archived")
         if not isinstance(archived, bool):
             return MutationResult.failure(400, "archived must be a boolean")
-        if not isinstance(keys, list) or not all(
-            isinstance(key, str) and _API_KEY_RE.fullmatch(key) and webui_chat_id(key)
-            for key in keys
-        ):
+        if not _is_archive_key_list(keys):
             return MutationResult.failure(400, "keys must be an array of WebUI session keys")
         if self.session_manager is None:
             return MutationResult.failure(503, "session manager unavailable")
@@ -945,32 +942,21 @@ class GatewayHTTPHandler:
         await ensure_webui_archives_imported(self.session_manager.state)
         accept_encoding = _combined_list_header(request.headers, "Accept-Encoding")
 
-        def render(stored: list[dict[str, Any]]) -> Response | None:
-            payload = self._sessions_list_from_snapshot(stored, partial=archived is not None)
-            if payload is None:
-                return None
-            return _http_json_response(payload, accept_encoding=accept_encoding)
+        resolver = SessionHandleResolver(self.session_manager)
 
-        response = await self.session_manager.state.query_metadata(render, archived=archived)
-        if response is None:
-            handles = await SessionHandleResolver(self.session_manager).alist_all_by_key()
+        def render(handles: dict[str, SessionHandle], stored: list[dict[str, Any]]) -> Response:
+            return _http_json_response(self._sessions_list_payload(handles, stored), accept_encoding=accept_encoding)
 
-            def render_allocated(stored: list[dict[str, Any]]) -> Response:
-                return _http_json_response(
-                    self._sessions_list_payload(handles, stored), accept_encoding=accept_encoding,
-                )
+        def snapshot(stored: list[dict[str, Any]]) -> Response | None:
+            handles = resolver.handles_from_metadata(stored, filtered=archived is not None)
+            return render(handles, stored) if handles is not None else None
 
-            response = await self.session_manager.state.query_metadata(render_allocated, archived=archived)
-        return response
-
-    def _sessions_list_from_snapshot(
-        self, stored_sessions: list[dict[str, Any]], *, partial: bool,
-    ) -> dict[str, Any] | None:
-        assert self.session_manager is not None
-        handles = SessionHandleResolver(self.session_manager).handles_from_metadata(stored_sessions, partial=partial)
-        if handles is None:
-            return None
-        return self._sessions_list_payload(handles, stored_sessions)
+        query = self.session_manager.state.query_metadata
+        response = await query(snapshot, archived=archived)
+        if response is not None:
+            return response
+        handles = await resolver.alist_all_by_key()
+        return await query(lambda stored: render(handles, stored), archived=archived)
 
     def _sessions_list_payload(
         self,
@@ -1680,6 +1666,13 @@ class GatewayHTTPHandler:
             content_type=ctype,
             extra_headers=[("Cache-Control", cache), *extra_headers],
         )
+
+
+def _is_archive_key_list(value: object) -> TypeGuard[list[str]]:
+    return isinstance(value, list) and all(
+        isinstance(key, str) and _API_KEY_RE.fullmatch(key) and webui_chat_id(key)
+        for key in cast(list[object], value)
+    )
 
 
 def _is_websocket_channel_session_key(key: str) -> bool:

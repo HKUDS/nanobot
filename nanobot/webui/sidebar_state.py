@@ -8,8 +8,6 @@ import math
 import os
 import threading
 import time
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -336,36 +334,13 @@ async def ensure_webui_session_archives(sessions: SessionState) -> list[str]:
 class WebUISidebarState:
     def __init__(self, sessions: SessionState | None) -> None:
         self._sessions = sessions
-        self._lock = asyncio.Lock()
-        self._readers = 0
-        self._readers_drained = asyncio.Event()
-        self._readers_drained.set()
-
-    @asynccontextmanager
-    async def _read_snapshot(self) -> AsyncGenerator[None, None]:
-        # The FIFO admission lock lets readers overlap without overtaking a writer.
-        async with self._lock:
-            self._readers += 1
-            self._readers_drained.clear()
-        try:
-            yield
-        finally:
-            self._readers -= 1
-            if not self._readers:
-                self._readers_drained.set()
 
     async def read(self) -> dict[str, Any]:
-        async with self._read_snapshot():
-            if self._sessions is not None:
-                await ensure_webui_archives_imported(self._sessions)
-            return await asyncio.to_thread(read_webui_sidebar_state)
-
-    async def write(self, raw: dict[str, Any]) -> dict[str, Any]:
-        async with self._lock:
-            await self._readers_drained.wait()
-            return await shield_and_drain(self._write_snapshot(raw))
-
-    async def _write_snapshot(self, raw: dict[str, Any]) -> dict[str, Any]:
         if self._sessions is not None:
             await ensure_webui_archives_imported(self._sessions)
-        return await asyncio.to_thread(write_webui_sidebar_preferences, raw)
+        return await asyncio.to_thread(read_webui_sidebar_state)
+
+    async def write(self, raw: dict[str, Any]) -> dict[str, Any]:
+        if self._sessions is not None:
+            await ensure_webui_archives_imported(self._sessions)
+        return await shield_and_drain(asyncio.to_thread(write_webui_sidebar_preferences, raw))
