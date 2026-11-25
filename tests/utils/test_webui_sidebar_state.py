@@ -189,7 +189,7 @@ def test_sidebar_state_serializes_concurrent_writes(monkeypatch) -> None:
     assert peak_writes == 1
 
 
-async def test_sidebar_archive_migration_preserves_wire_shape_and_restored_state(tmp_path, monkeypatch):
+async def test_sidebar_archive_migration_preserves_preferences_and_restored_state(tmp_path, monkeypatch):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     path = webui_sidebar_state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -205,13 +205,14 @@ async def test_sidebar_archive_migration_preserves_wire_shape_and_restored_state
     sidebar = WebUISidebarState(manager.state)
     try:
         loaded = await sidebar.read()
-        assert loaded["archived_keys"] == ["websocket:empty", "websocket:old"]
+        assert "archived_keys" not in loaded
+        assert await manager.state.archived_keys() == ["websocket:empty", "websocket:old"]
         assert loaded["pinned_keys"] == ["websocket:pinned"]
         assert loaded["collapsed_groups"] == {"archived:workspace:chats": False}
         assert "archived_keys" not in json.loads(path.read_text(encoding="utf-8"))
-        loaded["archived_keys"].remove("websocket:old")
-        saved = await sidebar.write(loaded)
-        assert saved["archived_keys"] == ["websocket:empty"]
+        await manager.state.set_archived(["websocket:old"], False)
+        saved = await sidebar.write({**loaded, "archived_keys": []})
+        assert saved == loaded
         assert await manager.state.archived_keys() == ["websocket:empty"]
         assert {session["key"] for session in manager.list_sessions()} == {"websocket:old", "websocket:empty"}
         assert manager.read_session_snapshot("websocket:draft") is None
@@ -222,10 +223,10 @@ async def test_sidebar_archive_migration_preserves_wire_shape_and_restored_state
     sidebar = WebUISidebarState(reopened.state)
     try:
         restored = await sidebar.read()
-        assert restored["archived_keys"] == ["websocket:empty"]
+        assert await reopened.state.archived_keys() == ["websocket:empty"]
         assert restored["pinned_keys"] == ["websocket:pinned"]
         changed_preferences = await sidebar.write({"view": {"density": "compact"}})
-        assert changed_preferences["archived_keys"] == ["websocket:empty"]
+        assert "archived_keys" not in changed_preferences
         assert changed_preferences["view"]["density"] == "compact"
         assert "archived_keys" not in json.loads(path.read_text(encoding="utf-8"))
     finally:
@@ -254,7 +255,8 @@ async def test_archive_import_failure_keeps_json_source_for_retry(tmp_path, monk
         with sqlite3.connect(manager._store.path) as db:
             assert db.execute("SELECT key FROM session_archives").fetchall() == []
             db.execute("DROP TRIGGER fail_archive")
-        assert (await WebUISidebarState(manager.state).read())["archived_keys"] == ["websocket:fail", "websocket:first"]
+        await WebUISidebarState(manager.state).read()
+        assert await manager.state.archived_keys() == ["websocket:fail", "websocket:first"]
     finally:
         await manager.state.aclose()
 
@@ -264,8 +266,7 @@ async def test_sidebar_reads_and_preferences_do_not_wait_for_unrelated_session_w
     manager = SessionManager(tmp_path)
     sidebar = WebUISidebarState(manager.state)
     await manager.state.import_messages("websocket:busy", [{"role": "user", "content": "hello"}])
-    await manager.state.import_messages("websocket:archived", [{"role": "user", "content": "saved"}])
-    saved = await sidebar.write({"archived_keys": ["websocket:archived"]})
+    saved = await sidebar.write({"pinned_keys": ["websocket:busy"]})
     held, release, entered = threading.Event(), threading.Event(), threading.Event()
 
     def hold_writer():
@@ -288,9 +289,9 @@ async def test_sidebar_reads_and_preferences_do_not_wait_for_unrelated_session_w
         writer = asyncio.create_task(manager.state.update_metadata("websocket:busy", {"title": "Updated"}))
         assert await asyncio.to_thread(entered.wait, 2)
         loaded = await asyncio.wait_for(sidebar.read(), 2)
-        assert loaded["archived_keys"] == ["websocket:archived"]
+        assert loaded == saved
         changed = await asyncio.wait_for(sidebar.write({**saved, "view": {"density": "compact"}}), 2)
-        assert changed["archived_keys"] == ["websocket:archived"]
+        assert changed["pinned_keys"] == ["websocket:busy"]
         assert changed["view"]["density"] == "compact"
         assert not writer.done()
     finally:
@@ -311,93 +312,18 @@ async def test_archive_only_update_keeps_preferences_unchanged(tmp_path, monkeyp
         path = webui_sidebar_state_path()
         before = path.read_bytes()
         before_mtime = path.stat().st_mtime_ns
-        archived = await sidebar.write({**saved, "archived_keys": ["websocket:empty"]})
-        assert archived["archived_keys"] == ["websocket:empty"]
+        await manager.state.set_archived(["websocket:empty"], True)
         assert await manager.state.archived_keys() == ["websocket:empty"]
         assert path.read_bytes() == before
         assert path.stat().st_mtime_ns == before_mtime
         restored = await sidebar.write({**saved, "archived_keys": []})
-        assert restored["archived_keys"] == []
+        assert restored == saved
+        assert await manager.state.archived_keys() == ["websocket:empty"]
         assert path.stat().st_mtime_ns == before_mtime
         # A comparison failure must not prevent the existing repair-on-write path.
         for damaged in ("{broken", json.dumps({"view": {"density": []}})):
             path.write_text(damaged, encoding="utf-8")
             repaired = await sidebar.write(saved)
-            assert json.loads(path.read_text(encoding="utf-8")) == {key: value for key, value in repaired.items() if key != "archived_keys"}
+            assert json.loads(path.read_text(encoding="utf-8")) == repaired
     finally:
         await manager.state.aclose()
-
-
-async def test_sidebar_readers_overlap_without_overtaking_queued_write(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    manager = SessionManager(tmp_path)
-    manager.save(Session(key="websocket:new"))
-    sidebar = WebUISidebarState(manager.state)
-    saved = await sidebar.write({"view": {"density": "compact"}, "archived_keys": []})
-    entered, release = threading.Event(), threading.Event()
-    counter_lock = threading.Lock()
-    count = 0
-    original = sidebar_state.read_webui_sidebar_state
-
-    def paused_read():
-        nonlocal count
-        with counter_lock:
-            count += 1
-            pause = count <= 2
-            if count == 2:
-                entered.set()
-        if pause:
-            assert release.wait(10)
-        return original()
-
-    monkeypatch.setattr(sidebar_state, "read_webui_sidebar_state", paused_read)
-    readers = [asyncio.create_task(sidebar.read()) for _ in range(2)]
-    pending = []
-    try:
-        assert await asyncio.to_thread(entered.wait, 2)
-        writer = asyncio.create_task(sidebar.write({**saved, "view": {"density": "comfortable"}, "archived_keys": ["websocket:new"]}))
-        later_read = asyncio.create_task(sidebar.read())
-        pending.extend([writer, later_read])
-        release.set()
-        before = await asyncio.gather(*readers)
-        assert all(snapshot["archived_keys"] == [] and snapshot["view"]["density"] == "compact" for snapshot in before)
-        written, after = await asyncio.gather(writer, later_read)
-        assert written["archived_keys"] == after["archived_keys"] == ["websocket:new"]
-        assert written["view"]["density"] == after["view"]["density"] == "comfortable"
-    finally:
-        release.set()
-        await asyncio.gather(*readers, *pending, return_exceptions=True)
-        await manager.state.aclose()
-
-
-async def test_failed_archive_read_drains_preference_write_before_releasing_admission(tmp_path, monkeypatch):
-    from nanobot.session.state import SessionOperationQueueFullError
-
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    manager = SessionManager(tmp_path)
-    sidebar = WebUISidebarState(manager.state)
-    saved = await sidebar.write({"view": {"density": "comfortable"}, "archived_keys": []})
-    entered, release = threading.Event(), threading.Event()
-    original = sidebar_state.write_webui_sidebar_preferences
-
-    def paused_write(raw):
-        entered.set()
-        assert release.wait(10)
-        return original(raw)
-
-    async def reject_read():
-        raise SessionOperationQueueFullError("session operation queue is full")
-
-    monkeypatch.setattr(sidebar_state, "write_webui_sidebar_preferences", paused_write)
-    monkeypatch.setattr(manager.state, "archived_keys", reject_read)
-    write = asyncio.create_task(sidebar.write({**saved, "view": {"density": "compact"}}))
-    try:
-        assert await asyncio.to_thread(entered.wait, 2)
-        done, _ = await asyncio.wait({write}, timeout=0.05)
-        assert not done, "a failed archive read must not leave a preference write outside admission"
-    finally:
-        release.set()
-        with pytest.raises(SessionOperationQueueFullError):
-            await write
-        await manager.state.aclose()
-    assert json.loads(webui_sidebar_state_path().read_text(encoding="utf-8"))["view"]["density"] == "compact"

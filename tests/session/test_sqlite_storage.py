@@ -799,10 +799,12 @@ async def test_archive_state_survives_reopen_for_persisted_sessions_only(tmp_pat
         manager.get_or_create("websocket:draft")
         original = manager.read_session_snapshot("websocket:active")
         assert await state.import_archives(["websocket:active"]) == ["websocket:active"]
-        assert await state.set_archived_keys(["websocket:active", "websocket:empty", "websocket:draft", "websocket:missing"]) == ["websocket:active", "websocket:empty"]
+        await state.set_archived(["websocket:empty", "websocket:draft", "websocket:missing"], True)
+        assert await state.archived_keys() == ["websocket:active", "websocket:empty"]
         assert manager.read_session_snapshot("websocket:draft") is None
         assert manager.read_session_snapshot("websocket:missing") is None
         assert manager.read_session_snapshot("websocket:empty") == fork
+        assert manager.read_session_version(fork.key) == (fork.generation, fork.revision)
         assert manager.read_session_snapshot("websocket:active") == original
     finally:
         await state.aclose()
@@ -813,7 +815,7 @@ async def test_archive_state_survives_reopen_for_persisted_sessions_only(tmp_pat
         await reopened.reset("websocket:active")
         assert await reopened.archived_keys() == ["websocket:active", "websocket:empty"]
         assert (await reopened.read("websocket:active")).messages == []
-        assert await reopened.set_archived_keys(["websocket:empty"]) == ["websocket:empty"]
+        await reopened.set_archived(["websocket:active"], False)
         # A repeated legacy import must not revive a restored session.
         assert await reopened.import_archives(["websocket:active"]) == ["websocket:empty"]
         assert await reopened.delete("websocket:empty") is True
@@ -834,7 +836,7 @@ async def test_archive_batch_rolls_back_on_database_failure(tmp_path):
                           WHEN NEW.key='websocket:fail'
                           BEGIN SELECT RAISE(ABORT, 'archive failed'); END""")
         with pytest.raises(sqlite3.IntegrityError, match="archive failed"):
-            await state.set_archived_keys(["websocket:first", "websocket:fail"])
+            await state.set_archived(["websocket:first", "websocket:fail"], True)
         assert await state.archived_keys() == []
     finally:
         await state.aclose()

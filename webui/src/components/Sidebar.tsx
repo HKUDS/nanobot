@@ -86,7 +86,6 @@ interface SidebarProps {
   recoveryChatIds?: string[];
   viewState?: SidebarViewState;
   showArchived?: boolean;
-  archivedCount?: number;
   defaultWorkspacePath?: string | null;
   hostChromeInset?: boolean;
   desktopDock?: boolean;
@@ -123,7 +122,7 @@ export function Sidebar(props: SidebarProps) {
   const collapseLabel = t("sidebar.collapse");
   const apple = isApplePlatform();
   const activeUtilityId = props.activeUtility ? `utility:${props.activeUtility}` : null;
-  const { archivedCount, desktopDock, onOpenSearch, onToggleArchived, showArchived } = props;
+  const { desktopDock, onOpenSearch, onToggleArchived, showArchived } = props;
   const footerActionProps = { collapsed, dockLabel: desktopDock, onIntent: props.onSettingsIntent, tooltipSide: "top" } as const;
   const actionInset = desktopDock || collapsed ? "px-3" : "px-2";
 
@@ -138,17 +137,15 @@ export function Sidebar(props: SidebarProps) {
         onClick={onOpenSearch}
         icon={<SearchIcon className="h-4 w-4" />}
       />
-      {archivedCount ? (
-        <SidebarActionButton
-          collapsed={collapsed}
-          dockLabel={desktopDock}
-          label={showArchived ? t("chat.hideArchived") : t("chat.showArchived")}
-          onClick={onToggleArchived}
-          icon={<ArchiveIcon className="h-4 w-4" />}
-        />
-      ) : null}
+      <SidebarActionButton
+        collapsed={collapsed}
+        dockLabel={desktopDock}
+        label={showArchived ? t("chat.hideArchived") : t("chat.showArchived")}
+        onClick={onToggleArchived}
+        icon={<ArchiveIcon className="h-4 w-4" />}
+      />
     </div>
-  ), [actionInset, apple, archivedCount, collapsed, desktopDock, onOpenSearch, onToggleArchived, showArchived, t]);
+  ), [actionInset, apple, collapsed, desktopDock, onOpenSearch, onToggleArchived, showArchived, t]);
 
   return (
     <nav

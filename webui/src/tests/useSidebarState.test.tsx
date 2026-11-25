@@ -62,7 +62,6 @@ describe("useSidebarState", () => {
     } as unknown as NanobotClient;
     const saved = {
       pinned_keys: ["websocket:old"],
-      archived_keys: ["websocket:archived"],
       title_overrides: { "websocket:old": "Saved title" },
       tags_by_key: { "websocket:old": ["important"] },
       session_order: ["websocket:old", "websocket:archived"],
@@ -123,7 +122,6 @@ describe("useSidebarState", () => {
     const pushed: SidebarStatePayload = {
       ...result.current.state,
       pinned_keys: ["websocket:saved"],
-      archived_keys: ["websocket:archived"],
       session_order: ["websocket:saved", "websocket:archived"],
       title_overrides: { "websocket:saved": "Saved title" },
       tags_by_key: { "websocket:saved": ["saved-tag"] },
@@ -254,22 +252,24 @@ describe("useSidebarState", () => {
   });
 
   it("drains optimistic writes before renaming and preserves edits made during the rename", async () => {
-    const { result, writes, setSidebarState } = await renderLoadedSidebarState();
+    const { result, writes, setSidebarState, receive } = await renderLoadedSidebarState();
     let rename!: Promise<void>;
     act(() => {
       void result.current.update((current) => ({ ...current, pinned_keys: ["websocket:a"] }));
       rename = result.current.rename("websocket:a", "Requested title");
-      void result.current.update((current) => ({ ...current, archived_keys: ["websocket:b"] }));
+      void result.current.update((current) => ({ ...current, session_order: ["websocket:b"] }));
       void result.current.update((current) => ({
         ...current, view: { ...current.view, density: "compact" },
       }));
     });
     expect(setSidebarState).toHaveBeenCalledTimes(1);
+    act(() => receive(writes[0].state));
+    expect(result.current.state.session_order).toEqual(["websocket:b"]);
     await act(async () => { writes[0].resolve(); });
     expect(setSidebarState).toHaveBeenCalledTimes(2);
     expect(writes[1].state).toEqual(expect.objectContaining({
       pinned_keys: ["websocket:a"],
-      archived_keys: ["websocket:b"],
+      session_order: ["websocket:b"],
       view: expect.objectContaining({ density: "compact" }),
     }));
     expect(writes[1].state.title_overrides["websocket:a"]).toBe("Saved title");
@@ -301,7 +301,7 @@ describe("useSidebarState", () => {
     });
     expect(result.current.state).toEqual(expect.objectContaining({
       pinned_keys: [],
-      archived_keys: ["websocket:b"],
+      session_order: ["websocket:b"],
       tags_by_key: { "websocket:b": ["important"] },
       view: expect.objectContaining({ density: "comfortable" }),
       title_overrides: { "websocket:a": "Canonical title", "websocket:b": "Other title" },
@@ -355,77 +355,18 @@ describe("useSidebarState", () => {
     await act(async () => {
       await expect(result.current.rename("websocket:b", "Offline title"))
         .rejects.toThrow("WebUI connection is not open");
-      await result.current.update((current) => ({ ...current, archived_keys: ["websocket:b"] }));
+      await result.current.update((current) => ({ ...current, session_order: ["websocket:b"] }));
       writes[0].resolve();
     });
     expect(setSidebarState).toHaveBeenCalledTimes(1);
     expect(result.current.state.title_overrides).toEqual({
       "websocket:a": "Saved title", "websocket:b": "Other title",
     });
-    expect(result.current.state.archived_keys).toEqual(["websocket:b"]);
+    expect(result.current.state.session_order).toEqual(["websocket:b"]);
     act(() => setStatus("open"));
     expect(setSidebarState).toHaveBeenCalledTimes(2);
     expect(writes[1].state).toEqual(result.current.state);
     await act(async () => { writes[1].resolve(); });
     expect(setSidebarState).toHaveBeenCalledTimes(2);
-  });
-
-  it("serializes full-state writes so an older request cannot overwrite a newer update", async () => {
-    let resolveFirstWrite: (() => void) | null = null;
-    let sidebarStateUpdateHandler: ((state: SidebarStatePayload) => void) | null = null;
-    const setSidebarState = vi.fn()
-      .mockImplementationOnce((state: SidebarStatePayload) => new Promise<SidebarStatePayload>(
-        (resolve) => {
-          resolveFirstWrite = () => resolve(state);
-        },
-      ))
-      .mockImplementation(async (state: SidebarStatePayload) => state);
-    const client = {
-      status: "open" as const,
-      onStatus: () => () => {},
-      onSidebarStateUpdate: (handler: (state: SidebarStatePayload) => void) => {
-        sidebarStateUpdateHandler = handler;
-        return () => {
-          sidebarStateUpdateHandler = null;
-        };
-      },
-      setSidebarState,
-    } as unknown as NanobotClient;
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({}),
-    }));
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <ClientProvider client={client} token="token">
-        {children}
-      </ClientProvider>
-    );
-    const { result } = renderHook(() => useSidebarState([], false), { wrapper });
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    act(() => {
-      void result.current.update((current) => ({
-        ...current,
-        title_overrides: { "websocket:a": "First" },
-      }));
-      void result.current.update((current) => ({
-        ...current,
-        title_overrides: { "websocket:a": "Second" },
-      }));
-    });
-
-    expect(setSidebarState).toHaveBeenCalledTimes(1);
-    act(() => {
-      sidebarStateUpdateHandler?.(setSidebarState.mock.calls[0]?.[0]);
-    });
-    expect(result.current.state.title_overrides).toEqual({
-      "websocket:a": "Second",
-    });
-    act(() => resolveFirstWrite?.());
-    await waitFor(() => expect(setSidebarState).toHaveBeenCalledTimes(2));
-    expect(setSidebarState.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
-      title_overrides: { "websocket:a": "Second" },
-    }));
   });
 });

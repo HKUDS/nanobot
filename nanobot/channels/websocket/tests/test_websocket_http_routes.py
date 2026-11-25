@@ -2526,8 +2526,8 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         assert updated.status_code == 200
         body = updated.result
         assert body["pinned_keys"] == ["websocket:sidebar"]
-        assert body["archived_keys"] == ["websocket:old"]
-        assert await sm.state.archived_keys() == ["websocket:old"]
+        assert "archived_keys" not in body
+        assert await sm.state.archived_keys() == []
         assert body["session_order"] == ["websocket:old", "websocket:sidebar"]
         assert body["title_overrides"] == {"websocket:sidebar": "Pinned work"}
         assert body["view"]["density"] == "compact"
@@ -2538,7 +2538,7 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         assert persisted["pinned_keys"] == ["websocket:sidebar"]
         assert "archived_keys" not in persisted
         read_back = await _http_get("http://127.0.0.1:29911/api/webui/sidebar-state", headers=auth)
-        assert read_back.json()["archived_keys"] == ["websocket:old"]
+        assert read_back.json() == body
     finally:
         await channel.stop()
         await server_task

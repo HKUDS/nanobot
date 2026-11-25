@@ -1048,30 +1048,9 @@ export const ChatList = memo(function ChatList({
                             <SidebarActionMenuContent
                               portalContainer={actionMenuPortalContainer}
                             >
-                              <DropdownMenuItem onSelect={() => onTogglePin(s.key)}>
-                                {isPinned ? (
-                                  <PinOff className="h-4 w-4 shrink-0" />
-                                ) : (
-                                  <Pin className="h-4 w-4 shrink-0" />
-                                )}
-                                {isPinned ? t("chat.unpin") : t("chat.pin")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onSelect={() => beginRename(s.key)}
-                              >
-                                <Pencil className="h-4 w-4 shrink-0" />
-                                {t("chat.rename")}
-                              </DropdownMenuItem>
-                              {s.projectLocked !== false ? (
-                                <DropdownMenuItem onSelect={() => onToggleArchive(s.key)}>
-                                  {isArchived ? (
-                                    <ArchiveRestore className="h-4 w-4 shrink-0" />
-                                  ) : (
-                                    <Archive className="h-4 w-4 shrink-0" />
-                                  )}
-                                  {isArchived ? t("chat.unarchive") : t("chat.archive")}
-                                </DropdownMenuItem>
-                              ) : null}
+                              <TopicMenuItems pinned={isPinned} archived={isArchived} canArchive={s.projectLocked !== false}
+                                onPin={() => onTogglePin(s.key)} onRename={() => beginRename(s.key)}
+                                onArchive={() => onToggleArchive(s.key)} />
                               {paneGroup && onCreateTab ? (
                                 <DropdownMenuItem onSelect={() => onCreateTab(s.key)}>
                                   <PanelsTopLeft className="h-4 w-4 shrink-0" aria-hidden />
@@ -1349,6 +1328,26 @@ function WorkbenchTabHeader({
   );
 }
 
+function TopicMenuItems({ pinned, archived, canArchive, onPin, onRename, onArchive }: {
+  pinned: boolean; archived: boolean; canArchive: boolean;
+  onPin: () => void; onRename: () => void; onArchive: () => void;
+}) {
+  const { t } = useTranslation();
+  const PinIcon = pinned ? PinOff : Pin;
+  const ArchiveIcon = archived ? ArchiveRestore : Archive;
+  return <>
+    {!archived && <DropdownMenuItem onSelect={onPin}>
+      <PinIcon className="h-4 w-4 shrink-0" />{t(pinned ? "chat.unpin" : "chat.pin")}
+    </DropdownMenuItem>}
+    <DropdownMenuItem onSelect={onRename}>
+      <Pencil className="h-4 w-4 shrink-0" />{t("chat.rename")}
+    </DropdownMenuItem>
+    {canArchive && <DropdownMenuItem onSelect={onArchive}>
+      <ArchiveIcon className="h-4 w-4 shrink-0" />{t(archived ? "chat.unarchive" : "chat.archive")}
+    </DropdownMenuItem>}
+  </>;
+}
+
 function ActivePaneRows({
   id,
   group,
@@ -1526,30 +1525,9 @@ function ActivePaneRows({
                 <SidebarActionMenuContent
                   portalContainer={actionMenuPortalContainer}
                 >
-                  <DropdownMenuItem onSelect={() => onTogglePin(pane.key)}>
-                    {isPinned ? (
-                      <PinOff className="h-4 w-4 shrink-0" />
-                    ) : (
-                      <Pin className="h-4 w-4 shrink-0" />
-                    )}
-                    {isPinned ? t("chat.unpin") : t("chat.pin")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onSelect={() => onBeginRename(pane.key)}
-                  >
-                    <Pencil className="h-4 w-4 shrink-0" />
-                    {t("chat.rename")}
-                  </DropdownMenuItem>
-                  {pane.projectLocked === true ? (
-                    <DropdownMenuItem onSelect={() => onToggleArchive(pane.key)}>
-                      {isArchived ? (
-                        <ArchiveRestore className="h-4 w-4 shrink-0" />
-                      ) : (
-                        <Archive className="h-4 w-4 shrink-0" />
-                      )}
-                      {isArchived ? t("chat.unarchive") : t("chat.archive")}
-                    </DropdownMenuItem>
-                  ) : null}
+                  <TopicMenuItems pinned={isPinned} archived={isArchived} canArchive={pane.projectLocked === true}
+                    onPin={() => onTogglePin(pane.key)} onRename={() => onBeginRename(pane.key)}
+                    onArchive={() => onToggleArchive(pane.key)} />
                   {onDetachPane ? (
                     <DropdownMenuItem onSelect={() => onDetachPane(group.tabKey, pane.key)}>
                       <Unplug className="h-4 w-4 shrink-0" />

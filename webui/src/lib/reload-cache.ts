@@ -40,11 +40,12 @@ export function removeReloadCache(name: string): void {
 export function clearReloadCache(): void {
   scope = null;
   removeReloadCache("sessions");
+  removeReloadCache("activeSessions");
   removeReloadCache("thread");
 }
 
 export function readReloadSessions(): ChatSummary[] {
-  const value = readReloadCache("sessions");
+  const value = readReloadCache("activeSessions");
   if (!Array.isArray(value)) return [];
   return value.flatMap((row): ChatSummary[] => {
     if (!isRecord(row) || typeof row.key !== "string" || typeof row.channel !== "string"

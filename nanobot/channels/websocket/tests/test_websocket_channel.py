@@ -1626,8 +1626,50 @@ async def test_webui_persists_sidebar_state_larger_than_http_request_line(
         "event": "webui_response",
         "request_id": request_id,
         "ok": True,
-        "result": {**saved, "archived_keys": []},
+        "result": saved,
     }
+
+
+@pytest.mark.asyncio
+async def test_archive_request_broadcasts_list_invalidation_only_on_success(bus, tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sessions = SessionManager(tmp_path)
+    for key in ("websocket:a", "websocket:b"):
+        await sessions.state.import_messages(key, [{"role": "user", "content": "saved"}])
+    channel = _ch(bus, session_manager=sessions)
+    source, peer = AsyncMock(), AsyncMock()
+    source.request = SimpleNamespace(headers=Headers())
+    channel._webui_connections.update({source, peer})
+    channel._register_connection_outbound(peer)
+
+    async def request(request_id, keys, archived, connection=source):
+        await channel._dispatch_envelope(connection, "webui-client", {
+            "type": "webui_request", "action": "sessions.archive", "request_id": request_id,
+            "payload": {"keys": keys, "archived": archived},
+        })
+        await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
+        return json.loads(connection.send.await_args.args[0])
+
+    try:
+        result = await request("archive-a", ["websocket:a"], True)
+        assert result["ok"] and result["result"] == {"ok": True}
+        assert json.loads(peer.send.await_args.args[0]) == {"event": "sessions_changed"}
+        assert (await request("archive-b", ["websocket:b"], True, peer))["ok"]
+        assert await sessions.state.archived_keys() == ["websocket:a", "websocket:b"]
+        assert (await request("restore", ["websocket:a"], False))["ok"]
+        assert await sessions.state.archived_keys() == ["websocket:b"]
+        peer.send.reset_mock()
+        for i, (keys, archived) in enumerate([
+            (["websocket:b", 1], False), (["slack:C1"], True), ("websocket:b", True),
+            (["websocket:b"], "false"), (["websocket:"], True),
+        ]):
+            result = await request(f"invalid-{i}", keys, archived)
+            assert not result["ok"] and result["error"]["status"] == 400
+        peer.send.assert_not_awaited()
+        assert await sessions.state.archived_keys() == ["websocket:b"]
+    finally:
+        await channel.stop()
+        await sessions.state.aclose()
 
 
 @pytest.mark.asyncio
@@ -1674,8 +1716,8 @@ async def test_webui_sidebar_state_update_broadcasts_workbench_to_other_devices(
         await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
         event = json.loads(other_device.send.await_args.args[0])
         assert event["event"] == "sidebar_state_updated"
-        assert event["state"]["archived_keys"] == ["websocket:b"]
-        assert await sessions.state.archived_keys() == ["websocket:b"]
+        assert "archived_keys" not in event["state"]
+        assert await sessions.state.archived_keys() == []
         assert event["state"]["workbench"] == state["workbench"]
         persisted = json.loads((tmp_path / "webui" / "sidebar-state.json").read_text(encoding="utf-8"))
         assert "archived_keys" not in persisted
@@ -6098,7 +6140,8 @@ def test_sessions_list_reports_only_live_runs(monkeypatch, retired: bool) -> Non
             "updated_at": "2026-05-19T10:01:00Z",
         },
     ]
-    session_manager.state.query_metadata = AsyncMock(side_effect=lambda project: project([]))
+    session_manager.state.archives_imported = AsyncMock(return_value=True)
+    session_manager.state.query_metadata = AsyncMock(side_effect=lambda project, **filters: project([]))
     monkeypatch.setattr(ws_http_module, "list_webui_sessions", lambda _session_manager, _stored: sessions)
     handle = session_handle_for_name("websocket:chat-1", "luma")
     monkeypatch.setattr(

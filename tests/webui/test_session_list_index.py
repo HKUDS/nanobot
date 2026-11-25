@@ -291,9 +291,8 @@ def list_webui_sessions(manager: SessionManager) -> list[dict]:
     return session_list_index.list_webui_sessions(manager)
 
 
-async def test_sidebar_allocates_handles_then_reads_during_pending_write(tmp_path, monkeypatch):
-    import asyncio
-    import threading
+@pytest.fixture
+async def session_list_api(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
     from websockets.datastructures import Headers
@@ -305,10 +304,6 @@ async def test_sidebar_allocates_handles_then_reads_during_pending_write(tmp_pat
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
     manager = SessionManager(tmp_path / "workspace")
-    state = manager.state
-    key = "websocket:busy"
-    await state.get(key)
-    await state.update_metadata(key, {"title": "committed"})
     gateway = build_gateway_services(
         config=WebSocketConfig(), bus=MessageBus(), session_manager=manager,
         static_dist_path=None, workspace_path=tmp_path / "workspace",
@@ -317,7 +312,26 @@ async def test_sidebar_allocates_handles_then_reads_during_pending_write(tmp_pat
     )
     token = gateway.tokens.issue_api_token(60)
     connection = SimpleNamespace(remote_address=("127.0.0.1", 12345))
-    request = Request("/api/sessions", Headers({"Authorization": f"Bearer {token}"}))
+    headers = Headers({"Authorization": f"Bearer {token}"})
+
+    async def get(query=""):
+        return await gateway.http.dispatch(connection, Request("/api/sessions" + query, headers))
+
+    try:
+        yield manager, get
+    finally:
+        await manager.state.aclose()
+
+
+async def test_sidebar_allocates_handles_then_reads_during_pending_write(session_list_api, monkeypatch):
+    import asyncio
+    import threading
+
+    manager, get = session_list_api
+    state = manager.state
+    key = "websocket:busy"
+    await state.get(key)
+    await state.update_metadata(key, {"title": "committed"})
     started, release = threading.Event(), threading.Event()
     original = manager._store.replace_metadata
 
@@ -326,27 +340,51 @@ async def test_sidebar_allocates_handles_then_reads_during_pending_write(tmp_pat
         assert release.wait(5)
         return original(session_key, metadata, **kwargs)
 
+    first = await get()
+    assert first.status_code == 200
+    first_row, = json.loads(first.body)["sessions"]
+    persisted = await state.read_metadata(key)
+    assert first_row["handle"]["name"] == persisted["metadata"]["session_handle"]
+    monkeypatch.setattr(manager._store, "replace_metadata", blocked)
+    write = asyncio.create_task(state.update_metadata(key, {"title": "next"}))
     try:
-        first = await gateway.http.dispatch(connection, request)
-        assert first.status_code == 200
-        first_row, = json.loads(first.body)["sessions"]
-        persisted = await state.read_metadata(key)
-        assert first_row["handle"]["name"] == persisted["metadata"]["session_handle"]
-        monkeypatch.setattr(manager._store, "replace_metadata", blocked)
-        write = asyncio.create_task(state.update_metadata(key, {"title": "next"}))
-        try:
-            assert await asyncio.to_thread(started.wait, 2)
-            response = await asyncio.wait_for(gateway.http.dispatch(connection, request), 0.5)
-            assert response.status_code == 200
-            row, = json.loads(response.body)["sessions"]
-            assert row["title"] == "committed"
-            assert row["handle"] == first_row["handle"]
-        finally:
-            release.set()
-            await write
+        assert await asyncio.to_thread(started.wait, 2)
+        response = await asyncio.wait_for(get("?archived=false"), 0.5)
+        assert response.status_code == 200
+        row, = json.loads(response.body)["sessions"]
+        assert row["title"] == "committed"
+        assert row["handle"] == first_row["handle"]
     finally:
         release.set()
-        await state.aclose()
+        await write
+
+
+async def test_archive_filter_selects_rows_before_rendering_and_preserves_handles(session_list_api):
+    from nanobot.webui.sidebar_state import webui_sidebar_state_path
+
+    manager, get = session_list_api
+    active, archived = "websocket:active", "websocket:archived"
+    for key in (active, archived):
+        await manager.state.import_messages(key, [{"role": "user", "content": key}])
+        # A legacy import can reuse a name across the two partitions.
+        await manager.state.update_metadata(key, {"session_handle": "luma" if key == active else "@LUMA"})
+    legacy = webui_sidebar_state_path()
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(json.dumps({"archived_keys": [archived]}), encoding="utf-8")
+    handles = {}
+    for value, key in ((False, active), (True, archived)):
+        result = await get("?archived=" + str(value).lower())
+        assert result.status_code == 200
+        row, = json.loads(result.body)["sessions"]
+        assert row["key"] == key and row["archived"] is value
+        handles[key] = row["handle"]
+    assert handles[active]["name"] == "luma"
+    assert handles[archived]["name"] != "luma"
+    rows = json.loads((await get()).body)["sessions"]
+    assert {r["key"]: r["handle"] for r in rows} == handles
+    assert {r["key"]: r["archived"] for r in rows} == {active: False, archived: True}
+    for query in ("?archived=yes", "?archived=", "?archived=true&archived=false"):
+        assert (await get(query)).status_code == 400
 
 
 def test_webui_session_list_fallback_time_when_missing(tmp_path: Path) -> None:

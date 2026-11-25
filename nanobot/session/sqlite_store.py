@@ -26,7 +26,7 @@ from nanobot.session.manager import (
 )
 from nanobot.session.model_selection import SESSION_MODEL_KEYS, SessionModelPreset
 from nanobot.session.summary import is_summary_checkpoint
-from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
+from nanobot.session.types import CONVERSATION, PARENT_SESSION_KEY, SESSION_TYPE_KEY
 
 _CHECKPOINT = "runtime_checkpoint"
 _INPUTS = ("pending_user_followups",)
@@ -589,6 +589,19 @@ class SqliteSessionStore:
             finally:
                 rows.close()
 
+    def list_handle_metadata(self) -> list[dict[str, Any]]:
+        """Read just the allocation headers, irrespective of archive membership."""
+        with self.transaction(write=False) as db:
+            rows = db.execute(f"""
+                SELECT key, created_at, json_extract(metadata, '$.session_handle'),
+                    CASE WHEN json_type(metadata, '$.{SESSION_TYPE_KEY}') IS NULL THEN ?
+                         ELSE json_extract(metadata, '$.{SESSION_TYPE_KEY}') END
+                FROM sessions
+            """, (CONVERSATION.name,))
+            return [{"key": key, "created_at": created,
+                     "metadata": {"session_handle": name, SESSION_TYPE_KEY: kind}}
+                    for key, created, name, kind in rows]
+
     def project_session_handle_names(
         self, project: Callable[[Iterator[tuple[str, object]]], _T],
     ) -> _T:
@@ -747,28 +760,20 @@ class SqliteSessionStore:
 
     def import_archives(self, keys: list[str]) -> list[str]:
         with self.transaction() as db:
-            if self.archives_imported():
-                return self.archived_keys()
-            imported = self.set_archived_keys(keys)
-            db.execute("INSERT INTO storage_meta (key, value) VALUES ('session_archives_imported', '1')")
-            return imported
+            if db.execute("INSERT OR IGNORE INTO storage_meta (key, value) VALUES ('session_archives_imported', '1')").rowcount:
+                self.set_archived(keys, True)
+            return self.archived_keys()
 
-    def set_archived_keys(self, keys: list[str]) -> list[str]:
+    def set_archived(self, keys: list[str], archived: bool) -> None:
         with self.transaction() as db:
-            current = set(self.archived_keys())
-            requested = set(keys)
-            # Existing memberships are valid by FK; only new keys need validation.
-            added = requested - current
-            if added:
-                added = {row[0] for row in db.execute(
-                    "SELECT key FROM sessions WHERE key IN (SELECT value FROM json_each(?))",
-                    (_encode(list(added)),),
-                )}
-            target = (requested & current) | added
-            db.executemany("DELETE FROM session_archives WHERE key=?", ((key,) for key in current - target))
-            now = datetime.now().isoformat()
-            db.executemany("INSERT INTO session_archives (key, archived_at) VALUES (?, ?)", ((key, now) for key in target - current))
-            return sorted(target)
+            if archived:
+                db.execute("""
+                    INSERT INTO session_archives (key, archived_at)
+                    SELECT key, ? FROM sessions WHERE key IN (SELECT value FROM json_each(?))
+                    ON CONFLICT(key) DO NOTHING
+                """, (datetime.now().isoformat(), _encode(keys)))
+            else:
+                db.execute("DELETE FROM session_archives WHERE key IN (SELECT value FROM json_each(?))", (_encode(keys),))
 
     def delete(self, key: str, *, preserve_archive: bool = False) -> bool:
         with self.transaction() as db:
@@ -846,20 +851,25 @@ class SqliteSessionStore:
                         (_encode(keys), parent_key),
                     )]
 
-    def list_metadata(self) -> list[dict[str, Any]]:
+    def list_metadata(self, *, archived: bool | None = None) -> list[dict[str, Any]]:
+        archive_join = "JOIN" if archived is True else "LEFT JOIN"
+        archive_filter = "WHERE session_archives.key IS NULL" if archived is False else ""
         with self.transaction(write=False) as db:
             # Fetch one value so a large list does not cross the Python/SQLite
             # iterator boundary for every session while other workers are busy.
-            encoded = db.execute("""
+            encoded = db.execute(f"""
                 SELECT json_group_array(json_object(
                     'key', key, 'created_at', created_at, 'updated_at', updated_at,
-                    'title', title, 'preview', preview, 'visible_updated_at', visible_updated_at,
+                    'archived', archived, 'title', title, 'preview', preview, 'visible_updated_at', visible_updated_at,
                     'metadata', metadata, 'history_updated_at_ms', history_updated_at_ms,
                     'history_preview', history_preview
                 )) FROM (
-                    SELECT sessions.*, coalesce(history_heads.updated_at_ms, 0) AS history_updated_at_ms,
+                    SELECT sessions.*, session_archives.key IS NOT NULL AS archived,
+                           coalesce(history_heads.updated_at_ms, 0) AS history_updated_at_ms,
                            coalesce(nullif(history_heads.user_preview, ''), history_heads.preview, '') AS history_preview
-                    FROM sessions LEFT JOIN history_heads ON history_heads.session_key=sessions.key
+                    FROM sessions {archive_join} session_archives ON session_archives.key=sessions.key
+                    LEFT JOIN history_heads ON history_heads.session_key=sessions.key
+                    {archive_filter}
                     ORDER BY sessions.updated_at DESC
                 )
             """).fetchone()[0]

@@ -417,7 +417,6 @@ export async function fetchSessions(
     }
   }
   const pinned = new Set(Array.isArray(sidebar.pinned_keys) ? sidebar.pinned_keys : [])
-  const archived = new Set(Array.isArray(sidebar.archived_keys) ? sidebar.archived_keys : [])
   const titles = isRecord(sidebar.title_overrides) ? sidebar.title_overrides : {}
   return (payload.sessions || []).flatMap((value) => {
     if (!isRecord(value) || typeof value.key !== "string" || !value.key.startsWith("websocket:")) {
@@ -448,7 +447,7 @@ export async function fetchSessions(
         : {}),
       ...(isWorkspaceScope(value.workspace_scope) ? { workspaceScope: value.workspace_scope } : {}),
       pinned: pinned.has(value.key),
-      archived: archived.has(value.key),
+      archived: value.archived === true,
     }]
   })
 }

@@ -232,10 +232,10 @@ async def test_rejected_input_does_not_stop_other_sessions(loop, monkeypatch, re
 
     original_list = loop.sessions._store.list_metadata
 
-    def blocked_list():
+    def blocked_list(**filters):
         readers_started.set()
         assert release_readers.wait(5)
-        return original_list()
+        return original_list(**filters)
 
     loop.provider.chat_stream_with_retry = chat
     if rejection == "idle":
