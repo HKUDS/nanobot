@@ -199,6 +199,22 @@ export function ThreadMessages({
   }, []);
   const editing = useMessageEditing(editScope);
   const selected = editing?.message;
+  const focusReturn = useRef<{ row: HTMLElement; scope: string } | null>(null);
+  useLayoutEffect(() => {
+    const list = messageListRef.current;
+    if (selected && list && editScope) {
+      const row = list.querySelector<HTMLElement>("[data-thread-editing]");
+      focusReturn.current = row ? { row, scope: editScope } : null;
+      return;
+    }
+    const target = focusReturn.current;
+    focusReturn.current = null;
+    if (!target || target.scope !== editScope || !list?.contains(target.row)) return;
+    const trigger = target.row.querySelector<HTMLButtonElement>(
+      mobileActions ? "[data-message-block-menu-trigger]" : "[data-message-block-edit-action]",
+    );
+    (trigger?.disabled ? trigger.parentElement : trigger)?.focus({ preventScroll: true });
+  }, [selected, editScope, mobileActions]);
   let editSourceVisible = false;
   let nextUserIndex = hiddenUserMessageCount;
   const preludeIndex = Math.max(0, beforeUnit ? unitKeys.indexOf(beforeUnit.key) : 0);
@@ -561,16 +577,6 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
     return () => { historyRows.delete(element); };
   }, [historyRows, scrollAnchor]);
   const activityDetailsId = useId();
-  const wasEditing = useRef(false);
-  useLayoutEffect(() => {
-    if (wasEditing.current && !isEditing) {
-      const trigger = elementRef.current?.querySelector<HTMLButtonElement>(
-        mobileActions ? "[data-message-block-menu-trigger]" : "[data-message-block-edit-action]",
-      );
-      (trigger?.disabled ? trigger.parentElement : trigger)?.focus({ preventScroll: true });
-    }
-    wasEditing.current = isEditing;
-  }, [isEditing, mobileActions]);
   const heightRef = useRef(0);
   const [nearViewport, setNearViewport] = useState(true);
   const [interacted, setInteracted] = useState(false);
@@ -660,6 +666,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
           onContextBlockActiveChange(contextBlockKey ?? null);
         }}
         data-thread-display-unit={unitKey}
+        data-thread-editing={isEditing || undefined}
         data-user-prompt-id={userPromptId}
         data-message-context-block={contextBlockKey}
         data-context-block-active={contextBlockActive || undefined}
