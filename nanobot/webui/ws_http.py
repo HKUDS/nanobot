@@ -1232,7 +1232,6 @@ class GatewayHTTPHandler:
         if data is None:
             return _http_error(404, "webui thread not found")
         data["workspace_scope"] = scope_payload
-        data["history_generation"] = source_version[0] if source_version is not None else None
         response_headers = list(_NO_STORE_HEADERS)
         if revision is not None:
             response_headers.append(("ETag", _quoted_etag(revision)))

@@ -265,7 +265,7 @@ export class NanobotClient {
   private transcriptHandlers = new Map<string, { handler: EventHandler }>();
   /** Inbound frames received while the transcript owner is absent, regardless of observers. */
   private pendingInboundByChat = new Map<string, InboundEvent[]>();
-  private historyGenerations = new Map<string, string>();
+  private historyGenerations = new Map<string, { generation: string; version: WebuiThreadPersistedPayload["history_version"] }>();
   private retiredHistoryGenerations = new Map<string, Set<string>>();
   private static readonly PENDING_INBOUND_MAX = 2000;
   private static readonly PENDING_TEMP_INBOUND_MAX = 20_000;
@@ -413,9 +413,23 @@ export class NanobotClient {
   /** Adopt a canonical lifecycle boundary, including after a missed live reset. */
   adoptHistorySnapshot(chatId: string, body: WebuiThreadPersistedPayload, retiredTurnIds: string[] = [], previousGeneration?: string): boolean {
     const generation = body.history_generation;
-    if (!generation || this.retiredHistoryGenerations.get(chatId)?.has(generation)) return false;
-    const previous = this.historyGenerations.get(chatId);
-    this.historyGenerations.set(chatId, generation);
+    if (!generation) return false;
+    const current = this.historyGenerations.get(chatId);
+    const previous = current?.generation;
+    if (this.isRetiredHistorySnapshot(chatId, body)) {
+      // A newer HTTP page may win the race with multiple ordered WS notices.
+      // Learn the old notice's tombstones without forgetting the current run.
+      const retired = this.retiredHistoryGenerations.get(chatId) ?? new Set<string>();
+      retired.add(generation);
+      if (previousGeneration && previousGeneration !== previous) retired.add(previousGeneration);
+      this.retiredHistoryGenerations.set(chatId, retired);
+      if (retiredTurnIds.length) this.fenceCanonicalCompletedTurns(chatId, retiredTurnIds);
+      return false;
+    }
+    const clock = body.history_version;
+    if (previous !== generation || (clock && (!current?.version || clock.revision >= current.version.revision))) {
+      this.historyGenerations.set(chatId, { generation, version: clock });
+    }
     const replaced = previous !== generation && !!(previous || previousGeneration);
     if (replaced || previousGeneration) {
       const retired = this.retiredHistoryGenerations.get(chatId) ?? new Set<string>();
@@ -434,8 +448,14 @@ export class NanobotClient {
     return replaced;
   }
 
-  isRetiredHistorySnapshot(chatId: string, body: Pick<WebuiThreadPersistedPayload, "history_generation">): boolean {
-    return !!body.history_generation && this.retiredHistoryGenerations.get(chatId)?.has(body.history_generation) === true;
+  isRetiredHistorySnapshot(chatId: string, body: Pick<WebuiThreadPersistedPayload, "history_generation" | "history_version">): boolean {
+    const generation = body.history_generation;
+    if (!generation) return false;
+    if (this.retiredHistoryGenerations.get(chatId)?.has(generation)) return true;
+    const current = this.historyGenerations.get(chatId);
+    const clock = body.history_version;
+    return !!(current?.version && clock && current.generation !== generation
+      && current.version.created_at === clock.created_at && clock.revision < current.version.revision);
   }
 
   /** End the local optimistic run without confirming gateway cancellation. */

@@ -311,7 +311,6 @@ async def fork_webui_chat_in_place(
             session_version_loader=lambda: history.session_version,
         ))
         assert body is not None
-        body["history_generation"] = session.generation
         body["active_turn_id"] = turn_id
         body["has_pending_tool_calls"] = True
         await channel.announce_webui_history_replacement(

@@ -1866,6 +1866,8 @@ export interface PromptIndex {
 export interface WebuiThreadPersistedPayload {
   /** Owner lifecycle fence; changes only when canonical history is replaced. */
   history_generation?: string | null;
+  /** SQLite session revision is ordered within the lifetime of the row. */
+  history_version?: { created_at: string; revision: number };
   schemaVersion: number;
   sessionKey?: string;
   savedAt?: string;

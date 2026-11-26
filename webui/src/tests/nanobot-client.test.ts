@@ -1047,13 +1047,20 @@ describe("NanobotClient", () => {
     const socket = lastSocket();
     socket.fakeOpen();
     const thread = { schemaVersion: 3, projection: "events" as const, events: [], history_generation: "after" };
-    client.adoptHistorySnapshot("same", thread);
+    const latest = { ...thread, history_version: { created_at: "session", revision: 15 } };
+    client.adoptHistorySnapshot("same", latest);
     const received = vi.fn();
     client.onTranscript("same", received);
     socket.fakeMessage({ event: "goal_status", chat_id: "same", turn_id: "new-turn", status: "running", started_at: 123 });
     received.mockClear();
-    socket.fakeMessage({ event: "history_replaced", chat_id: "same", thread,
+    // Both WS notices are in order; an independent HTTP read already returned the second edit.
+    socket.fakeMessage({ event: "history_replaced", chat_id: "same",
+      thread: { ...thread, history_generation: "before", history_version: { created_at: "session", revision: 9 } },
+      previous_generation: "original", retired_turn_ids: ["original-turn"] });
+    socket.fakeMessage({ event: "history_replaced", chat_id: "same", thread: latest,
       previous_generation: "before", retired_turn_ids: ["old-turn"] });
+    expect(client.isRetiredHistorySnapshot("same", latest)).toBe(false);
+    socket.fakeMessage({ event: "delta", chat_id: "same", turn_id: "original-turn", text: "late original answer" });
     const stale = { ...thread, history_generation: "before" };
     expect(client.isRetiredHistorySnapshot("same", stale)).toBe(true);
     client.adoptHistorySnapshot("same", stale);

@@ -1521,6 +1521,10 @@ def build_webui_thread_response(
         ),
         "active_turn_id": active_turn_id,
     }
+    # Both HTTP pages and replacement notices use this same transactional clock.
+    if version := history.session_version:
+        payload["history_generation"] = version[0]
+        payload["history_version"] = {"created_at": history.session_created_at, "revision": version[1]}
     replay_started = time.perf_counter()
     events, fork_boundary_event_index = _client_projection_events(
         lines,
