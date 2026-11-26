@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSessionHistory, useSessions } from "@/hooks/useSessions";
 import * as api from "@/lib/api";
+import { NanobotClient } from "@/lib/nanobot-client";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
 import { ClientProvider } from "@/providers/ClientProvider";
@@ -23,11 +24,15 @@ vi.mock("@/lib/api", async (importOriginal) => {
 function fakeClient() {
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
   const archiveHandlers = new Set<() => void>();
+  const history = new NanobotClient({ url: "ws://test", reconnect: false });
   return {
     status: "open" as const,
     defaultChatId: null as string | null,
     onStatus: () => () => {},
     onRunCompletion: () => () => {},
+    historyReadEpoch: history.historyReadEpoch.bind(history),
+    adoptHistorySnapshot: history.adoptHistorySnapshot.bind(history),
+    isRetiredHistorySnapshot: history.isRetiredHistorySnapshot.bind(history),
     onError: () => () => {},
     onChat: () => () => {},
     onSessionUpdate: (handler: (chatId: string, scope?: string) => void) => {

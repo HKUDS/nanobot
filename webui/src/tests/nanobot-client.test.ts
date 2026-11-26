@@ -1047,8 +1047,8 @@ describe("NanobotClient", () => {
     const socket = lastSocket();
     socket.fakeOpen();
     const thread = { schemaVersion: 3, projection: "events" as const, events: [], history_generation: "after" };
-    const latest = { ...thread, history_version: { created_at: "session", revision: 15 } };
-    client.adoptHistorySnapshot("same", latest);
+    const latest = { ...thread, active_turn_id: "new-turn", history_version: { created_at: "session", revision: 15 } };
+    client.adoptHistorySnapshot("same", latest, 0);
     const received = vi.fn();
     client.onTranscript("same", received);
     socket.fakeMessage({ event: "goal_status", chat_id: "same", turn_id: "new-turn", status: "running", started_at: 123 });
@@ -1056,20 +1056,59 @@ describe("NanobotClient", () => {
     // Both WS notices are in order; an independent HTTP read already returned the second edit.
     socket.fakeMessage({ event: "history_replaced", chat_id: "same",
       thread: { ...thread, history_generation: "before", history_version: { created_at: "session", revision: 9 } },
-      previous_generation: "original", retired_turn_ids: ["original-turn"] });
+      // The newer edit reused an ID removed from the original history.
+      previous_generation: "original", retired_turn_ids: ["original-turn", "new-turn"] });
     socket.fakeMessage({ event: "history_replaced", chat_id: "same", thread: latest,
       previous_generation: "before", retired_turn_ids: ["old-turn"] });
     expect(client.isRetiredHistorySnapshot("same", latest)).toBe(false);
     socket.fakeMessage({ event: "delta", chat_id: "same", turn_id: "original-turn", text: "late original answer" });
     const stale = { ...thread, history_generation: "before" };
     expect(client.isRetiredHistorySnapshot("same", stale)).toBe(true);
-    client.adoptHistorySnapshot("same", stale);
+    client.adoptHistorySnapshot("same", stale, client.historyReadEpoch("same"));
     socket.fakeMessage({ event: "delta", chat_id: "same", turn_id: "old-turn", text: "late untagged answer" });
     socket.fakeMessage({ event: "delta", chat_id: "same", turn_id: "other-turn", text: "late tagged answer", history_generation: "before" });
     expect(received).not.toHaveBeenCalled();
     expect(client.getRunState("same").startedAt).toBe(123);
     socket.fakeMessage({ event: "delta", chat_id: "same", turn_id: "new-turn", text: "new answer", history_generation: "after" });
     expect(received).toHaveBeenCalledWith(expect.objectContaining({ text: "new answer" }));
+    client.close();
+  });
+
+  it("settles a foreign notice by a validated read, without fencing reused turns in the wrong lifetime", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const thread = (generation: string, lifetime: string, revision: number) => ({
+      schemaVersion: 3, projection: "events" as const, events: [], history_generation: generation,
+      history_version: { created_at: lifetime, revision },
+    });
+    const original = thread("a", "later-clock", 19);
+    const recreated = thread("b1", "earlier-clock", 2);
+    client.adoptHistorySnapshot("same", original, 0);
+    const received = vi.fn();
+    const refresh = vi.fn();
+    client.onSessionUpdate(refresh);
+    client.onTranscript("same", received);
+    const notice = (body: typeof original, previous: string) => socket.fakeMessage({ event: "history_replaced",
+      chat_id: "same", thread: body, previous_generation: previous, retired_turn_ids: ["reused"] });
+    notice(recreated, "b0");
+    expect(refresh).toHaveBeenCalledWith("same", "thread", undefined);
+    expect(received).not.toHaveBeenCalled();
+    expect(client.isRunCompleted("same", "reused")).toBe(false);
+    client.adoptHistorySnapshot("same", recreated, client.historyReadEpoch("same"));
+    expect(received).toHaveBeenCalledTimes(1);
+    expect(client.isRunCompleted("same", "reused")).toBe(true);
+    const newest = thread("c", "middle-clock", 1);
+    client.adoptHistorySnapshot("same", newest, client.historyReadEpoch("same"));
+    notice(thread("b2", "earlier-clock", 8), "b1");
+    expect(received).toHaveBeenCalledTimes(2);
+    expect(client.isRunCompleted("same", "reused")).toBe(false);
+    socket.fakeMessage({ event: "delta", chat_id: "same", history_generation: "b2", turn_id: "reused", text: "stale" });
+    expect(received).toHaveBeenCalledTimes(2);
+    socket.fakeMessage({ event: "delta", chat_id: "same", history_generation: "c", turn_id: "reused", text: "current" });
+    expect(received).toHaveBeenLastCalledWith(expect.objectContaining({ text: "current" }));
     client.close();
   });
 

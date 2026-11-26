@@ -79,6 +79,9 @@ function makeClient() {
     },
     onRunStatus: lifecycle.onRunStatus.bind(lifecycle),
     onRunCompletion: lifecycle.onRunCompletion.bind(lifecycle),
+    historyReadEpoch: lifecycle.historyReadEpoch.bind(lifecycle),
+    isRetiredHistorySnapshot: lifecycle.isRetiredHistorySnapshot.bind(lifecycle),
+    adoptHistorySnapshot: lifecycle.adoptHistorySnapshot.bind(lifecycle),
     onRuntimeModelUpdate: (
       handler: (modelName: string | null, modelPreset?: string | null) => void,
     ) => {

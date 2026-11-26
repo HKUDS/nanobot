@@ -103,6 +103,26 @@ describe("shared latest thread requests", () => {
     await Promise.all([first, surviving, fresh].map((read) => expect(read).resolves.toEqual(body)));
   });
 
+  it("revalidates a delayed 304 from an unseen lifetime without installing its cached generation", async () => {
+    const client = connectedClient("ws://host");
+    const old = { ...cachedThread(), history_generation: "unseen", history_version: { created_at: "z", revision: 10 } };
+    const fresh = { ...cachedThread("fresh"), history_generation: "recreated", history_version: { created_at: "a", revision: 1 } };
+    const pending = deferredResponse();
+    const fetchMock = vi.fn().mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce(Response.json(fresh)).mockResolvedValueOnce(Response.json(fresh));
+    vi.stubGlobal("fetch", fetchMock);
+    webuiThreadCache.set(KEY, old);
+    const delayed = fetchLatestWebuiThread(client, "token", KEY);
+    webuiThreadCache.delete(KEY);
+    await expect(fetchLatestWebuiThread(client, "token", KEY)).resolves.toMatchObject(fresh);
+    webuiThreadCache.set(KEY, old);
+    pending.resolve(new Response(null, { status: 304 }));
+    await expect(delayed).resolves.toMatchObject(fresh);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2][1].headers).not.toHaveProperty("If-None-Match");
+    expect(client.isRetiredHistorySnapshot("shared", fresh)).toBe(false);
+  });
+
   it("keeps host clients and renewed credentials in separate reads", async () => {
     const firstHost = connectedClient("ws://first-host");
     const secondHost = connectedClient("ws://second-host");
