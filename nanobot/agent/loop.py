@@ -34,6 +34,7 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
+from nanobot.agent.tools.mcp_tool_search import mcp_tool_view
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.runtime_control import AgentRuntimeControl
 from nanobot.agent.turn_delivery import (
@@ -336,7 +337,9 @@ class AgentLoop:
             store=self.context.memory,
             sessions=self.sessions,
             build_messages=self._build_compaction_messages,
-            get_tool_definitions=self.tools.get_definitions,
+            get_tool_definitions=lambda: mcp_tool_view(
+                self.tools, self.tools_config.mcp_schema_token_budget,
+            ).get_definitions(),
             resolve_prompt_context=PersistedPromptContextResolver(
                 workspace_scopes=self.workspace_scopes,
             ),
@@ -1105,6 +1108,8 @@ class AgentLoop:
         )
         include_memory = session is None or session.policy.persist
         effective_tools = tools if tools is not None else self.tools
+        if session is None or "tool_search" not in session.policy.disabled_tools:
+            effective_tools = mcp_tool_view(effective_tools, self.tools_config.mcp_schema_token_budget)
         has_cron = effective_tools.has("cron")
         transcript_builder = partial(
             self.context.build_transcript,

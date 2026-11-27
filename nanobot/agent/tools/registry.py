@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ContextAware, current_request_context
+from nanobot.utils.helpers import estimate_prompt_tokens
 
 if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
@@ -36,16 +37,25 @@ class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, Tool] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
+        self._mcp_definitions: list[dict[str, Any]] | None = None
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
-        self._cached_definitions = None
+        self._cached_definitions = self._mcp_definitions = None
 
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         self._tools.pop(name, None)
-        self._cached_definitions = None
+        self._cached_definitions = self._mcp_definitions = None
+
+    def mcp_schema_tokens(self) -> int:
+        if self._mcp_definitions is None:
+            mcp_names = {name for name, tool in self._tools.items() if tool.mcp_server is not None}
+            self._mcp_definitions = [
+                schema for schema in self.get_definitions() if self._schema_name(schema) in mcp_names
+            ] if mcp_names else []
+        return estimate_prompt_tokens([], self._mcp_definitions) if self._mcp_definitions else 0
 
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""

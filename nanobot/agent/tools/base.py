@@ -94,6 +94,11 @@ class Tool(ABC):
         ...
 
     @property
+    def mcp_server(self) -> str | None:
+        """Source server for MCP capabilities; native tools stay directly visible."""
+        return None
+
+    @property
     def read_only(self) -> bool:
         """Whether this tool is side-effect free and safe to parallelize."""
         return False

@@ -541,6 +541,10 @@ class _MCPWrapperBase(Tool):
         self._replay_safe = replay_safe
         self._reconnect: _ReconnectCallback | None = None
 
+    @property
+    def mcp_server(self) -> str:
+        return self._server_name
+
     def set_reconnect_handler(self, reconnect: _ReconnectCallback) -> None:
         self._reconnect = reconnect
 
