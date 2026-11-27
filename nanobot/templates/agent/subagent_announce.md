@@ -1,6 +1,10 @@
 [Subagent '{{ label }}' {{ status_text }}]
 
 Task: {{ task }}
+{% if remaining_count %}
+
+Other results for this turn are still pending: {{ remaining_count }} completion message(s) have not arrived. You may summarize this result, but do not infer the other results or claim that the overall work is complete.
+{% endif %}
 
 Result:
 {{ result }}
