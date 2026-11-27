@@ -366,7 +366,9 @@ class AgentLoop:
         # A queue is installed before its single session worker is scheduled.
         # It remains the only admission path until that worker atomically
         # observes the queue empty and removes it.
-        self._pending_queues = SessionInboxes()
+        self._pending_queues = SessionInboxes(
+            bus.admission, self._get_session_lock, self._start_session_worker, self._prepare_followup,
+        )
         self._preserve_inflight_turns_on_shutdown = False
         self._cron_turns = CronTurnCoordinator(enqueue=self._enqueue_session_message)
         self._local_trigger_turns = LocalTriggerTurnCoordinator(enqueue=self._enqueue_session_message)
@@ -862,7 +864,7 @@ class AgentLoop:
         return sum(1 for task in tasks if not task.done() and not task.cancelling() and task.cancel())
 
     async def _cancel_active_tasks(self, key: str) -> int:
-        with self._pending_queues.controlling(key):
+        async with self._pending_queues.controlling(key):
             return await self._cancel_session_work(key)
 
     async def _cancel_session_work(self, key: str) -> int:
@@ -906,12 +908,13 @@ class AgentLoop:
 
     async def discard_session(self, key: str) -> None:
         """Stop active work for *key* and forget its cached session."""
-        with self.bus.admission.activity(), self._pending_queues.controlling(key, discard=True):
-            try:
-                await self.sessions.state.discard(key)
-                await self._cancel_session_work(key)
-            finally:
-                self.discard_session_file_state(key)
+        with self.bus.admission.activity():
+            async with self._pending_queues.controlling(key, discard=True):
+                try:
+                    await self.sessions.state.discard(key)
+                    await self._cancel_session_work(key)
+                finally:
+                    self.discard_session_file_state(key)
 
     def discard_session_file_state(self, key: str) -> None:
         """Forget ephemeral file-read state for a reset or removed session."""
@@ -965,7 +968,9 @@ class AgentLoop:
         session: Session | None,
         tools: ToolRegistry,
     ) -> dict[str, Any] | None:
-        # Commands and independent turns retain their own worker and completion.
+        # Leave stale work to the generation check in independent dispatch, never inject it.
+        if session is not None and message.session_generation not in (None, session.generation):
+            return None
         if not self._can_inject_message(message):
             return None
         content = message.content
@@ -1173,7 +1178,7 @@ class AgentLoop:
                 consume=execution_scope.consume_inputs if execution_scope is not None else None,
                 session_key=session.key if session is not None else None,
                 running_subagents=(
-                    partial(self.subagents.get_running_count_by_session, session.key)
+                    partial(self.subagents.get_running_count_by_session, session.key, session_generation=session.generation)
                     if session is not None else None
                 ),
                 terminal_wait_seconds=_SUBAGENT_TERMINAL_WAIT_SECONDS,
@@ -1400,14 +1405,13 @@ class AgentLoop:
         """
         self._preserve_inflight_turns_on_shutdown = True
 
-    async def _journal_pending_message(
-        self,
-        session_key: str,
-        msg: InboundMessage,
-    ) -> InboundMessage:
+    async def _prepare_followup(self, inbox: SessionInbox, msg: InboundMessage) -> InboundMessage | None:
+        if any(coordinator.should_defer(msg) for coordinator in self._automation_turn_coordinators):
+            inbox.defer(msg)
+            return None
         if not self._can_inject_message(msg):
             return msg
-        followup_id = await self.sessions.state.queue_followup(session_key, msg)
+        followup_id = await self.sessions.state.queue_followup(msg.session_key, msg)
         if followup_id is None:
             return msg
         pending_msg = dataclasses.replace(
@@ -1419,29 +1423,29 @@ class AgentLoop:
         )
         return pending_msg
 
+    async def enqueue_if_idle(self, message: InboundMessage, prepare: Callable[[], Awaitable[bool]]) -> bool:
+        """If idle, run prepare and enqueue the input iff requested. Return False only if busy."""
+        key = message.session_key
+
+        async def prepare_input() -> bool:
+            previous = self.sessions.state.peek_identity(key)
+            if not await prepare():
+                return False
+            if message.session_generation is not None and (
+                previous is None or previous.generation != message.session_generation
+            ):
+                self.auto_compact.discard_summary(key)
+                self.discard_session_file_state(key)
+            return True
+
+        return await self._pending_queues.enqueue_if_idle(message, prepare_input)
+
     async def _enqueue_session_message(self, msg: InboundMessage) -> None:
-        self._pending_queues.check_admission()
-        self.bus.admission.check()
-        session_key = msg.session_key
-        if not self.subagents.accepts_result(msg, session_key):
-            return
+        if self.subagents.accepts_result(msg, msg.session_key):
+            await self._pending_queues.enqueue(msg)
 
-        pending = self._pending_queues.get(session_key)
-        if pending is not None:
-            if any(coordinator.should_defer(msg) for coordinator in self._automation_turn_coordinators):
-                pending.defer(msg)
-                return
-            msg = await self._journal_pending_message(session_key, msg)
-            self._pending_queues.check_admission()
-            pending = self._pending_queues.get(session_key)
-        if pending is not None:
-            pending.put_nowait(msg)
-            return
-
-        new_pending = SessionInbox()
-        new_pending.put_nowait(msg)
-        self._pending_queues.install(session_key, new_pending)
-        task = asyncio.create_task(self._run_session_queue(session_key, new_pending))
+    def _start_session_worker(self, session_key: str, inbox: SessionInbox) -> None:
+        task = asyncio.create_task(self._run_session_queue(session_key, inbox))
         self._track_active_task(session_key, task)
 
     async def _run_session_queue(
@@ -1528,8 +1532,13 @@ class AgentLoop:
                             return
                     await execution.enter_async_context(lock)
                     await execution.enter_async_context(gate)
+                    session = await self.sessions.state.read(session_key)
+                    if msg.session_generation is not None and (
+                        session is None or session.generation != msg.session_generation
+                    ):
+                        skip_idle = True
+                        return
                     processing = True
-                    await self.sessions.state.read(session_key)
                     delivery = self.turn_delivery_factory.create(
                         msg,
                         session_key,
@@ -1641,7 +1650,7 @@ class AgentLoop:
             await self._aclose_unlocked()
 
     async def _aclose_unlocked(self) -> None:
-        self._pending_queues.close_admission()
+        await self._pending_queues.close_admission()
         self._running = False
         errors: list[BaseException] = []
         active_task_groups = getattr(self, "_active_tasks", {})
@@ -1664,7 +1673,7 @@ class AgentLoop:
             for key, pending in pending_queues.items():
                 if self._pending_queues.get(key) is pending:
                     await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
-            await self._pending_queues.join_controls()
+            await self._pending_queues.wait_for_controls()
             # A scan can schedule archival while shutdown waits for it.
             while self._background_tasks:
                 tasks = tuple(self._background_tasks)

@@ -1181,6 +1181,8 @@ class GatewayHTTPHandler:
             websocket_turn_transcript_persistence_failed(chat_id)
         )
         include_model_requests = _query_first(query, "include_model_requests") == "1"
+        source_version = history.session_version
+        scope_payload = scope.payload()
         revision_variant = {
             "include_model_requests": include_model_requests,
             "context_graph_encoding": _query_first(query, "context_graph_encoding"),
@@ -1194,12 +1196,12 @@ class GatewayHTTPHandler:
             "direction": direction,
             "gateway_instance": self.tokens.instance_id,
             "limit": limit,
-            "session_version": self._read_session_version(decoded_key),
-            "workspace_scope": scope.payload(),
+            "session_version": source_version,
+            "workspace_scope": scope_payload,
         }
-        initial_revision = webui_transcript_revision(decoded_key, history=history, variant=revision_variant)
-        if initial_revision is not None:
-            etag = _quoted_etag(initial_revision)
+        revision = webui_transcript_revision(decoded_key, history=history, variant=revision_variant)
+        if revision is not None:
+            etag = _quoted_etag(revision)
             if _etag_matches(_case_insensitive_header(request.headers, "If-None-Match"), etag):
                 return _http_response(b"", status=304, extra_headers=[*_NO_STORE_HEADERS, ("ETag", etag)])
         build_started = time.perf_counter()
@@ -1213,7 +1215,7 @@ class GatewayHTTPHandler:
                 workspace_path=scope.project_path,
             ),
             session_messages_loader=lambda: self._read_session_messages(decoded_key),
-            session_version_loader=lambda: self._read_session_version(decoded_key),
+            session_version_loader=lambda: source_version,
             active_turn_started_at=active_turn_started_at,
             active_turn_id=active_turn_id,
             active_turn_transcript_persistence_failed=(
@@ -1229,13 +1231,11 @@ class GatewayHTTPHandler:
             diagnostics.build_ms = (time.perf_counter() - build_started) * 1000
         if data is None:
             return _http_error(404, "webui thread not found")
-        data["workspace_scope"] = scope.payload()
-        revision_variant["session_version"] = self._read_session_version(decoded_key)
-        final_revision = webui_transcript_revision(decoded_key, history=history, variant=revision_variant)
+        data["workspace_scope"] = scope_payload
         response_headers = list(_NO_STORE_HEADERS)
-        if final_revision is not None and final_revision == initial_revision:
-            response_headers.append(("ETag", _quoted_etag(final_revision)))
-            data["revision"] = final_revision
+        if revision is not None:
+            response_headers.append(("ETag", _quoted_etag(revision)))
+            data["revision"] = revision
         return _PreparedThreadResponse(
             data=data, headers=response_headers,
         )

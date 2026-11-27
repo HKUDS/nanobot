@@ -16,6 +16,7 @@ import type {
   GoalStateWsPayload,
   WorkspaceScopePayload,
 } from "./types";
+import { webuiThreadCache } from "./webui-thread-cache";
 import { createHostWebSocket } from "./runtime";
 import { ClientRunLedger } from "./client-run-ledger";
 import type { CanonicalRunSnapshot, RunEffect, RunObservation, RunState } from "./client-run-ledger";
@@ -993,6 +994,16 @@ export class NanobotClient {
       return;
     }
 
+    if (parsed.event === "history_invalidated") {
+      const chatId = parsed.chat_id;
+      webuiThreadCache.delete(`websocket:${chatId}`);
+      this.pendingInboundByChat.delete(chatId);
+      this.goalStateByChatId.delete(chatId);
+      this.applyRunEffects(this.runs.transition({ kind: "forget", chatId }));
+      this.dispatch(chatId, parsed);
+      this.emitSessionUpdate(chatId, "history_invalidated");
+      return;
+    }
     if (parsed.event === "error" && parsed.request_id !== undefined) {
       const pending = this.pendingChatRequest;
       if (pending && pending.phase !== "queued" && pending.frame.request_id === parsed.request_id) {

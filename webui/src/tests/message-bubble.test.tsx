@@ -697,11 +697,11 @@ describe("MessageBubble", () => {
     expect(prefix).toHaveTextContent(/^!$/);
     expect(prefix).toHaveClass("font-normal");
     expect(prefix.style.color).toBe("var(--inline-reference-highlight)");
-    expect(container.querySelector("[data-user-text-bubble] p")?.textContent).toBe(content);
+    expect(container.querySelector("[data-user-message-body]")?.textContent).toBe(content);
 
     rerender(<MessageBubble message={{ ...message, content: "Explain !pwd, please!" }} />);
     expect(screen.queryByTestId("message-shell-prefix")).not.toBeInTheDocument();
-    expect(container.querySelector("[data-user-text-bubble] p")?.textContent).toBe("Explain !pwd, please!");
+    expect(container.querySelector("[data-user-message-body]")?.textContent).toBe("Explain !pwd, please!");
   });
 
   it("highlights skill references without a live skill catalog", () => {
@@ -1497,7 +1497,7 @@ describe("MessageBubble", () => {
     const disconnect = vi.fn();
     vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
-      if (this.tagName === "P" || this.parentElement?.hasAttribute("data-user-message-clip")) {
+      if (this.hasAttribute("data-user-message-body") || this.parentElement?.hasAttribute("data-user-message-clip")) {
         return textHeight;
       }
       return 0;
@@ -1525,7 +1525,7 @@ describe("MessageBubble", () => {
       expect(wrapper).toHaveAttribute("data-user-message-collapsed", "true");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
       expect(toggle).toHaveAttribute("data-thread-disclosure", "");
-      expect(toggle.getAttribute("aria-controls")).toBe(container.querySelector("[data-user-text-bubble] > p")?.id);
+      expect(toggle.getAttribute("aria-controls")).toBe(container.querySelector("[data-user-message-body]")?.id);
       expect(clip).toHaveClass("user-message-collapsible-masked");
       expect(clip.style.height).toBe("304px");
 

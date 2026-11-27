@@ -3632,43 +3632,6 @@ async def test_webui_thread_revalidates_and_loads_large_trace_details(history,
 
 
 @pytest.mark.asyncio
-async def test_webui_thread_omits_validator_when_transcript_changes_during_replay(history,
-    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-
-
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:changing-thread"
-    sm = _seed_session(tmp_path, key=key)
-    history.append(
-        key,
-        {"event": "user", "chat_id": "changing-thread", "text": "hello"},
-    )
-    revisions = iter(("before-replay", "after-replay"))
-    monkeypatch.setattr(
-        "nanobot.webui.ws_http.webui_transcript_revision",
-        lambda *_args, **_kwargs: next(revisions),
-    )
-    port = _free_port()
-    channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=port)
-    server_task = asyncio.create_task(channel.start())
-    try:
-        token = channel.gateway.tokens.issue_api_token(300)
-        response = await _http_get(
-            f"http://127.0.0.1:{port}/api/sessions/"
-            "websocket%3Achanging-thread/webui-thread?limit=40&direction=latest",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-        assert response.status_code == 200
-        assert "ETag" not in response.headers
-        assert "revision" not in response.json()
-    finally:
-        await channel.stop()
-        await server_task
-
-
-@pytest.mark.asyncio
 async def test_session_delete_rejects_non_websocket_keys(
     bus: MagicMock, tmp_path: Path
 ) -> None:

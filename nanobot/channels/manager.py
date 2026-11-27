@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
+    from nanobot.webui.gateway_services import EnqueueIfIdle
 
 
 def _default_webui_dist() -> Path | None:
@@ -124,6 +125,7 @@ class ChannelManager:
         ) = None,
         webui_subagent_manager: SubagentManager | None = None,
         webui_discard_session: Callable[[str], Awaitable[None]] | None = None,
+        enqueue_if_idle: EnqueueIfIdle | None = None,
         config_path: Path | None = None,
     ):
         if config_path is None:
@@ -150,6 +152,7 @@ class ChannelManager:
         self._webui_recovery_action = webui_recovery_action
         self._webui_subagent_manager = webui_subagent_manager
         self._webui_discard_session = webui_discard_session
+        self._enqueue_if_idle = enqueue_if_idle
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
         self._channel_runtime_specs: dict[str, tuple[str, str]] = {}
@@ -237,6 +240,7 @@ class ChannelManager:
                 recovery_action=self._webui_recovery_action,
                 subagent_manager=self._webui_subagent_manager,
                 discard_session=self._webui_discard_session,
+                enqueue_if_idle=self._enqueue_if_idle,
                 logger=logger,
             )
             kwargs["gateway"] = gateway
@@ -1005,31 +1009,6 @@ class ChannelManager:
                 self._outbound_dispatching = False
 
     @staticmethod
-    async def _send_reasoning_delta(
-        channel: BaseChannel,
-        msg: OutboundMessage,
-        event: ProgressEvent,
-    ) -> None:
-        await channel.send_reasoning_delta(
-            msg.chat_id,
-            msg.content,
-            msg.metadata,
-            stream_id=event.stream_id,
-        )
-
-    @staticmethod
-    async def _send_reasoning_end(
-        channel: BaseChannel,
-        msg: OutboundMessage,
-        event: ProgressEvent,
-    ) -> None:
-        await channel.send_reasoning_end(
-            msg.chat_id,
-            msg.metadata,
-            stream_id=event.stream_id,
-        )
-
-    @staticmethod
     async def _send_stream_event(
         channel: BaseChannel,
         msg: OutboundMessage,
@@ -1064,10 +1043,13 @@ class ChannelManager:
     async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:
         """Send one outbound message without retry policy."""
         event = msg.event
-        if isinstance(event, ProgressEvent) and event.reasoning_end:
-            await ChannelManager._send_reasoning_end(channel, msg, event)
+        if msg.channel == "websocket":
+            # WebUI admits the whole envelope before projecting any frame or touching a buffer.
+            await channel.send(msg)
+        elif isinstance(event, ProgressEvent) and event.reasoning_end:
+            await channel.send_reasoning_end(msg.chat_id, msg.metadata, stream_id=event.stream_id)
         elif isinstance(event, ProgressEvent) and event.reasoning_delta:
-            await ChannelManager._send_reasoning_delta(channel, msg, event)
+            await channel.send_reasoning_delta(msg.chat_id, msg.content, msg.metadata, stream_id=event.stream_id)
         elif isinstance(event, ProgressEvent) and event.reasoning:
             # BaseChannel translates one-shot reasoning to a single delta +
             # end pair so plugins only implement the streaming primitives.
@@ -1078,9 +1060,7 @@ class ChannelManager:
                 event.file_edit_events,
                 msg.metadata,
             )
-        elif isinstance(event, StreamDeltaEvent):
-            await ChannelManager._send_stream_event(channel, msg, event)
-        elif isinstance(event, StreamEndEvent):
+        elif isinstance(event, StreamDeltaEvent | StreamEndEvent):
             await ChannelManager._send_stream_event(channel, msg, event)
         elif isinstance(event, CommandResultEvent):
             if await channel.send_command_result(msg) != "queued":
@@ -1124,11 +1104,8 @@ class ChannelManager:
             is_delta = isinstance(next_event, StreamDeltaEvent)
             is_end = isinstance(next_event, StreamEndEvent)
 
-            same_response_sources = (
-                next_msg.metadata.get("response_sources")
-                == first_msg.metadata.get("response_sources")
-            )
-            if same_target and same_response_sources and (is_delta or (is_end and next_msg.content)):
+            if (same_target and next_msg.metadata == first_msg.metadata
+                    and next_msg.delivery == first_msg.delivery and (is_delta or (is_end and next_msg.content))):
                 combined_content += next_msg.content
                 if isinstance(next_event, StreamEndEvent):
                     final_event = StreamEndEvent(

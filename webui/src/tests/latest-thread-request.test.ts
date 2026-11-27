@@ -72,7 +72,7 @@ describe("shared latest thread requests", () => {
     await expect(recovered).resolves.toEqual(body);
   });
 
-  it.each(["thread update", "turn end"] as const)("replaces surviving reads only for their own chat's %s", async (invalidation) => {
+  it.each(["thread update", "turn end", "history invalidation"] as const)("replaces surviving reads only for their own chat's %s", async (invalidation) => {
     const socket = {
       readyState: 1, onopen: null as (() => void) | null,
       onmessage: null as ((event: MessageEvent) => void) | null, send() {}, close() {},
@@ -83,6 +83,7 @@ describe("shared latest thread requests", () => {
     const reads = [deferredResponse(), deferredResponse()];
     const fetchMock = vi.fn().mockReturnValueOnce(reads[0].promise).mockReturnValueOnce(reads[1].promise);
     vi.stubGlobal("fetch", fetchMock);
+    webuiThreadCache.set(KEY, cachedThread("previous"));
     const first = fetchLatestWebuiThread(client, "token", KEY);
     const surviving = fetchLatestWebuiThread(client, "token", KEY);
     const receive = (chatId: string, scope: string) => socket.onmessage?.({
@@ -92,11 +93,15 @@ describe("shared latest thread requests", () => {
     receive("another-chat", "thread");
     expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(false);
     if (invalidation === "thread update") receive("shared", "thread");
+    else if (invalidation === "history invalidation") socket.onmessage?.({
+      data: JSON.stringify({ event: "history_invalidated", chat_id: "shared" }),
+    } as MessageEvent);
     else socket.onmessage?.({
       data: JSON.stringify({ event: "turn_end", chat_id: "shared", turn_id: "turn-shared" }),
     } as MessageEvent);
     const fresh = fetchLatestWebuiThread(client, "token", KEY);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    if (invalidation === "history invalidation") expect(fetchMock.mock.calls[1][1].headers).not.toHaveProperty("If-None-Match");
     const body = cachedThread("complete");
     reads[0].resolve(new Response(JSON.stringify(cachedThread("stale")), { status: 200 }));
     reads[1].resolve(new Response(JSON.stringify(body), { status: 200 }));

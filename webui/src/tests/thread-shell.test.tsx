@@ -592,6 +592,62 @@ describe("ThreadShell", () => {
     expect(fetch).toHaveBeenCalledTimes(readsBeforeSearch);
   });
 
+  it("resends a live user message by turn identity and leaves the composer draft alone", async () => {
+    const client = Object.assign(makeClient(), { requestMutation: vi.fn().mockResolvedValue({ accepted: true }) });
+    const chat_id = "editable";
+    render(wrap(client, <ThreadShell session={session(chat_id)} title="Editable history" onToggleSidebar={() => {}} />));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Unsent follow-up" } });
+    act(() => {
+      client._emitChat(chat_id, { event: "user_message", chat_id, turn_id: "first", starts_turn: true, turn_seq: 1, text: "First question" });
+      client._emitChat(chat_id, { event: "turn_end", chat_id, turn_id: "first", turn_seq: 2 });
+    });
+    const actions = await findSideActions("First question");
+    fireEvent.click(within(actions).getByRole("button", { name: "Edit message" }));
+    const editor = screen.getByRole("textbox", { name: "Edit message" });
+    fireEvent.change(editor, { target: { value: "   " } });
+    expect(screen.getByRole("button", { name: "Resend" })).toBeDisabled();
+    fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true });
+    expect(client.requestMutation).not.toHaveBeenCalled();
+    fireEvent.change(editor, { target: { value: "Edited question" } });
+    fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true });
+
+    await waitFor(() => expect(editor).not.toBeInTheDocument());
+    expect(client.requestMutation).toHaveBeenCalledWith("chat.edit", {
+      chat_id, turn_id: expect.any(String), text: "Edited question", source_id: "user:first",
+    });
+    expect(screen.getByRole("textbox")).toHaveValue("Unsent follow-up");
+  });
+
+  it.each([
+    { text: "", available: true },
+    { text: "New caption", available: false },
+  ])("resends caption '$text' by source identity (attachment available: $available)", async ({ text, available }) => {
+    const requestMutation = available ? vi.fn().mockResolvedValue({ accepted: true }) : vi.fn().mockRejectedValue(new Error("edit_attachments_unavailable"));
+    const client = Object.assign(makeClient(), { requestMutation });
+    const chat_id = "edit-caption";
+    render(wrap(client, <ThreadShell session={session(chat_id)} title="Attachments" onToggleSidebar={() => {}} />));
+    act(() => {
+      client._emitChat(chat_id, { event: "user_message", chat_id, turn_id: "first", starts_turn: true, turn_seq: 1, text: "Caption",
+        media_urls: [{ kind: "file", url: "/media/notes", name: "notes.pdf" }] });
+      client._emitChat(chat_id, { event: "turn_end", chat_id, turn_id: "first", turn_seq: 2 });
+    });
+    const actions = await findSideActions("Caption");
+    fireEvent.click(within(actions).getByRole("button", { name: "Edit message" }));
+    const editor = screen.getByRole("textbox", { name: "Edit message" });
+    fireEvent.change(editor, { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: "Resend" }));
+    expect(requestMutation).toHaveBeenCalledWith("chat.edit", {
+      chat_id, turn_id: expect.any(String), text, source_id: "user:first",
+    });
+    if (available) {
+      await waitFor(() => expect(editor).not.toBeInTheDocument());
+    } else {
+      expect(await screen.findByRole("alert")).toHaveTextContent("An original attachment is unavailable");
+      expect(editor).toHaveValue(text);
+      expect(screen.getByRole("button", { name: "notes.pdf" })).toBeVisible();
+    }
+  });
+
   it.each(["callback", "cached return"] as const)("keeps closed answer segments in order after %s", async (path) => {
     const client = makeClient();
     const messageCache = new ThreadMessageCache(() => false);
@@ -1061,6 +1117,41 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
     await screen.findByText("latest answer");
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
+  });
+
+  it("does not hydrate a replacement history with a late trace from the retired generation", async () => {
+    const { client, receive } = createStreamClient();
+    let resolveOld!: (value: Response) => void;
+    const oldDetail = new Promise<Response>((resolve) => { resolveOld = resolve; });
+    const detail = (text: string) => httpJson({ message_id: "history-aaaaaaaaaaaaaaaaaaaa", events: [
+      { event: "message", chat_id: "trace-replaced", projection_id: "trace-shared", kind: "progress", text: `exec({"command":"echo ${text}"})` },
+    ] }) as Response;
+    const readDetail = vi.fn().mockReturnValueOnce(oldDetail).mockResolvedValue(detail("current details"));
+    const oldThread = traceDetailThread(true, "old answer");
+    const newThread = traceDetailThread(true, "replacement answer");
+    let thread = oldThread;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      if (String(input).includes("/trace-detail?")) return readDetail();
+      if (String(input).includes("/webui-thread")) return Promise.resolve(httpJson(thread));
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    render(<ClientProvider client={client} token="tok">
+      <ThreadShell session={session("trace-replaced")} title="Trace replacement" onToggleSidebar={() => {}} />
+    </ClientProvider>);
+    fireEvent.click(within(await findSideActions("old answer")).getByRole("button", { name: /Worked/ }));
+    await waitFor(() => expect(readDetail).toHaveBeenCalled());
+    thread = newThread;
+    act(() => receive({ event: "history_invalidated", chat_id: "trace-replaced" }));
+    await screen.findByText("replacement answer");
+    await act(async () => resolveOld(detail("obsolete suffix")));
+    // The old detail completed after the replacement; even reusing its ref cannot revive it.
+    expect(screen.getByText("replacement answer")).toBeVisible();
+    expect(document.body).not.toHaveTextContent("obsolete suffix");
+    if (!screen.queryByRole("button", { name: /Collapse activity details/ })) {
+      fireEvent.click(within(await findSideActions("replacement answer")).getByRole("button", { name: /Worked/ }));
+    }
+    await waitFor(() => expect(document.body).toHaveTextContent("current details"));
+    expect(document.body).not.toHaveTextContent("obsolete suffix");
   });
 
   it("starts a fresh trace-detail read after leaving and returning to the same chat", async () => {

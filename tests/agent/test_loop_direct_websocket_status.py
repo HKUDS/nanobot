@@ -10,6 +10,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel
 from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.session import webui_turns as wth
+from nanobot.session.manager import Session
 from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
 from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
 from nanobot.webui.transcript import WebUITranscriptRecorder
@@ -41,9 +42,14 @@ def _make_loop(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_process_direct_websocket_clears_run_status(tmp_path) -> None:
+@pytest.mark.parametrize("retire_destination", [False, True], ids=["current", "retired"])
+async def test_process_direct_websocket_clears_run_status(tmp_path, retire_destination) -> None:
     loop = _make_loop(tmp_path)
+    target_key = "websocket:chat-1"
+    loop.sessions.save(Session(key=target_key))
+    loop.turn_delivery_factory.route_admission = WebuiTurnRoutePolicy(loop.sessions).admit
     gateway = MagicMock()
+    gateway.session_manager = loop.sessions
     gateway.transcripts = WebUITranscriptRecorder(loop.sessions)
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
@@ -61,6 +67,9 @@ async def test_process_direct_websocket_clears_run_status(tmp_path) -> None:
 
         assert response is not None
         assert response.content == "done"
+        if retire_destination:
+            # A queued status frame outlives the destination it was admitted to.
+            await loop.sessions.state.delete(target_key)
 
         events = []
         while loop.bus.outbound_size:

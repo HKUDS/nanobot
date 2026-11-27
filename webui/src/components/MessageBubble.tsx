@@ -30,6 +30,7 @@ import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
 import { HoverHint } from "@/components/ui/tooltip";
+import { EditIcon } from "@/components/icons/product-icons";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -58,6 +59,7 @@ interface MessageBubbleProps {
   slashCommands?: SlashCommand[];
   onOpenFilePreview?: (path: string) => void;
   contextMenu?: ReactNode;
+  editor?: { input: ReactNode; actions: ReactNode };
 }
 
 function ForkArrowIcon({ className }: { className?: string }) {
@@ -143,6 +145,8 @@ interface MessageBlockMenuActionsProps {
   message: UIMessage;
   isTurnStreaming?: boolean;
   onForkFromHere?: () => void;
+  onEdit?: () => void;
+  editDisabledReason?: string | null;
   activity?: MessageBlockMenuActivity;
   sheet?: boolean;
 }
@@ -151,6 +155,8 @@ export function MessageBlockMenuActions({
   message,
   isTurnStreaming = false,
   onForkFromHere,
+  onEdit,
+  editDisabledReason,
   activity,
   sheet = false,
 }: MessageBlockMenuActionsProps) {
@@ -207,6 +213,25 @@ export function MessageBlockMenuActions({
       <div className={sheet ? "flex flex-col items-stretch gap-1" : "flex max-w-full items-center"}>
         {!sheet && hasText ? <MessageCopyButton message={message} className="shrink-0" /> : null}
         {!sheet && fallbackSources}
+        {onEdit ? (
+          <HoverHint enabled={!sheet} content={editDisabledReason || t("message.editMessage")}>
+            <span
+              className={cn(sheet ? "w-full" : "inline-flex rounded-control",
+                !sheet && editDisabledReason && "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+              tabIndex={!sheet && editDisabledReason ? 0 : undefined}
+              aria-label={!sheet && editDisabledReason ? `${t("message.editMessage")}: ${editDisabledReason}` : undefined}
+            >
+              <button type="button" data-message-block-edit-action onClick={onEdit}
+                disabled={!!editDisabledReason} aria-label={t("message.editMessage")}
+                className={cn("inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                  sheet && "w-full justify-start gap-2 px-2 text-sm hover:bg-muted/70 disabled:hover:bg-transparent")}>
+                <EditIcon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+                {sheet ? t("message.editMessage") : null}
+              </button>
+              {sheet && editDisabledReason ? <span className="block px-2 pb-2 text-left text-xs text-muted-foreground">{editDisabledReason}</span> : null}
+            </span>
+          </HoverHint>
+        ) : null}
         {showFork ? (
           <HoverHint content={t("message.forkFromHere")}>
             <button type="button" onClick={onForkFromHere}
@@ -358,6 +383,7 @@ export function MessageBubble({
   slashCommands = [],
   onOpenFilePreview,
   contextMenu,
+  editor,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const mentionCliApps = useMemo(
@@ -399,13 +425,13 @@ export function MessageBubble({
     const hasMedia = media.length > 0;
     const parsedMessage = parseQuotedUserMessage(message.content);
     const userContent = parsedMessage.content;
-    const hasText = userContent.trim().length > 0;
+    const showTextBubble = !!editor || userContent.trim().length > 0;
     const isSending = message.deliveryStatus === "sending";
     const isFailed = message.deliveryStatus === "failed";
     const processingStatus = message.processingStatus;
     const showProcessingStatus = !temporary && processingStatus === "pending";
-    const mediaEdgeState: PendingEdgeState = !hasText ? edgeState : "solid";
-    const mediaSealEnd = !hasText ? completeSeal : undefined;
+    const mediaEdgeState: PendingEdgeState = showTextBubble ? "solid" : edgeState;
+    const mediaSealEnd = showTextBubble ? undefined : completeSeal;
     const userMedia = hasImages
       ? <ImageGallery images={images} align="right" size="compact" edgeState={mediaEdgeState} onSealEnd={mediaSealEnd} />
       : hasMedia
@@ -450,13 +476,11 @@ export function MessageBubble({
       />
     );
     return (
-      <div
-        className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5"
-      >
-        {!hasText ? contextMenu : null}
-        {!hasText ? sendingIndicator : null}
+      <div className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5">
+        {!showTextBubble ? contextMenu : null}
+        {!showTextBubble ? sendingIndicator : null}
         {userMedia ? (
-          !hasText ? (
+          !showTextBubble ? (
             <div className={cn("transition-opacity duration-200 ease-out motion-reduce:transition-none", isSending && "opacity-65")}>
               {userMedia}
             </div>
@@ -468,9 +492,10 @@ export function MessageBubble({
             label={t("thread.composer.quotedContext")}
           />
         ) : null}
-        {hasText ? (
+        {showTextBubble ? (
           <UserTextBubble
             messageId={message.id}
+            textEditor={editor?.input}
             contentKey={userContent}
             temporary={temporary}
             sendingIndicator={sendingIndicator}
@@ -482,6 +507,7 @@ export function MessageBubble({
             {messageText}
           </UserTextBubble>
         ) : null}
+        {editor?.actions}
         {isSending ? (
           <span role="status" className="sr-only">
             {t("message.delivery.sending")}
@@ -565,6 +591,7 @@ interface UserTextCollapseLayout {
 interface UserTextBubbleProps {
   messageId: string;
   contentKey: string;
+  textEditor?: ReactNode;
   temporary: boolean;
   sendingIndicator: ReactNode;
   showProcessingStatus: boolean;
@@ -577,6 +604,7 @@ interface UserTextBubbleProps {
 function UserTextBubble({
   messageId,
   contentKey,
+  textEditor,
   temporary,
   sendingIndicator,
   showProcessingStatus,
@@ -587,18 +615,19 @@ function UserTextBubble({
 }: UserTextBubbleProps) {
   const { t } = useTranslation();
   const viewport = useContext(DiffViewportContext);
-  const bubbleRef = useRef<HTMLParagraphElement>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLSpanElement>(null);
   const contentId = useId();
   const [layout, setLayout] = useState<UserTextCollapseLayout | null>(null);
   const [expandedForId, setExpandedForId] = useState<string | null>(null);
   const expanded = expandedForId === messageId;
-  const isCollapsible = layout?.collapsible ?? false;
+  const editing = textEditor != null;
+  const isCollapsible = !editing && (layout?.collapsible ?? false);
   const isCollapsed = isCollapsible && !expanded;
 
   useLayoutEffect(() => {
     const bubble = bubbleRef.current;
-    if (!bubble) return;
+    if (!bubble || editing) return;
     const scroller = viewport?.scroller.current ?? null;
 
     const measure = () => {
@@ -654,7 +683,7 @@ function UserTextBubble({
       observer?.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [contentKey, isCollapsible, messageId, viewport]);
+  }, [contentKey, editing, isCollapsible, messageId, viewport]);
 
   const toggleCollapsed = useCallback(() => {
     if (expanded) {
@@ -694,7 +723,9 @@ function UserTextBubble({
     >
       {contextMenu}
       {sendingIndicator}
-      <p
+      <div
+        data-user-message-body
+        data-editing={editing ? "true" : undefined}
         ref={bubbleRef}
         id={isCollapsible ? contentId : undefined}
         data-theme-surface
@@ -728,9 +759,9 @@ function UserTextBubble({
             </span>
           </span>
         ) : (
-          children
+          textEditor ?? children
         )}
-      </p>
+      </div>
       {isCollapsible ? (
         <>
           <div

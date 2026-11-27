@@ -135,7 +135,7 @@ for (const width of [1440, 390]) {
       await expect(image).toBeVisible();
       await expect(page.getByText("Earlier context / 之前的上下文")).toBeVisible();
       const bubble = page.locator("[data-user-text-bubble]");
-      const text = bubble.locator("p");
+      const text = bubble.locator("[data-user-message-body]");
       const trigger = page.locator(width === 390 ? "[data-message-block-menu-trigger]" : "[data-message-side-actions] [data-message-block-copy-action]");
       const fontSize = { small: 15, standard: 16, large: 18 }[size];
       await expect(text).toHaveCSS("font-size", `${fontSize}px`);

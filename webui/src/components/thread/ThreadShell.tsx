@@ -83,6 +83,7 @@ import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { switchModelPreset } from "@/lib/switch-model-preset";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { MessageEditingProvider } from "@/components/thread/MessageEditing";
 import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import { useFilePreviewResize } from "@/hooks/useFilePreviewResize";
@@ -545,6 +546,10 @@ function ThreadShellContent({
   const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
   const consumedPendingFirstMessageIdRef = useRef<string | null>(null);
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
+  const anchorMessageEdit = useCallback((messageId: string) => {
+    viewportRef.current?.cancelAutoScroll();
+    viewportRef.current?.jumpToUserPrompt(messageId);
+  }, []);
   const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
   const knownTemporaryChatIdsRef = useRef(new Set<string>());
   const localMessageCacheRef = useRef(new ThreadMessageCache(
@@ -583,6 +588,7 @@ function ThreadShellContent({
       hasPendingToolCalls,
       completedTurnIds,
       activeTurnId: historyActiveTurnId,
+      historyGeneration,
       version: historyVersion,
       forkBoundaryMessageCount,
     },
@@ -599,7 +605,7 @@ function ThreadShellContent({
   const initialHistoryLoading = loading;
   const showTemporaryChatControl =
     !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
-  const promptNavigation = usePromptHistory(historyKey, historyVersion, displayMessages);
+  const promptNavigation = usePromptHistory(historyKey, historyVersion, displayMessages, historyGeneration);
   const sessionCommands = useMemo(
     () => messagesReady ? execSessionCommands(execSourceMessages ?? [], promptNavigation.window?.messages ?? []) : new Map<string, string>(),
     [execSourceMessages, messagesReady, promptNavigation.window?.messages],
@@ -1432,6 +1438,9 @@ function ThreadShellContent({
         >
           <FileActionsProvider value={previewSessionKey ? fileActions : undefined}>
           <McpCatalogContext.Provider value={toolsCatalog}>
+          <MessageEditingProvider chatId={chatId} busy={turnActive}
+            onBegin={anchorMessageEdit}
+            enabled={!temporary && messagesReady && historyKey === `websocket:${chatId}`}>
           <ExecSessionCommandsContext.Provider value={sessionCommands}>
           <ThreadViewport
             ref={viewportRef}
@@ -1479,6 +1488,7 @@ function ThreadShellContent({
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
           </ExecSessionCommandsContext.Provider>
+            </MessageEditingProvider>
           </McpCatalogContext.Provider>
           </FileActionsProvider>
         </FilePreviewAvailabilityProvider>

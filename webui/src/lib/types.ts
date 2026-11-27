@@ -1568,6 +1568,7 @@ interface InboundTurnMetadata {
 }
 
 export type InboundEvent =
+  | { event: "history_invalidated"; chat_id: string }
   | { event: "subagent_task"; chat_id: string; task: SubagentTaskSnapshot }
   | { event: "ready"; chat_id: string; client_id: string; upload?: unknown }
   | {

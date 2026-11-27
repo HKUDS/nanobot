@@ -92,29 +92,26 @@ def _restore(history: HistoryReader, generation: str | None) -> _State:
     if revision is None or generation != revision[0]:
         return state
     pending: list[tuple[Mapping[str, Any], str | None]] = []
-    for turn in history.turns(reverse=True):
-        for _, fact in reversed(history.read_entries(turn.ordinal)):
-            boundary = fact.kind is HistoryKind.COMPACTION and fact.content.get("phase") == "succeeded"
-            value = fact.content.get("context_graph")
-            parts = decode_graph_parts(value) if fact.kind is HistoryKind.MODEL_REQUEST or boundary else None
-            graph = decode_graph(value) if parts is None and (fact.kind is HistoryKind.MODEL_REQUEST or boundary) else None
-            if boundary or parts is not None or graph is not None:
-                if parts is not None:
-                    state.graph = parts["stage"]
-                    state.system_graph = parts["system"]
-                    state.system_turn_id = fact.turn_id
-                    state.reads = parts["reads"]
-                elif graph is not None:
-                    state.graph = graph
-                for event, turn_id in reversed(pending):
-                    state.apply(event, turn_id)
-                return state
-            events = fact.content.get("tool_events")
-            if not isinstance(events, list):
-                continue
-            for event in reversed(cast(list[object], events)):
-                if isinstance(event, dict) and "context_source" in event:
-                    pending.append((cast(dict[str, Any], event), fact.turn_id))
+    for fact in history.recent_context_facts():
+        boundary = fact.kind is HistoryKind.COMPACTION and fact.content.get("phase") == "succeeded"
+        value = fact.content.get("context_graph")
+        parts = decode_graph_parts(value) if fact.kind is HistoryKind.MODEL_REQUEST or boundary else None
+        graph = decode_graph(value) if parts is None and (fact.kind is HistoryKind.MODEL_REQUEST or boundary) else None
+        if boundary or parts is not None or graph is not None:
+            if parts is not None:
+                state.graph = parts["stage"]
+                state.system_graph = parts["system"]
+                state.system_turn_id = fact.turn_id
+                state.reads = parts["reads"]
+            elif graph is not None:
+                state.graph = graph
+            break
+        events = fact.content.get("tool_events")
+        if not isinstance(events, list):
+            continue
+        for event in reversed(cast(list[object], events)):
+            if isinstance(event, dict) and "context_source" in event:
+                pending.append((cast(dict[str, Any], event), fact.turn_id))
     for event, turn_id in reversed(pending):
         state.apply(event, turn_id)
     return state

@@ -5,6 +5,7 @@ import sqlite3
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from functools import cached_property
 from pathlib import Path
 from typing import Any, cast
 
@@ -100,16 +101,26 @@ class HistoryReader:
         self.key = key
         self.storage_path = storage_path
 
-    @property
-    def revision(self) -> tuple[str, int] | None:
+    # A reader belongs to one transaction snapshot. Page cursors, edit sources and
+    # conditional responses can reuse its header, never one from an earlier request.
+    @cached_property
+    def _versions(self) -> tuple[str, int, int] | None:
         row = self._db.execute(
-            """SELECT sessions.generation, coalesce(history_heads.revision, -1) FROM sessions
+            """SELECT sessions.generation, sessions.revision, coalesce(history_heads.revision, -1) FROM sessions
                LEFT JOIN history_heads ON history_heads.session_key=sessions.key WHERE sessions.key=?""",
             (self.key,),
         ).fetchone()
-        return (str(row[0]), int(row[1])) if row is not None else None
+        return (str(row[0]), int(row[1]), int(row[2])) if row is not None else None
 
     @property
+    def session_version(self) -> tuple[str, int] | None:
+        return (self._versions[0], self._versions[1]) if self._versions is not None else None
+
+    @property
+    def revision(self) -> tuple[str, int] | None:
+        return (self._versions[0], self._versions[2]) if self._versions is not None else None
+
+    @cached_property
     def turn_count(self) -> int:
         return int(self._db.execute(
             "SELECT coalesce(max(ordinal)+1, 0) FROM history_turns WHERE session_key=?",
@@ -270,6 +281,27 @@ class HistoryReader:
                AND kind IN (?, ?, ?) LIMIT 1""",
             (self.key, ordinal, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT, HistoryKind.ANSWER_FRAGMENT),
         ).fetchone() is not None
+
+    def recent_context_facts(self) -> Iterator[HistoryFact]:
+        """Stream potential graph checkpoints and reads, newest first until restore stops."""
+        # Project rather than filter: sqlite3 steps to the next row before yielding,
+        # which must not scan past the latest checkpoint to find an older match.
+        for row in self._db.execute(
+            """SELECT CASE WHEN kind IN (?, ?) OR json_type(record, '$.content.tool_events')='array'
+                           THEN record END FROM history_entries WHERE session_key=?
+               ORDER BY turn_ordinal DESC, position DESC""",
+            (HistoryKind.MODEL_REQUEST, HistoryKind.COMPACTION, self.key),
+        ):
+            if row[0] is not None:
+                yield HistoryFact.decode(row[0])
+
+    def inputs_by_id(self, input_id: str | None) -> Iterator[tuple[int, int, HistoryFact]]:
+        """Use history_input_identity; NULL selects only legacy inputs with no stored ID."""
+        for ordinal, position, record in self._db.execute(
+            """SELECT turn_ordinal, position, record FROM history_entries WHERE session_key=?
+               AND kind='input' AND json_extract(record, '$.content.input_id') IS ?""", (self.key, input_id),
+        ):
+            yield ordinal, position, HistoryFact.decode(record)
 
     def navigation(self) -> Iterator[tuple[int, int, HistoryFact]]:
         """Read input/answer records only, never file diffs or tool result bodies."""

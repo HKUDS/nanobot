@@ -75,7 +75,10 @@ async function loadFixture() {
     }
     case "long-user-message": {
       const { LongUserMessageFixture } = await import("./long-user-message-fixture");
-      return withClient(<LongUserMessageFixture parameters={parameters} />);
+      const { MessageEditingProvider } = await import("@/components/thread/MessageEditing");
+      return withClient(<MessageEditingProvider chatId="long-user-message-preview" enabled busy={false}>
+        <LongUserMessageFixture parameters={parameters} />
+      </MessageEditingProvider>);
     }
     case "composer-action": {
       const { ComposerActionFixture, installMissingMicrophonePreview } = await import("./composer-action-fixture");

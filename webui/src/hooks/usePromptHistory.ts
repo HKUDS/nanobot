@@ -106,7 +106,7 @@ function projectHistoryWindow(pages: HistoryPage[]): NonNullable<PromptHistoryNa
 }
 
 /** Browsing pages never replace the canonical latest page or live turn state. */
-export function usePromptHistory(key: string | null, version: number, messages: UIMessage[]): PromptHistoryNavigation {
+export function usePromptHistory(key: string | null, version: number, messages: UIMessage[], generation?: string | null): PromptHistoryNavigation {
   const { client, getToken, webuiCapabilities } = useClient();
   const enabled = !!key && webuiCapabilities.includes("webui.prompt-navigation.v1");
   const [index, setIndex] = useState<{ key: string; prompts: PromptAnchor[] } | null>(null);
@@ -127,8 +127,8 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   const request = useRef<AbortController | null>(null);
   const sequence = useRef(0);
   const retry = useRef<(() => void) | null>(null);
-  const scope = useRef({ key, client });
-  const currentScope = scope.current.key === key && scope.current.client === client;
+  const scope = useRef({ key, client, generation });
+  const currentScope = scope.current.key === key && scope.current.client === client && scope.current.generation === generation;
 
   const cancel = useCallback(() => {
     request.current?.abort();
@@ -145,13 +145,13 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   }, [cancel, publishPages]);
 
   useEffect(() => {
-    scope.current = { key, client };
+    scope.current = { key, client, generation };
     latest();
     setIndex(null);
     indexSnapshot.current = undefined;
     setIndexError(null);
     return () => request.current?.abort();
-  }, [key, client, enabled, latest]);
+  }, [key, client, enabled, latest, generation]);
 
   useEffect(() => {
     if (!enabled || !key) return;
@@ -169,7 +169,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
       setIndexError(cause instanceof Error ? cause.message : String(cause));
     });
     return () => controller.abort();
-  }, [client, enabled, getToken, key, version, refresh]);
+  }, [client, enabled, getToken, key, version, refresh, generation]);
 
   const indexed = useMemo(() => {
     const ids = new Set<string>();
@@ -311,7 +311,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
         setLoading(false);
       }
     }
-  }, [getToken, key, publishPages]);
+  }, [generation, getToken, key, publishPages]);
 
   const first = pages[0]?.body.page;
   const last = pages[pages.length - 1]?.body.page;

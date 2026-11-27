@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from loguru import logger as default_logger
 
 from nanobot.agent.tools.mcp_metadata import MCPRuntimeSnapshot
+from nanobot.bus.events import InboundMessage
 from nanobot.channels.websocket.attachment_http import AttachmentHTTP
 from nanobot.channels.websocket.attachment_store import AttachmentStore
 from nanobot.config.loader import get_config_path
@@ -33,6 +34,9 @@ if TYPE_CHECKING:
     from nanobot.triggers.local_store import LocalTriggerStore
 
 
+EnqueueIfIdle = Callable[[InboundMessage, Callable[[], Awaitable[bool]]], Awaitable[bool]]
+
+
 @dataclass(frozen=True)
 class GatewayServices:
     """Explicit dependencies shared by WebSocket transport and HTTP routes."""
@@ -53,6 +57,7 @@ class GatewayServices:
     local_trigger_store: LocalTriggerStore | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
     local_trigger_pending_ids: Callable[[str], set[str]] | None
+    enqueue_if_idle: EnqueueIfIdle | None = None
 
 
 def build_gateway_services(
@@ -82,6 +87,7 @@ def build_gateway_services(
     recovery_action: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
     subagent_manager: SubagentManager | None = None,
     discard_session: Callable[[str], Awaitable[None]] | None = None,
+    enqueue_if_idle: EnqueueIfIdle | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     settings = WebUISettingsServices.create(
@@ -177,4 +183,5 @@ def build_gateway_services(
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
         local_trigger_pending_ids=local_trigger_pending_ids,
+        enqueue_if_idle=enqueue_if_idle,
     )

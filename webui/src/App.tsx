@@ -916,7 +916,8 @@ function Shell({
 
   useEffect(() => {
     return client.onSessionUpdate((chatId, scope, workspaceScope) => {
-      if (scope === "thread") {
+      if (scope === "history_invalidated") threadMessageCache.delete(chatId);
+      if (scope === "thread" || scope === "history_invalidated") {
         setUpdatedChatIds((current) => {
           const next = new Set(current);
           if (activeChatIdRef.current === chatId) {
@@ -939,7 +940,7 @@ function Shell({
       setWorkspaceError(null);
       void refreshWorkspaces();
     });
-  }, [client, refreshWorkspaces]);
+  }, [client, refreshWorkspaces, threadMessageCache]);
 
   useEffect(() => {
     return client.onError((error) => {

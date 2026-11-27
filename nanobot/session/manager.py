@@ -37,18 +37,12 @@ if TYPE_CHECKING:
 _T = TypeVar("_T")
 SESSION_CACHE_MAX_SIZE = 128
 _SESSION_PREVIEW_MAX_CHARS = 120
-_FORK_VOLATILE_METADATA_KEYS = {
-    "_stopped_at_iteration_limit",
-    PARENT_SESSION_KEY,
-    SESSION_TYPE_KEY,
-    "pending_user_turn",
-    "pending_user_followups",
-    "runtime_checkpoint",
-    "session_handle",
-    "webui_recovery",
-    "title",
-    "title_user_edited",
-}
+EDIT_RECEIPT_KEY = "history_edit_receipt"
+GENERATION_HISTORY_KEYS = frozenset({
+    "_stopped_at_iteration_limit", "webui_recovery",
+    "pending_user_turn", "pending_user_followups", "runtime_checkpoint", EDIT_RECEIPT_KEY,
+})
+_FORK_IDENTITY_KEYS = {PARENT_SESSION_KEY, SESSION_TYPE_KEY, "session_handle", "title", "title_user_edited"}
 
 
 def _text_preview(content: object) -> str:
@@ -360,47 +354,38 @@ class SessionInfo(TypedDict):
     path: str
 
 
+def history_prefix_boundary(source: Session, before_user_index: int) -> int | None:
+    """Locate a global visible-user boundary, shared by new forks and replacement."""
+    if before_user_index < 0:
+        return None
+    user_index = 0
+    for position, message in enumerate(source.messages):
+        if message.get("role") == "user" and not is_hidden_history_message(message):
+            if user_index == before_user_index:
+                return position
+            user_index += 1
+    return len(source.messages) if user_index == before_user_index else None
+
+
 def fork_session(
     source: Session, target_key: str, before_user_index: int,
     *, exclude_metadata: frozenset[str] = frozenset(),
 ) -> Session | None:
     """Build a portable fork ending before the requested visible user message."""
-    if before_user_index < 0:
+    boundary = history_prefix_boundary(source, before_user_index)
+    if boundary is None:
         return None
-    copied: list[dict[str, Any]] = []
-    user_index = 0
-    found_target = False
-    for message in source.messages:
-        if message.get("role") == "user" and not is_hidden_history_message(message):
-            if user_index == before_user_index:
-                found_target = True
-                break
-            user_index += 1
-        copied.append(public_history_message(message))
-    if user_index == before_user_index:
-        found_target = True
-    if not found_target:
-        return None
-
-    metadata = deepcopy(source.metadata)
-    for key in _FORK_VOLATILE_METADATA_KEYS | exclude_metadata:
-        metadata.pop(key, None)
-
-    last_consolidated = min(source.last_archived, len(copied))
-    if source.last_archived > len(copied):
-        metadata.pop("_last_summary", None)
-        last_consolidated = 0
-
+    excluded = GENERATION_HISTORY_KEYS | _FORK_IDENTITY_KEYS | exclude_metadata
+    archived = source.last_archived
+    if archived > boundary:
+        archived = 0
+        excluded |= {"_last_summary"}
     now = datetime.now()
-    target = Session(
-        key=target_key,
-        messages=copied,
-        created_at=now,
-        updated_at=now,
-        metadata=metadata,
-        last_consolidated=last_consolidated,
+    return Session(
+        key=target_key, created_at=now, updated_at=now, last_consolidated=archived,
+        messages=[public_history_message(message) for message in source.messages[:boundary]],
+        metadata=deepcopy({k: v for k, v in source.metadata.items() if k not in excluded}),
     )
-    return target
 
 
 class SessionManager:

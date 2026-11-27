@@ -4,7 +4,7 @@
   --message-column-margin: calc((100% - var(--content-column-width)) / 2);
   --message-actions-width: calc(3 * var(--message-block-action-width));
   padding-left: max(calc(var(--message-actions-width) + 0.75rem), var(--message-column-margin));
-  padding-right: max(3rem, var(--message-column-margin));
+  padding-right: max(calc(2 * var(--message-block-action-width) + 0.75rem), var(--message-column-margin));
 }
 
 /* Keep the prompt navigator and the answer actions in separate hit areas. */

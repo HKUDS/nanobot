@@ -61,6 +61,7 @@ class _SubagentOrigin(TypedDict):
     channel: str
     chat_id: str
     session_key: str | None
+    session_generation: NotRequired[str | None]
     llm_usage_source: NotRequired[LLMUsageSource]
 
 
@@ -591,7 +592,7 @@ class SubagentManager:
         session_key: str | None, origin_message_id: str | None,
         temperature: float | None, workspace_scope: WorkspaceScope | None,
         runtime: LLMRuntime | None, *, announce: bool, origin_turn_id: str | None,
-        session_policy: SessionPolicy | None,
+        session_policy: SessionPolicy | None, session_generation: str | None = None,
     ) -> _SubagentTask:
         self.bus.admission.check()
         if runtime is None:
@@ -641,7 +642,8 @@ class SubagentManager:
             runtime=runtime,
             origin={
                 "channel": origin_channel, "chat_id": origin_chat_id,
-                "session_key": owner, "llm_usage_source": current_llm_usage_source(),
+                "session_key": owner, "session_generation": session_generation,
+                "llm_usage_source": current_llm_usage_source(),
             },
             origin_message_id=origin_message_id,
             workspace_scope=workspace_scope,
@@ -671,13 +673,14 @@ class SubagentManager:
         runtime: LLMRuntime | None = None,
         origin_turn_id: str | None = None,
         session_policy: SessionPolicy | None = None,
+        session_generation: str | None = None,
     ) -> str:
         """Start background work and route its terminal result to the parent."""
         try:
             record = await self._create_task(
                 task, label, origin_channel, origin_chat_id, session_key,
                 origin_message_id, temperature, workspace_scope, runtime, announce=True, origin_turn_id=origin_turn_id,
-                session_policy=session_policy,
+                session_policy=session_policy, session_generation=session_generation,
             )
         except SubagentControlError as exc:
             return ToolResult.error(f"Error: {exc}")
@@ -699,13 +702,14 @@ class SubagentManager:
         runtime: LLMRuntime | None = None,
         origin_turn_id: str | None = None,
         session_policy: SessionPolicy | None = None,
+        session_generation: str | None = None,
     ) -> str:
         """Wait for the same task lifecycle without a background notice."""
         try:
             record = await self._create_task(
                 task, label, origin_channel, origin_chat_id, session_key,
                 origin_message_id, temperature, workspace_scope, runtime, announce=False, origin_turn_id=origin_turn_id,
-                session_policy=session_policy,
+                session_policy=session_policy, session_generation=session_generation,
             )
         except SubagentControlError as exc:
             return ToolResult.error(f"Error: {exc}")
@@ -985,6 +989,7 @@ class SubagentManager:
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
             session_key_override=override,
+            session_generation=origin.get("session_generation"),
             require_existing_session=True,
             metadata=metadata,
         )
@@ -1059,9 +1064,11 @@ class SubagentManager:
             self._owns_exec_session_manager and self._exec_session_manager.has_pending_work
         )
 
-    def get_running_count_by_session(self, session_key: str) -> int:
-        """Return the number of currently running subagents for a session."""
+    def get_running_count_by_session(self, session_key: str, *, session_generation: str | None = None) -> int:
+        """Count running children, optionally restricted to one parent lifecycle."""
         return sum(
             1 for tid, task in self._running_tasks.items()
             if self._tasks[tid].status.owner == session_key and not task.done()
+            and (session_generation is None
+                 or self._tasks[tid].origin.get("session_generation") in (None, session_generation))
         )

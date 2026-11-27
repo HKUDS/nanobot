@@ -10,6 +10,7 @@ from contextlib import contextmanager, suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeVar, cast
+from uuid import uuid4
 
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
@@ -391,12 +392,8 @@ class SqliteSessionStore:
             _encode(metadata), metadata_title(metadata), int(bump_revision), key,
         ))
 
-    def save(self, session: Session, *, message_start: int = 0) -> None:
-        """Commit history, optionally skipping a prefix verified at this revision."""
-        if not 0 <= message_start <= len(session.messages):
-            raise ValueError("invalid message suffix boundary")
-        records = [_encode(message) for message in session.messages[message_start:]]
-        provider = _encode(session.provider_state.to_private_record()) if session.provider_state else None
+    @staticmethod
+    def _message_list_summary(session: Session) -> tuple[str, str | None]:
         preview = ""
         fallback = ""
         scanned_chars = 0
@@ -416,6 +413,15 @@ class SqliteSessionStore:
         last_visible = next((m["timestamp"] for m in reversed(session.messages)
                              if m.get("timestamp") and not is_hidden_history_message(m)
                              and m.get("role") in {"user", "assistant"}), None)
+        return preview, last_visible
+
+    def save(self, session: Session, *, message_start: int = 0) -> None:
+        """Commit history, optionally skipping a prefix verified at this revision."""
+        if not 0 <= message_start <= len(session.messages):
+            raise ValueError("invalid message suffix boundary")
+        records = [_encode(message) for message in session.messages[message_start:]]
+        provider = _encode(session.provider_state.to_private_record()) if session.provider_state else None
+        preview, last_visible = self._message_list_summary(session)
         with self.transaction() as db:
             row = db.execute("SELECT revision, generation FROM sessions WHERE key=?", (session.key,)).fetchone()
             if row is None:
@@ -722,6 +728,73 @@ class SqliteSessionStore:
             if appended:
                 db.execute("UPDATE history_heads SET revision=revision+1 WHERE session_key=?", (key,))
         return errors
+
+    def _truncate_display_history(self, key: str, ordinal: int, position: int) -> None:
+        """Drop a display suffix and rebuild its paging/sidebar summaries before appending."""
+        with self.transaction() as db:
+            db.execute(
+                """DELETE FROM history_entries WHERE session_key=?
+                   AND (turn_ordinal>? OR (turn_ordinal=? AND position>=?))""",
+                (key, ordinal, ordinal, position),
+            )
+            db.execute("DELETE FROM history_turns WHERE session_key=? AND ordinal>?", (key, ordinal))
+            counts = db.execute(
+                """SELECT count(*), coalesce(sum(coalesce(json_extract(record, '$.uncompressed_bytes'),
+                                                        length(CAST(record AS BLOB)))), 0),
+                          coalesce(sum(kind=?), 0)
+                   FROM history_entries WHERE session_key=? AND turn_ordinal=?""",
+                (HistoryKind.INPUT, key, ordinal),
+            ).fetchone()
+            if counts[0]:
+                db.execute(
+                    """UPDATE history_turns SET record_count=?, byte_count=?, user_count=?, completed=0
+                       WHERE session_key=? AND ordinal=?""", (*counts, key, ordinal),
+                )
+            else:
+                db.execute("DELETE FROM history_turns WHERE session_key=? AND ordinal=?", (key, ordinal))
+            preview = user_preview = ""
+            for row in db.execute(
+                """SELECT kind, json_extract(record, '$.content.text') FROM history_entries
+                   WHERE session_key=? AND kind IN (?, ?, ?) ORDER BY turn_ordinal, position""",
+                (key, HistoryKind.INPUT, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT),
+            ):
+                text = message_preview_text({"content": row[1] or ""})
+                if row[0] == HistoryKind.INPUT:
+                    user_preview = user_preview or text
+                else:
+                    preview = preview or text
+                if preview and user_preview:
+                    break
+            updated_at_ms = db.execute(
+                "SELECT coalesce(max(json_extract(record, '$.created_at_ms')), 0) FROM history_entries WHERE session_key=?",
+                (key,),
+            ).fetchone()[0]
+            db.execute(
+                "UPDATE history_heads SET preview=?, user_preview=?, updated_at_ms=? WHERE session_key=?",
+                (preview, user_preview, updated_at_ms, key),
+            )
+
+    def replace_input_suffix(self, session: Session, ordinal: int, position: int, new_input: HistoryFact) -> None:
+        """Delete only the model/display suffix and persist the journal with its displayed input."""
+        key = session.key
+        generation = uuid4().hex
+        provider = _encode(session.provider_state.to_private_record()) if session.provider_state else None
+        preview, last_visible = self._message_list_summary(session)
+        with self.transaction() as db:
+            changed = db.execute(
+                """UPDATE sessions SET generation=?, revision=revision+1, updated_at=?, provider_state=?,
+                          last_archived=?, preview=?, visible_updated_at=? WHERE key=? AND generation=? AND revision=?""",
+                (generation, session.updated_at.isoformat(), provider, session.last_archived, preview, last_visible,
+                 key, session.generation, session.revision),
+            ).rowcount
+            if changed != 1:
+                raise SessionConflictError("session history changed")
+            db.execute("DELETE FROM messages WHERE session_key=? AND position>=?", (key, len(session.messages)))
+            self._write_metadata(db, key, session.metadata, bump_revision=False)
+            self._truncate_display_history(key, ordinal, position)
+            self.append_history(key, [new_input], expected_generation=generation)
+        session.generation = generation
+        session.revision += 1
 
     def copy_history_prefix(self, source_key: str, target: Session, before_input: int) -> bool:
         """Copy a display prefix alongside its canonical fork, in the caller's transaction."""

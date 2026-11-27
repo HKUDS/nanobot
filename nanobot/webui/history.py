@@ -16,6 +16,7 @@ from nanobot.session.manager import SessionInfo, SessionManager
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_chat_id, webui_session_key
 
 HISTORY_IMPORT_MARKER = "webui_history_import_v1"
+MODEL_PROJECTED_INPUT = "_model_projected_input"
 _SEGMENT_NAME = re.compile(r"^\d{6}\.jsonl$")
 _EVENTS = {
     "user": HistoryKind.INPUT,
@@ -41,7 +42,7 @@ _CONTENT_FIELDS = frozenset({
     "merge_next", "latency_ms", "usage", "round_usages", "context_window_tokens", "goal_state",
     "outcome", "failure_kind", "failure_error_kind", "failure_attempts", "failure_message",
     "transcript_incomplete", "stream_id", "text_from_seq", "compaction_id", "phase", "reason", "render_as",
-    "side_channel",
+    "side_channel", MODEL_PROJECTED_INPUT,
     "request_usage", "request_id", "run_id", "sequence", "context_graph", "context_snapshot",
 })
 

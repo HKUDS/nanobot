@@ -11,10 +11,12 @@ from dataclasses import fields, replace
 from datetime import datetime
 from typing import Any, TypeVar, cast
 
-from nanobot.bus.events import InboundMessage
+from nanobot.bus.events import INBOUND_META_TURN_ID, InboundMessage
 from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import (
+    EDIT_RECEIPT_KEY,
+    GENERATION_HISTORY_KEYS,
     Session,
     SessionIdentity,
     SessionInfo,
@@ -31,6 +33,15 @@ _CHECKPOINT_KEY = "runtime_checkpoint"
 _RESERVED_KEYS = frozenset({_PENDING_KEY, _CHECKPOINT_KEY, "pending_user_followups"})
 _DEFAULT_CAPACITY = 64
 _DEFAULT_WORKERS = 4
+
+
+InputLocator = Callable[[Session, HistoryReader], tuple[int, int, int, HistoryFact]]
+
+
+class EditError(ValueError):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
 
 
 class SessionOperationQueueFullError(RuntimeError):
@@ -1021,6 +1032,9 @@ class SessionState:
         *, title: str | None = None,
         history_projection: Callable[[Session], list[HistoryFact]] | None = None,
     ) -> Session | None:
+        if source_key == target_key:
+            raise ValueError("new fork requires a different target session")
+
         def commit() -> Session | None:
             def write() -> Session | None:
                 source = self._load(source_key)
@@ -1051,6 +1065,60 @@ class SessionState:
             commit,
             operation_name="fork",
         )
+
+    async def replace_input(
+        self, key: str, source_id: str, message: InboundMessage, locate: InputLocator | None,
+    ) -> Session | None:
+        """Replace an anchored input, or return None for an exact retry. A busy lane may only retry."""
+        from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY, record_pending_followup
+
+        receipt = {"turn_id": message.metadata[INBOUND_META_TURN_ID], "source_id": source_id, "text": message.content}
+
+        def write() -> tuple[Session, str] | None:
+            session = self._load(key, history=locate is not None)
+            if session is None or not session.policy.persist:
+                raise EditError("edit_source_changed")
+            previous = session.metadata.get(EDIT_RECEIPT_KEY)
+            if isinstance(previous, dict) and cast(dict[str, object], previous).get("turn_id") == receipt["turn_id"]:
+                if previous != receipt:
+                    raise EditError("edit_request_conflict")
+                return None
+            resolve = locate
+            if resolve is None or any(session.metadata.get(name) for name in _RESERVED_KEYS):
+                raise EditError("edit_session_busy")
+            boundary, ordinal, entry, new_input = self._store.project_history(key, lambda history: resolve(session, history))
+            if not 0 <= boundary < len(session.messages):
+                raise EditError("edit_source_changed")
+            if session.provider_state is not None:
+                from nanobot.providers.openai_responses.state import responses_state_before_input
+
+                session.provider_state = (
+                    responses_state_before_input(session.provider_state, session.messages, boundary)
+                    if not session.last_archived else None
+                )
+            del session.messages[boundary:]
+            if session.last_archived > boundary:
+                session.last_archived = 0
+                session.metadata.pop("_last_summary", None)
+            for name in GENERATION_HISTORY_KEYS | self._generation_exclusions | {"_last_usage", "request_origin"}:
+                session.metadata.pop(name, None)
+            followup_id = record_pending_followup(session, message)
+            if followup_id is None:
+                raise ValueError("replacement input cannot be journaled")
+            session.metadata[EDIT_RECEIPT_KEY] = receipt
+            self._store.replace_input_suffix(session, ordinal, entry, new_input)
+            return session, followup_id
+
+        def commit() -> Session | None:
+            result = self._store.run_write(write)
+            if result is None:
+                return None
+            session, followup_id = result
+            message.metadata[PENDING_FOLLOWUP_ID_KEY] = followup_id
+            self._publish(session)
+            return self._draft(session)
+
+        return await self._execute(key, commit, operation_name="replace_input")
 
     async def delete(
         self,
@@ -1174,7 +1242,7 @@ class SessionState:
                 if old is not None:
                     session.policy = old.policy
                     session.metadata = deepcopy(old.metadata)
-                for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary", "_stopped_at_iteration_limit"):
+                for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary", "_stopped_at_iteration_limit", EDIT_RECEIPT_KEY):
                     session.metadata.pop(name, None)
                 for name in self._generation_exclusions:
                     session.metadata.pop(name, None)

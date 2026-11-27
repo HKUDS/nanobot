@@ -111,6 +111,8 @@ class _GatewayAgentContractStub:
     async def discard_session(self, _session_key: str) -> None:
         pass
 
+    enqueue_if_idle = AsyncMock()
+
     @staticmethod
     def mcp_runtime_status() -> dict[str, str]:
         return {}
@@ -3518,6 +3520,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         def __init__(self, *_args, **_kwargs) -> None:
             seen["webui_subagent_manager"] = _kwargs["webui_subagent_manager"]
             seen["webui_discard_session"] = _kwargs["webui_discard_session"]
+            seen["enqueue_if_idle"] = _kwargs["enqueue_if_idle"]
 
         def get_channel(self, name: str) -> object | None:
             return object() if name == "websocket" else None
@@ -3552,6 +3555,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     kwargs = seen["local_trigger_queue_kwargs"]
     assert seen["webui_subagent_manager"] is agent.subagents
     assert seen["webui_discard_session"] == agent.discard_session
+    assert seen["enqueue_if_idle"] == agent.enqueue_if_idle
     assert isinstance(agent_kwargs["provider"].provider, UnconfiguredProvider) is bool(setup_error)
     refreshed_snapshot = agent_kwargs["provider_snapshot_loader"]()
     assert not isinstance(refreshed_snapshot.provider, UnconfiguredProvider)

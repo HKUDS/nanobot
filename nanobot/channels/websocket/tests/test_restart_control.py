@@ -16,6 +16,7 @@ from nanobot.channels.websocket.runtime import WebSocketChannel
 from nanobot.command.builtin import cmd_new, cmd_restart
 from nanobot.command.router import CommandContext
 from nanobot.config.schema import Config
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import RECOVERY_METADATA_KEY
 from nanobot.session.state import SessionOperationQueueFullError
@@ -91,17 +92,16 @@ async def test_restart_completion_after_gateway_start(history, tmp_path, monkeyp
         subscriber.send.reset_mock()
 
         if scenario in {"busy", "reset_during_retry"}:
+            send = AsyncMock(wraps=target.send)
+            monkeypatch.setattr(target, "send", send)
             append = fresh.state.append_history
-            attempts = []
 
             async def busy_once(key, facts, *, expected_generation, skip_invalid):
-                attempts.append(expected_generation)
-                if len(attempts) == 1:
-                    if scenario == "reset_during_retry":
-                        await fresh.state.reset(key)
-                        raise SessionOperationQueueFullError("session queue full")
-                    raise sqlite3.OperationalError("database is locked")
-                return await append(key, facts, expected_generation=expected_generation, skip_invalid=skip_invalid)
+                monkeypatch.setattr(fresh.state, "append_history", append)
+                if scenario == "reset_during_retry":
+                    await fresh.state.reset(key)
+                    raise SessionOperationQueueFullError("session queue full")
+                raise sqlite3.OperationalError("database is locked")
 
             monkeypatch.setattr(fresh.state, "append_history", busy_once)
             monkeypatch.setattr("nanobot.channels.manager._SEND_RETRY_DELAYS", (0,))
@@ -111,7 +111,11 @@ async def test_restart_completion_after_gateway_start(history, tmp_path, monkeyp
             await task
         frames = _sent_ws_payloads(subscriber)
         if scenario in {"busy", "reset_during_retry"}:
-            assert len(attempts) == 2 and attempts[0] and attempts[1] == attempts[0]
+            # A retry for a reset chat is rejected before the next history append.
+            generation = message.metadata[HISTORY_GENERATION_METADATA_KEY]
+            assert [call.args[0].metadata[HISTORY_GENERATION_METADATA_KEY] for call in send.await_args_list] == [
+                generation, generation,
+            ]
         if scenario not in {"typed", "busy"}:
             assert frames == []
             assert history.read(message.session_key) == []

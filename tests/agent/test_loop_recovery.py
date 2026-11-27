@@ -132,7 +132,7 @@ async def test_recovery_continuation_runs_without_a_sustained_goal(
     loop._session_locks = {}
     loop._concurrency_gate = None
     loop._automation_turn_coordinators = []
-    loop._pending_queues = SessionInboxes()
+    loop._pending_queues = MagicMock(spec=SessionInboxes)
     loop._preserve_inflight_turns_on_shutdown = False
     loop.turn_delivery_factory = TurnDeliveryFactory(bus)
     process_message = AsyncMock(return_value=OutboundMessage(

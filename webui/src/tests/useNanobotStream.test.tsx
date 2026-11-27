@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -160,6 +160,41 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it("refreshes an edited transcript without losing live replies received before the read completes", async () => {
+    const { client, receive } = createStreamClient();
+    const cache = new ThreadMessageCache(() => false);
+    const chat_id = "edited";
+    const page = { before_cursor: "earlier", has_more_before: true, user_message_offset: 4 };
+    const thread = (id: string, text: string) => ({ schemaVersion: 3, projection: "events", page,
+      events: [{ event: "user_message", chat_id, turn_id: id, starts_turn: true, turn_seq: 1, text }] });
+    let resolveRead!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { resolveRead = resolve; });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json(thread("old", "Original"))).mockReturnValue(pending));
+    const wrapper = ({ children }: { children: ReactNode }) => <ClientProvider client={client} token="tok">{children}</ClientProvider>;
+    const first = renderHook(() => useNanobotStream(chat_id, EMPTY_MESSAGES, false,
+      undefined, undefined, [], { key: `websocket:${chat_id}`, cache }), { wrapper });
+    try {
+      await waitFor(() => expect(first.result.current.messages.map(row => row.content)).toEqual(["Original"]));
+      act(() => {
+        receive({ event: "delta", chat_id, turn_id: "old", stream_id: "old-answer", turn_seq: 2, text: "Discarded pending output" });
+        receive({ event: "history_invalidated", chat_id });
+        receive({ event: "delta", chat_id, turn_id: "new", stream_id: "new-answer", turn_seq: 2, text: "New reply" });
+      });
+      await flushStreamFrame();
+      expect(first.result.current.messages.map(row => row.content)).toEqual(["New reply"]);
+      act(() => {
+        receive({ event: "user_message", chat_id, turn_id: "followup", starts_turn: true, turn_seq: 1, text: "Next question" });
+        receive({ event: "delta", chat_id, turn_id: "followup", stream_id: "next", turn_seq: 2, text: "Next reply" });
+      });
+      await act(async () => resolveRead(Response.json(thread("new", "Edited"))));
+      const expected = ["Edited", "New reply", "Next question", "Next reply"];
+      expect(first.result.current.messages.map(row => row.content)).toEqual(expected);
+      expect(first.result.current.history).toMatchObject({ beforeCursor: "earlier", userMessageOffset: 4 });
+      first.unmount();
+      expect(cache.get(chat_id)?.projection.messages.map(row => row.content)).toEqual(expected);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it("updates the command source on exec results, not on streamed text, and scopes it to the chat", async () => {
     const fake = fakeClient();
     const initial: UIMessage[] = Array.from({ length: 500 }, (_, index) => ({

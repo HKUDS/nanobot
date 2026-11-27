@@ -11,6 +11,7 @@ import {
 import { sameHistoryRowIdentity, type HistoryRowIdentity, type HistoryRowSource } from "@/components/thread/history-row-identity";
 import { ThreadDivider } from "@/components/thread/ThreadDivider";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
+import { editSourceId, messageEditorSlots, useMessageEditing } from "@/components/thread/MessageEditing";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useFloatingPortal } from "@/components/ui/floating-portal";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -22,6 +23,9 @@ import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
+  /** Only the primary list may act on the selected chat (never a nested subagent thread). */
+  editScope?: string | null;
+  historyComplete?: boolean;
   historyRows?: WeakMap<HTMLElement, HistoryRowIdentity>;
   messages: UIMessage[];
   beforeMessages?: ReactNode;
@@ -82,6 +86,8 @@ export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
 }
 
 export function ThreadMessages({
+  editScope,
+  historyComplete = false,
   historyRows,
   messages,
   beforeMessages,
@@ -191,6 +197,25 @@ export function ThreadMessages({
   const setContextBlockMenuOpen = useCallback((key: string, open: boolean) => {
     setOpenContextBlockKey((current) => open ? key : current === key ? null : current);
   }, []);
+  const editing = useMessageEditing(editScope);
+  const selected = editing?.message;
+  const focusReturn = useRef<{ row: HTMLElement; scope: string } | null>(null);
+  useLayoutEffect(() => {
+    const list = messageListRef.current;
+    if (selected && list && editScope) {
+      const row = list.querySelector<HTMLElement>("[data-thread-editing]");
+      focusReturn.current = row ? { row, scope: editScope } : null;
+      return;
+    }
+    const target = focusReturn.current;
+    focusReturn.current = null;
+    if (!target || target.scope !== editScope || !list?.contains(target.row)) return;
+    const trigger = target.row.querySelector<HTMLButtonElement>(
+      mobileActions ? "[data-message-block-menu-trigger]" : "[data-message-block-edit-action]",
+    );
+    (trigger?.disabled ? trigger.parentElement : trigger)?.focus({ preventScroll: true });
+  }, [selected, editScope, mobileActions]);
+  let editSourceVisible = false;
   let nextUserIndex = hiddenUserMessageCount;
   const preludeIndex = Math.max(0, beforeUnit ? unitKeys.indexOf(beforeUnit.key) : 0);
   const inset = topInset > 0 ? <div aria-hidden style={{ height: topInset }} /> : null;
@@ -241,6 +266,9 @@ export function ThreadMessages({
           unit.type === "message" && unit.message.role === "user"
             ? unit.message.id
             : undefined;
+        const isEditing = !!selected && unit.type === "message" && !!userPromptId
+          && editSourceId(unit.message) === editSourceId(selected);
+        if (isEditing) editSourceVisible = true;
         const forkIndex =
           unit.type === "message" && unit.message.role === "assistant" && forkFlags[index]
             ? nextUserIndex
@@ -275,6 +303,8 @@ export function ThreadMessages({
             mobileActions={mobileActions}
             marginTop={prelude ? "" : marginTop}
             userPromptId={userPromptId}
+            editing={editing}
+            isEditing={isEditing}
             hasBodyBelow={hasBodyBelow}
             suppressActivity={suppressActivity}
             showBlockContext={showBlockContext}
@@ -316,6 +346,9 @@ export function ThreadMessages({
           </Fragment>,
         ];
       })]}
+      {selected && !editSourceVisible ? <div className={cn("thread-message-row", units.length > 0 && "mt-5")}>
+        <MessageBubble message={selected} editor={messageEditorSlots(historyComplete)} />
+      </div> : null}
       {afterMessages}
       {pendingActivity ? (
         <div className={cn("thread-message-row", units.length > 0 && "mt-5")}>
@@ -389,6 +422,8 @@ interface ThreadDisplayUnitProps {
   unit: DisplayUnit;
   marginTop: string;
   userPromptId?: string;
+  editing: ReturnType<typeof useMessageEditing>;
+  isEditing: boolean;
   hasBodyBelow: boolean;
   suppressActivity: boolean;
   showBlockContext: boolean;
@@ -426,6 +461,8 @@ interface MessageBlockMenuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onForkFromHere?: () => void;
+  onEdit?: () => void;
+  editDisabledReason?: string | null;
   activity?: {
     label: string;
     expanded: boolean;
@@ -442,16 +479,25 @@ function MessageBlockMenu({
   open,
   onOpenChange,
   onForkFromHere,
+  onEdit,
+  editDisabledReason,
   activity,
 }: MessageBlockMenuProps) {
   const { t } = useTranslation();
   const portal = useFloatingPortal();
   const label = t("message.actions");
+  const editingRef = useRef(false);
   const actions = <MessageBlockMenuActions
     message={message}
     isTurnStreaming={isTurnStreaming}
     onForkFromHere={onForkFromHere ? () => { if (mobileActions) onOpenChange(false); onForkFromHere(); } : undefined}
     activity={activity}
+    onEdit={onEdit && mobileActions ? () => {
+      editingRef.current = true;
+      onOpenChange(false);
+      onEdit();
+    } : onEdit}
+    editDisabledReason={editDisabledReason}
     sheet={mobileActions}
   />;
   if (mobileActions) {
@@ -468,7 +514,11 @@ function MessageBlockMenu({
           overlayClassName={portal ? "pointer-events-auto bg-black/25 backdrop-blur-[8px]" : undefined}
           data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
           className="gap-2 p-4 pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] outline-none"
-          onCloseAutoFocus={(event) => { if (activity?.expanded) event.preventDefault(); }}>
+          onCloseAutoFocus={(event) => {
+            const startedEdit = editingRef.current;
+            editingRef.current = false;
+            if (startedEdit || activity?.expanded) event.preventDefault();
+          }}>
           <DialogTitle className="px-2 pb-2 text-sm font-medium text-muted-foreground">{label}</DialogTitle>
           {actions}
         </DialogContent>
@@ -488,6 +538,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   unit,
   marginTop,
   userPromptId,
+  editing,
+  isEditing,
   hasBodyBelow,
   suppressActivity,
   showBlockContext,
@@ -579,7 +631,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
     onBlockActivityExpandedChange,
     onContextBlockMenuOpenChange,
   ]);
-  const blockMenu = unit.type === "message" && contextBlockKey !== undefined ? (
+  const userEditing = unit.type === "message" && unit.message.role === "user" ? editing : null;
+  const blockMenu = unit.type === "message" && contextBlockKey !== undefined && !isEditing ? (
     <MessageBlockMenu
       mobileActions={mobileActions}
       message={unit.message}
@@ -588,6 +641,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
       open={contextBlockMenuOpen}
       onOpenChange={(open) => onContextBlockMenuOpenChange(contextBlockKey, open)}
       onForkFromHere={onForkFromMessage && forkIndex !== undefined ? () => onForkFromMessage(forkIndex) : undefined}
+      onEdit={userEditing ? () => userEditing.begin(unit.message) : undefined}
+      editDisabledReason={userEditing?.reason(unit.message)}
       activity={activityLabel ? {
         label: activityLabel,
         expanded: blockActivityExpanded,
@@ -611,6 +666,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
           onContextBlockActiveChange(contextBlockKey ?? null);
         }}
         data-thread-display-unit={unitKey}
+        data-thread-editing={isEditing || undefined}
         data-user-prompt-id={userPromptId}
         data-message-context-block={contextBlockKey}
         data-context-block-active={contextBlockActive || undefined}
@@ -671,6 +727,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             ) : null}
             <MessageBubble
               message={unit.message}
+              editor={isEditing ? messageEditorSlots() : undefined}
               temporary={temporary}
               cliApps={cliApps}
               mcpPresets={mcpPresets}
@@ -706,6 +763,8 @@ function threadDisplayUnitPropsEqual(
     && previous.mobileActions === next.mobileActions
     && previous.marginTop === next.marginTop
     && previous.userPromptId === next.userPromptId
+    && previous.editing === next.editing
+    && previous.isEditing === next.isEditing
     && previous.hasBodyBelow === next.hasBodyBelow
     && previous.suppressActivity === next.suppressActivity
     && previous.showBlockContext === next.showBlockContext

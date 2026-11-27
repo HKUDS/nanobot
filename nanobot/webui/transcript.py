@@ -40,6 +40,7 @@ from nanobot.session.session_messages import (
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.webui.history import (
+    MODEL_PROJECTED_INPUT,
     fact_from_record,
     initialize_history,
     record_from_fact,
@@ -230,6 +231,22 @@ def _coerce_page_limit(limit: int | None) -> int:
 
 def read_transcript_lines(session_key: str, *, history: HistoryReader) -> list[dict[str, Any]]:
     return [record_from_fact(fact, session_key) for fact in history.all_facts()]
+
+
+def find_history_input(history: HistoryReader, input_id: str) -> tuple[int, int, HistoryFact] | None:
+    if entry := next(history.inputs_by_id(input_id), None):
+        return entry
+    # Before durable input IDs, replay identified a user by turn or its position in the transcript.
+    match = None
+    for ordinal, position, fact in history.inputs_by_id(None):
+        legacy_id = f"user:{fact.turn_id}" if fact.turn_id else projection_event_id({
+            WEBUI_REPLAY_IDENTITY_KEY: f"turn:{ordinal}:record:{position}",
+        })
+        if input_id == legacy_id:
+            if match is not None:
+                return None
+            match = (ordinal, position, fact)
+    return match
 
 
 def _now_ms() -> int:
@@ -643,9 +660,13 @@ def _session_assistant_event(
 
 def session_display_facts(session: Session) -> list[HistoryFact]:
     """Basic projection for a fork whose source has model records but no display facts."""
-    return [fact_from_record(row) for message in session.messages
-            if (row := _session_user_event(session.key, message)
-                or _session_assistant_event(session.key, message)) is not None]
+    facts: list[HistoryFact] = []
+    for message in session.messages:
+        if row := _session_user_event(session.key, message):
+            facts.append(fact_from_record({**row, MODEL_PROJECTED_INPUT: True}))
+        elif row := _session_assistant_event(session.key, message):
+            facts.append(fact_from_record(row))
+    return facts
 
 
 def _session_backfill_turns(

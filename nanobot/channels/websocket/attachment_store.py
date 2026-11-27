@@ -8,7 +8,9 @@ transport state; callers persist the paths returned by ``resolve`` as before.
 from __future__ import annotations
 
 import asyncio
+import os
 import secrets
+import stat
 import time
 from collections.abc import AsyncIterable
 from dataclasses import dataclass
@@ -185,6 +187,25 @@ class AttachmentStore:
             (self._journal / entry.path.name).unlink(missing_ok=True)
             self._reserved_bytes -= self._entries.pop(reference).size
         return paths
+
+    def check_committed_paths(self, paths: list[str]) -> None:
+        """Reopen only session-owned upload paths, never client-supplied references."""
+        for raw in paths:
+            path = Path(raw)
+            try:
+                if (not path.is_absolute() or path.parent != self.media_dir
+                        or path.resolve(strict=True) != self.media_dir.parent.resolve() / self.media_dir.name / path.name
+                        or (self._journal / path.name).exists()):
+                    raise AttachmentUploadError("Unavailable committed upload")
+                fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+                try:
+                    info = os.fstat(fd)
+                    if not stat.S_ISREG(info.st_mode) or not info.st_size:
+                        raise AttachmentUploadError("Unavailable committed upload")
+                finally:
+                    os.close(fd)
+            except OSError as exc:
+                raise AttachmentUploadError("Unavailable committed upload") from exc
 
     def discard_owner(self, owner: str) -> None:
         self.discard([ref for ref, entry in self._entries.items() if entry.owner == owner], owner=owner)
