@@ -26,6 +26,9 @@ This conversation is via email. Structure with clear sections. Markdown may not 
 {% elif channel == 'cli' or channel == 'mochat' %}
 ## Format Hint
 Output is rendered in a terminal. Avoid markdown headings and tables. Use plain text with minimal formatting.
+{% elif channel == 'websocket' %}
+## Format Hint
+For math meant to render, use LaTeX with `\(...\)` for inline math and `\[...\]` for display math. Keep those formulas outside inline code and fenced code blocks.
 {% endif %}
 
 ## External Content
