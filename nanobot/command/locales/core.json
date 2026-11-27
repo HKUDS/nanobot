@@ -9,7 +9,8 @@
     "es": "Detenido.",
     "pt-BR": "Interrompido.",
     "vi": "Đã dừng.",
-    "id": "Dihentikan."
+    "id": "Dihentikan.",
+    "he": "המשימה נעצרה."
   },
   "restart.started": {
     "en": "Restarting...",
@@ -21,7 +22,8 @@
     "es": "Reiniciando…",
     "pt-BR": "Reiniciando…",
     "vi": "Đang khởi động lại…",
-    "id": "Memulai ulang…"
+    "id": "Memulai ulang…",
+    "he": "ההפעלה מחדש החלה…"
   },
   "new.done": {
     "en": "New session started.",
@@ -33,7 +35,8 @@
     "es": "Nueva conversación iniciada.",
     "pt-BR": "Nova conversa iniciada.",
     "vi": "Đã bắt đầu phiên mới.",
-    "id": "Sesi baru dimulai."
+    "id": "Sesi baru dimulai.",
+    "he": "נפתחה שיחה חדשה."
   },
   "model.current": {
     "en": "- Current model: `{model}`",
@@ -45,7 +48,8 @@
     "es": "- Modelo actual: `{model}`",
     "pt-BR": "- Modelo atual: `{model}`",
     "vi": "- Mô hình hiện tại: `{model}`",
-    "id": "- Model saat ini: `{model}`"
+    "id": "- Model saat ini: `{model}`",
+    "he": "- המודל הנוכחי: `{model}`"
   },
   "model.preset": {
     "en": "- Current preset: `{preset}`",
@@ -57,7 +61,8 @@
     "es": "- Preajuste actual: `{preset}`",
     "pt-BR": "- Predefinição atual: `{preset}`",
     "vi": "- Cấu hình hiện tại: `{preset}`",
-    "id": "- Preset saat ini: `{preset}`"
+    "id": "- Preset saat ini: `{preset}`",
+    "he": "- התצורה הנוכחית: `{preset}`"
   },
   "model.options": {
     "en": "- Available presets: {names}",
@@ -69,7 +74,8 @@
     "es": "- Preajustes disponibles: {names}",
     "pt-BR": "- Predefinições disponíveis: {names}",
     "vi": "- Cấu hình hiện có: {names}",
-    "id": "- Preset tersedia: {names}"
+    "id": "- Preset tersedia: {names}",
+    "he": "- תצורות זמינות: {names}"
   },
   "model.hint": {
     "en": "- Switch with `/model <preset>`.",
@@ -81,7 +87,8 @@
     "es": "- Cambia con `/model <preset>`.",
     "pt-BR": "- Altere com `/model <preset>`.",
     "vi": "- Đổi bằng `/model <preset>`.",
-    "id": "- Ganti dengan `/model <preset>`."
+    "id": "- Ganti dengan `/model <preset>`.",
+    "he": "- כדי להחליף תצורה: `/model <preset>`."
   },
   "model.invalid": {
     "en": "- Current selection error: {error}",
@@ -93,7 +100,8 @@
     "es": "- Error de selección: {error}",
     "pt-BR": "- Erro na seleção: {error}",
     "vi": "- Lỗi lựa chọn: {error}",
-    "id": "- Kesalahan pilihan: {error}"
+    "id": "- Kesalahan pilihan: {error}",
+    "he": "- יש בעיה בבחירה הנוכחית: {error}"
   },
   "model.failed": {
     "en": "Could not switch model preset: {error}",
@@ -105,7 +113,8 @@
     "es": "No se pudo cambiar el preajuste: {error}",
     "pt-BR": "Falha ao mudar a predefinição: {error}",
     "vi": "Không đổi được cấu hình: {error}",
-    "id": "Tidak dapat mengganti preset: {error}"
+    "id": "Tidak dapat mengganti preset: {error}",
+    "he": "לא ניתן היה להחליף את תצורת המודל: {error}"
   },
   "model.switched": {
     "en": "Switched model preset to `{preset}`.",
@@ -117,7 +126,8 @@
     "es": "Preajuste cambiado a `{preset}`.",
     "pt-BR": "Predefinição alterada para `{preset}`.",
     "vi": "Đã đổi sang `{preset}`.",
-    "id": "Preset diubah ke `{preset}`."
+    "id": "Preset diubah ke `{preset}`.",
+    "he": "תצורת המודל הוחלפה ל־`{preset}`."
   },
   "model.scope": {
     "en": "- Scope: current session",
@@ -129,7 +139,8 @@
     "es": "- Ámbito: conversación actual",
     "pt-BR": "- Escopo: conversa atual",
     "vi": "- Phạm vi: phiên hiện tại",
-    "id": "- Cakupan: sesi ini"
+    "id": "- Cakupan: sesi ini",
+    "he": "- השינוי חל על השיחה הנוכחית בלבד"
   },
   "model.name": {
     "en": "- Model: `{model}`",
@@ -141,7 +152,8 @@
     "es": "- Modelo: `{model}`",
     "pt-BR": "- Modelo: `{model}`",
     "vi": "- Mô hình: `{model}`",
-    "id": "- Model: `{model}`"
+    "id": "- Model: `{model}`",
+    "he": "- מודל: `{model}`"
   },
   "model.window": {
     "en": "- Context window: {tokens}",
@@ -153,7 +165,8 @@
     "es": "- Ventana de contexto: {tokens}",
     "pt-BR": "- Janela de contexto: {tokens}",
     "vi": "- Cửa sổ ngữ cảnh: {tokens}",
-    "id": "- Jendela konteks: {tokens}"
+    "id": "- Jendela konteks: {tokens}",
+    "he": "- גודל חלון ההקשר: {tokens}"
   },
   "model.max": {
     "en": "- Max output tokens: {tokens}",
@@ -165,7 +178,8 @@
     "es": "- Máximo de tokens de salida: {tokens}",
     "pt-BR": "- Máximo de tokens de saída: {tokens}",
     "vi": "- Token đầu ra tối đa: {tokens}",
-    "id": "- Token keluaran maksimum: {tokens}"
+    "id": "- Token keluaran maksimum: {tokens}",
+    "he": "- מספר מרבי של אסימוני פלט: {tokens}"
   },
   "help.title": {
     "en": "🐈 nanobot commands:",
@@ -177,7 +191,8 @@
     "es": "🐈 Comandos de nanobot:",
     "pt-BR": "🐈 Comandos do nanobot:",
     "vi": "🐈 Lệnh nanobot:",
-    "id": "🐈 Perintah nanobot:"
+    "id": "🐈 Perintah nanobot:",
+    "he": "🐈 הפקודות של nanobot:"
   },
   "skill.empty": {
     "en": "No skills available.",
@@ -189,7 +204,8 @@
     "es": "No hay habilidades disponibles.",
     "pt-BR": "Nenhuma habilidade disponível.",
     "vi": "Không có kỹ năng nào.",
-    "id": "Tidak ada keterampilan yang tersedia."
+    "id": "Tidak ada keterampilan yang tersedia.",
+    "he": "אין מיומנויות זמינות."
   },
   "skill.list": {
     "en": "Available skills ({count}):",
@@ -201,7 +217,8 @@
     "es": "Habilidades disponibles ({count}):",
     "pt-BR": "Habilidades disponíveis ({count}):",
     "vi": "Kỹ năng hiện có ({count}):",
-    "id": "Keterampilan tersedia ({count}):"
+    "id": "Keterampilan tersedia ({count}):",
+    "he": "מיומנויות זמינות ({count}):"
   },
   "trigger.usage": {
     "en": "Usage: /trigger <name>",
@@ -213,7 +230,8 @@
     "es": "Uso: /trigger <nombre>",
     "pt-BR": "Uso: /trigger <nome>",
     "vi": "Cách dùng: /trigger <tên>",
-    "id": "Penggunaan: /trigger <nama>"
+    "id": "Penggunaan: /trigger <nama>",
+    "he": "שימוש: /trigger <name>"
   },
   "trigger.created": {
     "en": "Trigger created: {name}",
@@ -225,7 +243,8 @@
     "es": "Disparador creado: {name}",
     "pt-BR": "Gatilho criado: {name}",
     "vi": "Đã tạo trình kích hoạt: {name}",
-    "id": "Pemicu dibuat: {name}"
+    "id": "Pemicu dibuat: {name}",
+    "he": "נוצר טריגר: {name}"
   },
   "trigger.command": {
     "en": "Command:",
@@ -237,7 +256,8 @@
     "es": "Comando:",
     "pt-BR": "Comando:",
     "vi": "Lệnh:",
-    "id": "Perintah:"
+    "id": "Perintah:",
+    "he": "פקודה:"
   },
   "goal.usage": {
     "en": "Usage: /goal <long-running task description>",
@@ -249,7 +269,8 @@
     "es": "Uso: /goal <objetivo a largo plazo>",
     "pt-BR": "Uso: /goal <objetivo de longo prazo>",
     "vi": "Cách dùng: /goal <mô tả mục tiêu dài hạn>",
-    "id": "Penggunaan: /goal <deskripsi tugas jangka panjang>"
+    "id": "Penggunaan: /goal <deskripsi tugas jangka panjang>",
+    "he": "שימוש: /goal <תיאור המשימה המתמשכת>"
   },
   "goal.userOnly": {
     "en": "Goal mode can only be started by a user `/goal <task>` command.",
@@ -261,7 +282,8 @@
     "es": "Solo el usuario puede iniciar `/goal <tarea>`.",
     "pt-BR": "Somente o usuário pode iniciar `/goal <tarefa>`.",
     "vi": "Chỉ người dùng mới có thể chạy `/goal <tác vụ>`.",
-    "id": "Hanya pengguna yang dapat memulai `/goal <tugas>`."
+    "id": "Hanya pengguna yang dapat memulai `/goal <tugas>`.",
+    "he": "כדי להתחיל לעבוד על יעד, יש לשלוח את הפקודה `/goal <task>` בהודעת משתמש."
   },
   "goal.temporary": {
     "en": "Goals can't start in a temporary session. Use a persistent session for `/goal`.",
@@ -273,7 +295,8 @@
     "es": "Usa `/goal` en una conversación que no sea temporal.",
     "pt-BR": "Use `/goal` em uma conversa não temporária.",
     "vi": "Hãy dùng `/goal` trong phiên không tạm thời.",
-    "id": "Gunakan `/goal` dalam sesi nonsementara."
+    "id": "Gunakan `/goal` dalam sesi nonsementara.",
+    "he": "אי אפשר להגדיר יעד בשיחה זמנית. כדי להשתמש בפקודה `/goal`, יש לעבור לשיחה קבועה."
   },
   "goal.cancelUserOnly": {
     "en": "Goals can only be cancelled by a user `/cancel_goal` command.",
@@ -285,7 +308,8 @@
     "es": "Solo el usuario puede ejecutar `/cancel_goal`.",
     "pt-BR": "Somente o usuário pode executar `/cancel_goal`.",
     "vi": "Chỉ người dùng mới có thể chạy `/cancel_goal`.",
-    "id": "Hanya pengguna yang dapat menjalankan `/cancel_goal`."
+    "id": "Hanya pengguna yang dapat menjalankan `/cancel_goal`.",
+    "he": "כדי לבטל יעד, יש לשלוח את הפקודה `/cancel_goal` בהודעת משתמש."
   },
   "goal.none": {
     "en": "No goal to cancel.",
@@ -297,7 +321,8 @@
     "es": "No hay objetivo que cancelar.",
     "pt-BR": "Nenhum objetivo para cancelar.",
     "vi": "Không có mục tiêu để hủy.",
-    "id": "Tidak ada tujuan untuk dibatalkan."
+    "id": "Tidak ada tujuan untuk dibatalkan.",
+    "he": "אין יעד לביטול."
   },
   "goal.changed": {
     "en": "The session changed. Try /cancel_goal again.",
@@ -309,7 +334,8 @@
     "es": "Cambió la conversación. Vuelve a intentar /cancel_goal.",
     "pt-BR": "A conversa mudou. Tente /cancel_goal de novo.",
     "vi": "Phiên đã thay đổi. Hãy thử lại /cancel_goal.",
-    "id": "Sesi berubah. Coba lagi /cancel_goal."
+    "id": "Sesi berubah. Coba lagi /cancel_goal.",
+    "he": "השיחה השתנתה. יש לנסות שוב עם /cancel_goal."
   },
   "goal.saveFailed": {
     "en": "Could not save the goal cancellation. Try /cancel_goal again.",
@@ -321,7 +347,8 @@
     "es": "No se guardó la cancelación. Vuelve a intentar /cancel_goal.",
     "pt-BR": "Não foi possível salvar o cancelamento. Tente /cancel_goal novamente.",
     "vi": "Không lưu được thay đổi. Hãy thử lại /cancel_goal.",
-    "id": "Pembatalan gagal disimpan. Coba lagi /cancel_goal."
+    "id": "Pembatalan gagal disimpan. Coba lagi /cancel_goal.",
+    "he": "לא ניתן היה לשמור את ביטול היעד. יש לנסות שוב עם /cancel_goal."
   },
   "goal.cancelled": {
     "en": "Goal cancelled.",
@@ -333,7 +360,8 @@
     "es": "Objetivo cancelado.",
     "pt-BR": "Objetivo cancelado.",
     "vi": "Đã hủy mục tiêu.",
-    "id": "Tujuan dibatalkan."
+    "id": "Tujuan dibatalkan.",
+    "he": "היעד בוטל."
   },
   "invalid.args": {
     "en": "Command \"{command}\" does not accept arguments. Did you mean \"{command}\"?",
@@ -345,7 +373,8 @@
     "es": "«{command}» no admite argumentos. ¿Querías usar «{command}»?",
     "pt-BR": "“{command}” não aceita argumentos. Queria usar “{command}”?",
     "vi": "“{command}” không nhận đối số. Bạn muốn chạy “{command}”?",
-    "id": "“{command}” tidak menerima argumen. Maksud Anda “{command}”?"
+    "id": "“{command}” tidak menerima argumen. Maksud Anda “{command}”?",
+    "he": "הפקודה \"{command}\" לא מקבלת ארגומנטים. להפעיל את \"{command}\" בלי ארגומנטים?"
   },
   "invalid.command": {
     "en": "Invalid command \"{command}\". Use \"/help\" to list available commands.",
@@ -357,7 +386,8 @@
     "es": "Comando «{command}» no válido. Usa /help.",
     "pt-BR": "Comando “{command}” inválido. Use /help.",
     "vi": "Lệnh “{command}” không hợp lệ. Xem /help.",
-    "id": "Perintah “{command}” tidak valid. Gunakan /help."
+    "id": "Perintah “{command}” tidak valid. Gunakan /help.",
+    "he": "הפקודה \"{command}\" אינה תקינה. להצגת הפקודות הזמינות: /help."
   },
   "status.model": {
     "en": "🧠 Model: {model}",
@@ -369,7 +399,8 @@
     "es": "🧠 Modelo: {model}",
     "pt-BR": "🧠 Modelo: {model}",
     "vi": "🧠 Mô hình: {model}",
-    "id": "🧠 Model: {model}"
+    "id": "🧠 Model: {model}",
+    "he": "🧠 מודל: {model}"
   },
   "status.context": {
     "en": "📚 Context: ≈{used}/{total} (≈{percent}%)",
@@ -381,7 +412,8 @@
     "es": "📚 Contexto: ≈{used}/{total} (≈{percent}%)",
     "pt-BR": "📚 Contexto: ≈{used}/{total} (≈{percent}%)",
     "vi": "📚 Ngữ cảnh: ≈{used}/{total} (≈{percent}%)",
-    "id": "📚 Konteks: ≈{used}/{total} (≈{percent}%)"
+    "id": "📚 Konteks: ≈{used}/{total} (≈{percent}%)",
+    "he": "📚 הקשר: ≈{used}/{total} (≈{percent}%)"
   },
   "status.context_recorded": {
     "en": "📚 Context (last request): {used}/{total} ({percent}%)",
@@ -393,7 +425,8 @@
     "es": "📚 Contexto (última solicitud): {used}/{total} ({percent}%)",
     "pt-BR": "📚 Contexto (última solicitação): {used}/{total} ({percent}%)",
     "vi": "📚 Ngữ cảnh (yêu cầu gần nhất): {used}/{total} ({percent}%)",
-    "id": "📚 Konteks (permintaan terakhir): {used}/{total} ({percent}%)"
+    "id": "📚 Konteks (permintaan terakhir): {used}/{total} ({percent}%)",
+    "he": "📚 הקשר בבקשה האחרונה: {used}/{total} ({percent}%)"
   },
   "status.context_previous": {
     "en": "📚 Context: unavailable (last recorded request: {used} tokens)",
@@ -405,7 +438,8 @@
     "es": "📚 Contexto: no disponible (última solicitud registrada: {used} tokens)",
     "pt-BR": "📚 Contexto: indisponível (última solicitação registrada: {used} tokens)",
     "vi": "📚 Ngữ cảnh: không có ước tính (yêu cầu gần nhất được ghi nhận: {used} token)",
-    "id": "📚 Konteks: tidak tersedia (permintaan terakhir yang tercatat: {used} token)"
+    "id": "📚 Konteks: tidak tersedia (permintaan terakhir yang tercatat: {used} token)",
+    "he": "📚 נתוני ההקשר אינם זמינים (מספר האסימונים בבקשה האחרונה שתועדה: {used})"
   },
   "status.context_unavailable": {
     "en": "📚 Context: unavailable",
@@ -417,7 +451,8 @@
     "es": "📚 Contexto: no disponible",
     "pt-BR": "📚 Contexto: indisponível",
     "vi": "📚 Ngữ cảnh: không có ước tính",
-    "id": "📚 Konteks: tidak tersedia"
+    "id": "📚 Konteks: tidak tersedia",
+    "he": "📚 נתוני ההקשר אינם זמינים"
   },
   "status.session": {
     "en": "💬 Session: {count} messages",
@@ -429,7 +464,8 @@
     "es": "💬 Sesión: {count} mensajes",
     "pt-BR": "💬 Sessão: {count} mensagens",
     "vi": "💬 Phiên: {count} tin nhắn",
-    "id": "💬 Sesi: {count} pesan"
+    "id": "💬 Sesi: {count} pesan",
+    "he": "💬 מספר ההודעות בשיחה: {count}"
   },
   "status.uptime": {
     "en": "⏱ Uptime: {uptime}",
@@ -441,7 +477,8 @@
     "es": "⏱ Tiempo activo: {uptime}",
     "pt-BR": "⏱ Tempo de atividade: {uptime}",
     "vi": "⏱ Thời gian hoạt động: {uptime}",
-    "id": "⏱ Waktu aktif: {uptime}"
+    "id": "⏱ Waktu aktif: {uptime}",
+    "he": "⏱ זמן מאז ההפעלה: {uptime}"
   },
   "status.tasks": {
     "en": "⚡ Tasks: {count} active",
@@ -453,7 +490,8 @@
     "es": "⚡ Tareas: {count} activas",
     "pt-BR": "⚡ Tarefas: {count} ativas",
     "vi": "⚡ Tác vụ: {count} đang chạy",
-    "id": "⚡ Tugas: {count} aktif"
+    "id": "⚡ Tugas: {count} aktif",
+    "he": "⚡ משימות פעילות: {count}"
   },
   "search.provider": {
     "en": "🔍 Web Search: {provider}",
@@ -465,7 +503,8 @@
     "es": "🔍 Búsqueda web: {provider}",
     "pt-BR": "🔍 Pesquisa na web: {provider}",
     "vi": "🔍 Tìm kiếm web: {provider}",
-    "id": "🔍 Pencarian web: {provider}"
+    "id": "🔍 Pencarian web: {provider}",
+    "he": "🔍 חיפוש באינטרנט: {provider}"
   },
   "search.search": {
     "en": "Search: {count}",
@@ -477,7 +516,8 @@
     "es": "Búsqueda: {count}",
     "pt-BR": "Pesquisa: {count}",
     "vi": "Tìm kiếm: {count}",
-    "id": "Pencarian: {count}"
+    "id": "Pencarian: {count}",
+    "he": "חיפושים: {count}"
   },
   "search.extract": {
     "en": "Extract: {count}",
@@ -489,7 +529,8 @@
     "es": "Extracción: {count}",
     "pt-BR": "Extração: {count}",
     "vi": "Trích xuất: {count}",
-    "id": "Ekstraksi: {count}"
+    "id": "Ekstraksi: {count}",
+    "he": "פעולות חילוץ: {count}"
   },
   "search.crawl": {
     "en": "Crawl: {count}",
@@ -501,7 +542,8 @@
     "es": "Rastreo: {count}",
     "pt-BR": "Rastreamento: {count}",
     "vi": "Thu thập: {count}",
-    "id": "Perayapan: {count}"
+    "id": "Perayapan: {count}",
+    "he": "סריקות אתרים: {count}"
   },
   "search.remaining": {
     "en": "Remaining: {count}",
@@ -513,7 +555,8 @@
     "es": "Restantes: {count}",
     "pt-BR": "Restantes: {count}",
     "vi": "Còn lại: {count}",
-    "id": "Tersisa: {count}"
+    "id": "Tersisa: {count}",
+    "he": "יתרה: {count}"
   },
   "search.reset": {
     "en": "Resets: {date}",
@@ -525,7 +568,8 @@
     "es": "Se restablece: {date}",
     "pt-BR": "Redefinição: {date}",
     "vi": "Đặt lại: {date}",
-    "id": "Atur ulang: {date}"
+    "id": "Atur ulang: {date}",
+    "he": "מועד האיפוס: {date}"
   },
   "status.tokens": {
     "en": "📊 Tokens: {incoming} in / {outgoing} out",
@@ -537,7 +581,8 @@
     "es": "📊 Tokens: {incoming} de entrada / {outgoing} de salida",
     "pt-BR": "📊 Tokens: {incoming} de entrada / {outgoing} de saída",
     "vi": "📊 Token: vào {incoming} / ra {outgoing}",
-    "id": "📊 Token: {incoming} masuk / {outgoing} keluar"
+    "id": "📊 Token: {incoming} masuk / {outgoing} keluar",
+    "he": "📊 אסימונים: {incoming} בקלט / {outgoing} בפלט"
   },
   "status.cache": {
     "en": "{percent}% cached",
@@ -549,7 +594,8 @@
     "es": "{percent} % en caché",
     "pt-BR": "{percent}% em cache",
     "vi": "{percent}% trong bộ nhớ đệm",
-    "id": "{percent}% dalam cache"
+    "id": "{percent}% dalam cache",
+    "he": "{percent}% מהמטמון"
   },
   "search.used": {
     "en": "Usage: {count} requests",
@@ -561,7 +607,8 @@
     "es": "Uso: {count} solicitudes",
     "pt-BR": "Uso: {count} solicitações",
     "vi": "Mức sử dụng: {count} yêu cầu",
-    "id": "Penggunaan: {count} permintaan"
+    "id": "Penggunaan: {count} permintaan",
+    "he": "מספר הבקשות שנוצלו: {count}"
   },
   "search.quota": {
     "en": "Usage: {count} / {limit}",
@@ -573,7 +620,8 @@
     "es": "Uso: {count} / {limit}",
     "pt-BR": "Uso: {count} / {limit}",
     "vi": "Mức sử dụng: {count} / {limit}",
-    "id": "Penggunaan: {count} / {limit}"
+    "id": "Penggunaan: {count} / {limit}",
+    "he": "ניצול המכסה: {count} מתוך {limit}"
   },
   "search.unavailable": {
     "en": "Usage: unavailable ({error})",
@@ -585,7 +633,8 @@
     "es": "Uso: no disponible ({error})",
     "pt-BR": "Uso: indisponível ({error})",
     "vi": "Mức sử dụng: không có dữ liệu ({error})",
-    "id": "Penggunaan: tidak tersedia ({error})"
+    "id": "Penggunaan: tidak tersedia ({error})",
+    "he": "נתוני השימוש אינם זמינים ({error})"
   },
   "search.unsupported": {
     "en": "Usage tracking: not available for this provider",
@@ -597,7 +646,8 @@
     "es": "El proveedor no ofrece estadísticas",
     "pt-BR": "O provedor não oferece estatísticas",
     "vi": "Nhà cung cấp không báo mức sử dụng",
-    "id": "Penyedia tidak menyediakan statistik penggunaan"
+    "id": "Penyedia tidak menyediakan statistik penggunaan",
+    "he": "הספק הזה אינו מספק נתוני שימוש"
   },
   "skill.item": {
     "en": "- **{name}** — {description}",
@@ -609,7 +659,8 @@
     "es": "- **{name}** — {description}",
     "pt-BR": "- **{name}** — {description}",
     "vi": "- **{name}** — {description}",
-    "id": "- **{name}** — {description}"
+    "id": "- **{name}** — {description}",
+    "he": "- **{name}** — {description}"
   },
   "trigger.id": {
     "en": "ID: {id}",
@@ -621,7 +672,8 @@
     "es": "ID: {id}",
     "pt-BR": "ID: {id}",
     "vi": "ID: {id}",
-    "id": "ID: {id}"
+    "id": "ID: {id}",
+    "he": "מזהה: {id}"
   },
   "shell.trusted": {
     "en": "Shell commands are only available from a trusted local client.",
@@ -633,7 +685,8 @@
     "es": "El shell requiere un cliente local de confianza.",
     "pt-BR": "O shell exige um cliente local confiável.",
     "vi": "Shell yêu cầu máy khách cục bộ đáng tin cậy.",
-    "id": "Shell memerlukan klien lokal tepercaya."
+    "id": "Shell memerlukan klien lokal tepercaya.",
+    "he": "אפשר להריץ פקודות מעטפת רק מלקוח מקומי מהימן."
   },
   "shell.usage": {
     "en": "Type a command after `!`, for example `!pwd`.",
@@ -645,7 +698,8 @@
     "es": "Escribe un comando después de `!`, por ejemplo `!pwd`.",
     "pt-BR": "Digite um comando após `!`, por exemplo `!pwd`.",
     "vi": "Nhập lệnh sau `!`, ví dụ `!pwd`.",
-    "id": "Ketik perintah setelah `!`, misalnya `!pwd`."
+    "id": "Ketik perintah setelah `!`, misalnya `!pwd`.",
+    "he": "יש להקליד פקודה אחרי `!`, למשל `!pwd`."
   },
   "shell.disabled": {
     "en": "Shell execution is disabled in this nanobot configuration.",
@@ -657,7 +711,8 @@
     "es": "El shell está deshabilitado.",
     "pt-BR": "A execução de shell está desativada.",
     "vi": "Chạy shell đã bị tắt.",
-    "id": "Eksekusi shell dinonaktifkan."
+    "id": "Eksekusi shell dinonaktifkan.",
+    "he": "הרצת פקודות מעטפת מושבתת בהגדרות הנוכחיות של nanobot."
   },
   "restart.complete": {
     "en": "Restart completed.",
@@ -669,7 +724,8 @@
     "es": "Reinicio completado.",
     "pt-BR": "Reinicialização concluída.",
     "vi": "Đã khởi động lại.",
-    "id": "Mulai ulang selesai."
+    "id": "Mulai ulang selesai.",
+    "he": "ההפעלה מחדש הושלמה."
   },
   "restart.elapsed": {
     "en": "Restart completed in {seconds}s.",
@@ -681,7 +737,8 @@
     "es": "Reinicio completado en {seconds} s.",
     "pt-BR": "Reinicialização concluída em {seconds} s.",
     "vi": "Đã khởi động lại trong {seconds} giây.",
-    "id": "Mulai ulang selesai dalam {seconds} detik."
+    "id": "Mulai ulang selesai dalam {seconds} detik.",
+    "he": "ההפעלה מחדש הושלמה תוך {seconds} שנ׳."
   },
   "compact.empty": {
     "en": "Nothing to compact.",
@@ -693,7 +750,8 @@
     "es": "No hay contexto que comprimir.",
     "pt-BR": "Não há contexto para compactar.",
     "vi": "Không có ngữ cảnh nào cần nén.",
-    "id": "Tidak ada konteks yang perlu dipadatkan."
+    "id": "Tidak ada konteks yang perlu dipadatkan.",
+    "he": "אין הקשר לדחיסה."
   },
   "compact.started": {
     "en": "Compressing context…",
@@ -705,7 +763,8 @@
     "es": "Comprimiendo contexto…",
     "pt-BR": "Compactando contexto…",
     "vi": "Đang nén ngữ cảnh…",
-    "id": "Memadatkan konteks…"
+    "id": "Memadatkan konteks…",
+    "he": "דוחס את ההקשר…"
   },
   "compact.succeeded": {
     "en": "Context compacted.",
@@ -717,7 +776,8 @@
     "es": "Contexto comprimido.",
     "pt-BR": "Contexto compactado.",
     "vi": "Đã nén ngữ cảnh.",
-    "id": "Konteks dipadatkan."
+    "id": "Konteks dipadatkan.",
+    "he": "ההקשר נדחס."
   },
   "compact.failed": {
     "en": "Unable to compact context.",
@@ -729,7 +789,8 @@
     "es": "No se pudo comprimir el contexto.",
     "pt-BR": "Não foi possível compactar o contexto.",
     "vi": "Không thể nén ngữ cảnh.",
-    "id": "Gagal memadatkan konteks."
+    "id": "Gagal memadatkan konteks.",
+    "he": "לא ניתן היה לדחוס את ההקשר."
   },
   "compact.cancelled": {
     "en": "Context compaction cancelled.",
@@ -741,7 +802,8 @@
     "es": "Compresión de contexto cancelada.",
     "pt-BR": "Compactação de contexto cancelada.",
     "vi": "Đã hủy nén ngữ cảnh.",
-    "id": "Pemadatan konteks dibatalkan."
+    "id": "Pemadatan konteks dibatalkan.",
+    "he": "דחיסת ההקשר בוטלה."
   },
   "native.denied": {
     "en": "You are not allowed to use this bot.",
@@ -753,7 +815,8 @@
     "es": "No tienes permiso para usar este bot.",
     "pt-BR": "Você não tem permissão para usar este bot.",
     "vi": "Bạn không có quyền dùng bot này.",
-    "id": "Anda tidak diizinkan menggunakan bot ini."
+    "id": "Anda tidak diizinkan menggunakan bot ini.",
+    "he": "אין לך הרשאה להשתמש בבוט הזה."
   },
   "native.channelDenied": {
     "en": "This channel is not allowed for this bot.",
@@ -765,7 +828,8 @@
     "es": "Este canal no está autorizado para el bot.",
     "pt-BR": "Este canal não tem permissão para usar o bot.",
     "vi": "Kênh này không được phép dùng bot.",
-    "id": "Saluran ini tidak diizinkan menggunakan bot."
+    "id": "Saluran ini tidak diizinkan menggunakan bot.",
+    "he": "הערוץ הזה אינו מורשה להשתמש בבוט."
   },
   "native.processing": {
     "en": "Processing {command}...",
@@ -777,7 +841,8 @@
     "es": "Procesando {command}…",
     "pt-BR": "Processando {command}…",
     "vi": "Đang xử lý {command}…",
-    "id": "Memproses {command}…"
+    "id": "Memproses {command}…",
+    "he": "הפקודה {command} מתבצעת…"
   },
   "native.welcome": {
     "en": "👋 Hi {name}! I'm nanobot.\n\nSend me a message and I'll respond!\nType /help to see available commands.",
@@ -789,7 +854,8 @@
     "es": "👋 ¡Hola, {name}! Soy nanobot. Envíame un mensaje o usa /help para ver los comandos.",
     "pt-BR": "👋 Olá, {name}! Sou o nanobot. Envie uma mensagem ou use /help para ver os comandos.",
     "vi": "👋 Chào {name}! Tôi là nanobot. Hãy nhắn tin hoặc gõ /help để xem các lệnh.",
-    "id": "👋 Halo {name}! Saya nanobot. Kirim pesan atau ketik /help untuk melihat daftar perintah."
+    "id": "👋 Halo {name}! Saya nanobot. Kirim pesan atau ketik /help untuk melihat daftar perintah.",
+    "he": "👋 שלום {name}, כאן nanobot!\n\nאפשר לשלוח לי הודעה ולקבל תשובה.\nלרשימת הפקודות הזמינות: /help."
   },
   "status.version": {
     "en": "🐈 nanobot v{version}",
@@ -801,7 +867,8 @@
     "es": "🐈 nanobot v{version}",
     "pt-BR": "🐈 nanobot v{version}",
     "vi": "🐈 nanobot v{version}",
-    "id": "🐈 nanobot v{version}"
+    "id": "🐈 nanobot v{version}",
+    "he": "🐈 nanobot v{version}"
   },
   "model.notFound": {
     "en": "Model preset `{preset}` not found.",
@@ -813,6 +880,7 @@
     "es": "No se encontró el preajuste `{preset}`.",
     "pt-BR": "Predefinição `{preset}` não encontrada.",
     "vi": "Không tìm thấy cấu hình `{preset}`.",
-    "id": "Preset `{preset}` tidak ditemukan."
+    "id": "Preset `{preset}` tidak ditemukan.",
+    "he": "תצורת המודל `{preset}` לא נמצאה."
   }
 }

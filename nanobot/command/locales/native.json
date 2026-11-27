@@ -9,7 +9,8 @@
     "es": "Iniciar el bot",
     "pt-BR": "Iniciar o bot",
     "vi": "Khởi động bot",
-    "id": "Mulai bot"
+    "id": "Mulai bot",
+    "he": "הפעלת הבוט"
   },
   "native.presetDescription": {
     "en": "Model preset name, such as default",
@@ -21,7 +22,8 @@
     "es": "Nombre del preajuste del modelo, por ejemplo, default",
     "pt-BR": "Nome da predefinição do modelo, por exemplo, default",
     "vi": "Tên cấu hình mô hình, ví dụ: default",
-    "id": "Nama preset model, misalnya default"
+    "id": "Nama preset model, misalnya default",
+    "he": "שם של תצורת מודל שמורה, למשל default"
   },
   "native.triggerNameDescription": {
     "en": "Trigger name",
@@ -33,6 +35,7 @@
     "es": "Nombre del activador",
     "pt-BR": "Nome do gatilho",
     "vi": "Tên trình kích hoạt",
-    "id": "Nama pemicu"
+    "id": "Nama pemicu",
+    "he": "שם הטריגר"
   }
 }
