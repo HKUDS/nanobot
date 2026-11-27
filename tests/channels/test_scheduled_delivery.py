@@ -57,7 +57,8 @@ def message(channel="whatsapp", content="result", generation=None):
 
 
 async def drain(manager):
-    async with asyncio.timeout(5):
+    # Real session and outbox writes can exceed five seconds on busy CI workers.
+    async with asyncio.timeout(30):
         while manager.bus.outbound_size or manager._outbound_tasks:
             await asyncio.sleep(0.01)
 
