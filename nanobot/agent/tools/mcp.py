@@ -10,6 +10,7 @@ import traceback
 import urllib.parse
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import AsyncExitStack, suppress
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
 
 import httpx
@@ -276,7 +277,7 @@ async def _probe_http_url(url: str, timeout: float = 3.0, *, proxy: str | None =
     port = parsed.port
     if not port:
         port = 443 if parsed.scheme == "https" else 80
-    ok, _, resolved_ips = resolve_url_target(url)
+    ok, _, resolved_ips = resolve_url_target(url, trust_remote_dns=bool(proxy))
     if not ok:
         return False
     if proxy or env_proxy_applies_to_url(url):
@@ -325,8 +326,8 @@ def _pinned_transport_kwargs(proxy: str | None = None) -> dict[str, Any]:
     return kwargs
 
 
-async def _validate_mcp_request_url(request: httpx.Request) -> None:
-    ok, error = validate_url_target(str(request.url))
+async def _validate_mcp_request_url(request: httpx.Request, *, trust_remote_dns: bool = False) -> None:
+    ok, error = validate_url_target(str(request.url), trust_remote_dns=trust_remote_dns)
     if not ok:
         raise httpx.RequestError(
             f"Blocked unsafe MCP URL {_redact_url(str(request.url))} ({error})",
@@ -1008,8 +1009,13 @@ async def connect_mcp_servers(
                     logger.warning("MCP server '{}': no command or url configured, skipping", name)
                     return None
 
+            if cfg.use_proxy and transport_type == "stdio":
+                raise ValueError("The shared proxy is available for HTTP and SSE MCP connections")
+            proxy = (network or NetworkConfig()).resolve_proxy(cfg.use_proxy)
+            selected_proxies[name] = proxy
+            check_request = partial(_validate_mcp_request_url, trust_remote_dns=bool(proxy))
             if transport_type in {"sse", "streamableHttp"}:
-                ok, error = validate_url_target(cfg.url)
+                ok, error = validate_url_target(cfg.url, trust_remote_dns=bool(proxy))
                 if not ok:
                     logger.warning(
                         "MCP server '{}': blocked unsafe URL {} ({})",
@@ -1019,10 +1025,6 @@ async def connect_mcp_servers(
                     )
                     return None
 
-            if cfg.use_proxy and transport_type == "stdio":
-                raise ValueError("The shared proxy is available for HTTP and SSE MCP connections")
-            proxy = (network or NetworkConfig()).resolve_proxy(cfg.use_proxy)
-            selected_proxies[name] = proxy
             oauth_auth: httpx.Auth | None = None
             if cfg.auth == "oauth":
                 if transport_type not in {"sse", "streamableHttp"}:
@@ -1076,7 +1078,7 @@ async def connect_mcp_servers(
                     }
                     return httpx.AsyncClient(
                         headers=merged_headers or None,
-                        event_hooks={"request": [_validate_mcp_request_url]},
+                        event_hooks={"request": [check_request]},
                         follow_redirects=True,
                         timeout=timeout,
                         auth=auth,
@@ -1098,7 +1100,7 @@ async def connect_mcp_servers(
 
                 http_client_kwargs: dict[str, Any] = {
                     "headers": cfg.headers or None,
-                    "event_hooks": {"request": [_validate_mcp_request_url]},
+                    "event_hooks": {"request": [check_request]},
                     "follow_redirects": True,
                     # Read must outlast the tool call itself; otherwise a slow tool
                     # fails with ReadTimeout before tool_timeout is reached.
