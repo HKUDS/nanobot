@@ -1,3 +1,4 @@
+import { DEFAULT_SKILL_SCOPE, type SkillScope } from "@/lib/skill-events";
 import { ChevronLeft } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogLayoutContext, DialogTitle } from "@/components/ui/dialog";
@@ -64,6 +65,7 @@ interface SettingsPageProps {
   onChangeTheme: (value: ThemePreference) => void;
   onBackToChat: () => void;
   skills: SkillSummary[];
+  skillScope?: SkillScope;
   skillsLoading: boolean;
   skillsError: boolean;
   onStartAutomationChat?: (
@@ -89,6 +91,7 @@ export function SettingsPage({
   onChangeTheme,
   onBackToChat,
   skills,
+  skillScope = DEFAULT_SKILL_SCOPE,
   skillsLoading,
   skillsError,
   onStartAutomationChat,
@@ -622,7 +625,7 @@ export function SettingsPage({
           </div>
         );
       case "skills":
-        return <SkillsCatalogPage skills={skills} loading={skillsLoading} error={skillsError} searchState={skillsSearch} />;
+        return <SkillsCatalogPage key={JSON.stringify(skillScope)} skillScope={skillScope} skills={skills} loading={skillsLoading} error={skillsError} searchState={skillsSearch} />;
       default:
         return renderSettingsSection(section, embedded);
     }

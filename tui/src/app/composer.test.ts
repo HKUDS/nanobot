@@ -888,6 +888,45 @@ describe("NanobotTui composer", () => {
     expect(sent).toEqual([])
   })
 
+  test("discards the old skill menu and its late response when attaching another chat", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const original = globalThis.fetch
+    const pending = new Map<string, (name: string) => void>()
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.pathname !== "/api/webui/skills") return Promise.resolve(Response.json({}))
+      return new Promise<Response>(resolve => pending.set(url.searchParams.get("chat_id")!, name => {
+        resolve(Response.json({ skills: [{ name, enabled: true, available: true, source: "project" }] }))
+      }))
+    }) as typeof fetch
+    try {
+      const transport = client()
+      const app = NanobotTui.mount(setup.renderer, { ...options, apiUrl: "http://gateway.test", apiToken: "token" },
+        transport, new MockTreeSitterClient({ autoResolveTimeout: 0 }))
+      const ui = app as unknown as { skillCandidates: SkillCandidate[]; skillMenu: { visible: boolean }; ready: boolean }
+      app.accept({ event: "attached", chat_id: "chat" })
+      await waitUntil(() => pending.has("chat") && ui.ready)
+      pending.get("chat")!("old-project")
+      await waitUntil(() => ui.skillCandidates.length === 1)
+      await setup.mockInput.typeText("$")
+      await waitUntil(() => ui.skillMenu.visible)
+      for (const chat of ["middle", "latest"]) {
+        transport.activeChatId = chat
+        app.accept({ event: "attached", chat_id: chat })
+        expect(ui.skillMenu.visible).toBe(false)
+        expect(ui.skillCandidates).toEqual([])
+        await waitUntil(() => pending.has(chat))
+      }
+      pending.get("latest")!("new-project")
+      await waitUntil(() => ui.skillCandidates[0]?.name === "new-project")
+      pending.get("middle")!("stale-project")
+      await Bun.sleep(0)
+      expect(ui.skillCandidates.map(skill => skill.name)).toEqual(["new-project"])
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
   test("completes available skills with arrows, Enter, Tab, and Escape", async () => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const sent: string[] = []

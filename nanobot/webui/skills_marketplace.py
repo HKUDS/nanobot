@@ -79,19 +79,21 @@ def skills_install_supported() -> bool:
 async def trending_marketplace_skills(
     workspace_path: Path,
     *,
+    project_workspace: Path | None = None,
     limit: int = 8,
     provider: str = _PROVIDER_ALL,
 ) -> dict[str, Any]:
     """Return provider-aware marketplace rankings without mixing metric semantics."""
     selected = _valid_provider(provider)
+    installed = await asyncio.to_thread(_installed_skill_origins, workspace_path, project_workspace)
     if selected == _PROVIDER_SKILLHUB:
-        return await _trending_skillhub_skills(workspace_path, limit=limit)
+        return await _trending_skillhub_skills(installed, limit=limit)
     if selected == _PROVIDER_SKILLS_SH:
-        return await _trending_skills_sh_skills(workspace_path, limit=limit)
+        return await _trending_skills_sh_skills(installed, limit=limit)
 
     results = await asyncio.gather(
-        _trending_skills_sh_skills(workspace_path, limit=limit),
-        _trending_skillhub_skills(workspace_path, limit=limit),
+        _trending_skills_sh_skills(installed, limit=limit),
+        _trending_skillhub_skills(installed, limit=limit),
         return_exceptions=True,
     )
     payloads = [result for result in results if isinstance(result, dict)]
@@ -114,7 +116,7 @@ async def trending_marketplace_skills(
 
 
 async def _trending_skills_sh_skills(
-    workspace_path: Path,
+    installed: dict[str, tuple[str, str] | None],
     *,
     limit: int,
 ) -> dict[str, Any]:
@@ -129,7 +131,6 @@ async def _trending_skills_sh_skills(
             status=502,
         ) from exc
 
-    installed = _installed_skill_origins(workspace_path)
     rows = payload.get("skills", [])
     skills: list[dict[str, Any]] = []
     seen_sources: set[str] = set()
@@ -160,6 +161,7 @@ async def search_marketplace_skills(
     query: str,
     workspace_path: Path,
     *,
+    project_workspace: Path | None = None,
     limit: int = 20,
     provider: str = _PROVIDER_ALL,
 ) -> dict[str, Any]:
@@ -171,14 +173,15 @@ async def search_marketplace_skills(
         raise SkillsMarketplaceError("search query is too long")
 
     selected = _valid_provider(provider)
+    installed = await asyncio.to_thread(_installed_skill_origins, workspace_path, project_workspace)
     if selected == _PROVIDER_SKILLHUB:
-        return await _search_skillhub_skills(normalized, workspace_path, limit=limit)
+        return await _search_skillhub_skills(normalized, installed, limit=limit)
     if selected == _PROVIDER_SKILLS_SH:
-        return await _search_skills_sh_skills(normalized, workspace_path, limit=limit)
+        return await _search_skills_sh_skills(normalized, installed, limit=limit)
 
     results = await asyncio.gather(
-        _search_skills_sh_skills(normalized, workspace_path, limit=limit),
-        _search_skillhub_skills(normalized, workspace_path, limit=limit),
+        _search_skills_sh_skills(normalized, installed, limit=limit),
+        _search_skillhub_skills(normalized, installed, limit=limit),
         return_exceptions=True,
     )
     payloads = [result for result in results if isinstance(result, dict)]
@@ -202,7 +205,7 @@ async def search_marketplace_skills(
 
 async def _search_skills_sh_skills(
     normalized: str,
-    workspace_path: Path,
+    installed: dict[str, tuple[str, str] | None],
     *,
     limit: int,
 ) -> dict[str, Any]:
@@ -220,7 +223,6 @@ async def _search_skills_sh_skills(
             status=502,
         ) from exc
 
-    installed = _installed_skill_origins(workspace_path)
     rows = payload.get("skills", [])
     skills: list[dict[str, Any]] = []
     for row in rows:
@@ -240,7 +242,7 @@ async def _search_skills_sh_skills(
 
 async def _search_skillhub_skills(
     normalized: str,
-    workspace_path: Path,
+    installed: dict[str, tuple[str, str] | None],
     *,
     limit: int,
 ) -> dict[str, Any]:
@@ -258,7 +260,6 @@ async def _search_skillhub_skills(
             status=502,
         ) from exc
 
-    installed = _installed_skill_origins(workspace_path)
     rows = payload.get("results", [])
     skills = [
         skill
@@ -275,7 +276,7 @@ async def _search_skillhub_skills(
 
 
 async def _trending_skillhub_skills(
-    workspace_path: Path,
+    installed: dict[str, tuple[str, str] | None],
     *,
     limit: int,
 ) -> dict[str, Any]:
@@ -290,7 +291,6 @@ async def _trending_skillhub_skills(
             status=502,
         ) from exc
 
-    installed = _installed_skill_origins(workspace_path)
     rows = payload.get("skills", [])
     skills: list[dict[str, Any]] = []
     for rank, row in enumerate(rows, start=1):
@@ -335,27 +335,30 @@ async def install_marketplace_skill(
     skill_id: str,
     workspace_path: Path,
     *,
+    project_workspace: Path | None = None,
     provider: str = _PROVIDER_SKILLS_SH,
     version: str = "",
 ) -> dict[str, Any]:
     """Install one normalized marketplace result into ``<workspace>/skills``."""
     selected = _valid_provider(provider, allow_all=False)
+    installed = await asyncio.to_thread(_installed_skill_origins, workspace_path, project_workspace)
     if selected == _PROVIDER_SKILLHUB:
-        return await _install_skillhub_skill(skill_id, version, workspace_path)
-    return await _install_skills_sh_skill(source, skill_id, workspace_path)
+        return await _install_skillhub_skill(skill_id, version, workspace_path, installed)
+    return await _install_skills_sh_skill(source, skill_id, workspace_path, installed)
 
 
 async def _install_skills_sh_skill(
     source: str,
     skill_id: str,
     workspace_path: Path,
+    installed: dict[str, tuple[str, str] | None],
 ) -> dict[str, Any]:
     if not _SOURCE_RE.fullmatch(source):
         raise SkillsMarketplaceError("invalid skill source")
     if not _valid_skill_id(skill_id):
         raise SkillsMarketplaceError("invalid skill name")
 
-    if _already_installed(workspace_path, skill_id, _PROVIDER_SKILLS_SH, source):
+    if _already_installed(installed, skill_id, _PROVIDER_SKILLS_SH, source):
         return {"installed": True, "already_installed": True, "name": skill_id}
 
     target = _install_target(workspace_path, skill_id)
@@ -426,13 +429,14 @@ async def _install_skillhub_skill(
     skill_id: str,
     requested_version: str,
     workspace_path: Path,
+    installed: dict[str, tuple[str, str] | None],
 ) -> dict[str, Any]:
     if not _valid_skill_id(skill_id):
         raise SkillsMarketplaceError("invalid SkillHub skill name")
     if requested_version and _VERSION_RE.fullmatch(requested_version) is None:
         raise SkillsMarketplaceError("invalid SkillHub skill version")
 
-    if _already_installed(workspace_path, skill_id, _PROVIDER_SKILLHUB):
+    if _already_installed(installed, skill_id, _PROVIDER_SKILLHUB):
         return {
             "installed": True,
             "already_installed": True,
@@ -696,10 +700,10 @@ def _skillhub_client() -> httpx.AsyncClient:
     )
 
 
-def _installed_skill_origins(workspace_path: Path) -> dict[str, tuple[str, str] | None]:
+def _installed_skill_origins(workspace_path: Path, project_workspace: Path | None = None) -> dict[str, tuple[str, str] | None]:
     """Read optional installation receipts, never infer origin from a skill name."""
     installed: dict[str, tuple[str, str] | None] = {}
-    for entry in SkillsLoader(workspace_path).list_skills(filter_unavailable=False):
+    for entry in SkillsLoader(workspace_path, project_workspace=project_workspace).list_skills(filter_unavailable=False):
         name = entry["name"]
         installed[name] = None
         if entry["source"] != "workspace":
@@ -740,8 +744,8 @@ def _installation_status(
     return "installed" if origin == (provider, source.lower()) else "conflict"
 
 
-def _already_installed(workspace: Path, skill_id: str, provider: str, source: str = "") -> bool:
-    status = _installation_status(_installed_skill_origins(workspace), skill_id, provider, source)
+def _already_installed(installed: dict[str, tuple[str, str] | None], skill_id: str, provider: str, source: str = "") -> bool:
+    status = _installation_status(installed, skill_id, provider, source)
     if status in {"conflict", "unknown"}:
         raise SkillsMarketplaceError(
             "a skill with this name already exists; review it in Installed before removing it",

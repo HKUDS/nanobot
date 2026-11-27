@@ -402,6 +402,87 @@ async def test_absolute_path_reaches_provider_as_chat(tmp_path, channel, content
         await loop.aclose()
 
 
+def _project_skill(project: Path, name: str, body: str, *, always: bool = False) -> Path:
+    path = project / ".agents" / "skills" / name / "SKILL.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = "always: true\n" if always else ""
+    path.write_text(f"---\nname: {name}\ndescription: {project.name} {name}\n{flags}---\n{body}", encoding="utf-8")
+    return path
+
+
+@pytest.mark.asyncio
+async def test_model_turns_use_separate_project_catalogs(tmp_path: Path) -> None:
+    projects = [tmp_path / name for name in ("alpha", "beta")]
+    loop = _make_full_loop(tmp_path / "agent")
+    inputs = []
+    for project in projects:
+        _project_skill(project, "policy", f"Policy for {project.name}", always=True)
+        _project_skill(project, "review", f"Procedure for {project.name}")
+        inputs.append(InboundMessage(
+            "websocket", "user", project.name, "Use $review",
+            metadata={"workspace_scope": {"project_path": str(project), "access_mode": "restricted"}},
+        ))
+    try:
+        await asyncio.gather(*(loop._process_message(msg) for msg in inputs))
+        requests = [call.kwargs["messages"] for call in loop.provider.chat_stream_with_retry.await_args_list]
+        assert len(requests) == 2
+        for project in projects:
+            messages, = [rows for rows in requests if f"Policy for {project.name}" in rows[0]["content"]]
+            assert f"{project.name} review" in messages[0]["content"]
+            assert f"Procedure for {project.name}" in messages[-1]["content"]
+            other, = (p for p in projects if p != project)
+            assert f"Policy for {other.name}" not in messages[0]["content"]
+            assert f"Procedure for {other.name}" not in messages[-1]["content"]
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.asyncio
+async def test_injected_skill_uses_turn_snapshot_and_next_turn_refreshes(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path / "agent")
+    project = tmp_path / "project"
+    _project_skill(project, "review", "Original procedure")
+    metadata = {"workspace_scope": {"project_path": str(project), "access_mode": "restricted"}}
+    queue = asyncio.Queue()
+    requests = []
+
+    async def respond(*, messages, **_kwargs):
+        requests.append(messages)
+        if len(requests) == 1:
+            _project_skill(project, "review", "Revised procedure")
+            queue.put_nowait(InboundMessage("websocket", "user", "first", "Now use $review", metadata=metadata))
+        return LLMResponse(content="ok")
+
+    loop.provider.chat_stream_with_retry = respond
+    try:
+        await loop._process_message(InboundMessage("websocket", "user", "first", "hello", metadata=metadata),
+                                    pending_queue=queue)
+        assert len(requests) == 2
+        assert "Original procedure" in requests[1][-1]["content"]
+        await loop._process_message(InboundMessage("websocket", "user", "next", "Use $review", metadata=metadata))
+        assert "Revised procedure" in requests[-1][-1]["content"]
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.asyncio
+async def test_failed_prompt_build_releases_skill_snapshot(tmp_path: Path, monkeypatch) -> None:
+    loop = _make_full_loop(tmp_path)
+    _project_skill(tmp_path, "review", "Original instructions")
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(loop, "_persist_user_message_early", AsyncMock(side_effect=RuntimeError("save failed")))
+            with pytest.raises(RuntimeError, match="save failed"):
+                await loop._process_message(InboundMessage("cli", "user", "failed", "Use $review"))
+        _project_skill(tmp_path, "review", "Updated instructions")
+        await loop._process_message(InboundMessage("cli", "user", "retry", "Use $review"))
+        messages = loop.provider.chat_stream_with_retry.await_args.kwargs["messages"]
+        assert "Updated instructions" in messages[-1]["content"]
+        assert "Original instructions" not in messages[-1]["content"]
+    finally:
+        await loop.aclose()
+
+
 def test_clean_generated_title_strips_reasoning_tags() -> None:
     assert clean_generated_title("<think>reasoning</think> WebUI polish") == "WebUI polish"
     assert clean_generated_title("Title: <think> The user said hello") == ""

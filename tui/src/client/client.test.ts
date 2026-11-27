@@ -1253,7 +1253,8 @@ describe("gateway protocol", () => {
   test("loads only enabled and available skills", async () => {
     const original = globalThis.fetch
     let authorization = ""
-    globalThis.fetch = ((_: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = ((url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe("http://nanobot.test/api/webui/skills?chat_id=project-chat")
       authorization = new Headers(init?.headers).get("Authorization") || ""
       return Promise.resolve(new Response(JSON.stringify({
         skills: [
@@ -1286,7 +1287,7 @@ describe("gateway protocol", () => {
     }) as typeof fetch
 
     try {
-      expect(await fetchAvailableSkills("http://nanobot.test", "secret")).toEqual([{
+      expect(await fetchAvailableSkills("http://nanobot.test", "secret", "project-chat")).toEqual([{
         name: "verify",
         description: "Verify public behavior",
         source: "builtin",

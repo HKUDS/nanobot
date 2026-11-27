@@ -149,11 +149,11 @@ def test_subagent_prompt_keeps_agent_paths_for_selected_project(tmp_path):
     agent_workspace = tmp_path / "agent"
     project = tmp_path / "project"
     global_skill = agent_workspace / "skills" / "global-custom" / "SKILL.md"
-    project_skill = project / "skills" / "project-custom" / "SKILL.md"
+    project_skill = project / ".agents" / "skills" / "project-custom" / "SKILL.md"
     global_skill.parent.mkdir(parents=True)
     project_skill.parent.mkdir(parents=True)
     global_skill.write_text("---\ndescription: global skill\n---\nGlobal", encoding="utf-8")
-    project_skill.write_text("---\ndescription: project skill\n---\nProject", encoding="utf-8")
+    project_skill.write_text("---\nname: project-custom\ndescription: project skill\n---\nProject", encoding="utf-8")
     manager = SubagentManager(
         workspace=agent_workspace,
         bus=MessageBus(),
@@ -165,13 +165,13 @@ def test_subagent_prompt_keeps_agent_paths_for_selected_project(tmp_path):
 
     assert "one root and relative SKILL.md paths" in prompt
     assert "Join them when using `read_file`" in prompt
-    assert str(project.resolve()) not in prompt
+    assert f"### Project skills (`{project_skill.parent.parent.resolve()}`)" in prompt
     assert f"Nanobot's agent workspace: {agent_workspace.resolve()}" in prompt
     assert f"History log: {agent_workspace.resolve() / 'memory' / 'history.jsonl'}" in prompt
     assert f"Memory wiki: {agent_workspace.resolve()}/memory/wiki/" in prompt
     assert "Update durable memory only if the main agent assigns that work" in prompt
     assert "global-custom" in prompt
-    assert "project-custom" not in prompt
+    assert "project-custom/SKILL.md" in prompt
 
 
 def test_subagent_prompt_uses_relative_paths_in_agent_workspace(tmp_path):

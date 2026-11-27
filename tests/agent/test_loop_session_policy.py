@@ -152,6 +152,11 @@ async def test_transient_session_file_tools_keep_shared_memory_out_of_the_turn(t
     (tmp_path / "notes.txt").write_text("Project contains Private Marker", encoding="utf-8")
     heartbeat = tmp_path / "HEARTBEAT.md"
     heartbeat.write_text("Existing scheduled checks", encoding="utf-8")
+    project_memory = tmp_path / ".agents" / "skills" / "memory" / "SKILL.md"
+    shared_memory = loop.context.skills.shared_skills / "memory" / "SKILL.md"
+    for path in (project_memory, shared_memory):
+        path.parent.mkdir(parents=True)
+        path.write_text("---\nname: memory\ndescription: Memory procedure\n---\nPrivate Marker", encoding="utf-8")
     key = "websocket:private-files"
     await loop.sessions.state.register_transient(key, disabled_tools={"cron"})
     try:
@@ -159,6 +164,8 @@ async def test_transient_session_file_tools_keep_shared_memory_out_of_the_turn(t
             LLMResponse(content="", tool_calls=[
                 ToolCallRequest(id="profile", name="read_file", arguments={"path": "USER.md"}),
                 ToolCallRequest(id="skill", name="read_file", arguments={"path": "skills/memory/SKILL.md"}),
+                ToolCallRequest(id="project-skill", name="read_file", arguments={"path": str(project_memory)}),
+                ToolCallRequest(id="shared-skill", name="read_file", arguments={"path": str(shared_memory)}),
                 ToolCallRequest(id="wiki", name="read_file", arguments={"path": "memory/wiki/project.md"}),
                 ToolCallRequest(id="listing", name="list_dir", arguments={"path": ".", "recursive": True}),
                 ToolCallRequest(id="read-heartbeat", name="read_file", arguments={"path": "HEARTBEAT.md"}),
@@ -178,7 +185,7 @@ async def test_transient_session_file_tools_keep_shared_memory_out_of_the_turn(t
 
         request = loop.provider.chat_stream_with_retry.await_args.kwargs["messages"]
         results = {row['tool_call_id']: row['content'] for row in request if row['role'] == 'tool'}
-        for tool_call_id in ("profile", "wiki", "skill", "edit"):
+        for tool_call_id in ("profile", "wiki", "skill", "project-skill", "shared-skill", "edit"):
             assert "This path is not available in this session" in results[tool_call_id]
         assert "notes.txt" in results["listing"]
         assert "USER.md" not in results["listing"]

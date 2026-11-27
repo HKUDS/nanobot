@@ -22,7 +22,7 @@ def parse_skill_metadata(content: str) -> dict[str, object] | None:
         return None
     try:
         parsed = yaml.safe_load(match.group(1))
-    except yaml.YAMLError:
+    except (yaml.YAMLError, ValueError, OverflowError, RecursionError):
         return None
     if not isinstance(parsed, dict):
         return None

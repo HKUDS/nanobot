@@ -1,3 +1,4 @@
+import { DEFAULT_SKILL_SCOPE, type SkillScope } from "@/lib/skill-events";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import {
@@ -51,6 +52,7 @@ export function useSkillsCatalogSearch() {
 }
 
 type SkillsCatalogProps = {
+  skillScope?: SkillScope;
   skills: SkillSummary[];
   loading?: boolean;
   error?: boolean;
@@ -61,7 +63,7 @@ export function SkillsCatalogSettings(props: SkillsCatalogProps) {
   return <SkillsCatalogPage {...props} searchState={searchState} showSearch />;
 }
 
-export function SkillsCatalogPage({ skills, loading = false, error = false, searchState, showSearch }: SkillsCatalogProps & {
+export function SkillsCatalogPage({ skillScope = DEFAULT_SKILL_SCOPE, skills, loading = false, error = false, searchState, showSearch }: SkillsCatalogProps & {
   searchState: ReturnType<typeof useSkillsCatalogSearch>;
   showSearch?: boolean;
 }) {
@@ -172,6 +174,7 @@ export function SkillsCatalogPage({ skills, loading = false, error = false, sear
         <SkillsMarketplace
           query={search.value}
           provider={marketplaceProvider}
+          skillScope={skillScope}
           installedSkills={skills}
           installing={installingSkill}
           onInstallingChange={setInstallingSkill}
@@ -179,6 +182,7 @@ export function SkillsCatalogPage({ skills, loading = false, error = false, sear
       )}
 
       <SkillDetailSheet
+        skillScope={skillScope}
         key={selectedSkill ? `${selectedSkill.source}:${selectedSkill.name}` : "closed"}
         skill={selectedSkill}
         open={selectedSkill !== null}
@@ -256,10 +260,12 @@ function SkillCatalogRow({
 }
 
 function SkillDetailSheet({
+  skillScope,
   skill,
   open,
   onOpenChange,
 }: {
+  skillScope: SkillScope;
   skill: SkillSummary | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -284,7 +290,7 @@ function SkillDetailSheet({
     setActionError("");
     setDeleteOpen(false);
     setDescriptionExpanded(false);
-    fetchSkillDetail(getToken(), skill.name)
+    fetchSkillDetail(getToken(), skill.name, skillScope)
       .then((payload) => {
         if (!cancelled) setDetail(payload);
       })
@@ -297,7 +303,7 @@ function SkillDetailSheet({
     return () => {
       cancelled = true;
     };
-  }, [getToken, open, refreshKey, skill]);
+  }, [getToken, open, refreshKey, skill, skillScope]);
 
   if (!skill) return null;
 
@@ -316,8 +322,8 @@ function SkillDetailSheet({
     setActionBusy(true);
     setActionError("");
     try {
-      const payload = await updateSkillEnabled(client, activeSkill.name, !enabled);
-      notifySkillsChanged(payload);
+      const payload = await updateSkillEnabled(client, activeSkill.name, !enabled, skillScope);
+      notifySkillsChanged(payload, skillScope);
       const updated = payload.skills.find((item) => item.name === activeSkill.name);
       if (updated) {
         setDetail((current) => current ? { ...current, ...updated } : current);
@@ -340,8 +346,8 @@ function SkillDetailSheet({
     setActionBusy(true);
     setActionError("");
     try {
-      const payload = await deleteSkill(client, activeSkill.name);
-      notifySkillsChanged(payload);
+      const payload = await deleteSkill(client, activeSkill.name, skillScope);
+      notifySkillsChanged(payload, skillScope);
       onOpenChange(false);
     } catch (reason) {
       setActionError(

@@ -2,12 +2,14 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Collection, Generator
+from collections.abc import Collection, Generator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
+
+from loguru import logger
 
 from nanobot.agent.skill_metadata import (
     BUILTIN_SKILLS_DIR as BUILTIN_SKILLS_DIR,
@@ -18,9 +20,8 @@ from nanobot.agent.skill_metadata import (
 from nanobot.agent.skill_metadata import (
     parse_skill_metadata as parse_skill_metadata,
 )
-from nanobot.agent.skill_metadata import (
-    valid_skill_metadata as valid_skill_metadata,
-)
+from nanobot.agent.skill_sources import SkillSource, ordered_sources
+from nanobot.config import paths
 from nanobot.context_sources import record_source
 from nanobot.runtime_context import RuntimeContextBlock
 
@@ -29,7 +30,7 @@ _SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
 
 @dataclass
 class _SkillSnapshot:
-    entries: list[dict[str, str]] | None = None
+    entries: dict[str, dict[str, str]] | None = None
     aliases: dict[str, str] | None = None
     documents: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, dict[str, object] | None] = field(default_factory=dict)
@@ -44,12 +45,28 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None, disabled_skills: set[str] | None = None):
+    def __init__(
+        self, workspace: Path, builtin_skills_dir: Path | None = None, disabled_skills: set[str] | None = None,
+        *, project_workspace: Path | None = None,
+    ):
         self.workspace = workspace
-        self.workspace_skills = workspace / "skills"
+        self.project_workspace = project_workspace or workspace
+        self.shared_skills = paths.get_shared_skills_dir()
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
-        self.disabled_skills = disabled_skills or set()
+        self.disabled_skills: set[str] = disabled_skills if disabled_skills is not None else set()
         self._snapshot: ContextVar[_SkillSnapshot | None] = ContextVar("skill_snapshot", default=None)
+
+    def for_project(self, project_workspace: Path) -> "SkillsLoader":
+        if project_workspace == self.project_workspace:
+            return self
+        return SkillsLoader(self.workspace, self.builtin_skills, self.disabled_skills, project_workspace=project_workspace)
+
+    def _sources(self) -> Iterator[SkillSource]:
+        return ordered_sources(self.project_workspace, self.workspace, self.shared_skills, self.builtin_skills)
+
+    def local_package_dirs(self, name: str) -> Iterator[Path]:
+        """Package paths under the direct directory sources (not plugin-managed packages)."""
+        return (source.root / name for source in self._sources() if source.key != "plugin")
 
     @contextmanager
     def snapshot(self) -> Generator[None, None, None]:
@@ -77,22 +94,6 @@ class SkillsLoader:
             snapshot.aliases = aliases
         return aliases
 
-    def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
-        if not base.exists():
-            return []
-        entries: list[dict[str, str]] = []
-        for skill_dir in base.iterdir():
-            if not skill_dir.is_dir():
-                continue
-            skill_file = skill_dir / "SKILL.md"
-            if not skill_file.exists():
-                continue
-            name = skill_dir.name
-            if skip_names is not None and name in skip_names:
-                continue
-            entries.append({"name": name, "path": str(skill_file), "source": source})
-        return entries
-
     def list_skills(
         self, filter_unavailable: bool = True, *, exclude: Collection[str] = (),
     ) -> list[dict[str, str]]:
@@ -106,57 +107,43 @@ class SkillsLoader:
             List of skill info dicts with 'name', 'path', 'source'.
         """
         with self.snapshot():
-            return self._list_skills(filter_unavailable, exclude)
+            return [
+                skill for name, skill in self._entries().items()
+                if name not in exclude and (not filter_unavailable or self._check_requirements(self._get_skill_meta(name)))
+            ]
 
-    def _list_skills(self, filter_unavailable: bool, exclude: Collection[str]) -> list[dict[str, str]]:
+    def _entries(self) -> dict[str, dict[str, str]]:
         snapshot = self._snapshot.get()
-        if snapshot is not None and snapshot.entries is not None:
-            skills = snapshot.entries
-        else:
-            skills = self._discover_skills()
-            if snapshot is not None:
-                snapshot.entries = skills
-        if exclude:
-            skills = [skill for skill in skills if skill["name"] not in exclude]
-        if filter_unavailable:
-            return [skill for skill in skills if self._check_requirements(self._get_skill_meta(skill["name"]))]
-        return skills
+        assert snapshot is not None
+        if snapshot.entries is None:
+            snapshot.entries = self._discover_skills()
+        return snapshot.entries
 
-    def _discover_skills(self) -> list[dict[str, str]]:
-        from nanobot.agent.plugins import enabled_agent_plugin_skill_documents
-
-        plugin_skills = enabled_agent_plugin_skill_documents(self.workspace)
+    def _discover_skills(self) -> dict[str, dict[str, str]]:
         disabled = set(self.disabled_skills)
         if disabled:
             for legacy, canonical in self._skill_aliases().items():
                 if legacy in disabled or canonical in disabled:
                     disabled.update((legacy, canonical))
-        skills = self._skill_entries_from_dir(self.workspace_skills, "workspace")
-        seen_names = {entry["name"] for entry in skills}
+        entries: dict[str, dict[str, str]] = {}
+        seen_paths: set[Path] = set()
         snapshot = self._snapshot.get()
-        for skill in plugin_skills:
-            if skill.name in seen_names:
-                continue
-            skills.append(
-                {
-                    "name": skill.name,
-                    "path": str(skill.path),
-                    "source": "plugin",
-                }
-            )
-            if snapshot is not None and skill.name not in disabled:
-                snapshot.documents[skill.name] = skill.content
-                snapshot.metadata[skill.name] = skill.metadata
-            seen_names.add(skill.name)
-        if self.builtin_skills and self.builtin_skills.exists():
-            skills.extend(
-                self._skill_entries_from_dir(self.builtin_skills, "builtin", skip_names=seen_names)
-            )
-
-        if disabled:
-            skills = [s for s in skills if s["name"] not in disabled]
-
-        return skills
+        for source in self._sources():
+            for skill in source.candidates():
+                if skill.name in disabled:
+                    continue
+                if skill.name in entries:
+                    logger.debug("Skill {} shadows {}", entries[skill.name]["path"], skill.path)
+                    continue
+                target = skill.path.resolve()
+                if target in seen_paths:
+                    continue
+                seen_paths.add(target)
+                entries[skill.name] = {"name": skill.name, "path": str(skill.path), "source": source.key}
+                if snapshot is not None and skill.content is not None:
+                    snapshot.documents[skill.name] = skill.content
+                    snapshot.metadata[skill.name] = skill.metadata
+        return entries
 
     def load_skill(self, name: str) -> str | None:
         """
@@ -172,10 +159,9 @@ class SkillsLoader:
             return self._load_skill(name)
 
     def _load_skill(self, name: str, *, for_context: bool = False) -> str | None:
-        skills = self.list_skills(filter_unavailable=False)
-        available = {skill["name"] for skill in skills}
-        resolved = name if name in available else self._skill_aliases().get(name, name)
-        entry = next((skill for skill in skills if skill["name"] == resolved), None)
+        entries = self._entries()
+        resolved = name if name in entries else self._skill_aliases().get(name, name)
+        entry = entries.get(resolved)
         if entry is None:
             return None
         snapshot = self._snapshot.get()
@@ -187,7 +173,10 @@ class SkillsLoader:
                 snapshot.documents[resolved] = content
         if for_context:
             content = self._strip_frontmatter(content)
-            record_source(Path(entry["path"]), content)
+            path = Path(entry["path"])
+            record_source(path, content)
+            if entry["source"] in {"project", "shared"}:
+                content = f"Skill directory: `{path.parent}`\n\n{content}"
         return content
 
     def load_skills_for_context(self, skill_names: list[str]) -> str:
@@ -256,55 +245,34 @@ class SkillsLoader:
             ),
         )
 
-    def build_skills_summary(
-        self,
-        exclude: set[str] | None = None,
-        *,
-        workspace: Path | None = None,
-    ) -> str:
-        """
-        Build a summary of available skills (name, description, path).
-
-        This is used for progressive loading - the agent can read the full
-        skill content using read_file when needed.
-
-        Args:
-            exclude: Set of skill names to omit from the summary.
-            workspace: Effective project workspace used to choose safe display paths.
-
-        Returns:
-            Markdown-formatted skills summary.
-        """
+    def build_skills_summary(self, exclude: set[str] | None = None) -> str:
+        """Describe available skills and where to read them from the selected project."""
         with self.snapshot():
-            return self._build_skills_summary(exclude, workspace=workspace)
+            return self._build_skills_summary(exclude)
 
-    def _build_skills_summary(self, exclude: set[str] | None, *, workspace: Path | None) -> str:
+    def _build_skills_summary(self, exclude: set[str] | None) -> str:
         all_skills = self.list_skills(filter_unavailable=True, exclude=exclude or ())
         if not all_skills:
             return ""
 
         agent_workspace = self.workspace.expanduser().resolve()
-        project_workspace = (workspace or self.workspace).expanduser().resolve()
+        project_workspace = self.project_workspace.expanduser().resolve()
         use_relative_roots = project_workspace == agent_workspace
         sections: list[str] = []
-        groups = (
-            ("Workspace skills", "workspace", self.workspace_skills),
-            ("Agent Plugin skills", "plugin", self.workspace / "plugins"),
-            ("Built-in skills", "builtin", self.builtin_skills),
-        )
-        for label, source, root in groups:
-            entries = [entry for entry in all_skills if entry["source"] == source]
+        for source in self._sources():
+            root = source.root
+            entries = [entry for entry in all_skills if entry["source"] == source.key]
             if not entries:
                 continue
 
             resolved_root = root.expanduser().resolve()
             # Directory tools need the real built-in root; only read_file resolves
             # workspace-relative skills/<name>/... aliases to bundled resources.
-            if use_relative_roots and source != "builtin":
-                display_root = Path("plugins" if source == "plugin" else "skills")
+            if use_relative_roots and source.key in {"workspace", "plugin"}:
+                display_root = root.relative_to(self.workspace)
             else:
                 display_root = resolved_root
-            lines = [f"### {label} (`{display_root}`)"]
+            lines = [f"### {source.label} (`{display_root}`)"]
             for entry in entries:
                 skill_name = entry["name"]
                 record_source(Path(entry["path"]), "", loaded=False)

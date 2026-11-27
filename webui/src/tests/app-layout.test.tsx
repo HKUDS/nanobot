@@ -373,7 +373,9 @@ describe("App layout", () => {
     setSidebarStateSpy.mockReset().mockImplementation(
       async (state: SidebarStatePayload) => state,
     );
-    requestMutationSpy.mockReset();
+    requestMutationSpy.mockReset().mockImplementation(async (action: string) => {
+      if (action === "skill.preview") return { skills: [] };
+    });
     discardTemporaryChatSpy.mockReset();
     let temporaryChatCounter = 0;
     newTemporaryChatSpy.mockImplementation(async () => (
@@ -1269,6 +1271,10 @@ describe("App layout", () => {
     await userEvent.setup().click(await screen.findByRole("menuitem", { name: "New topic" }));
     await waitFor(() => expect(window.location.hash).toBe("#/new"));
     expect(await screen.findByRole("button", { name: "Switch directory" })).toHaveTextContent("selected-project");
+    expect(requestMutationSpy).toHaveBeenCalledWith("skill.preview", {
+      workspace_scope: { project_path: projectScope.project_path, access_mode: "restricted" },
+    });
+    expect(createChatSpy).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "project topic" },
     });

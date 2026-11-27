@@ -1,3 +1,4 @@
+import { DEFAULT_SKILL_SCOPE, type SkillScope } from "@/lib/skill-events";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import type { SettingsExitGuard, SettingsFocusTarget, SettingsSectionKey } from "@/components/settings/contracts";
 import { useSettingsController } from "@/components/settings/useSettingsController";
@@ -20,6 +21,7 @@ interface SettingsViewProps {
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
   skills?: SkillSummary[];
+  skillScope?: SkillScope;
   skillsLoading?: boolean;
   skillsError?: boolean;
   onStartAutomationChat?: (
@@ -51,6 +53,7 @@ export function SettingsView({
   onModelNameChange,
   onSettingsChange,
   skills = [],
+  skillScope = DEFAULT_SKILL_SCOPE,
   skillsLoading = false,
   skillsError = false,
   onStartAutomationChat,
@@ -83,6 +86,7 @@ export function SettingsView({
       mainNavigationExpanded={mainNavigationExpanded}
       onChangeTheme={onChangeTheme}
       onBackToChat={onBackToChat}
+      skillScope={skillScope}
       skills={skills}
       skillsLoading={skillsLoading}
       skillsError={skillsError}

@@ -610,7 +610,7 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("suffix", ["", "/workspace-skill"], ids=["list", "detail"])
+@pytest.mark.parametrize("suffix", ["", "/workspace-skill", "/trending?provider=skills_sh"], ids=["list", "detail", "marketplace"])
 async def test_webui_skill_reads_do_not_block_other_http_routes(
     bus: MagicMock,
     tmp_path: Path,
@@ -628,13 +628,14 @@ async def test_webui_skill_reads_do_not_block_other_http_routes(
     loop = asyncio.get_running_loop()
     discover = SkillsLoader._discover_skills
 
-    def slow_discovery(loader: SkillsLoader) -> list[dict[str, str]]:
+    def slow_discovery(loader: SkillsLoader) -> dict[str, dict[str, str]]:
         loop.call_soon_threadsafe(entered.set)
         if not release.wait(3.0):
             raise TimeoutError("skill scan was not released")
         return discover(loader)
 
     monkeypatch.setattr(SkillsLoader, "_discover_skills", slow_discovery)
+    monkeypatch.setattr("nanobot.webui.skills_marketplace._trending_skills_sh_skills", AsyncMock(return_value={"skills": []}))
     port = _free_port()
     channel = _ch(
         bus, session_manager=_seed_session(tmp_path), workspace_path=tmp_path, port=port,
@@ -682,6 +683,7 @@ async def test_webui_skill_management_routes(
         *,
         enabled: bool,
         disabled_skills: set[str],
+        project_workspace: Path | None,
         config_path: Path | None = None,
     ) -> dict[str, Any]:
         assert workspace == tmp_path
@@ -695,6 +697,7 @@ async def test_webui_skill_management_routes(
         name: str,
         *,
         disabled_skills: set[str],
+        project_workspace: Path | None,
         config_path: Path | None = None,
     ) -> dict[str, Any]:
         assert workspace == tmp_path
@@ -795,6 +798,7 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         *,
         provider: str,
         version: str,
+        project_workspace: Path | None,
     ) -> dict[str, Any]:
         assert source == "acme/agent-skills"
         assert skill_id == "react-testing"
@@ -837,7 +841,7 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         )
         assert search_response.status_code == 200
         assert search_response.json()["skills"][0]["skill_id"] == "react-testing"
-        search.assert_awaited_once_with("react", tmp_path, provider="all")
+        search.assert_awaited_once_with("react", tmp_path, project_workspace=None, provider="all")
 
         trending_response = await _http_get(
             f"http://127.0.0.1:{port}/api/webui/skills/trending",
@@ -845,7 +849,7 @@ async def test_webui_skills_marketplace_routes_search_and_install(
         )
         assert trending_response.status_code == 200
         assert trending_response.json()["period"] == "24h"
-        trending.assert_awaited_once_with(tmp_path, provider="all")
+        trending.assert_awaited_once_with(tmp_path, project_workspace=None, provider="all")
 
         trends_response = await _http_get(
             f"http://127.0.0.1:{port}/api/webui/skills/trends"
@@ -943,6 +947,7 @@ async def test_webui_skill_install_rejects_overlapping_requests(
         *,
         provider: str,
         version: str,
+        project_workspace: Path | None,
     ) -> dict[str, Any]:
         started.set()
         await finish.wait()
@@ -1028,6 +1033,7 @@ async def test_webui_skill_install_honors_remote_install_opt_in(
         *,
         provider: str,
         version: str,
+        project_workspace: Path | None,
     ) -> dict[str, Any]:
         skill_dir = workspace / "skills" / skill_id
         skill_dir.mkdir(parents=True)

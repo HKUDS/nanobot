@@ -497,7 +497,7 @@ class WorkspaceFiles:
         extra_read_allowed_files: Iterable[Path] | None = None,
         *,
         builtin_skills: Path,
-        plugin_skill_roots: Callable[[Path, Path], Iterable[Path]],
+        skill_read_roots: Callable[[Path, Path], Iterable[Path]],
     ) -> None:
         self._workspace = workspace
         self._allowed_dir = allowed_dir
@@ -510,7 +510,7 @@ class WorkspaceFiles:
         )
         self._sandbox_restricted = sandbox_restricts_workspace
         self._builtin_skills = builtin_skills
-        self._plugin_skill_roots = plugin_skill_roots
+        self._skill_read_roots = skill_read_roots
 
     @property
     def display_workspace(self) -> Path | None:
@@ -541,7 +541,7 @@ class WorkspaceFiles:
             extra_roots = [get_media_dir(), *self._read_dirs]
             if self._workspace is not None:
                 try:
-                    extra_roots.extend(self._plugin_skill_roots(self._workspace, resolve_path(path, workspace)))
+                    extra_roots.extend(self._skill_read_roots(self._workspace, resolve_path(path, workspace)))
                 except (OSError, RuntimeError):
                     pass
         target = resolve_allowed_path(

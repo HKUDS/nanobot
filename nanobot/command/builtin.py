@@ -482,13 +482,26 @@ async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:
 async def cmd_skill(ctx: CommandContext) -> OutboundMessage:
     """List all enabled skills (name and description only)."""
     loop = ctx.loop
-    skills = loop.context.skills.list_skills(filter_unavailable=False)
-    if not skills:
-        return command_reply(ctx.msg, "/skill", line("skill.empty"))
-    return command_reply(ctx.msg, "/skill", line("skill.list", count=len(skills)), "", *(
-        line("skill.item", name=entry["name"], description=loop.context.skills.get_skill_description(entry["name"]))
-        for entry in skills
-    ))
+    session = ctx.session
+    if session is None and ctx.msg.channel == loop.workspace_scopes.scoped_channel:
+        session = await loop.sessions.state.read_header(ctx.key)
+
+    def list_reply() -> OutboundMessage:
+        scope = loop.workspace_scopes.for_turn(
+            channel=ctx.msg.channel, message_metadata=ctx.msg.metadata,
+            session_metadata=session.metadata if session else None,
+        )
+        loader = loop.context.skills.for_project(scope.project_path)
+        with loader.snapshot():
+            skills = loader.list_skills(filter_unavailable=False)
+            if not skills:
+                return command_reply(ctx.msg, "/skill", line("skill.empty"))
+            return command_reply(ctx.msg, "/skill", line("skill.list", count=len(skills)), "", *(
+                line("skill.item", name=entry["name"], description=loader.get_skill_description(entry["name"]))
+                for entry in skills
+            ))
+
+    return await asyncio.to_thread(list_reply)
 
 
 async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:

@@ -30,6 +30,7 @@ from nanobot.agent.model_runtime import ModelRuntimeResolver
 from nanobot.agent.pending_inputs import PendingInputs
 from nanobot.agent.runner import AgentCheckpoint, AgentRunner, AgentRunResult, AgentRunSpec
 from nanobot.agent.session_inbox import SessionExecutionClosedError, SessionInbox, SessionInboxes
+from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
@@ -156,6 +157,8 @@ class TurnContext:
     transcript_input: TranscriptInput | None = None
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     request_context: RequestContext | None = None
+    skills: SkillsLoader | None = None
+    skill_scope: ExitStack = field(default_factory=ExitStack, repr=False)
     runtime_context_blocks: list[RuntimeContextBlock] = field(default_factory=list)
     attributes: dict[str, Any] = field(default_factory=dict)
 
@@ -755,6 +758,7 @@ class AgentLoop:
             ctx.request_context,
             ctx.tools if ctx.tools is not None else self.tools,
             include_memory=ctx.session.policy.persist,
+            skills=ctx.skills,
         )
 
     async def _resolve_runtime_context_for_request(
@@ -763,6 +767,7 @@ class AgentLoop:
         tools: ToolRegistry,
         *,
         include_memory: bool,
+        skills: SkillsLoader | None = None,
     ) -> list[RuntimeContextBlock]:
         providers = [
             *tools.get_runtime_context_providers(),
@@ -775,6 +780,7 @@ class AgentLoop:
             await self.runner.prepare_prompt(
                 self.context.build_explicit_skill_context, text,
                 include_memory=include_memory, has_cron=tools.has("cron"),
+                skills=skills or self.context.skills.for_project(request.workspace or self.workspace),
             )
             if "$" in text else None
         )
@@ -964,6 +970,7 @@ class AgentLoop:
         runtime: LLMRuntime,
         session: Session | None,
         tools: ToolRegistry,
+        skills: SkillsLoader,
     ) -> dict[str, Any] | None:
         # Commands and independent turns retain their own worker and completion.
         if not self._can_inject_message(message):
@@ -1016,7 +1023,7 @@ class AgentLoop:
                 log_content=request.log_content,
             )
             blocks = await self._resolve_runtime_context_for_request(
-                pending_request, tools, include_memory=session is None or session.policy.persist,
+                pending_request, tools, include_memory=session is None or session.policy.persist, skills=skills,
             )
             row["content"], runtime_marker = append_runtime_context(user_content, blocks)
             if runtime_marker is not None:
@@ -1073,6 +1080,7 @@ class AgentLoop:
         provider_state: ProviderConversationState | None = None,
         initial_message: InboundMessage | None = None,
         commit_session: bool = True,
+        skills: SkillsLoader | None = None,
     ) -> AgentRunResult:
         self._sync_subagent_runtime_limits()
 
@@ -1092,7 +1100,7 @@ class AgentLoop:
         active_session_key = session.key if session else request_ctx.session_key
         consolidation_session_key = active_session_key or "agent:transient"
         request_metadata = request_ctx.metadata
-        effective_scope = await self.runner.prepare_prompt(
+        effective_scope = request_ctx.workspace_scope or await self.runner.prepare_prompt(
             self.workspace_scopes.for_turn,
             channel=request_ctx.channel,
             message_metadata=_prompt_scope_metadata(request_metadata),
@@ -1101,8 +1109,10 @@ class AgentLoop:
         include_memory = session is None or session.policy.persist
         effective_tools = tools if tools is not None else self.tools
         has_cron = effective_tools.has("cron")
+        skills = skills or self.context.skills.for_project(effective_scope.project_path)
         transcript_builder = partial(
             self.context.build_transcript,
+            skills=skills,
             channel=request_ctx.channel,
             workspace=effective_scope.project_path,
             include_memory=include_memory,
@@ -1143,12 +1153,12 @@ class AgentLoop:
             )
             turn_scope_stack.callback(reset_request_context, bind_request_context(request_ctx))
             turn_scope_stack.callback(reset_workspace_scope, bind_workspace_scope(effective_scope))
+            turn_scope_stack.enter_context(skills.snapshot())
             if not include_memory:
                 memory = self.context.memory
-                skills = self.context.skills
                 turn_scope_stack.enter_context(exclude_file_paths(
                     memory.soul_file, memory.user_file, memory.memory_dir,
-                    skills.workspace_skills / "memory", skills.builtin_skills / "memory",
+                    *skills.local_package_dirs("memory"),
                 ))
                 if not has_cron:
                     turn_scope_stack.enter_context(exclude_file_paths(
@@ -1168,7 +1178,7 @@ class AgentLoop:
                 queue=pending_queue,
                 prepare=partial(
                     self._prepare_injected_input,
-                    request=request_ctx, runtime=runtime, session=session, tools=effective_tools,
+                    request=request_ctx, runtime=runtime, session=session, tools=effective_tools, skills=skills,
                 ),
                 consume=execution_scope.consume_inputs if execution_scope is not None else None,
                 session_key=session.key if session is not None else None,
@@ -1821,8 +1831,11 @@ class AgentLoop:
             if await self._run_turn_stage(ctx, "command", self._dispatch_command):
                 self._log_turn_completion(ctx, outcome="command")
                 return ctx.outbound
-            await self._run_turn_stage(ctx, "build", self._build_turn)
-            await self._run_turn_stage(ctx, "run", self._run_turn)
+            # BUILD selects the project and opens its snapshot; RUN may reuse it for
+            # provider resume or queued input. Unwind both stages on failure/cancellation.
+            with ctx.skill_scope:
+                await self._run_turn_stage(ctx, "build", self._build_turn)
+                await self._run_turn_stage(ctx, "run", self._run_turn)
             await self._run_turn_stage(ctx, "save", self._persist_turn)
             await self._run_turn_stage(ctx, "respond", self._prepare_outbound)
             self._log_turn_completion(ctx)
@@ -2108,6 +2121,8 @@ class AgentLoop:
         await ctx.delivery.runtime_admitted(runtime)
 
         ctx.request_context = await self._request_context_for_turn(ctx)
+        ctx.skills = self.context.skills.for_project(ctx.request_context.workspace or self.workspace)
+        ctx.skill_scope.enter_context(ctx.skills.snapshot())
         if ctx.kind is TurnKind.USER:
             ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
         staged_provider_state = False
@@ -2117,6 +2132,7 @@ class AgentLoop:
         ):
             current_provider_message = await self.runner.prepare_prompt(
                 self.context.build_current_message, ctx.msg.content,
+                skills=ctx.skills,
                 media=ctx.msg.media if ctx.kind is TurnKind.USER else None,
                 runtime_context_blocks=ctx.runtime_context_blocks,
                 include_memory=session.policy.persist,
@@ -2192,6 +2208,7 @@ class AgentLoop:
             hook_factories=ctx.hook_factories,
             tools=ctx.tools,
             request_context=ctx.request_context,
+            skills=ctx.skills,
             provider_state=ctx.provider_state,
             initial_message=ctx.msg,
             events=ctx.events,

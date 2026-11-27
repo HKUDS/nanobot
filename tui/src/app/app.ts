@@ -470,7 +470,6 @@ export class NanobotTui {
     this.client.connect()
     void this.loadCommands()
     void this.loadMentions()
-    void this.loadSkills()
     this.runtimeControls.preload()
     this.renderer.start()
     // OpenTUI learns the real terminal background through OSC 10/11. Wait for
@@ -691,6 +690,7 @@ export class NanobotTui {
     if (event.event === "attached") {
       const switchedSession = Boolean(this.currentChatId && this.currentChatId !== event.chat_id)
       this.currentChatId = event.chat_id
+      void this.loadSkills()
       this.closeUsage()
       if (event.usage) this.lastUsage = event.usage
       if (event.model_preset !== undefined) {
@@ -2058,6 +2058,7 @@ export class NanobotTui {
   }
 
   private applyWorkspaceScope(scope: WorkspaceScopePayload): void {
+    if (scope.project_path !== this.runtimeControls.workspaceScope.project_path) void this.loadSkills()
     this.runtimeControls.updateWorkspaceScope(scope)
     this.updateTitle()
     if (!this.activeTurn && this.ready) this.status.content = this.readyStatus()
@@ -2077,10 +2078,13 @@ export class NanobotTui {
 
   private async loadSkills(): Promise<void> {
     const loadId = ++this.skillLoadId
+    this.skillCandidates = []
+    this.skillMenu.hide()
     try {
       const candidates = await fetchAvailableSkills(
         this.options.apiUrl,
         this.options.apiToken,
+        this.currentChatId,
         this.apiReauthenticator,
       )
       if (loadId !== this.skillLoadId) return

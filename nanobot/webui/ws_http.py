@@ -99,7 +99,12 @@ from nanobot.webui.mutation import MutationResult
 from nanobot.webui.recovery import RecoveryActionError
 from nanobot.webui.session_automations import serialize_automation_jobs
 from nanobot.webui.session_context import session_context_payload
-from nanobot.webui.session_identity import is_webui_session_key, webui_chat_id
+from nanobot.webui.session_identity import (
+    is_valid_webui_chat_id,
+    is_webui_session_key,
+    webui_chat_id,
+    webui_session_key,
+)
 from nanobot.webui.session_list_index import (
     WEBUI_SESSION_INDEX_INTERNAL_FIELDS,
     indexed_workspace_scope,
@@ -480,12 +485,16 @@ class GatewayHTTPHandler:
                         return await asyncio.to_thread(self._handle_workspace_favorite, payload)
                     if action == "workspace.resolve_project":
                         return await asyncio.to_thread(self._handle_workspace_resolve_project, payload)
-                    if action == "skill.install":
-                        return await self._handle_webui_skill_install(connection, headers, params)
-                    if action == "skill.update":
-                        return await self._handle_webui_skill_update(params)
-                    if action == "skill.delete":
-                        return await self._handle_webui_skill_delete(connection, headers, params)
+                    if kind == "skill":
+                        try:
+                            project = await self._skill_project(payload.get("chat_id"), payload.get("project_path"))
+                        except WorkspaceScopeError as exc:
+                            return MutationResult.failure(exc.status, exc.message)
+                        if operation == "install":
+                            return await self._handle_webui_skill_install(connection, headers, params, project)
+                        if operation == "update":
+                            return await self._handle_webui_skill_update(params, project)
+                        return await self._handle_webui_skill_delete(connection, headers, params, project)
                     if kind == "star_prompt" and (operation == "claim" or operation == "dismiss"):
                         return await self._mutate_star_prompt(operation)
         except RuntimeMaintenanceError:
@@ -1338,17 +1347,25 @@ class GatewayHTTPHandler:
             return await self._handle_workspace_directories(connection, request)
         if got == "/api/workspaces":
             return await asyncio.to_thread(self._handle_workspaces, connection, request)
-        if got == "/api/webui/skills/search":
-            return await self._handle_webui_skills_search(request)
-        if got == "/api/webui/skills/trending":
-            return await self._handle_webui_skills_trending(request)
-        if got == "/api/webui/skills/trends":
-            return await self._handle_webui_skill_trends(request)
-        if got == "/api/webui/skills":
-            return await self._handle_webui_skills(request)
         m = _SKILL_DETAIL_RE.match(got)
-        if m:
-            return await self._handle_webui_skill_detail(request, m.group(1))
+        if got == "/api/webui/skills" or m:
+            if not self.check_api_token(request):
+                return _http_error(401, "Unauthorized")
+            if got == "/api/webui/skills/trends":
+                return await self._handle_webui_skill_trends(request)
+            query = _parse_query(request.path)
+            try:
+                project = await self._skill_project(_query_first(query, "chat_id"), _query_first(query, "project_path"))
+            except WorkspaceScopeError as exc:
+                return _http_error(exc.status, exc.message)
+            if got == "/api/webui/skills":
+                return _http_json_response(await self.load_webui_skills(project))
+            if got == "/api/webui/skills/search":
+                return await self._handle_webui_skills_search(request, project)
+            if got == "/api/webui/skills/trending":
+                return await self._handle_webui_skills_trending(request, project)
+            assert m is not None
+            return await self._handle_webui_skill_detail(m.group(1), project)
         if got == "/api/webui/sidebar-state":
             return await self._handle_webui_sidebar_state(request)
         return None
@@ -1400,21 +1417,27 @@ class GatewayHTTPHandler:
             return _http_error(exc.status, exc.message)
         return _http_json_response(dict(payload))
 
-    async def _load_webui_skills(self) -> dict[str, Any]:
+    async def _skill_project(self, chat_id: object, project_path: object) -> Path | None:
+        if project_path is not None:
+            raise WorkspaceScopeError("skill requests require a chat_id, not a project path")
+        if chat_id is None:
+            return None
+        if not is_valid_webui_chat_id(chat_id):
+            raise WorkspaceScopeError("invalid chat_id")
+        scope = await self.workspaces.async_existing_scope_for_session_key(webui_session_key(chat_id))
+        if scope is None:
+            raise WorkspaceScopeError("chat workspace not found", status=404)
+        return scope.project_path
+
+    async def load_webui_skills(self, project: Path | None) -> dict[str, Any]:
         return await asyncio.to_thread(
             webui_skills_payload,
             self.skills_workspace_path,
+            project_workspace=project,
             disabled_skills=set(self.disabled_skills),
         )
 
-    async def _handle_webui_skills(self, request: WsRequest) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        return _http_json_response(await self._load_webui_skills())
-
-    async def _handle_webui_skills_search(self, request: WsRequest) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
+    async def _handle_webui_skills_search(self, request: WsRequest, project: Path | None) -> Response:
         params = _parse_query(request.path)
         query = _query_first(params, "q") or ""
         provider = _query_first(params, "provider") or "all"
@@ -1422,6 +1445,7 @@ class GatewayHTTPHandler:
             payload = await search_marketplace_skills(
                 query,
                 self.skills_workspace_path,
+                project_workspace=project,
                 provider=provider,
             )
         except SkillsMarketplaceError as exc:
@@ -1431,13 +1455,12 @@ class GatewayHTTPHandler:
             return _http_error(500, "skills marketplace search failed")
         return _http_json_response(payload)
 
-    async def _handle_webui_skills_trending(self, request: WsRequest) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
+    async def _handle_webui_skills_trending(self, request: WsRequest, project: Path | None) -> Response:
         provider = _query_first(_parse_query(request.path), "provider") or "all"
         try:
             payload = await trending_marketplace_skills(
                 self.skills_workspace_path,
+                project_workspace=project,
                 provider=provider,
             )
         except SkillsMarketplaceError as exc:
@@ -1448,8 +1471,6 @@ class GatewayHTTPHandler:
         return _http_json_response(payload)
 
     async def _handle_webui_skill_trends(self, request: WsRequest) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
         skill_ids = _parse_query(request.path).get("id", [])
         try:
             payload = await marketplace_skill_trends(skill_ids)
@@ -1463,6 +1484,7 @@ class GatewayHTTPHandler:
         connection: Any,
         headers: Any,
         params: MutationParams,
+        project: Path | None,
     ) -> MutationResult:
         if not await asyncio.to_thread(self._allow_webui_package_install, connection, headers):
             return MutationResult.failure(403, "remote skill installation is disabled")
@@ -1479,6 +1501,7 @@ class GatewayHTTPHandler:
                     source,
                     skill_id,
                     self.skills_workspace_path,
+                    project_workspace=project,
                     provider=provider,
                     version=version,
                 )
@@ -1488,7 +1511,7 @@ class GatewayHTTPHandler:
                 self._log.exception("skill installation failed")
                 return MutationResult.failure(500, "skill installation failed")
         return MutationResult.success({
-            **(await self._load_webui_skills()),
+            **(await self.load_webui_skills(project)),
             "last_action": action,
         })
 
@@ -1503,7 +1526,7 @@ class GatewayHTTPHandler:
             self._log.exception("failed to load remote package install policy")
             return False
 
-    async def _handle_webui_skill_update(self, params: MutationParams) -> MutationResult:
+    async def _handle_webui_skill_update(self, params: MutationParams, project: Path | None) -> MutationResult:
         name = _mutation_text(params, "name") or ""
         raw_enabled = (_mutation_text(params, "enabled") or "").lower()
         if raw_enabled not in {"true", "false"}:
@@ -1514,6 +1537,7 @@ class GatewayHTTPHandler:
                 lambda config_path: set_webui_skill_enabled(
                     self.skills_workspace_path,
                     name,
+                    project_workspace=project,
                     enabled=raw_enabled == "true",
                     disabled_skills=self.disabled_skills,
                     config_path=config_path,
@@ -1523,7 +1547,7 @@ class GatewayHTTPHandler:
             return MutationResult.failure(exc.status, exc.message)
         self._apply_skill_state()
         return MutationResult.success({
-            **(await self._load_webui_skills()),
+            **(await self.load_webui_skills(project)),
             "last_action": action,
         })
 
@@ -1532,6 +1556,7 @@ class GatewayHTTPHandler:
         connection: Any,
         headers: Any,
         params: MutationParams,
+        project: Path | None,
     ) -> MutationResult:
         if not _is_local_browser_request(connection, headers):
             return MutationResult.failure(403, "remote skill deletion is disabled")
@@ -1542,6 +1567,7 @@ class GatewayHTTPHandler:
                 lambda config_path: delete_webui_skill(
                     self.skills_workspace_path,
                     name,
+                    project_workspace=project,
                     disabled_skills=self.disabled_skills,
                     config_path=config_path,
                 ),
@@ -1550,7 +1576,7 @@ class GatewayHTTPHandler:
             return MutationResult.failure(exc.status, exc.message)
         self._apply_skill_state()
         return MutationResult.success({
-            **(await self._load_webui_skills()),
+            **(await self.load_webui_skills(project)),
             "last_action": action,
         })
 
@@ -1558,9 +1584,7 @@ class GatewayHTTPHandler:
         if self.skill_state_action is not None:
             self.skill_state_action(set(self.disabled_skills))
 
-    async def _handle_webui_skill_detail(self, request: WsRequest, raw_name: str) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
+    async def _handle_webui_skill_detail(self, raw_name: str, project: Path | None) -> Response:
         from urllib.parse import unquote
 
         name = unquote(raw_name)
@@ -1570,6 +1594,7 @@ class GatewayHTTPHandler:
             webui_skill_detail_payload,
             self.skills_workspace_path,
             name,
+            project_workspace=project,
             disabled_skills=set(self.disabled_skills),
         )
         if payload is None:

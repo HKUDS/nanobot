@@ -1031,6 +1031,19 @@ class WebUICommandRouter:
             return
 
         payload = cast(dict[str, Any], payload)
+        if action == "skill.preview":
+            # The first-message composer has no chat ID. Validate its prospective
+            # scope under the owner's policy, without staging a chat or recording history.
+            try:
+                scope = await self._workspaces.scope_for_new_chat(
+                    payload, can_change_project=self.workspace_project_selection_available(connection),
+                )
+                result = await self._http_router.load_webui_skills(scope.project_path)
+            except WorkspaceScopeError as exc:
+                await self.send_webui_response(connection, request_id, status=exc.status, message=exc.message)
+            else:
+                await self.send_webui_response(connection, request_id, result=result)
+            return
         if action == "attachment.inspect":
             # Read-only and connection-scoped: never retain filesystem results in
             # the mutation replay cache. Send admission always checks again.

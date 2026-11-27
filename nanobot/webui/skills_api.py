@@ -23,10 +23,11 @@ class SkillManagementError(Exception):
 def webui_skills_payload(
     workspace_path: Path,
     *,
+    project_workspace: Path | None = None,
     disabled_skills: set[str] | None = None,
 ) -> dict[str, Any]:
     """Return agent skills without leaking local filesystem paths."""
-    loader = SkillsLoader(workspace_path)
+    loader = SkillsLoader(workspace_path, project_workspace=project_workspace)
     with loader.snapshot():
         entries = sorted(
             loader.list_skills(filter_unavailable=False),
@@ -44,10 +45,11 @@ def webui_skill_detail_payload(
     workspace_path: Path,
     name: str,
     *,
+    project_workspace: Path | None = None,
     disabled_skills: set[str] | None = None,
 ) -> dict[str, Any] | None:
     """Return a single skill's safe detail payload."""
-    loader = SkillsLoader(workspace_path)
+    loader = SkillsLoader(workspace_path, project_workspace=project_workspace)
     with loader.snapshot():
         entries = loader.list_skills(filter_unavailable=False)
         entry = next((item for item in entries if item["name"] == name), None)
@@ -71,12 +73,13 @@ def set_webui_skill_enabled(
     workspace_path: Path,
     name: str,
     *,
+    project_workspace: Path | None = None,
     enabled: bool,
     disabled_skills: set[str],
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Persist and apply one skill's enabled state."""
-    _require_skill_entry(workspace_path, name)
+    _require_skill_entry(workspace_path, name, project_workspace)
     config = load_config(config_path)
     next_disabled = set(config.agents.defaults.disabled_skills)
     if enabled:
@@ -95,13 +98,14 @@ def delete_webui_skill(
     workspace_path: Path,
     name: str,
     *,
+    project_workspace: Path | None = None,
     disabled_skills: set[str],
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Delete one workspace skill and remove its disabled-state entry."""
-    entry = _require_skill_entry(workspace_path, name)
+    entry = _require_skill_entry(workspace_path, name, project_workspace)
     if entry.get("source") != "workspace":
-        raise SkillManagementError("built-in skills cannot be deleted", status=403)
+        raise SkillManagementError("only workspace skills can be deleted", status=403)
 
     workspace = workspace_path.expanduser().resolve()
     try:
@@ -139,13 +143,13 @@ def delete_webui_skill(
     return {"name": name, "enabled": False, "deleted": True}
 
 
-def _require_skill_entry(workspace_path: Path, name: str) -> dict[str, str]:
+def _require_skill_entry(workspace_path: Path, name: str, project_workspace: Path | None) -> dict[str, str]:
     if not name or "/" in name or "\\" in name:
         raise SkillManagementError("invalid skill name")
     entry = next(
         (
             item
-            for item in SkillsLoader(workspace_path).list_skills(filter_unavailable=False)
+            for item in SkillsLoader(workspace_path, project_workspace=project_workspace).list_skills(filter_unavailable=False)
             if item["name"] == name
         ),
         None,
