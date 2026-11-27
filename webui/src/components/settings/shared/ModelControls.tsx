@@ -38,6 +38,7 @@ const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "openrouter",
   "orcarouter",
   "ovms",
+  "runcrate",
   "siliconflow",
   "vllm",
   "volcengine",
