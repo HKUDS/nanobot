@@ -1,64 +1,64 @@
 {
   "setup": {
-    "docsLabel": "פתח את הגדרות האותות",
-    "officialLabel": "פתח את מדריך אות־cli",
+    "docsLabel": "מדריך להגדרת Signal",
+    "officialLabel": "המדריך ל־signal-cli",
     "fields": {
       "phoneNumber": {
         "label": "מספר טלפון",
         "placeholder": "+1234567890"
       },
       "daemonHost": {
-        "label": "מארח דימון",
+        "label": "כתובת שירות signal-cli",
         "placeholder": "localhost"
       },
       "daemonPort": {
-        "label": "נמל דימון",
+        "label": "יציאת שירות signal-cli",
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "משתמשי DM מותרים",
-        "placeholder": "מספרי טלפון או UUID"
+        "label": "משתמשים המורשים לשלוח הודעות ישירות",
+        "placeholder": "מספרי טלפון או מזהי UUID"
       },
       "group_allowFrom": {
-        "label": "קבוצות מותרות",
-        "placeholder": "מזהי קבוצה"
+        "label": "קבוצות מורשות",
+        "placeholder": "מזהי קבוצות"
       },
       "groupMessageBufferSize": {
-        "label": "הודעות הקשר"
+        "label": "מספר הודעות הקבוצה שנשמרות להקשר"
       },
       "attachmentsDir": {
         "label": "ספריית קבצים מצורפים"
       },
       "dm_enabled": {
-        "label": "אפשר הודעות ישירות",
+        "label": "הפעלת הודעות ישירות",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "dm_policy": {
-        "label": "גישה ישירה להודעות",
+        "label": "הרשאה לשליחת הודעות ישירות",
         "choices": {
           "allowlist": "רשימת מורשים",
-          "open": "פתיחה"
+          "open": "פתוח לכולם"
         }
       },
       "group_enabled": {
-        "label": "אפשר קבוצות",
+        "label": "הפעלת שיחות קבוצתיות",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "group_policy": {
-        "label": "גישה לקבוצה",
+        "label": "גישה בקבוצות",
         "choices": {
           "allowlist": "רשימת מורשים",
-          "open": "פתיחה"
+          "open": "פתוח לכולם"
         }
       },
       "group_requireMention": {
-        "label": "דורש אזכור קבוצתי",
+        "label": "דרישת אזכור של הבוט בקבוצות",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"

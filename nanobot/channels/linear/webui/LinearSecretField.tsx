@@ -89,7 +89,7 @@ export function LinearSecretField({ field, configured, disabled, onSave }: {
           </Button>
         </div>
       ) : <>
-        <div className="relative">
+        <div className="relative" dir="ltr">
           <Input ref={inputRef} id={inputId} type={visible ? "text" : "password"}
             value={value} autoComplete="off" spellCheck={false} disabled={locked}
             placeholder={tx("custom.enterSecret", "Enter secret")}

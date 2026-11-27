@@ -1,9 +1,9 @@
 {
   "setup": {
-    "docsLabel": "פתח את הגדרות Slack",
-    "officialLabel": "פתח את אפליקציות Slack",
+    "docsLabel": "מדריך להגדרת Slack",
+    "officialLabel": "אפליקציות Slack",
     "actions": {
-      "slack-manifest": "העתק את מניפסט האפליקציה"
+      "slack-manifest": "העתקת מניפסט האפליקציה"
     },
     "fields": {
       "appToken": {
@@ -15,7 +15,7 @@
         "placeholder": "xoxb-..."
       },
       "groupPolicy": {
-        "label": "כללי הקבוצה",
+        "label": "כללים לקבוצות",
         "choices": {
           "mention": "אזכורים בלבד",
           "open": "כל ההודעות",
@@ -25,64 +25,64 @@
       "mode": {
         "label": "מצב חיבור",
         "choices": {
-          "socket": "מצב שקע"
+          "socket": "Socket Mode"
         }
       },
       "webhookPath": {
         "label": "נתיב Webhook"
       },
       "replyInThread": {
-        "label": "תשובות לשרשור",
+        "label": "מענה בתוך השרשור",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "reactEmoji": {
-        "label": "אימוג׳י לסימון הודעה כנקראה"
+        "label": "אימוג׳י לאישור קריאה"
       },
       "doneEmoji": {
-        "label": "אמוג'י בוצע"
+        "label": "אימוג׳י לציון סיום הטיפול"
       },
       "includeThreadContext": {
-        "label": "הקשר בשרשור",
+        "label": "הכללת ההקשר מהשרשור",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "threadContextLimit": {
-        "label": "מגבלת הקשר"
+        "label": "מספר הודעות מרבי להקשר בשרשור"
       },
       "allowFrom": {
         "label": "משתמשים מורשים"
       },
       "groupAllowFrom": {
-        "label": "ערוצים מותרים"
+        "label": "ערוצים מורשים"
       },
       "groupRequireMention": {
-        "label": "דורש אזכור ערוץ",
+        "label": "דרישת אזכור של הבוט בערוץ",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "dm_enabled": {
-        "label": "אפשר הודעות ישירות",
+        "label": "הפעלת הודעות ישירות",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "dm_policy": {
-        "label": "גישה ישירה להודעות",
+        "label": "הרשאה לשליחת הודעות ישירות",
         "choices": {
           "allowlist": "רשימת מורשים",
-          "open": "פתיחה"
+          "open": "פתוח לכולם"
         }
       },
       "dm_allowFrom": {
-        "label": "משתמשי DM מותרים"
+        "label": "משתמשים המורשים לשלוח הודעות ישירות"
       },
       "useProxy": {
         "label": "שימוש בשרת פרוקסי"

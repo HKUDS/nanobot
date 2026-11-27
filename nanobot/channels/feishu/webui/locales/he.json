@@ -1,26 +1,26 @@
 {
   "setup": {
-    "primaryAction": "התחבר עם Feishu",
-    "docsLabel": "פתח את הגדרות Feishu",
-    "officialLabel": "פתח את קונסולת Feishu",
+    "primaryAction": "חיבור ל־Feishu",
+    "docsLabel": "מדריך להגדרת Feishu",
+    "officialLabel": "מסוף הניהול של Feishu",
     "fields": {
       "appId": {
         "label": "מזהה אפליקציה",
         "placeholder": "cli_xxx"
       },
       "appSecret": {
-        "label": "סוד האפליקציה",
-        "placeholder": "השאר ריק כדי לשמור על הסוד הנוכחי"
+        "label": "מפתח האפליקציה הסודי (App Secret)",
+        "placeholder": "אפשר להשאיר ריק כדי לשמור על המפתח הקיים"
       },
       "domain": {
         "label": "אזור",
         "choices": {
-          "feishu": "פיישו",
-          "lark": "להשתעשע"
+          "feishu": "Feishu",
+          "lark": "Lark"
         }
       },
       "groupPolicy": {
-        "label": "כללי הקבוצה",
+        "label": "כללים לקבוצות",
         "choices": {
           "mention": "אזכורים בלבד",
           "open": "כל ההודעות",
@@ -29,13 +29,13 @@
       },
       "allowFrom": {
         "label": "משתמשים מורשים",
-        "placeholder": "מזהי משתמש, מופרדים בפסיקים"
+        "placeholder": "מזהי משתמשים בהפרדה בפסיקים"
       },
       "topicIsolation": {
-        "label": "מפגשי נושא",
+        "label": "שיחות לפי נושא",
         "choices": {
-          "true": "מפגשים נפרדים",
-          "false": "הפעלה משותפת"
+          "true": "שיחות נפרדות",
+          "false": "שיחה משותפת"
         }
       },
       "name": {
@@ -48,13 +48,13 @@
         "label": "אסימון אימות"
       },
       "reactEmoji": {
-        "label": "אימוג׳י לסימון הודעה כנקראה"
+        "label": "אימוג׳י לאישור קריאה"
       },
       "doneEmoji": {
-        "label": "אמוג'י בוצע"
+        "label": "אימוג׳י לציון סיום הטיפול"
       },
       "toolHintPrefix": {
-        "label": "קידומת רמז"
+        "label": "קידומת לעדכונים על הפעלת כלים"
       },
       "replyToMessage": {
         "label": "מענה להודעה",
@@ -73,16 +73,16 @@
     }
   },
   "custom": {
-    "addAssistant": "הוסף עוזר נוסף",
-    "toggleAssistant": "עוזר {{name}}",
+    "addAssistant": "הוספת עוזר נוסף",
+    "toggleAssistant": "העוזר {{name}}",
     "configured": "מחובר",
-    "needsSetup": "צריך אישור",
-    "qrAlt": "קוד QR של חיבור Feishu",
-    "scanTitle": "סרוק עם Feishu",
-    "scanDescription": "השתמש ב- Feishu או Lark בטלפון שלך כדי לסרוק את הקוד הזה. nanobot יסיים את ההגדרה באופן אוטומטי לאחר האישור.",
-    "waiting": "ממתין לאישור…",
-    "connected": "פיישו מחובר.",
+    "needsSetup": "נדרשת הרשאה",
+    "qrAlt": "קוד QR לחיבור ל־Feishu",
+    "scanTitle": "סריקה באפליקציית Feishu",
+    "scanDescription": "יש לסרוק את הקוד באפליקציית Feishu או Lark בטלפון. לאחר מתן ההרשאה, nanobot ישלים את ההגדרה אוטומטית.",
+    "waiting": "בהמתנה לאישור…",
+    "connected": "החיבור ל־Feishu פעיל.",
     "stopped": "החיבור הופסק.",
-    "connecting": "מקשר…"
+    "connecting": "החיבור מתבצע…"
   }
 }

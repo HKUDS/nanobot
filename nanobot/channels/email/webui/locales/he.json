@@ -1,27 +1,27 @@
 {
   "setup": {
-    "docsLabel": "פתח את הגדרת האימייל",
-    "officialLabel": "פתח את מדריך סיסמאות האפליקציה",
+    "docsLabel": "מדריך להגדרת הדוא״ל",
+    "officialLabel": "מדריך לסיסמאות לאפליקציות",
     "presetLabel": "מילוי מהיר",
     "sections": {
-      "receiving": "מקבל דואר",
-      "sending": "שולח דואר"
+      "receiving": "קבלת דואר",
+      "sending": "שליחת דואר"
     },
     "presets": {
       "gmail": "Gmail",
-      "outlook": "השקפה",
+      "outlook": "Outlook",
       "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {
-        "label": "גישה לאימייל",
+        "label": "גישה לדוא״ל",
         "choices": {
-          "true": "נכון",
-          "false": "לא ניתן"
+          "true": "ניתנה הרשאה",
+          "false": "לא ניתנה הרשאה"
         }
       },
       "imapHost": {
-        "label": "מארח IMAP",
+        "label": "שרת IMAP",
         "placeholder": "imap.gmail.com"
       },
       "imapUsername": {
@@ -33,7 +33,7 @@
         "placeholder": "סיסמת אפליקציה"
       },
       "smtpHost": {
-        "label": "מארח SMTP",
+        "label": "שרת SMTP",
         "placeholder": "smtp.gmail.com"
       },
       "smtpUsername": {
@@ -53,26 +53,26 @@
         "placeholder": "587"
       },
       "fromAddress": {
-        "label": "מהכתובת",
+        "label": "כתובת השולח",
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "מרווח בדיקה (שניות)",
+        "label": "זמן בין בדיקות (שניות)",
         "placeholder": "30"
       },
       "allowFrom": {
-        "label": "שולחים מותרים",
-        "placeholder": "כתובות אימייל, מופרדות בפסיק"
+        "label": "שולחים מורשים",
+        "placeholder": "כתובות דוא״ל בהפרדה בפסיקים"
       },
       "verifyDkim": {
-        "label": "אמת את DKIM",
+        "label": "אימות DKIM",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "verifySpf": {
-        "label": "אמת SPF",
+        "label": "אימות SPF",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
@@ -110,21 +110,21 @@
         }
       },
       "markSeen": {
-        "label": "סמן כנקרא",
+        "label": "סימון הודעות כהודעות שנקראו",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "postAction": {
-        "label": "לאחר עיבוד",
+        "label": "פעולה לאחר העיבוד",
         "choices": {
           "delete": "מחיקה",
-          "move": "מהלך"
+          "move": "העברה"
         }
       },
       "postActionMoveMailbox": {
-        "label": "תיבת דואר יעד"
+        "label": "תיבת הדואר להעברה"
       },
       "postActionExpunge": {
         "label": "מחיקה לצמיתות",
@@ -134,30 +134,30 @@
         }
       },
       "postActionIgnoreSkipped": {
-        "label": "שמור על דואר שדילג",
+        "label": "שמירת הודעות שלא עובדו",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "maxBodyChars": {
-        "label": "הגבלת אורך הגוף (תווים)"
+        "label": "אורך מרבי של גוף ההודעה (תווים)"
       },
       "subjectPrefix": {
-        "label": "קידומת נושא"
+        "label": "קידומת לשורת הנושא"
       },
       "allowedAttachmentTypes": {
-        "label": "סוגי קבצים מצורפים"
+        "label": "סוגי קבצים מצורפים מותרים"
       },
       "maxAttachmentSize": {
-        "label": "מגבלת קבצים מצורפים (בתים)"
+        "label": "גודל מרבי לקובץ מצורף (בתים)"
       },
       "maxAttachmentsPerEmail": {
-        "label": "מגבלת ספירת קבצים מצורפים"
+        "label": "מספר מרבי של קבצים מצורפים להודעה"
       },
       "trustedAuthservIds": {
         "label": "שירותי אימות מהימנים",
-        "placeholder": "mx.google.com, מופרד בפסיק"
+        "placeholder": "שמות שרתים בהפרדה בפסיקים, למשל mx.google.com"
       }
     }
   }

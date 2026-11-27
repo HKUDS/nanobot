@@ -1,6 +1,6 @@
 {
   "setup": {
-    "docsLabel": "הגדרות החיבור ל־Telegram",
+    "docsLabel": "מדריך להגדרת Telegram",
     "officialLabel": "פתיחת BotFather",
     "fields": {
       "token": {
@@ -15,7 +15,7 @@
         "placeholder": "* או מזהי משתמשים ב־Telegram"
       },
       "groupPolicy": {
-        "label": "כללי הקבוצה",
+        "label": "כללים לקבוצות",
         "choices": {
           "mention": "אזכורים בלבד",
           "open": "כל ההודעות",
@@ -37,13 +37,13 @@
         }
       },
       "reactEmoji": {
-        "label": "אימוג׳י לסימון הודעה כנקראה"
+        "label": "אימוג׳י לאישור קריאה"
       },
       "connectionPoolSize": {
         "label": "גודל מאגר החיבורים"
       },
       "poolTimeout": {
-        "label": "זמן ההמתנה במאגר החיבורים"
+        "label": "זמן המתנה מרבי לחיבור פנוי"
       },
       "streaming": {
         "label": "הזרמה",
@@ -67,7 +67,7 @@
         }
       },
       "streamEditInterval": {
-        "label": "מרווח עדכון (שניות)"
+        "label": "זמן בין עדכונים (שניות)"
       },
       "webhookUrl": {
         "label": "כתובת Webhook"

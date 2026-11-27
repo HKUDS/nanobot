@@ -1,73 +1,73 @@
 {
   "setup": {
-    "docsLabel": "פתח את הגדרות Teams",
-    "officialLabel": "פתח את פורטל המפתחים של Teams",
+    "docsLabel": "מדריך להגדרת Teams",
+    "officialLabel": "פורטל המפתחים של Teams",
     "fields": {
       "appId": {
         "label": "מזהה אפליקציה",
         "placeholder": "מזהה אפליקציה של Microsoft"
       },
       "appPassword": {
-        "label": "סוד הלקוח",
+        "label": "מפתח הלקוח הסודי (Client Secret)",
         "placeholder": "••••••"
       },
       "tenantId": {
-        "label": "זיהוי דייר",
-        "placeholder": "זיהוי דייר אופציונלי"
+        "label": "מזהה דייר (Tenant ID)",
+        "placeholder": "מזהה דייר (לא חובה)"
       },
       "path": {
-        "label": "נתיב התקשרות חוזרת",
+        "label": "נתיב Callback",
         "placeholder": "/api/messages"
       },
       "allowFrom": {
         "label": "משתמשים מורשים",
-        "placeholder": "מזהי משתמש של Teams, מופרדים בפסיקים"
+        "placeholder": "מזהי משתמשים ב־Teams בהפרדה בפסיקים"
       },
       "host": {
-        "label": "תקשיב מארח"
+        "label": "כתובת להאזנה"
       },
       "port": {
-        "label": "האזנה נמל"
+        "label": "יציאת האזנה"
       },
       "replyInThread": {
-        "label": "תשובות לשרשור",
+        "label": "מענה בתוך השרשור",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "mentionOnlyResponse": {
-        "label": "תשובה לאזכור בלבד"
+        "label": "מענה רק כשהבוט מוזכר"
       },
       "validateInboundAuth": {
-        "label": "אמת בקשות",
+        "label": "אימות בקשות נכנסות",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "refTtlDays": {
-        "label": "משך חיי התייחסות (ימים)"
+        "label": "משך שמירת ההפניות לשיחות (ימים)"
       },
       "pruneWebChatRefs": {
-        "label": "נקה הפניות ל־Web Chat",
+        "label": "ניקוי הפניות לשיחות Web Chat",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "pruneNonPersonalRefs": {
-        "label": "הפניות ברורות לקבוצה",
+        "label": "ניקוי הפניות לשיחות קבוצתיות",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "refTouchIntervalS": {
-        "label": "מרווח רענון (שניות)"
+        "label": "זמן בין רענונים (שניות)"
       },
       "trustedServiceUrlHosts": {
-        "label": "מארחים מהימנים"
+        "label": "שרתים מהימנים"
       }
     }
   }

@@ -1,18 +1,18 @@
 {
   "setup": {
-    "docsLabel": "פתח את הגדרות Discord",
-    "officialLabel": "פתח את פורטל Discord",
+    "docsLabel": "מדריך להגדרת Discord",
+    "officialLabel": "פורטל המפתחים של Discord",
     "fields": {
       "token": {
         "label": "אסימון גישה של הבוט",
-        "placeholder": "אסימון בוט Discord"
+        "placeholder": "אסימון הגישה של הבוט ב־Discord"
       },
       "allowChannels": {
-        "label": "ערוצים מותרים",
-        "placeholder": "מזהי ערוץ, מופרדים בפסיקים"
+        "label": "ערוצים מורשים",
+        "placeholder": "מזהי ערוצים בהפרדה בפסיקים"
       },
       "groupPolicy": {
-        "label": "כללי הקבוצה",
+        "label": "כללים לקבוצות",
         "choices": {
           "mention": "אזכורים בלבד",
           "open": "כל ההודעות",
@@ -21,22 +21,22 @@
       },
       "allowFrom": {
         "label": "משתמשים מורשים",
-        "placeholder": "מזהי משתמש, מופרדים בפסיקים"
+        "placeholder": "מזהי משתמשים בהפרדה בפסיקים"
       },
       "useProxy": {
         "label": "שימוש בשרת פרוקסי"
       },
       "intents": {
-        "label": "כוונות שער"
+        "label": "מסכת אירועים (Gateway Intents)"
       },
       "readReceiptEmoji": {
-        "label": "אימוג׳י לסימון הודעה כנקראה"
+        "label": "אימוג׳י לאישור קריאה"
       },
       "workingEmoji": {
-        "label": "אימוג'י עובד"
+        "label": "אימוג׳י לציון עיבוד ההודעה"
       },
       "workingEmojiDelay": {
-        "label": "עיכוב באמוג'י (שניות)"
+        "label": "השהיה לפני הצגת האימוג׳י (שניות)"
       },
       "streaming": {
         "label": "הזרמה",

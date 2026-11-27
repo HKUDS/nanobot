@@ -575,9 +575,17 @@ describe("webui i18n", () => {
   });
 
   it("keeps every locale aligned with the English resource shape", () => {
-    const reference = flattenResource(resources.en.common);
+    const english = flattenResource(resources.en.common);
     for (const [locale, resource] of Object.entries(resources)) {
       if (locale === "en") continue;
+      const reference = new Map(english);
+      // i18next requests a distinct form at count 2 in Hebrew, even for nouns
+      // whose dual and general plural are written alike.
+      if (new Intl.PluralRules(locale).select(2) === "two") {
+        for (const [key, value] of english) {
+          if (key.endsWith("_other")) reference.set(key.replace(/_other$/, "_two"), value);
+        }
+      }
       const current = flattenResource(resource.common);
       const missing = Array.from(reference.keys()).filter((key) => !current.has(key));
       const extra = Array.from(current.keys()).filter((key) => !reference.has(key));

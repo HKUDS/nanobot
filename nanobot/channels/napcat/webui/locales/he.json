@@ -1,7 +1,7 @@
 {
   "setup": {
-    "docsLabel": "פתח את הגדרות NapCat",
-    "officialLabel": "פתח את מסמכי NapCat",
+    "docsLabel": "מדריך להגדרת NapCat",
+    "officialLabel": "תיעוד NapCat",
     "fields": {
       "wsUrl": {
         "label": "כתובת WebSocket",
@@ -9,10 +9,10 @@
       },
       "accessToken": {
         "label": "אסימון גישה",
-        "placeholder": "אסימון אופציונלי"
+        "placeholder": "אסימון גישה (לא חובה)"
       },
       "groupPolicy": {
-        "label": "כללי הקבוצה",
+        "label": "כללים לקבוצות",
         "choices": {
           "mention": "אזכורים בלבד",
           "open": "כל ההודעות",
@@ -21,13 +21,13 @@
       },
       "allowFrom": {
         "label": "משתמשים מורשים",
-        "placeholder": "מזהי QQ, מופרדים בפסיקים"
+        "placeholder": "מזהי QQ בהפרדה בפסיקים"
       },
       "groupPolicyOverrides": {
-        "label": "חריגים בקבוצה (JSON)"
+        "label": "חריגים לכללי הקבוצות (JSON)"
       },
       "welcomeNewMembers": {
-        "label": "ברוכים הבאים חברים חדשים",
+        "label": "שליחת ברכה למצטרפים לקבוצה",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"

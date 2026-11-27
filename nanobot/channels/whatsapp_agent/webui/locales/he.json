@@ -1,73 +1,73 @@
 {
   "setup": {
-    "docsLabel": "פתח את המדריך להגדרת סוכן",
-    "officialLabel": "פתח את עזרה לסוכן WhatsApp",
-    "privacyNotice": "שיחות של סוכן אינם מוצפנים מקצה לקצה. ההודעות מעובדות על ידי nanobot וספק המודל המוגדר שלך.",
+    "docsLabel": "מדריך להגדרת הסוכן",
+    "officialLabel": "עזרה לסוכנים ב־WhatsApp",
+    "privacyNotice": "השיחות עם הסוכן אינן מוצפנות מקצה לקצה. גם nanobot וגם ספק המודל שהוגדר מעבדים את ההודעות.",
     "fields": {
       "token": {
         "label": "אסימון API",
-        "placeholder": "ב־WhatsApp, פתח את הגדרות → סוכנים, צור את הסוכן, ולאחר מכן העתק את המפתח מצ'אט הסוכן → פרטי שיחה → מפתח API."
+        "placeholder": "כדי ליצור את הסוכן ב־WhatsApp, יש לפתוח את ״הגדרות״ ולבחור ב״סוכנים״. לאחר מכן, בשיחה עם הסוכן, יש לפתוח את ״פרטי הצ׳אט״ ולהעתיק את הערך שב״מפתח API״."
       },
       "allowFrom": {
-        "label": "שולחים מותרים",
-        "placeholder": "משתמש:1234567890"
+        "label": "שולחים מורשים",
+        "placeholder": "user:1234567890"
       },
       "stateDir": {
-        "label": "ספריית המדינה",
+        "label": "תיקייה לשמירת נתוני מצב",
         "placeholder": "~/.nanobot/whatsapp-agent"
       },
       "pollTimeout": {
-        "label": "פסק זמן לסקר (שניות)",
+        "label": "זמן המתנה מרבי בתשאול (שניות)",
         "placeholder": "25"
       },
       "maxMediaMb": {
-        "label": "גודל מדיה מקסימלי (MB)",
+        "label": "גודל מדיה מרבי (MB)",
         "placeholder": "16"
       },
       "markRead": {
-        "label": "שלח אישורי קריאה",
+        "label": "שליחת אישורי קריאה",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "typingIndicator": {
-        "label": "הצג מחוון הקלדה",
+        "label": "הצגת חיווי הקלדה",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "downloadMedia": {
-        "label": "הורד מדיה נכנסת",
+        "label": "הורדת מדיה נכנסת",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "deleteMediaAfterDownload": {
-        "label": "מחק מדיה לאחר ההורדה",
+        "label": "מחיקת המדיה לאחר ההורדה",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "retryAmbiguousSends": {
-        "label": "נסה שוב תוצאות שליחה לא ידועות",
+        "label": "ניסיון שליחה נוסף כשתוצאת השליחה אינה ידועה",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "sendProgress": {
-        "label": "שלח הודעות התקדמות",
+        "label": "שליחת עדכוני התקדמות",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "sendToolHints": {
-        "label": "שלח רמזים לכלי",
+        "label": "שליחת עדכונים על הפעלת כלים",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"

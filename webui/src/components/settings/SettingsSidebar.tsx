@@ -29,7 +29,7 @@ import {
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 
-const SIDEBAR_ROW = "touch-target flex h-9 w-full items-center justify-start gap-2 rounded-xl px-2.5 text-left text-ui font-normal";
+const SIDEBAR_ROW = "touch-target flex h-9 w-full items-center justify-start gap-2 rounded-xl px-2.5 text-start text-ui font-normal";
 
 const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fallback: string }> = [
   { key: "overview", icon: OverviewIcon, fallback: "Overview" },

@@ -1,19 +1,19 @@
 {
   "setup": {
-    "docsLabel": "פתח את הגדרות WeCom",
-    "officialLabel": "פתח את קונסולת WeCom",
+    "docsLabel": "מדריך להגדרת WeCom",
+    "officialLabel": "מסוף הניהול של WeCom",
     "fields": {
       "botId": {
         "label": "מזהה בוט",
         "placeholder": "מזהה בוט של WeCom"
       },
       "secret": {
-        "label": "סוד",
+        "label": "המפתח הסודי של הבוט (Bot Secret)",
         "placeholder": "••••••"
       },
       "allowFrom": {
         "label": "משתמשים מורשים",
-        "placeholder": "מזהי משתמש, מופרדים בפסיקים"
+        "placeholder": "מזהי משתמשים בהפרדה בפסיקים"
       },
       "welcomeMessage": {
         "label": "הודעת ברוכים הבאים"

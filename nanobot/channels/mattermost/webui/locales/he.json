@@ -1,22 +1,22 @@
 {
   "setup": {
-    "docsLabel": "פתח את הגדרת Mattermost",
-    "officialLabel": "פתח את מדריך הבוטים של Mattermos",
+    "docsLabel": "מדריך להגדרת Mattermost",
+    "officialLabel": "מדריך הבוטים של Mattermost",
     "fields": {
       "serverUrl": {
-        "label": "שרת URL",
+        "label": "כתובת השרת",
         "placeholder": "https://mattermost.example.com"
       },
       "token": {
         "label": "אסימון גישה של הבוט",
-        "placeholder": "אסימון הבוט הכי חשוב"
+        "placeholder": "אסימון הגישה של הבוט ב־Mattermost"
       },
       "teamId": {
         "label": "מזהה צוות",
-        "placeholder": "זיהוי צוות אופציונלי"
+        "placeholder": "מזהה צוות (לא חובה)"
       },
       "groupPolicy": {
-        "label": "חוקי הערוץ",
+        "label": "כללים לערוצים",
         "choices": {
           "mention": "אזכורים בלבד",
           "open": "כל ההודעות",
@@ -24,7 +24,7 @@
         }
       },
       "groupPolicyInThread": {
-        "label": "חוקי השרשור",
+        "label": "כללים לשרשורים",
         "choices": {
           "mention": "אזכורים בלבד",
           "open": "כל ההודעות (אין צורך באזכור)",
@@ -33,35 +33,35 @@
       },
       "allowFrom": {
         "label": "משתמשים מורשים",
-        "placeholder": "מזהי משתמש, מופרדים בפסיקים"
+        "placeholder": "מזהי משתמשים בהפרדה בפסיקים"
       },
       "allowFromMatchMode": {
-        "label": "התאמת משתמש",
+        "label": "זיהוי משתמשים לפי",
         "choices": {
-          "email": "אלקטרוני",
+          "email": "כתובת דוא״ל",
           "id": "מזהה משתמש",
           "username": "שם משתמש"
         }
       },
       "groupAllowFrom": {
-        "label": "ערוצים מותרים"
+        "label": "ערוצים מורשים"
       },
       "replyInThread": {
-        "label": "תשובות לשרשור",
+        "label": "מענה בתוך השרשור",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "includeThreadContext": {
-        "label": "הקשר בשרשור",
+        "label": "הכללת ההקשר מהשרשור",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "threadContextLimit": {
-        "label": "מגבלת הקשר"
+        "label": "מספר הודעות מרבי להקשר בשרשור"
       },
       "streaming": {
         "label": "הזרמה",
@@ -71,41 +71,41 @@
         }
       },
       "reactEmoji": {
-        "label": "אימוג׳י לסימון הודעה כנקראה"
+        "label": "אימוג׳י לאישור קריאה"
       },
       "doneEmoji": {
-        "label": "אמוג'י בוצע"
+        "label": "אימוג׳י לציון סיום הטיפול"
       },
       "sendProgress": {
-        "label": "שלח התקדמות",
+        "label": "שליחת עדכוני התקדמות",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "sendToolHints": {
-        "label": "רמזים לכלים",
+        "label": "עדכונים על הפעלת כלים",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "dm_enabled": {
-        "label": "אפשר הודעות ישירות",
+        "label": "הפעלת הודעות ישירות",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "dm_policy": {
-        "label": "גישה ישירה להודעות",
+        "label": "הרשאה לשליחת הודעות ישירות",
         "choices": {
           "allowlist": "רשימת מורשים",
-          "open": "פתיחה"
+          "open": "פתוח לכולם"
         }
       },
       "dm_allowFrom": {
-        "label": "משתמשי DM מותרים"
+        "label": "משתמשים המורשים לשלוח הודעות ישירות"
       }
     }
   }

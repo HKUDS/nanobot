@@ -52,3 +52,20 @@ for (const locale of ["en-US", "he-IL"]) {
     });
   });
 }
+
+test.describe("Hebrew credentials", () => {
+  test.use({ locale: "he-IL" });
+
+  test("revealing an API key preserves its direction and value", async ({ page }) => {
+    await page.goto("/gallery.html#component=nanobot%2Fchannels%2Flinear%2Fwebui%2FLinearSecretField.tsx");
+    await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+    const preview = page.locator(".gallery-preview");
+    const field = preview.locator('input[type="password"]');
+    await field.fill("example_key-12/34=");
+    await expect(field).toHaveCSS("direction", "ltr");
+    await preview.getByRole("group", { name: "מפתח API" }).locator("button[aria-label]").click();
+    const revealed = preview.getByRole("textbox", { name: "מפתח API" });
+    await expect(revealed).toHaveValue("example_key-12/34=");
+    await expect(revealed).toHaveCSS("direction", "ltr");
+  });
+});

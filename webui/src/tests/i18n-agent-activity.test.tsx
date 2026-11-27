@@ -19,7 +19,6 @@ describe("localized agent activity contracts", () => {
   it.each(supportedLocales.map(({ code }) => code))("keeps complete activity resources and interpolation in %s", async (locale) => {
     const english = resources.en.common.message.agentActivity;
     const translated = resources[locale].common.message.agentActivity;
-    expect(Object.keys(translated).sort()).toEqual(Object.keys(english).sort());
     for (const key of Object.keys(english) as (keyof typeof english)[]) {
       expect(translated[key].trim(), key).not.toBe("");
       expect(placeholders(translated[key]), key).toEqual(placeholders(english[key]));
@@ -66,9 +65,10 @@ describe("localized agent activity contracts", () => {
     }
     for (const count of [0, 1, 2]) {
       for (const key of ["files", "searches", "actions", "scriptLines"]) {
-        const result = i18n.t(`message.agentActivity.${key}`, { count });
-        expect(result).toContain(String(count));
-        expect(result).not.toMatch(/message\.agentActivity|{{/);
+        const { res, usedLng } = i18n.t(`message.agentActivity.${key}`, { count, returnDetails: true });
+        expect(usedLng).toBe(locale);
+        expect(res).toContain(String(count));
+        expect(res).not.toMatch(/message\.agentActivity|{{/);
       }
     }
   });

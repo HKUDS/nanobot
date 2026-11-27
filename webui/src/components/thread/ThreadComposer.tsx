@@ -2067,16 +2067,16 @@ export function ThreadComposer({
         ) : null}
         {normalizedQuotedContext ? (
           <div
-            className="mx-3 mt-3 flex min-w-0 items-start gap-2 border-l-2 border-muted-foreground/25 pl-3 pr-1 text-muted-foreground"
+            className="mx-3 mt-3 flex min-w-0 items-start gap-2 border-s-2 border-muted-foreground/25 ps-3 pe-1 text-muted-foreground"
             aria-label={t("thread.composer.quotedContext")}
           >
             <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-            <p className="line-clamp-2 min-w-0 flex-1 text-reading-small">
+            <p dir="auto" className="line-clamp-2 min-w-0 flex-1 text-reading-small">
               {normalizedQuotedContext}
             </p>
             <button
               type="button"
-              className="touch-target -mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="touch-target -me-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={t("thread.composer.removeQuotedContext")}
               onClick={() => {
                 onQuotedContextChange?.(null);
@@ -2199,7 +2199,7 @@ export function ThreadComposer({
           </div>
           <div
             className={cn(
-              "thread-composer-footer-actions ml-auto flex min-w-0 items-center justify-end",
+              "thread-composer-footer-actions ms-auto flex min-w-0 items-center justify-end",
               isHero ? "gap-1.5" : "gap-2",
             )}
           >
@@ -2303,7 +2303,7 @@ export function ThreadComposer({
             {workspaceControl}
           </div>
           {usageInMeta && usageControl || mobileWorkspaceControls && accessControl ? (
-            <div className={cn("ml-auto flex shrink-0 items-center gap-1", mobileWorkspaceControls && "h-11 max-w-[calc(100%-3rem)]")}>
+            <div className={cn("ms-auto flex shrink-0 items-center gap-1", mobileWorkspaceControls && "h-11 max-w-[calc(100%-3rem)]")}>
               {usageInMeta ? usageControl : null}
               {mobileWorkspaceControls ? accessControl : null}
             </div>

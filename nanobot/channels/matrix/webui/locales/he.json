@@ -1,10 +1,10 @@
 {
   "setup": {
-    "docsLabel": "פתח את הגדרת מטריקס",
-    "officialLabel": "פתח לקוחות מטריקס",
+    "docsLabel": "מדריך להגדרת Matrix",
+    "officialLabel": "יישומי Matrix",
     "fields": {
       "homeserver": {
-        "label": "שרת ביתי",
+        "label": "שרת החשבון (Homeserver)",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -17,23 +17,23 @@
       },
       "accessToken": {
         "label": "אסימון גישה",
-        "placeholder": "הזן אסימון גישה"
+        "placeholder": "אסימון הגישה"
       },
       "deviceId": {
         "label": "מזהה מכשיר",
-        "placeholder": "נדרש עם אסימון גישה"
+        "placeholder": "חובה בשימוש באסימון גישה"
       },
       "groupPolicy": {
-        "label": "כללי הקבוצה",
+        "label": "כללים לקבוצות",
         "choices": {
           "mention": "אזכורים בלבד",
           "open": "כל ההודעות",
           "allowlist": "רשימת מורשים",
-          "listen": "האזינו (השב על אזכור)"
+          "listen": "האזנה לכל ההודעות ומענה רק באזכור"
         }
       },
       "groupPolicyOverrides": {
-        "label": "עקיפת מדיניות חדרים (JSON)"
+        "label": "חריגים לכללי החדרים (JSON)"
       },
       "allowFrom": {
         "label": "משתמשים מורשים"
@@ -53,7 +53,7 @@
         }
       },
       "syncStopGraceSeconds": {
-        "label": "הסנכרון עצירת המתנה (שניות)"
+        "label": "זמן המתנה לעצירת הסנכרון (שניות)"
       },
       "maxMediaBytes": {
         "label": "מגבלת גודל מדיה (בתים)"
@@ -62,17 +62,17 @@
         "label": "הורדות מקבילות"
       },
       "groupAllowFrom": {
-        "label": "קבוצות מותרות"
+        "label": "קבוצות מורשות"
       },
       "allowRoomMentions": {
-        "label": "אזכורים בחדר",
+        "label": "אזכורים של החדר כולו",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "replyToMessage": {
-        "label": "ציטוט תשובות",
+        "label": "ציטוט ההודעה בתשובה",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"

@@ -1,39 +1,39 @@
 {
   "setup": {
-    "docsLabel": "פתח את הגדרות DingTalk",
-    "officialLabel": "פתח את קונסולת DingTalk",
+    "docsLabel": "מדריך להגדרת DingTalk",
+    "officialLabel": "מסוף הניהול של DingTalk",
     "fields": {
       "clientId": {
         "label": "מזהה לקוח",
         "placeholder": "מזהה לקוח של DingTalk"
       },
       "clientSecret": {
-        "label": "סוד הלקוח",
+        "label": "מפתח הלקוח הסודי (Client Secret)",
         "placeholder": "••••••"
       },
       "allowFrom": {
         "label": "משתמשים מורשים",
-        "placeholder": "מזהי משתמש, מופרדים בפסיקים"
+        "placeholder": "מזהי משתמשים בהפרדה בפסיקים"
       },
       "allowRemoteMediaRedirects": {
-        "label": "הפניות מדיה",
+        "label": "התרת הפניות בעת הורדת מדיה",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "remoteMediaRedirectAllowedHosts": {
-        "label": "הפניית מארחים"
+        "label": "שרתים מורשים להפניות מדיה"
       },
       "groupUserIsolation": {
-        "label": "מפגשים לפי חבר",
+        "label": "שיחה נפרדת לכל משתתף בקבוצה",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
         }
       },
       "disablePrivateChat": {
-        "label": "השבת הודעות ישירות",
+        "label": "השבתת הודעות ישירות",
         "choices": {
           "true": "פעיל",
           "false": "כבוי"
