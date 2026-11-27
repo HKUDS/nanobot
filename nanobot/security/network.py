@@ -150,9 +150,9 @@ def resolve_url_target(
     return True, "", tuple(dict.fromkeys(str(_normalize_addr(addr)) for addr in addrs))
 
 
-def validate_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool, str]:
+def validate_url_target(url: str, *, allow_loopback: bool = False, trust_remote_dns: bool = False) -> tuple[bool, str]:
     """Validate a URL is safe to fetch: scheme, hostname, and resolved IPs."""
-    ok, error, _ = resolve_url_target(url, allow_loopback=allow_loopback)
+    ok, error, _ = resolve_url_target(url, allow_loopback=allow_loopback, trust_remote_dns=trust_remote_dns)
     return ok, error
 
 

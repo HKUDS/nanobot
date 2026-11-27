@@ -58,7 +58,7 @@ async def test_probe_returns_false_when_validated_target_refuses_connection(
 
     monkeypatch.setattr(
         "nanobot.agent.tools.mcp.resolve_url_target",
-        lambda _url: (True, "", ("93.184.216.34",)),
+        lambda _url, **_kwargs: (True, "", ("93.184.216.34",)),
     )
 
     async def _open_connection(host: str, port: int):
@@ -174,7 +174,7 @@ async def test_connect_isolates_streamable_http_status_failure(
     def _return_http_530(request: httpx.Request) -> httpx.Response:
         return httpx.Response(530, text="cloudflare error 1033", request=request)
 
-    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url, **_kwargs: (True, ""))
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
     monkeypatch.setattr(
         mcp_mod,
@@ -234,14 +234,14 @@ async def test_probe_not_called_for_stdio():
 
 
 @pytest.mark.asyncio
-async def test_explicit_proxy_skips_direct_probe_even_when_no_proxy_env_matches(monkeypatch):
-    monkeypatch.setenv("NO_PROXY", "mcp.example.com")
-    monkeypatch.setattr(
-        "nanobot.agent.tools.mcp.resolve_url_target",
-        lambda _url: (True, "", ("93.184.216.34",)),
-    )
-    with patch("nanobot.agent.tools.mcp.asyncio.open_connection") as open_connection:
-        assert await _probe_http_url(
-            "https://mcp.example.com/mcp", proxy="http://shared-proxy.example:8080"
-        ) is True
+@pytest.mark.parametrize("proxy", [None, "http://shared-proxy.example:8080"])
+async def test_only_explicit_proxy_can_probe_unresolved_hostname(monkeypatch, proxy):
+    monkeypatch.setenv("HTTPS_PROXY", "http://env-proxy.example:8080")
+    if proxy:
+        monkeypatch.setenv("NO_PROXY", "mcp.example.com")
+    with (
+        patch.object(socket, "getaddrinfo", side_effect=socket.gaierror),
+        patch("nanobot.agent.tools.mcp.asyncio.open_connection") as open_connection,
+    ):
+        assert await _probe_http_url("https://mcp.example.com/mcp", proxy=proxy) is bool(proxy)
     open_connection.assert_not_called()

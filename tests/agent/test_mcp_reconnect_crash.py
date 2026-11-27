@@ -15,6 +15,7 @@ import asyncio
 import multiprocessing
 import socket
 import time
+from ipaddress import ip_network
 
 import httpx
 import pytest
@@ -137,21 +138,7 @@ def allow_loopback_mcp_urls(monkeypatch: pytest.MonkeyPatch):
         _resolver_lock = asyncio.Lock()
 
     monkeypatch.setattr(mcp_module, "PinnedDNSAsyncTransport", TestPinnedDNSAsyncTransport)
-    monkeypatch.setattr(
-        mcp_module,
-        "validate_url_target",
-        lambda url, *, allow_loopback=False: (True, ""),
-    )
-    monkeypatch.setattr(
-        mcp_module,
-        "resolve_url_target",
-        lambda url, *, allow_loopback=False: (True, "", ("127.0.0.1",)),
-    )
-    monkeypatch.setattr(
-        security_network,
-        "resolve_url_target",
-        lambda url, *, allow_loopback=False: (True, "", ("127.0.0.1",)),
-    )
+    monkeypatch.setattr(security_network, "_allowed_networks", [ip_network("127.0.0.1/32")])
     monkeypatch.setattr(
         mcp_module,
         "env_proxy_applies_to_url",
