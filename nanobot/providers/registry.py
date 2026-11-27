@@ -66,6 +66,7 @@ class ProviderSpec:
     request_apis: tuple[ProviderAPI, ...]
     display_name: str = ""  # shown in `nanobot status`
     model_catalog: str = "auto"  # WebUI model-list source, including builtin/hybrid
+    model_catalog_types: tuple[str, ...] = ()  # keep only /models rows whose "type" is listed
     builtin_models: tuple[ProviderModelSpec, ...] = ()
     settings_alias_for: str = ""  # compatibility alias grouped under this provider in Settings
 
@@ -331,9 +332,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.edenai.run/v3",
     ),
     # AI/ML API: OpenAI-compatible gateway. Models use the "vendor/model" naming
-    # scheme (e.g. "openai/gpt-5"); the full id is sent upstream. The default
-    # headers identify nanobot to the gateway, the same way the OpenRouter
-    # attribution headers do; they ride only on this provider's requests.
+    # scheme (e.g. "openai/gpt-5"); the full id is sent upstream, including the
+    # catalog's own "aimlapi/..." ids. A pre-existing custom provider named
+    # "aimlapi" keeps its old route and prefix handling (accepts_legacy_custom_config).
     ProviderSpec(
         name="aimlapi",
         keywords=("aimlapi",),
@@ -341,15 +342,12 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         request_apis=("chat_completions",),
         display_name="aimlapi.com",
         backend="openai_compat",
-        default_extra_headers=(
-            ("HTTP-Referer", "https://github.com/HKUDS/nanobot"),
-            ("X-Title", "nanobot"),
-            ("X-AIMLAPI-Source", "agent/hkuds-nanobot"),
-            ("X-AIMLAPI-Partner-ID", "part_TcTxHfamJ2kkNiFsYzEVELTy"),
-        ),
+        default_extra_headers=(("X-AIMLAPI-Source", "agent/hkuds-nanobot"),),
         is_gateway=True,
         detect_by_base_keyword="aimlapi",
         default_api_base="https://api.aimlapi.com/v1",
+        accepts_legacy_custom_config=True,
+        model_catalog_types=("openai/chat-completions",),
     ),
     # OpenCode Zen: OpenAI-compatible chat-completions gateway for coding models.
     # models.dev/OpenCode use provider id "opencode" and model ids like

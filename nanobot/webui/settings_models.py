@@ -562,8 +562,14 @@ def _extract_model_rows(
         return []
     rows: list[ProviderModelRowPayload] = []
     seen: set[str] = set()
+    allowed_types = spec.model_catalog_types if spec is not None else ()
     for raw_row in cast(list[object], raw_rows):
         if not _model_catalog_row_active(raw_row):
+            continue
+        if allowed_types and (
+            not isinstance(raw_row, dict)
+            or cast(dict[str, object], raw_row).get("type") not in allowed_types
+        ):
             continue
         row = _model_row_payload(raw_row, spec=spec)
         if row is None or row["id"] in seen:

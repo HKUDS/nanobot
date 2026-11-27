@@ -8,8 +8,6 @@ from nanobot.providers.factory import _provider_extra_headers
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import PROVIDERS, find_by_name
 
-# The gateway silently drops a malformed partner id, so only a test catches a typo.
-PARTNER_ID_PATTERN = re.compile(r"^part_[A-Za-z0-9]{1,64}$")
 SOURCE_PATTERN = re.compile(r"^(web|agent|mcp)/[a-z0-9-]{1,32}$")
 
 
@@ -77,18 +75,13 @@ def test_aimlapi_preserves_model_id_and_reasoning_effort() -> None:
     assert "reasoning" not in kwargs.get("extra_body", {})
 
 
-def test_aimlapi_default_headers_identify_nanobot() -> None:
+def test_aimlapi_default_headers_identify_nanobot_only() -> None:
     spec = find_by_name("aimlapi")
 
     assert spec is not None
     headers = _provider_extra_headers(spec, ProviderConfig())
-    assert headers == {
-        "HTTP-Referer": "https://github.com/HKUDS/nanobot",
-        "X-Title": "nanobot",
-        "X-AIMLAPI-Source": "agent/hkuds-nanobot",
-        "X-AIMLAPI-Partner-ID": "part_TcTxHfamJ2kkNiFsYzEVELTy",
-    }
-    assert PARTNER_ID_PATTERN.match(headers["X-AIMLAPI-Partner-ID"])
+    # One integration identifier; no partner or referral attribution.
+    assert headers == {"X-AIMLAPI-Source": "agent/hkuds-nanobot"}
     assert SOURCE_PATTERN.match(headers["X-AIMLAPI-Source"])
 
 
@@ -113,7 +106,16 @@ def test_aimlapi_user_headers_win_without_mutating_the_spec() -> None:
 
     assert headers["X-Title"] == "my-fork"
     assert headers["X-Custom"] == "1"
-    assert headers["X-AIMLAPI-Partner-ID"] == "part_TcTxHfamJ2kkNiFsYzEVELTy"
+    assert headers["X-AIMLAPI-Source"] == "agent/hkuds-nanobot"
     # The registry entry is a shared constant; building the per-request dict
     # must not write back into it.
     assert dict(spec.default_extra_headers) == before
+
+
+def test_aimlapi_sends_catalog_ids_with_an_aimlapi_prefix_unchanged() -> None:
+    # The catalog has its own "aimlapi/..." models, e.g. aimlapi/dynamic-router.
+    spec = find_by_name("aimlapi")
+
+    assert spec is not None
+    assert spec.request_model_name("aimlapi/dynamic-router") == "aimlapi/dynamic-router"
+    assert spec.request_model_name("openai/gpt-5") == "openai/gpt-5"

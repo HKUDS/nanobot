@@ -242,8 +242,13 @@ Nanobot sends the model ID unchanged, including its vendor prefix, and passes
 `reasoning_effort` as the normal top-level Chat Completions parameter. Other
 valid IDs include `anthropic/claude-sonnet-4-6` and `google/gemini-3.1-pro-preview`.
 The public catalog at `https://api.aimlapi.com/v1/models` lists the current IDs;
-entries with `"type": "openai/chat-completions"` are the chat models. The WebUI
-can also load that catalog after the API key is saved under **Settings → Models**.
+entries with `"type": "openai/chat-completions"` are the chat models. After the
+API key is saved under **Settings → Models**, the WebUI loads that catalog and
+offers only those chat models, not image, video or audio ones.
+
+A custom provider you already named `aimlapi` keeps working as before: if it sets
+its own `apiBase`, `api`, `displayName` or `thinkingStyle`, nanobot treats it as
+that custom connection, including stripping an `aimlapi/` model prefix.
 
 Note that `https://api.aimlapi.com/v1/models` answers `200` for any credential,
 including an invalid one, so a successful model list does not prove the key
