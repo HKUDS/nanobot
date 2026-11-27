@@ -44,7 +44,6 @@ from nanobot.session.summary import (
     SUMMARY_CONTINUATION_TEXT,
     SessionSummaryCheckpoint,
     is_empty_summary,
-    mark_checkpoint_thinking,
 )
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import (
@@ -158,12 +157,6 @@ class ContextCompactionState:
         consolidate_provider_compaction: ProviderCompactionConsolidator | None,
     ) -> tuple[list[dict[str, Any]], ContextCompactionState]:
         """Build the raw transcript and its initial H/delta boundary."""
-        if transcript_input.session_summary is not None:
-            # The durable checkpoint omits the old prefix (including the temporary
-            # continuation used mid-turn). This applies to pre-existing sessions too.
-            transcript_input = replace(
-                transcript_input, history=mark_checkpoint_thinking(transcript_input.history),
-            )
         messages = list(transcript_builder(transcript_input))
         accepted_history_boundary = 1 + len(transcript_input.history)
 
@@ -682,7 +675,7 @@ class ContextGovernor:
                 [
                     *summary_transcript,
                     *continuation,
-                    *mark_checkpoint_thinking(delta_messages),
+                    *delta_messages,
                 ],
             )
             prepared, replacements = await self.prepare_in_background(

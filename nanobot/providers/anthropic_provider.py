@@ -21,7 +21,6 @@ from nanobot.providers.base import (
     tool_arguments_object_for_replay,
 )
 from nanobot.providers.images import prepare_message_images
-from nanobot.session.summary import has_checkpoint_thinking
 
 if TYPE_CHECKING:
     from nanobot.providers.registry import ProviderSpec
@@ -601,13 +600,12 @@ class AnthropicProvider(LLMProvider):
             model_name, _THINKING_DISABLE_MIN_VERSIONS,
         )
         check_binding = _model_version_at_least(model_name, _PREFIX_BOUND_THINKING_MIN_VERSIONS) and any(
-            has_checkpoint_thinking(msg) for msg in messages
+            msg.get("thinking_blocks") for msg in messages if msg.get("role") == "assistant"
         )
         if check_binding and disable_thinking:
             # Binding controls are not accepted with thinking off.
             messages = [
                 {k: v for k, v in msg.items() if k != "thinking_blocks"}
-                if has_checkpoint_thinking(msg) else msg
                 for msg in messages
             ]
         system, anthropic_msgs = self._convert_messages(self._sanitize_empty_content(messages))
@@ -669,8 +667,7 @@ class AnthropicProvider(LLMProvider):
 
         headers = self.extra_headers
         if check_binding and not disable_thinking:
-            # Let Anthropic keep matching blocks, including later turns in a
-            # reopened session which already used the compacted prefix.
+            # Only Anthropic can tell which replayed signatures still match the request prefix.
             kwargs.setdefault("thinking", {"type": "adaptive"})["block_binding"] = {
                 "prefix_mismatch_behavior": "drop_block",
             }
