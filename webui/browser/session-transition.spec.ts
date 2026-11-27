@@ -52,11 +52,10 @@ test("blocked goal remains visible until cleared and survives session switching"
   await expect(page.getByRole("status", { name: "Blocked · Waiting for a workspace permission decision." })).toBeVisible();
   await expect.poll(() => body.evaluate(el => el.scrollTop)).toBe(0);
   await expect(dialog.locator(".goal-island-status-icon")).toBeVisible();
-  const reason = dialog.getByText("Waiting for a workspace permission decision.");
-  await expect(reason).toBeVisible();
-  expect(await reason.evaluate(el => {
-    const body = el.closest(".goal-island-body")!;
-    return el.getBoundingClientRect().bottom <= body.getBoundingClientRect().bottom;
+  await expect(body.getByText("Waiting for a workspace permission decision.", { exact: true })).toBeVisible();
+  await expect.poll(() => body.evaluate(el => {
+    const reason = el.querySelector(".goal-island-reason");
+    return !!reason && reason.getBoundingClientRect().bottom <= el.getBoundingClientRect().bottom;
   })).toBe(true);
   await page.keyboard.press("Escape");
   await select(page, "plain");
