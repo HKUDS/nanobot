@@ -279,6 +279,8 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                 if response is not None and isinstance(response.event, TurnFailureNotice):
                     await renderer.close()
                     console.print(turn_failure_notice_text(response.event))
+                    if response.event.failure_kind == "model":
+                        raise typer.Exit(1)
                 elif not renderer.streamed:
                     await renderer.close()
                     print_kwargs: dict[str, Any] = {}

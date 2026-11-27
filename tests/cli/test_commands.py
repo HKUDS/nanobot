@@ -1617,12 +1617,16 @@ def test_agent_rejects_unknown_tui_theme(mock_agent_runtime):
 def test_one_shot_agent_reports_turn_failure_as_a_notice(mock_agent_runtime, kind, error_kind, notice):
     from nanobot.bus.outbound_events import TurnFailureNotice
 
-    mock_agent_runtime["agent_loop"].process_direct.return_value = OutboundMessage(
-        channel="cli", chat_id="direct", content="",
-        event=TurnFailureNotice(failure_kind=kind, failure_error_kind=error_kind),
-    )
-    result = runner.invoke(app, ["agent", "-m", "hello"])
-    assert result.exit_code == 0, result.output
+    async def fail_after_output(*args, on_stream, on_stream_end, **kwargs):
+        await on_stream("Partial answer")
+        await on_stream_end()
+        return OutboundMessage(channel="cli", chat_id="direct", content="",
+                               event=TurnFailureNotice(failure_kind=kind, failure_error_kind=error_kind))
+
+    mock_agent_runtime["agent_loop"].process_direct.side_effect = fail_after_output
+    result = runner.invoke(app, ["agent", "-m", "hello", "--no-markdown"])
+    assert "Partial answer" in result.output
+    assert result.exit_code == (1 if kind == "model" else 0), result.output
     assert " ".join(result.output.split()).count(notice) == 1
     mock_agent_runtime["print_response"].assert_not_called()
 

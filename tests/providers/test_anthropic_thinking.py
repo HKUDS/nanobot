@@ -49,8 +49,9 @@ def test_high_uses_enabled_with_budget() -> None:
     assert kw["max_tokens"] >= kw["thinking"]["budget_tokens"] + 4096
 
 
-def test_low_uses_small_budget() -> None:
-    kw = _build(_make_provider(), "low")
+@pytest.mark.parametrize("model", ["claude-sonnet-4-6", "claude-haiku-4-5"])
+def test_low_uses_small_budget(model) -> None:
+    kw = _build(_make_provider(model), "low")
     assert kw["thinking"] == {"type": "enabled", "budget_tokens": 1024}
 
 
@@ -96,6 +97,7 @@ def test_opus_4_8_omits_temperature_adaptive() -> None:
     [
         pytest.param("claude-opus-4-8", id="opus_4_8_high_uses_adaptive_effort"),
         pytest.param("claude-fable-5", id="fable_high_uses_adaptive_effort"),
+        "anthropic/claude-haiku-5-5",
         pytest.param("claude-sonnet-5", id="sonnet_5_high_uses_adaptive_effort"),
     ],
 )
@@ -125,6 +127,25 @@ def test_sonnet_5_omits_temperature_adaptive() -> None:
     kw = _build(_make_provider("claude-sonnet-5"), "adaptive")
     assert "temperature" not in kw
     assert kw["thinking"] == {"type": "adaptive"}
+
+
+@pytest.mark.parametrize("effort", [None, "none"])
+def test_replay_signed_thinking(effort) -> None:
+    provider = _make_provider("claude-haiku-5-5")
+    provider.extra_headers = {"Anthropic-Beta": "existing"}
+    block = {"type": "thinking", "thinking": "plan", "signature": "sig"}
+    messages = [{"role": "assistant", "content": "answer", "thinking_blocks": [block]},
+                {"role": "user", "content": "next"}]
+    kw = _build(provider, effort, messages=messages)
+    content = next(m["content"] for m in kw["messages"] if m["role"] == "assistant")
+    if effort is None:
+        assert content[0] == block
+        assert kw["thinking"]["block_binding"] == {"prefix_mismatch_behavior": "drop_block"}
+        assert kw["extra_headers"]["Anthropic-Beta"] == "existing,thinking-binding-controls-2026-08-01"
+        return
+    assert content == [{"type": "text", "text": "answer"}]
+    assert kw["extra_headers"] == {"Anthropic-Beta": "existing"}
+    assert kw["thinking"] == {"type": "disabled"}
 
 
 def test_sonnet_5_omits_temperature_none() -> None:

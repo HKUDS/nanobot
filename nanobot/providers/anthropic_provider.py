@@ -39,14 +39,22 @@ _CLAUDE_MODEL_VERSION = re.compile(
     r"(?:-(?P<minor>\d{1,2})(?=-|$))?"
 )
 _ADAPTIVE_ONLY_MIN_VERSIONS = {
+    "haiku": (5, 5),
     "opus": (4, 7),
     "sonnet": (5, 0),
     "fable": (5, 0),
     "mythos": (5, 0),
 }
 _THINKING_DISABLE_MIN_VERSIONS = {
+    "haiku": (5, 5),
     "opus": (5, 0),
     "sonnet": (5, 0),
+}
+_BINDING_BETA = "thinking-binding-controls-2026-08-01"
+# Only models with preserved thinking bind signatures to the request prefix.
+_PREFIX_BOUND_THINKING_MIN_VERSIONS = {
+    "fable": (5, 1), "mythos": (5, 1),
+    "opus": (5, 5), "sonnet": (5, 5), "haiku": (5, 5),
 }
 _SAMPLING_DEPRECATED_MODELS = {"claude-mythos-preview"}
 
@@ -587,6 +595,19 @@ class AnthropicProvider(LLMProvider):
             self._spec.request_model_name(model or self.default_model)
             if self._spec is not None else self._strip_prefix(model or self.default_model)
         )
+        reasoning_effort_lower = reasoning_effort.lower() if reasoning_effort else None
+        disable_thinking = reasoning_effort_lower == "none" and _model_version_at_least(
+            model_name, _THINKING_DISABLE_MIN_VERSIONS,
+        )
+        check_binding = _model_version_at_least(model_name, _PREFIX_BOUND_THINKING_MIN_VERSIONS) and any(
+            msg.get("thinking_blocks") for msg in messages if msg.get("role") == "assistant"
+        )
+        if check_binding and disable_thinking:
+            # Binding controls are not accepted with thinking off.
+            messages = [
+                {k: v for k, v in msg.items() if k != "thinking_blocks"}
+                for msg in messages
+            ]
         system, anthropic_msgs = self._convert_messages(self._sanitize_empty_content(messages))
         anthropic_tools = self._convert_tools(tools)
 
@@ -596,7 +617,6 @@ class AnthropicProvider(LLMProvider):
             )
 
         max_tokens = max(1, max_tokens)
-        reasoning_effort_lower = reasoning_effort.lower() if reasoning_effort else None
         thinking_enabled = reasoning_effort_lower not in (None, "", "none")
         adaptive_only = _model_version_at_least(model_name, _ADAPTIVE_ONLY_MIN_VERSIONS)
         # Mythos Preview rejects sampling parameters but still accepts manual
@@ -614,9 +634,7 @@ class AnthropicProvider(LLMProvider):
         if system:
             kwargs["system"] = system
 
-        if reasoning_effort_lower == "none" and _model_version_at_least(
-            model_name, _THINKING_DISABLE_MIN_VERSIONS
-        ):
+        if disable_thinking:
             # These models think by default, so omission would not honor an
             # explicit request to disable thinking.
             kwargs["thinking"] = {"type": "disabled"}
@@ -647,8 +665,18 @@ class AnthropicProvider(LLMProvider):
             if tc:
                 kwargs["tool_choice"] = tc
 
-        if self.extra_headers:
-            kwargs["extra_headers"] = self.extra_headers
+        headers = self.extra_headers
+        if check_binding and not disable_thinking:
+            # Only Anthropic can tell which replayed signatures still match the request prefix.
+            kwargs.setdefault("thinking", {"type": "adaptive"})["block_binding"] = {
+                "prefix_mismatch_behavior": "drop_block",
+            }
+            key = next((k for k in headers if k.lower() == "anthropic-beta"), "anthropic-beta")
+            betas = [v.strip() for v in headers.get(key, "").split(",") if v.strip()]
+            if _BINDING_BETA not in betas:
+                headers = {**headers, key: ",".join([*betas, _BINDING_BETA])}
+        if headers:
+            kwargs["extra_headers"] = headers
         if self._extra_body:
             kwargs["extra_body"] = self._extra_body
 
