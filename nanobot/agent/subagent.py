@@ -1000,8 +1000,7 @@ class SubagentManager:
         skills_summary = SkillsLoader(
             self.workspace,
             disabled_skills=self.disabled_skills,
-            project_workspace=project_workspace,
-        ).build_skills_summary()
+        ).build_skills_summary(workspace=project_workspace)
         history_log = (
             str(agent_workspace / "memory" / "history.jsonl")
             if agent_workspace != project_workspace

@@ -491,8 +491,8 @@ async def cmd_skill(ctx: CommandContext) -> OutboundMessage:
             channel=ctx.msg.channel, message_metadata=ctx.msg.metadata,
             session_metadata=session.metadata if session else None,
         )
-        loader = loop.context.skills.for_project(scope.project_path)
-        with loader.snapshot():
+        loader = loop.context.skills
+        with loader.snapshot(scope.project_path):
             skills = loader.list_skills(filter_unavailable=False)
             if not skills:
                 return command_reply(ctx.msg, "/skill", line("skill.empty"))

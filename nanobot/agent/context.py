@@ -2,6 +2,7 @@ import base64
 import mimetypes
 import platform
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, cast
@@ -84,6 +85,16 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
+    def prompt_scope(self, workspace: Path) -> AbstractContextManager[None]:
+        """Bind the effective project across prompt fragments for this turn."""
+        return self.skills.snapshot(workspace)
+
+    def private_memory_paths(self) -> tuple[Path, ...]:
+        return (
+            self.memory.soul_file, self.memory.user_file, self.memory.memory_dir,
+            *self.skills.local_package_dirs("memory"),
+        )
+
     def build_system_prompt(
         self,
         *,
@@ -92,10 +103,9 @@ class ContextBuilder:
         workspace: Path | None = None,
         include_memory: bool = True,
         has_cron: bool = True,
-        skills: SkillsLoader | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
-        root = workspace or self.workspace
+        root = workspace or self.skills.project_workspace
         parts = [self._get_identity(channel=channel, workspace=root, include_memory=include_memory)]
 
         bootstrap = self._load_bootstrap_files(root, include_memory=include_memory)
@@ -123,15 +133,14 @@ class ContextBuilder:
                 record_source(self.memory.memory_file, "", loaded=False)
 
         excluded_skills = self._excluded_skills(include_memory=include_memory, has_cron=has_cron)
-        skills = skills or self.skills.for_project(root)
-        with skills.snapshot():
-            active_skills = skills.get_always_skills(exclude=excluded_skills)
+        with self.prompt_scope(root):
+            active_skills = self.skills.get_always_skills(exclude=excluded_skills)
             if active_skills:
-                active_content = skills.load_skills_for_context(active_skills)
+                active_content = self.skills.load_skills_for_context(active_skills)
                 if active_content:
                     parts.append(f"# Active Skills\n\n{active_content}")
 
-            skills_summary = skills.build_skills_summary(exclude=set(active_skills).union(excluded_skills))
+            skills_summary = self.skills.build_skills_summary(exclude=set(active_skills).union(excluded_skills))
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary, track_source=True))
 
@@ -274,18 +283,15 @@ class ContextBuilder:
         workspace: Path | None = None,
         include_memory: bool = True,
         has_cron: bool = True,
-        skills: SkillsLoader | None = None,
     ) -> list[dict[str, Any]]:
         """Build a model transcript while preserving the fresh-turn boundary."""
-        root = workspace or self.workspace
-        skills = skills or self.skills.for_project(root)
-        with skills.snapshot():
+        root = workspace or self.skills.project_workspace
+        with self.prompt_scope(root):
             with system_source_scope():
                 system_prompt = self.build_system_prompt(
                     channel=channel,
                     session_summary=transcript.session_summary,
                     workspace=root,
-                    skills=skills,
                     include_memory=include_memory,
                     has_cron=has_cron,
                 )
@@ -301,7 +307,6 @@ class ContextBuilder:
                 media=list(transcript.media) if transcript.media else None,
                 current_role=transcript.current_role,
                 runtime_context_blocks=transcript.runtime_context_blocks,
-                skills=skills,
                 include_memory=include_memory,
                 has_cron=has_cron,
             )
@@ -318,9 +323,9 @@ class ContextBuilder:
         return excluded
 
     def build_explicit_skill_context(
-        self, text: str, *, include_memory: bool, has_cron: bool, skills: SkillsLoader | None = None,
+        self, text: str, *, include_memory: bool, has_cron: bool,
     ) -> RuntimeContextBlock | None:
-        return (skills or self.skills).build_explicit_skill_runtime_context(
+        return self.skills.build_explicit_skill_runtime_context(
             text, exclude=self._excluded_skills(include_memory=include_memory, has_cron=has_cron),
         )
 
@@ -333,7 +338,6 @@ class ContextBuilder:
         runtime_context_blocks: Sequence[RuntimeContextBlock] | None = None,
         include_memory: bool = True,
         has_cron: bool = True,
-        skills: SkillsLoader | None = None,
     ) -> dict[str, Any]:
         """Build only the fresh turn message without merging it into history."""
         content = self.build_user_content(current_message, image_paths=media)
@@ -341,7 +345,7 @@ class ContextBuilder:
         if current_role == "user":
             blocks.extend(runtime_context_blocks or ())
             skill_context = self.build_explicit_skill_context(
-                current_message, include_memory=include_memory, has_cron=has_cron, skills=skills,
+                current_message, include_memory=include_memory, has_cron=has_cron,
             )
             if skill_context is not None and skill_context not in blocks:
                 blocks.append(skill_context)

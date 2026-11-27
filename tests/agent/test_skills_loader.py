@@ -107,17 +107,19 @@ def test_shared_skill_discovery_and_invocation(tmp_path: Path) -> None:
     project_file = project / ".agents" / "skills" / name / "SKILL.md"
     project_file.parent.mkdir(parents=True)
     project_file.write_text(skill_file.read_text(encoding="utf-8").replace("Shared", "Project"), encoding="utf-8")
-    scoped = loader.for_project(project)
-    block = scoped.build_explicit_skill_runtime_context("Use $weather")
-    assert block and "Project instructions" in block.content and str(project_file.parent) in block.content
-    assert scoped.list_skills() == [{"name": name, "path": str(project_file), "source": "project"}]
+    with loader.snapshot(project):
+        block = loader.build_explicit_skill_runtime_context("Use $weather")
+        assert block and "Project instructions" in block.content and str(project_file.parent) in block.content
+        assert loader.list_skills() == [{"name": name, "path": str(project_file), "source": "project"}]
 
     # A broken project skill must not hide a usable lower-priority skill.
     project_file.write_text("---\nname: weather\nlast-reviewed: 2026-13-01\n---\nBroken instructions", encoding="utf-8")
-    block = scoped.build_explicit_skill_runtime_context("Use $weather")
-    assert block and "Workspace instructions" in block.content
+    with loader.snapshot(project):
+        block = loader.build_explicit_skill_runtime_context("Use $weather")
+        assert block and "Workspace instructions" in block.content
     loader.disabled_skills.add(name)
-    assert scoped.build_explicit_skill_runtime_context("Use $weather") is None
+    with loader.snapshot(project):
+        assert loader.build_explicit_skill_runtime_context("Use $weather") is None
 
 
 def test_list_skills_workspace_shadows_builtin_same_name(tmp_path: Path) -> None:
@@ -398,7 +400,7 @@ def test_build_skills_summary_keeps_absolute_roots_for_selected_project(tmp_path
     project = tmp_path / "project"
     project.mkdir()
 
-    summary = SkillsLoader(workspace, builtin_skills_dir=builtin, project_workspace=project).build_skills_summary()
+    summary = SkillsLoader(workspace, builtin_skills_dir=builtin).build_skills_summary(workspace=project)
 
     assert summary.count(str(workspace_skills.resolve())) == 1
     assert summary.count(str(builtin.resolve())) == 1

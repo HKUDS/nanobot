@@ -2144,9 +2144,9 @@ async def test_system_subagent_followup_uses_common_turn_lifecycle(tmp_path: Pat
     ):
         original = getattr(loop, name)
 
-        async def record(ctx, *, _original=original, _name=name):
+        async def record(ctx, *, _original=original, _name=name, **kwargs):
             visited.append(_name)
-            return await _original(ctx)
+            return await _original(ctx, **kwargs)
 
         setattr(loop, name, record)
 

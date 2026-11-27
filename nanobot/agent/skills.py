@@ -30,6 +30,7 @@ _SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
 
 @dataclass
 class _SkillSnapshot:
+    project: Path
     entries: dict[str, dict[str, str]] | None = None
     aliases: dict[str, str] | None = None
     documents: dict[str, str] = field(default_factory=dict)
@@ -47,19 +48,17 @@ class SkillsLoader:
 
     def __init__(
         self, workspace: Path, builtin_skills_dir: Path | None = None, disabled_skills: set[str] | None = None,
-        *, project_workspace: Path | None = None,
     ):
         self.workspace = workspace
-        self.project_workspace = project_workspace or workspace
         self.shared_skills = paths.get_shared_skills_dir()
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills: set[str] = disabled_skills if disabled_skills is not None else set()
         self._snapshot: ContextVar[_SkillSnapshot | None] = ContextVar("skill_snapshot", default=None)
 
-    def for_project(self, project_workspace: Path) -> "SkillsLoader":
-        if project_workspace == self.project_workspace:
-            return self
-        return SkillsLoader(self.workspace, self.builtin_skills, self.disabled_skills, project_workspace=project_workspace)
+    @property
+    def project_workspace(self) -> Path:
+        snapshot = self._snapshot.get()
+        return snapshot.project if snapshot is not None else self.workspace
 
     def _sources(self) -> Iterator[SkillSource]:
         return ordered_sources(self.project_workspace, self.workspace, self.shared_skills, self.builtin_skills)
@@ -69,12 +68,13 @@ class SkillsLoader:
         return (source.root / name for source in self._sources() if source.key != "plugin")
 
     @contextmanager
-    def snapshot(self) -> Generator[None, None, None]:
-        """Reuse discovery, documents, metadata, and CLI checks until this scope exits."""
-        if self._snapshot.get() is not None:
+    def snapshot(self, project: Path | None = None) -> Generator[None, None, None]:
+        """Share discovery and loaded documents within one project's prompt scope."""
+        current = self._snapshot.get()
+        if current is not None and (project is None or project == current.project):
             yield
             return
-        token = self._snapshot.set(_SkillSnapshot())
+        token = self._snapshot.set(_SkillSnapshot(project or self.workspace))
         try:
             yield
         finally:
@@ -245,9 +245,9 @@ class SkillsLoader:
             ),
         )
 
-    def build_skills_summary(self, exclude: set[str] | None = None) -> str:
+    def build_skills_summary(self, exclude: set[str] | None = None, *, workspace: Path | None = None) -> str:
         """Describe available skills and where to read them from the selected project."""
-        with self.snapshot():
+        with self.snapshot(workspace):
             return self._build_skills_summary(exclude)
 
     def _build_skills_summary(self, exclude: set[str] | None) -> str:

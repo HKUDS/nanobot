@@ -69,8 +69,9 @@ def test_project_skill_directory_links_respect_project_boundary(tmp_path: Path, 
     (package / "SKILL.md").write_text("---\nname: foreign\ndescription: Outside project\n---\nSecret", encoding="utf-8")
     _make_directory_link(link, foreign)
 
-    loader = SkillsLoader(tmp_path / "agent", project_workspace=project)
-    assert loader.build_explicit_skill_runtime_context("Use $foreign") is None
+    loader = SkillsLoader(tmp_path / "agent")
+    with loader.snapshot(project):
+        assert loader.build_explicit_skill_runtime_context("Use $foreign") is None
 
 
 async def test_linked_shared_root_does_not_grant_external_reads(tmp_path: Path) -> None:
