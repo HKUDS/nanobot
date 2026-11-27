@@ -6,6 +6,8 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 
 ## Highlights
 
+- **2026-11-21** 🔧 [v0.4.2](https://github.com/HKUDS/nanobot/releases/tag/v0.4.2) supports SSH connections to gateways that also advertise a public WebSocket URL and makes ongoing activity and queued follow-ups easier to see in WebUI.
+- **2026-11-06** 🔧 [v0.4.1](https://github.com/HKUDS/nanobot/releases/tag/v0.4.1) improves workspace permissions, sandboxed commands, connection recovery, file-context previews, and navigation.
 - **2026-10-28** 🚀 Released [v0.4.0](https://github.com/HKUDS/nanobot/releases/tag/v0.4.0), with remote WebUI connections, SQLite conversation storage, richer attachments and diagrams, and expanded channel support.
 - **2026-10-27** 🗂️ Batch topic archiving and clearer WebUI mentions; reply text streamed before model failures is retained for later context.
 - **2026-10-26** 🧰 WebUI `!` shell-command completion and literal output; delegated tasks and their details stay within reach.
