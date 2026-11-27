@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from agent.session_helpers import make_agent_loop
@@ -16,7 +16,7 @@ from nanobot.config.schema import ModelPresetConfig
 
 
 def _provider(default_model: str = "test-model") -> MagicMock:
-    provider = MagicMock()
+    provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = default_model
     provider.generation = MagicMock()
     provider.generation.max_tokens = 4096
@@ -42,8 +42,8 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     )
 
 
-def _ctx(loop: AgentLoop, raw: str = "/skill") -> CommandContext:
-    msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content=raw)
+def _ctx(loop: AgentLoop, raw: str = "/skill", *, channel: str = "cli") -> CommandContext:
+    msg = InboundMessage(channel=channel, sender_id="user", chat_id="direct", content=raw)
     return CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, args="", loop=loop)
 
 
@@ -98,6 +98,26 @@ async def test_skill_command_excludes_disabled(tmp_path: Path) -> None:
 
     assert "alpha" not in message_text(out)
     assert "**beta** — Beta skill" in message_text(out)
+
+
+@pytest.mark.asyncio
+async def test_skill_command_uses_saved_project_or_message_override(tmp_path: Path) -> None:
+    loop = _loop_with_skills(tmp_path)
+    projects = [tmp_path / name for name in ("alpha", "beta")]
+    for project in projects:
+        _write_skill(project / ".agents" / "skills", "review", description=f"Review for {project.name}")
+    ctx = _ctx(loop, channel="websocket")
+    session = await loop.sessions.state.get(ctx.key)
+    session.metadata["workspace_scope"] = {"project_path": str(projects[0]), "access_mode": "restricted"}
+    await loop.sessions.state.prepare_input(session)
+    try:
+        assert "**review** — Review for alpha" in message_text(await cmd_skill(ctx))
+        ctx.msg.metadata["workspace_scope"] = {"project_path": str(projects[1]), "access_mode": "restricted"}
+        text = message_text(await cmd_skill(ctx))
+        assert "**review** — Review for beta" in text
+        assert "Review for alpha" not in text
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.asyncio

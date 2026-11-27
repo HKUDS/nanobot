@@ -7,6 +7,7 @@ import mimetypes
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import partial
 from itertools import accumulate
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -22,14 +23,18 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.config import paths
 from nanobot.execution.files import NotRegularFileError, ReadableFile, WorkspaceFiles, WritableFile
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
-def _plugin_skill_roots(workspace: Path, target: Path) -> tuple[Path, ...]:
+def _skill_read_roots(workspace: Path, target: Path, *, shared: Path | None = None) -> tuple[Path, ...]:
     from nanobot.agent.plugins import enabled_agent_plugin_skill_dirs
 
+    # target is already resolved. Do not let a link at the shared root grant its destination.
+    if shared is not None and target.is_relative_to(shared):
+        return (shared,)
     return enabled_agent_plugin_skill_dirs(workspace, requested_path=target)
 
 
@@ -58,6 +63,7 @@ class _FsTool(Tool):
         restrict_to_workspace: bool | None = None,
         sandbox_restricts_workspace: bool = False,
         extra_read_allowed_files: list[Path] | None = None,
+        shared_skills: Path | None = None,
     ):
         self._files = WorkspaceFiles(
             workspace=workspace,
@@ -70,7 +76,7 @@ class _FsTool(Tool):
             sandbox_restricts_workspace=sandbox_restricts_workspace,
             extra_read_allowed_files=extra_read_allowed_files,
             builtin_skills=BUILTIN_SKILLS_DIR,
-            plugin_skill_roots=_plugin_skill_roots,
+            skill_read_roots=partial(_skill_read_roots, shared=shared_skills),
         )
         # Dream and isolated runners can supply their own receipt store.
         self._explicit_file_states = file_states
@@ -86,6 +92,7 @@ class _FsTool(Tool):
             workspace=workspace,
             allowed_dir=workspace if restricted or sandboxed else None,
             extra_read_allowed_dirs=[BUILTIN_SKILLS_DIR, root / "skills", root / "memory" / "wiki"],
+            shared_skills=paths.get_shared_skills_dir(),
             extra_read_allowed_files=[root / "memory" / "history.jsonl"],
             restrict_to_workspace=restricted,
             sandbox_restricts_workspace=sandboxed,

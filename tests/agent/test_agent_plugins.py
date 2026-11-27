@@ -172,13 +172,14 @@ async def test_prompt_snapshot_uses_approved_plugin_bytes_after_replacement(
     try:
         await loop.process_direct("Explain this project", session_key="cli:approved")
         assert "ORIGINAL_APPROVED_INSTRUCTIONS" in provider.prompts[-1]
-        original_iterdir = Path.iterdir
+        verified_documents = agent_plugins.enabled_agent_plugin_skill_documents
         original_read_bytes = Path.read_bytes
 
-        def iterdir(path):
-            if path == workspace / "skills" and not reached.is_set():
+        def capture_documents(path):
+            documents = verified_documents(path)
+            if not reached.is_set():
                 pause_for_replacement()
-            return original_iterdir(path)
+            return documents
 
         def read_bytes(path):
             content = original_read_bytes(path)
@@ -188,7 +189,7 @@ async def test_prompt_snapshot_uses_approved_plugin_bytes_after_replacement(
 
         with monkeypatch.context() as race:
             if boundary == "after-verification":
-                race.setattr(Path, "iterdir", iterdir)
+                race.setattr(agent_plugins, "enabled_agent_plugin_skill_documents", capture_documents)
             else:
                 race.setattr(Path, "read_bytes", read_bytes)
             writer = Thread(target=replace_package)

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.cli_apps import CliAppsTool
 from nanobot.agent.tools.context import RequestContext, ToolContext, request_context
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
@@ -18,6 +19,7 @@ from nanobot.agent.tools.search import GrepTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
+from nanobot.config import paths
 from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
@@ -54,6 +56,38 @@ def _make_directory_link(link: Path, target: Path) -> None:
         link.symlink_to(target, target_is_directory=True)
     except (NotImplementedError, OSError) as exc:
         pytest.skip(f"directory symlink unavailable: {exc}")
+
+
+@pytest.mark.parametrize("link_at", [".agents", ".agents/skills/foreign"])
+def test_project_skill_directory_links_respect_project_boundary(tmp_path: Path, link_at: str) -> None:
+    project = tmp_path / "project"
+    link = project / link_at
+    link.parent.mkdir(parents=True)
+    foreign = tmp_path / "outside"
+    package = foreign / "skills" / "foreign" if link_at == ".agents" else foreign
+    package.mkdir(parents=True)
+    (package / "SKILL.md").write_text("---\nname: foreign\ndescription: Outside project\n---\nSecret", encoding="utf-8")
+    _make_directory_link(link, foreign)
+
+    loader = SkillsLoader(tmp_path / "agent")
+    with loader.snapshot(project):
+        assert loader.build_explicit_skill_runtime_context("Use $foreign") is None
+
+
+async def test_linked_shared_root_does_not_grant_external_reads(tmp_path: Path) -> None:
+    root = paths.get_shared_skills_dir()
+    root.parent.mkdir(parents=True)
+    workspace = tmp_path / "agent"
+    workspace.mkdir()
+    reader = ReadFileTool.create(ToolContext(config=ToolsConfig(restrict_to_workspace=True), workspace=str(workspace)))
+    private = tmp_path / "private"
+    private.mkdir()
+    note = private / "note.md"
+    note.write_text("Private note", encoding="utf-8")
+    _make_directory_link(root, private)
+
+    assert (await reader.execute(path=str(note))).is_error
+    assert (await reader.execute(path=str(root / note.name))).is_error
 
 
 def test_workspace_scope_defaults_match_legacy_config(tmp_path: Path) -> None:
@@ -174,6 +208,9 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
     agent_workspace = tmp_path / "agent"
     project = tmp_path / "project"
     skill_file = agent_workspace / "skills" / "custom" / "SKILL.md"
+    reference = paths.get_shared_skills_dir() / "shared" / "references" / "guide.md"
+    reference.parent.mkdir(parents=True)
+    reference.write_text("Shared reference", encoding="utf-8")
     history_file = agent_workspace / "memory" / "history.jsonl"
     private_memory_file = agent_workspace / "memory" / "private.txt"
     wiki_file = agent_workspace / "memory" / "wiki" / "projects" / "example.md"
@@ -207,6 +244,9 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
     try:
         project_result = await read_tool.execute(path="project.txt")
         skill_result = await read_tool.execute(path=str(skill_file))
+        assert "Shared reference" in await read_tool.execute(path=str(reference))
+        assert (await write_tool.execute(path=str(reference), content="changed")).is_error
+        assert reference.read_text(encoding="utf-8") == "Shared reference"
         history_result = await grep_tool.execute(
             pattern="global history",
             path=str(history_file),

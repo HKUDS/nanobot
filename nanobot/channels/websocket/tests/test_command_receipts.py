@@ -115,6 +115,8 @@ async def test_skill_image_is_signed_in_displayed_live_and_replayed_receipt(hist
     channel, connection = chat
     ctx = await _command(history, "/skill")
     image = "![Example](diagram.png)"
+    ctx.loop.sessions = history.sessions
+    ctx.loop.workspace_scopes.scoped_channel = "websocket"
     skills = ctx.loop.context.skills
     skills.list_skills.return_value = [{"name": "charts"}]
     skills.get_skill_description.return_value = image

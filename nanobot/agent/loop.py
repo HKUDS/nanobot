@@ -80,6 +80,7 @@ from nanobot.runtime_context import (
 )
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
+    WorkspaceScope,
     WorkspaceScopeResolver,
     bind_workspace_scope,
     reset_workspace_scope,
@@ -704,7 +705,7 @@ class AgentLoop:
             ),
         )
 
-    async def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
+    async def _request_context_for_turn(self, ctx: TurnContext, scope: WorkspaceScope) -> RequestContext:
         assert ctx.session is not None
         origin: RequestOrigin = {
             "message_id": ctx.msg.metadata.get("message_id"),
@@ -721,12 +722,6 @@ class AgentLoop:
                     {REQUEST_ORIGIN_METADATA_KEY: origin},
                     expected_generation=ctx.session.generation,
                 )
-        scope = await self.runner.prepare_prompt(
-            self.workspace_scopes.for_turn,
-            channel=ctx.delivery.route.channel,
-            message_metadata=_prompt_scope_metadata(ctx.msg.metadata),
-            session_metadata=_prompt_scope_metadata(ctx.session.metadata),
-        )
         return RequestContext(
             channel=ctx.delivery.route.channel,
             chat_id=ctx.delivery.route.chat_id,
@@ -1092,7 +1087,7 @@ class AgentLoop:
         active_session_key = session.key if session else request_ctx.session_key
         consolidation_session_key = active_session_key or "agent:transient"
         request_metadata = request_ctx.metadata
-        effective_scope = await self.runner.prepare_prompt(
+        effective_scope = request_ctx.workspace_scope or await self.runner.prepare_prompt(
             self.workspace_scopes.for_turn,
             channel=request_ctx.channel,
             message_metadata=_prompt_scope_metadata(request_metadata),
@@ -1143,13 +1138,9 @@ class AgentLoop:
             )
             turn_scope_stack.callback(reset_request_context, bind_request_context(request_ctx))
             turn_scope_stack.callback(reset_workspace_scope, bind_workspace_scope(effective_scope))
+            turn_scope_stack.enter_context(self.context.prompt_scope(effective_scope.project_path))
             if not include_memory:
-                memory = self.context.memory
-                skills = self.context.skills
-                turn_scope_stack.enter_context(exclude_file_paths(
-                    memory.soul_file, memory.user_file, memory.memory_dir,
-                    skills.workspace_skills / "memory", skills.builtin_skills / "memory",
-                ))
+                turn_scope_stack.enter_context(exclude_file_paths(*self.context.private_memory_paths()))
                 if not has_cron:
                     turn_scope_stack.enter_context(exclude_file_paths(
                         self.workspace / "HEARTBEAT.md", writes_only=True,
@@ -1821,8 +1812,15 @@ class AgentLoop:
             if await self._run_turn_stage(ctx, "command", self._dispatch_command):
                 self._log_turn_completion(ctx, outcome="command")
                 return ctx.outbound
-            await self._run_turn_stage(ctx, "build", self._build_turn)
-            await self._run_turn_stage(ctx, "run", self._run_turn)
+            scope = await self.runner.prepare_prompt(
+                self.workspace_scopes.for_turn,
+                channel=ctx.delivery.route.channel,
+                message_metadata=_prompt_scope_metadata(ctx.msg.metadata),
+                session_metadata=_prompt_scope_metadata(ctx.require_session().metadata),
+            )
+            with self.context.prompt_scope(scope.project_path):
+                await self._run_turn_stage(ctx, "build", partial(self._build_turn, scope=scope))
+                await self._run_turn_stage(ctx, "run", self._run_turn)
             await self._run_turn_stage(ctx, "save", self._persist_turn)
             await self._run_turn_stage(ctx, "respond", self._prepare_outbound)
             self._log_turn_completion(ctx)
@@ -2064,7 +2062,7 @@ class AgentLoop:
             return True
         return command_matched
 
-    async def _build_turn(self, ctx: TurnContext) -> None:
+    async def _build_turn(self, ctx: TurnContext, *, scope: WorkspaceScope) -> None:
         session = ctx.require_session()
         runtime = ctx.runtime
         if runtime is None:
@@ -2107,7 +2105,7 @@ class AgentLoop:
             ctx.input_persisted_early = True
         await ctx.delivery.runtime_admitted(runtime)
 
-        ctx.request_context = await self._request_context_for_turn(ctx)
+        ctx.request_context = await self._request_context_for_turn(ctx, scope)
         if ctx.kind is TurnKind.USER:
             ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
         staged_provider_state = False

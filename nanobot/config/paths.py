@@ -53,6 +53,10 @@ def get_workspace_path(workspace: str | Path | None = None) -> Path:
     return ensure_dir(path)
 
 
+def get_shared_skills_dir() -> Path:
+    return Path.home().resolve() / ".agents" / "skills"
+
+
 def is_default_workspace(workspace: str | Path | None) -> bool:
     """Return whether a workspace resolves to nanobot's default workspace path."""
     current = Path(workspace).expanduser() if workspace is not None else get_home_path() / "workspace"

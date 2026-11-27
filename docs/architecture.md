@@ -171,11 +171,12 @@ Runtime code distinguishes the configured agent workspace from the effective pro
 
 | Concern | Path owner |
 |---|---|
-| Session namespace, `SOUL.md`, `USER.md`, memory, and custom skills | Configured agent workspace |
+| Session namespace, `SOUL.md`, `USER.md`, memory, and nanobot-managed skills | Configured agent workspace |
+| Shared Agent Skills | Effective project `.agents/skills/` and gateway user's `~/.agents/skills/` |
 | Project `AGENTS.md`, relative tool paths, and shell working directory | Effective project workspace |
 | Workspace access mode and project metadata | Session workspace scope |
 
-`ContextBuilder` combines project instructions with agent-owned profile and memory. Filesystem and search tools use the project as their ordinary boundary and receive only capability-specific read access to built-in/agent skills and the exact agent history file. Keep those cross-root capabilities read-only and explicit; do not treat the entire agent workspace as an allowed root.
+`ContextBuilder` combines project instructions with agent-owned profile and memory. Filesystem and search tools use the project as their ordinary boundary and receive only capability-specific read access to skills outside the project and the exact agent history file. Keep those cross-root capabilities read-only and explicit; do not treat the entire agent workspace as an allowed root.
 
 ## Memory and Sessions
 
@@ -223,7 +224,7 @@ When changing tools, channels, file access, WebUI workspace behavior, or network
 | Tool | Implement a tool under `agent/tools/` or expose a plugin entry point |
 | Agent Plugin | Add a v1 package under `<workspace>/plugins/` and enable it from Apps |
 | MCP | Add `tools.mcpServers` config or bundle the server in an Agent Plugin |
-| Skill | Add workspace skills under `<workspace>/skills/`, bundle them in an Agent Plugin, or add built-in skills under `nanobot/skills/` |
+| Skill | Share [Agent Skills](configuration.md#skills) via `.agents/skills/`, add workspace skills under `<workspace>/skills/`, bundle an Agent Plugin, or ship built-ins under `nanobot/skills/` |
 | CLI App | Add it to the CLI Apps catalog; the installer owns its executable lifecycle and writes a skills-only Agent Plugin |
 
 Prefer existing registry/discovery patterns over ad hoc wiring.

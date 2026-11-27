@@ -10,6 +10,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.filesystem import ListDirTool, WriteFileTool
 from nanobot.agent.tools.search import GrepTool
+from nanobot.config import paths
 
 
 def _write_skill(
@@ -80,6 +81,45 @@ def test_list_skills_skips_non_directories_and_missing_skill_md(tmp_path: Path) 
     names = {entry["name"] for entry in entries}
     assert names == {"ok"}
     assert entries[0]["path"] == str(ok_path)
+
+
+def test_shared_skill_discovery_and_invocation(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    builtin = tmp_path / "builtin"
+    shared = paths.get_shared_skills_dir()
+    name = "weather"
+    _write_skill(builtin, name, body="Bundled instructions")
+    skill_file = shared / name / "SKILL.md"
+    skill_file.parent.mkdir(parents=True)
+    skill_file.write_text("---\nname: weather\ndescription: Shared forecast\n---\nShared instructions", encoding="utf-8")
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    assert loader.list_skills() == [{"name": name, "path": str(skill_file), "source": "shared"}]
+    summary = loader.build_skills_summary()
+    assert str(shared) in summary and "Shared forecast" in summary
+    block = loader.build_explicit_skill_runtime_context("Use $weather")
+    assert block and "Shared instructions" in block.content
+
+    _write_skill(workspace / "skills", name, body="Workspace instructions")
+    block = loader.build_explicit_skill_runtime_context("Use $weather")
+    assert block and "Workspace instructions" in block.content and "Shared instructions" not in block.content
+    project = tmp_path / "checkout"
+    project_file = project / ".agents" / "skills" / name / "SKILL.md"
+    project_file.parent.mkdir(parents=True)
+    project_file.write_text(skill_file.read_text(encoding="utf-8").replace("Shared", "Project"), encoding="utf-8")
+    with loader.snapshot(project):
+        block = loader.build_explicit_skill_runtime_context("Use $weather")
+        assert block and "Project instructions" in block.content and str(project_file.parent) in block.content
+        assert loader.list_skills() == [{"name": name, "path": str(project_file), "source": "project"}]
+
+    # A broken project skill must not hide a usable lower-priority skill.
+    project_file.write_text("---\nname: weather\nlast-reviewed: 2026-13-01\n---\nBroken instructions", encoding="utf-8")
+    with loader.snapshot(project):
+        block = loader.build_explicit_skill_runtime_context("Use $weather")
+        assert block and "Workspace instructions" in block.content
+    loader.disabled_skills.add(name)
+    with loader.snapshot(project):
+        assert loader.build_explicit_skill_runtime_context("Use $weather") is None
 
 
 def test_list_skills_workspace_shadows_builtin_same_name(tmp_path: Path) -> None:
@@ -360,9 +400,7 @@ def test_build_skills_summary_keeps_absolute_roots_for_selected_project(tmp_path
     project = tmp_path / "project"
     project.mkdir()
 
-    summary = SkillsLoader(workspace, builtin_skills_dir=builtin).build_skills_summary(
-        workspace=project,
-    )
+    summary = SkillsLoader(workspace, builtin_skills_dir=builtin).build_skills_summary(workspace=project)
 
     assert summary.count(str(workspace_skills.resolve())) == 1
     assert summary.count(str(builtin.resolve())) == 1

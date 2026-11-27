@@ -2607,11 +2607,19 @@ Common examples: `UTC`, `America/New_York`, `America/Los_Angeles`, `Europe/Londo
 
 > Need another timezone? Browse the full [IANA Time Zone Database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
 
-## Disabled Skills
+## Skills
 
-Open **Skills** in the sidebar, find the installed skill, and turn its switch off or on. This controls whether the agent can load it without deleting its files.
+To share a skill with your team, put it in `<project>/.agents/skills/<name>/SKILL.md`. To use it across your projects, put it in `~/.agents/skills/<name>/SKILL.md` on the machine running the gateway. nanobot looks in the selected project, not its parent directories. Only use skills from projects you trust.
 
-nanobot ships with built-in skills, and your workspace can also define custom skills under `skills/`. If you want to hide specific skills from the agent, set `agents.defaults.disabledSkills` to a list of skill directory names:
+For example, use `/skill` in the project chat to see `.agents/skills/release-check/SKILL.md`, then type `$release-check` to use it. The chat’s autocomplete menu does not switch to the project catalog.
+
+Use the [Agent Skills format](https://agentskills.io/specification): the name matches the directory, and the description tells the agent when to use the skill. References, assets, and scripts can sit alongside `SKILL.md`; discovery does not execute scripts. Keep the user-level `.agents/skills/` root in place: redirecting it with a symlink does not grant access to another directory. The shared convention is `.agents/skills/`, not `.agent/skills/`. Installing or deleting skills through nanobot still targets its workspace.
+
+If names collide, the first match wins: selected project `.agents/skills/`, nanobot workspace `skills/`, user `~/.agents/skills/`, enabled plugins, then built-in skills.
+
+### Disabled Skills
+
+For skills listed in the sidebar, use the switch in **Skills**. To disable a skill from any source without deleting its files, add its directory name to `agents.defaults.disabledSkills`:
 
 <details>
 <summary>Manual configuration</summary>
@@ -2632,7 +2640,7 @@ Disabled skills are excluded from the main agent's skill summary, from always-on
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `agents.defaults.disabledSkills` | `[]` | List of skill directory names to exclude from loading. Applies to both built-in skills and workspace skills. |
+| `agents.defaults.disabledSkills` | `[]` | Skill directory names to exclude from all sources. |
 
 ### Agent Plugins v1
 

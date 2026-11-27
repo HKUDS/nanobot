@@ -58,6 +58,7 @@ def _isolate_runtime_stores(
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    monkeypatch.setattr("nanobot.config.paths.get_shared_skills_dir", lambda: data_root / ".agents" / "skills")
     monkeypatch.setattr(session_location, "get_runtime_subdir", runtime_subdir)
     monkeypatch.setattr("nanobot.session.image_attachments.get_data_dir", data_dir)
     monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: runtime_subdir("webui"))

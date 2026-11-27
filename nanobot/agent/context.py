@@ -2,6 +2,7 @@ import base64
 import mimetypes
 import platform
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, cast
@@ -84,6 +85,16 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
+    def prompt_scope(self, workspace: Path) -> AbstractContextManager[None]:
+        """Bind the effective project across prompt fragments for this turn."""
+        return self.skills.snapshot(workspace)
+
+    def private_memory_paths(self) -> tuple[Path, ...]:
+        return (
+            self.memory.soul_file, self.memory.user_file, self.memory.memory_dir,
+            *self.skills.local_package_dirs("memory"),
+        )
+
     def build_system_prompt(
         self,
         *,
@@ -94,7 +105,7 @@ class ContextBuilder:
         has_cron: bool = True,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
-        root = workspace or self.workspace
+        root = workspace or self.skills.project_workspace
         parts = [self._get_identity(channel=channel, workspace=root, include_memory=include_memory)]
 
         bootstrap = self._load_bootstrap_files(root, include_memory=include_memory)
@@ -122,17 +133,14 @@ class ContextBuilder:
                 record_source(self.memory.memory_file, "", loaded=False)
 
         excluded_skills = self._excluded_skills(include_memory=include_memory, has_cron=has_cron)
-        with self.skills.snapshot():
+        with self.prompt_scope(root):
             active_skills = self.skills.get_always_skills(exclude=excluded_skills)
             if active_skills:
                 active_content = self.skills.load_skills_for_context(active_skills)
                 if active_content:
                     parts.append(f"# Active Skills\n\n{active_content}")
 
-            skills_summary = self.skills.build_skills_summary(
-                exclude=set(active_skills).union(excluded_skills),
-                workspace=root,
-            )
+            skills_summary = self.skills.build_skills_summary(exclude=set(active_skills).union(excluded_skills))
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary, track_source=True))
 
@@ -277,8 +285,8 @@ class ContextBuilder:
         has_cron: bool = True,
     ) -> list[dict[str, Any]]:
         """Build a model transcript while preserving the fresh-turn boundary."""
-        root = workspace or self.workspace
-        with self.skills.snapshot():
+        root = workspace or self.skills.project_workspace
+        with self.prompt_scope(root):
             with system_source_scope():
                 system_prompt = self.build_system_prompt(
                     channel=channel,
