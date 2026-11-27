@@ -26,6 +26,10 @@
     <a href="https://nanobot.wiki/docs/latest/getting-started/nanobot-overview"><img src="https://img.shields.io/badge/docs-nanobot.wiki-blue" alt="nanobot documentation"></a>
   </p>
   <p>
+    <a href="https://www.star-history.com/hkuds/nanobot/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=rank&amp;theme=dark"><img alt="Global Star rank from Star History" src="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=rank"></picture></a>
+    <a href="https://www.star-history.com/hkuds/nanobot/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=trending&amp;theme=dark"><img alt="GitHub Trending badge from Star History" src="https://api.star-history.com/badge?repo=HKUDS%2Fnanobot&amp;type=trending"></picture></a>
+  </p>
+  <p>
     <a href="https://discord.gg/MnCvHqpUGB">Discord</a> ·
     <a href="https://x.com/nanobot_project">X</a> ·
     <a href="./COMMUNICATION.md#wechat">WeChat 微信交流群</a> ·
