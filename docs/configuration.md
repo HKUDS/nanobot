@@ -1834,7 +1834,7 @@ Set the address in **Settings → Advanced → Shared proxy**, then enable **Use
 > ```
 >
 > </details>
-> Web requests still enforce URL safety checks when using a proxy. Use only trusted proxies: the proxy controls final DNS resolution and outbound access. With **Use proxy** enabled, the shared address takes precedence over environment proxy settings, including `NO_PROXY`.
+> Web requests still enforce URL safety checks when using a proxy. Use only trusted proxies: the proxy controls final DNS resolution and outbound access. With **Use proxy** enabled and a shared proxy configured, `web_fetch` can read links that only the proxy can resolve. Configure the proxy to block destinations the agent should not reach, including private networks. The shared proxy takes precedence over environment proxy settings, including `NO_PROXY`.
 
 ### `tools.web`
 
