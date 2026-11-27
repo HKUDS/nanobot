@@ -52,7 +52,7 @@ SETUP_SPEC = ChannelSetupSpec(
 
 PLUGIN = ChannelPlugin(
     name="email",
-    reply_format="This conversation is via email. Structure with clear sections. Markdown may not render — keep formatting simple.",
+    reply_format="Email replies are sent as plain text. Use blank lines to separate sections instead of Markdown headings.",
     display_name="Email",
     runtime=f"{__package__}.runtime:EmailChannel",
     setup=SETUP_SPEC,
