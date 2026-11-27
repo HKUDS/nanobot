@@ -233,7 +233,7 @@ def read_transcript_lines(session_key: str, *, history: HistoryReader) -> list[d
     return [record_from_fact(fact, session_key) for fact in history.all_facts()]
 
 
-def find_fork_input(history: HistoryReader, input_id: str) -> tuple[int, int, HistoryFact] | None:
+def find_history_input(history: HistoryReader, input_id: str) -> tuple[int, int, HistoryFact] | None:
     if entry := next(history.inputs_by_id(input_id), None):
         return entry
     # Before durable input IDs, replay identified a user by turn or its position in the transcript.

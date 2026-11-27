@@ -273,6 +273,15 @@ export class ThreadTranscript {
   }
 
   get messages(): UIMessage[] { return this.projection.messages; }
+  get liveRevision(): number { return this.revision; }
+
+  replayLiveAfter(revision: number, target: ThreadTranscript): void {
+    for (const entry of this.live) {
+      if (entry.revision <= revision) continue;
+      target.project(entry.event, { createId: () => crypto.randomUUID(), now: entry.now,
+        startSeq: entry.startSeq, sideChannel: entry.sideChannel });
+    }
+  }
   get modelRequests() { return this.projection.modelRequests; }
   get hasPendingFragmentGap(): boolean { return this.pendingFragmentGap !== null; }
 
@@ -518,7 +527,7 @@ export class ThreadTranscript {
     for (const event of joined.withdrawn) this.withdrawnSources.add(this.describe(event).source);
     this.pendingFragmentGap = gap;
     this.paging = { ...this.paging, loading: false, loadingOlder: false, error: null, olderError: null,
-      historyGeneration: joined.body.history_generation ?? page.history_generation ?? this.paging.historyGeneration,
+      historyGeneration: page.history_generation ?? this.paging.historyGeneration,
       beforeCursor: page.before_cursor ?? null, hasMoreBefore: page.has_more_before === true, truncated: true,
       version: this.paging.version + (read.kind === "older" ? 0 : 1),
       lineage: this.paging.lineage + (read.kind === "older" ? 0 : 1) };
@@ -549,14 +558,6 @@ export class ThreadTranscript {
     return candidate;
   }
 
-  /** An authoritative replacement retires even unpersisted rows, staged fragments and pending details. */
-  replacedBy(body: WebuiThreadPersistedPayload): ThreadTranscript {
-    const owner = new ThreadTranscript([], undefined, { recordLiveContributions: this.recordLiveContributions });
-    owner.paging = { ...owner.paging, version: this.paging.version, lineage: this.paging.lineage + 1 };
-    owner.accept(body, owner.begin("initial"));
-    return owner;
-  }
-
   accept(body: WebuiThreadPersistedPayload | null, read: ThreadRead): boolean {
     this.fragmentCompletedTurnIds = [];
     if (read.kind === "older" && (read.lineage !== this.paging.lineage || read.before !== this.paging.beforeCursor)) return false;
@@ -572,7 +573,7 @@ export class ThreadTranscript {
       this.finishRead(read, "Earlier history cursor did not advance");
       return false;
     }
-    const generation = body?.history_generation ?? body?.page?.history_generation ?? null;
+    const generation = body?.page?.history_generation ?? null;
     const replacedHistory = generation !== null && this.paging.historyGeneration !== null
       && generation !== this.paging.historyGeneration;
     if (replacedHistory && (read.kind === "older" || this.live.length > 0 || this.revision > read.revision)) {

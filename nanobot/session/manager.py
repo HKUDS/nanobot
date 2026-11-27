@@ -37,11 +37,11 @@ if TYPE_CHECKING:
 _T = TypeVar("_T")
 SESSION_CACHE_MAX_SIZE = 128
 _SESSION_PREVIEW_MAX_CHARS = 120
-FORK_RECEIPT_KEY = "history_edit_receipt"
-_FORK_HISTORY_KEYS = {
+EDIT_RECEIPT_KEY = "history_edit_receipt"
+GENERATION_HISTORY_KEYS = frozenset({
     "_stopped_at_iteration_limit", "webui_recovery",
-    "pending_user_turn", "pending_user_followups", "runtime_checkpoint", FORK_RECEIPT_KEY,
-}
+    "pending_user_turn", "pending_user_followups", "runtime_checkpoint", EDIT_RECEIPT_KEY,
+})
 _FORK_IDENTITY_KEYS = {PARENT_SESSION_KEY, SESSION_TYPE_KEY, "session_handle", "title", "title_user_edited"}
 
 
@@ -317,35 +317,6 @@ class Session:
                     entry["content"] = replay_user_image_blocks(cast(list[object], content))
         return out
 
-    def fork_prefix(
-        self, boundary: int, *, new_key: str | None = None, exclude_metadata: frozenset[str] = frozenset(),
-    ) -> Session:
-        """Start a fresh generation from a resolved model prefix, optionally under a new identity."""
-        if not 0 <= boundary <= len(self.messages):
-            raise ValueError("invalid fork boundary")
-        messages = self.messages[:boundary]
-        excluded = _FORK_HISTORY_KEYS | exclude_metadata
-        if new_key is not None:
-            messages = [public_history_message(message) for message in messages]
-            excluded |= _FORK_IDENTITY_KEYS
-        else:
-            excluded.update(("_last_usage", "request_origin"))
-        archived = self.last_archived
-        if archived > boundary:
-            archived = 0
-            excluded.add("_last_summary")
-        now = datetime.now()
-        return Session(
-            key=self.key if new_key is None else new_key,
-            created_at=self.created_at if new_key is None else now,
-            updated_at=now,
-            metadata=deepcopy({k: v for k, v in self.metadata.items() if k not in excluded}),
-            messages=messages, last_consolidated=archived,
-            policy=self.policy if new_key is None else SessionPolicy(),
-            revision=self.revision if new_key is None else 0,
-            persisted=new_key is None and self.persisted,
-        )
-
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
         self.messages = []
@@ -404,7 +375,17 @@ def fork_session(
     boundary = history_prefix_boundary(source, before_user_index)
     if boundary is None:
         return None
-    return source.fork_prefix(boundary, new_key=target_key, exclude_metadata=exclude_metadata)
+    excluded = GENERATION_HISTORY_KEYS | _FORK_IDENTITY_KEYS | exclude_metadata
+    archived = source.last_archived
+    if archived > boundary:
+        archived = 0
+        excluded |= {"_last_summary"}
+    now = datetime.now()
+    return Session(
+        key=target_key, created_at=now, updated_at=now, last_consolidated=archived,
+        messages=[public_history_message(message) for message in source.messages[:boundary]],
+        metadata=deepcopy({k: v for k, v in source.metadata.items() if k not in excluded}),
+    )
 
 
 class SessionManager:

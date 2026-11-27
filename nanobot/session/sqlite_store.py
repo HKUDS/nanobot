@@ -10,6 +10,7 @@ from contextlib import contextmanager, suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeVar, cast
+from uuid import uuid4
 
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
@@ -392,12 +393,8 @@ class SqliteSessionStore:
             _encode(metadata), metadata_title(metadata), int(bump_revision), key,
         ))
 
-    def save(self, session: Session, *, message_start: int = 0) -> None:
-        """Commit history, optionally skipping a prefix verified at this revision."""
-        if not 0 <= message_start <= len(session.messages):
-            raise ValueError("invalid message suffix boundary")
-        records = [_encode(message) for message in session.messages[message_start:]]
-        provider = _encode(session.provider_state.to_private_record()) if session.provider_state else None
+    @staticmethod
+    def _message_list_summary(session: Session) -> tuple[str, str | None]:
         preview = ""
         fallback = ""
         scanned_chars = 0
@@ -417,6 +414,15 @@ class SqliteSessionStore:
         last_visible = next((m["timestamp"] for m in reversed(session.messages)
                              if m.get("timestamp") and not is_hidden_history_message(m)
                              and m.get("role") in {"user", "assistant"}), None)
+        return preview, last_visible
+
+    def save(self, session: Session, *, message_start: int = 0) -> None:
+        """Commit history, optionally skipping a prefix verified at this revision."""
+        if not 0 <= message_start <= len(session.messages):
+            raise ValueError("invalid message suffix boundary")
+        records = [_encode(message) for message in session.messages[message_start:]]
+        provider = _encode(session.provider_state.to_private_record()) if session.provider_state else None
+        preview, last_visible = self._message_list_summary(session)
         with self.transaction() as db:
             row = db.execute("SELECT revision, generation FROM sessions WHERE key=?", (session.key,)).fetchone()
             if row is None:
@@ -769,25 +775,26 @@ class SqliteSessionStore:
                 (preview, user_preview, updated_at_ms, key),
             )
 
-    def save_fork(
-        self, source: Session, target: Session, display_suffix: Callable[[], list[HistoryFact]], *,
-        replace_at: tuple[int, int, int] | None = None,
-    ) -> None:
-        """Commit the model and display branches together; keep retained rows for an in-place fork."""
+    def replace_input_suffix(self, session: Session, ordinal: int, position: int, new_input: HistoryFact) -> None:
+        """Delete only the model/display suffix and persist the journal with its displayed input."""
+        key = session.key
+        generation = uuid4().hex
+        preview, last_visible = self._message_list_summary(session)
         with self.transaction() as db:
-            start = 0
-            if replace_at is not None:
-                start, ordinal, position = replace_at
-                changed = db.execute(
-                    "UPDATE sessions SET generation=? WHERE key=? AND generation=? AND revision=?",
-                    (target.generation, target.key, source.generation, source.revision),
-                ).rowcount
-                if changed != 1:
-                    raise SessionConflictError("session history changed")
-                self._truncate_display_history(target.key, ordinal, position)
-            self.save(target, message_start=start)
-            if facts := display_suffix():
-                self.append_history(target.key, facts, expected_generation=target.generation)
+            changed = db.execute(
+                """UPDATE sessions SET generation=?, revision=revision+1, updated_at=?, provider_state=NULL,
+                          last_archived=?, preview=?, visible_updated_at=? WHERE key=? AND generation=? AND revision=?""",
+                (generation, session.updated_at.isoformat(), session.last_archived, preview, last_visible,
+                 key, session.generation, session.revision),
+            ).rowcount
+            if changed != 1:
+                raise SessionConflictError("session history changed")
+            db.execute("DELETE FROM messages WHERE session_key=? AND position>=?", (key, len(session.messages)))
+            self._write_metadata(db, key, session.metadata, bump_revision=False)
+            self._truncate_display_history(key, ordinal, position)
+            self.append_history(key, [new_input], expected_generation=generation)
+        session.generation = generation
+        session.revision += 1
 
     def fork_before_user_index(
         self, source: Session, target_key: str, before_user_index: int, *, exclude_metadata: frozenset[str],
@@ -800,18 +807,15 @@ class SqliteSessionStore:
         if title:
             target.metadata["title"] = title
 
-        def display_suffix() -> list[HistoryFact]:
-            facts = self.project_history(source.key, lambda reader: reader.fork_prefix(before_user_index))
-            if facts is None:
-                if history_projection is None:
-                    return []
-                facts = history_projection(target)
-            facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
-            return facts
-
-        self.save_fork(source, target, display_suffix)
+        self.save(target)
+        facts = self.project_history(source.key, lambda reader: reader.fork_prefix(before_user_index))
+        if facts is None:
+            if history_projection is None:
+                return target
+            facts = history_projection(target)
+        facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
+        self.append_history(target.key, facts, expected_generation=target.generation)
         return target
-
 
     def archives_imported(self) -> bool:
         with self.transaction(write=False) as db:

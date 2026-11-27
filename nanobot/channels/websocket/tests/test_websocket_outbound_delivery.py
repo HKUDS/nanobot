@@ -724,10 +724,7 @@ async def test_streams_wait_for_replacement_and_cannot_repopulate_retired_text(h
                 await sending.wait()
                 await history.sessions.state.reset(key)
                 fresh = await history.metadata(chat, {"webui_turn_id": "turn"})
-                await channel._commands.announce_webui_history_replacement(
-                    chat, {"history_generation": fresh[HISTORY_GENERATION_METADATA_KEY]},
-                    retired_turn_ids=["turn"], previous_generation=old[HISTORY_GENERATION_METADATA_KEY],
-                )
+                await channel._commands.invalidate_history(chat)
             # Adjacent old/new chunks share the stream id, so coalescing also has to respect the boundary.
             await publish("obsolete", StreamDeltaEvent(), old)
             await publish("answer", StreamDeltaEvent(), fresh)
@@ -745,12 +742,10 @@ async def test_streams_wait_for_replacement_and_cannot_repopulate_retired_text(h
                 await asyncio.sleep(0)
         frames = [json.loads(connection.sent.get_nowait()) for _ in range(connection.sent.qsize())]
         assert [frame["event"] for frame in frames] == [
-            "history_replaced", "session_updated", "delta", "reasoning_delta", "reasoning_end", "stream_end", "message",
+            "history_invalidated", "session_updated", "delta", "reasoning_delta", "reasoning_end", "stream_end", "message",
         ]
         assert [frame.get("text") for frame in frames[2:]] == ["answer", "thought", None, "answer!", "reply"]
-        assert all(frame["history_generation"] == fresh[HISTORY_GENERATION_METADATA_KEY] for frame in frames[2:])
-        assert frames[0]["previous_generation"] == old[HISTORY_GENERATION_METADATA_KEY]
-        assert frames[0]["thread"]["history_generation"] == fresh[HISTORY_GENERATION_METADATA_KEY]
+        assert frames[0] == {"event": "history_invalidated", "chat_id": chat}
         assert [row["text"] for row in history.read(key)] == ["thought", "answer!", "reply"]
     finally:
         dispatcher.cancel()

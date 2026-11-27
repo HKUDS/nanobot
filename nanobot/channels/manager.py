@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
-    from nanobot.webui.gateway_services import ForkInPlace
+    from nanobot.webui.gateway_services import EnqueueIfIdle
 
 
 def _default_webui_dist() -> Path | None:
@@ -125,7 +125,7 @@ class ChannelManager:
         ) = None,
         webui_subagent_manager: SubagentManager | None = None,
         webui_discard_session: Callable[[str], Awaitable[None]] | None = None,
-        webui_fork_in_place: ForkInPlace | None = None,
+        enqueue_if_idle: EnqueueIfIdle | None = None,
         config_path: Path | None = None,
     ):
         if config_path is None:
@@ -152,7 +152,7 @@ class ChannelManager:
         self._webui_recovery_action = webui_recovery_action
         self._webui_subagent_manager = webui_subagent_manager
         self._webui_discard_session = webui_discard_session
-        self._webui_fork_in_place = webui_fork_in_place
+        self._enqueue_if_idle = enqueue_if_idle
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
         self._channel_runtime_specs: dict[str, tuple[str, str]] = {}
@@ -240,7 +240,7 @@ class ChannelManager:
                 recovery_action=self._webui_recovery_action,
                 subagent_manager=self._webui_subagent_manager,
                 discard_session=self._webui_discard_session,
-                fork_in_place=self._webui_fork_in_place,
+                enqueue_if_idle=self._enqueue_if_idle,
                 logger=logger,
             )
             kwargs["gateway"] = gateway

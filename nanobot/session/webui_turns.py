@@ -770,7 +770,6 @@ class WebuiTurnCoordinator:
         title_llm = event.runtime
         if (
             ctx.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
-            or ctx.metadata.get("_webui_history_replacement") is True
             or ctx.session_key != webui_session_key(ctx.chat_id)
             or not isinstance(title_llm, LLMRuntime)
         ):

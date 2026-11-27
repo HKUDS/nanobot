@@ -79,9 +79,6 @@ function makeClient() {
     },
     onRunStatus: lifecycle.onRunStatus.bind(lifecycle),
     onRunCompletion: lifecycle.onRunCompletion.bind(lifecycle),
-    historyReadEpoch: lifecycle.historyReadEpoch.bind(lifecycle),
-    isRetiredHistorySnapshot: lifecycle.isRetiredHistorySnapshot.bind(lifecycle),
-    adoptHistorySnapshot: lifecycle.adoptHistorySnapshot.bind(lifecycle),
     onRuntimeModelUpdate: (
       handler: (modelName: string | null, modelPreset?: string | null) => void,
     ) => {
@@ -615,8 +612,8 @@ describe("ThreadShell", () => {
     fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true });
 
     await waitFor(() => expect(editor).not.toBeInTheDocument());
-    expect(client.requestMutation).toHaveBeenCalledWith("chat.fork", {
-      mode: "replace", chat_id, turn_id: expect.any(String), text: "Edited question", source_id: "user:first",
+    expect(client.requestMutation).toHaveBeenCalledWith("chat.edit", {
+      chat_id, turn_id: expect.any(String), text: "Edited question", source_id: "user:first",
     });
     expect(screen.getByRole("textbox")).toHaveValue("Unsent follow-up");
   });
@@ -639,8 +636,8 @@ describe("ThreadShell", () => {
     const editor = screen.getByRole("textbox", { name: "Edit message" });
     fireEvent.change(editor, { target: { value: text } });
     fireEvent.click(screen.getByRole("button", { name: "Resend" }));
-    expect(requestMutation).toHaveBeenCalledWith("chat.fork", {
-      mode: "replace", chat_id, turn_id: expect.any(String), text, source_id: "user:first",
+    expect(requestMutation).toHaveBeenCalledWith("chat.edit", {
+      chat_id, turn_id: expect.any(String), text, source_id: "user:first",
     });
     if (available) {
       await waitFor(() => expect(editor).not.toBeInTheDocument());
@@ -1130,8 +1127,8 @@ describe("ThreadShell", () => {
       { event: "message", chat_id: "trace-replaced", projection_id: "trace-shared", kind: "progress", text: `exec({"command":"echo ${text}"})` },
     ] }) as Response;
     const readDetail = vi.fn().mockReturnValueOnce(oldDetail).mockResolvedValue(detail("current details"));
-    const oldThread = { ...traceDetailThread(true, "old answer"), history_generation: "before" };
-    const newThread = { ...traceDetailThread(true, "replacement answer"), history_generation: "after" };
+    const oldThread = traceDetailThread(true, "old answer");
+    const newThread = traceDetailThread(true, "replacement answer");
     let thread = oldThread;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       if (String(input).includes("/trace-detail?")) return readDetail();
@@ -1144,7 +1141,7 @@ describe("ThreadShell", () => {
     fireEvent.click(within(await findSideActions("old answer")).getByRole("button", { name: /Worked/ }));
     await waitFor(() => expect(readDetail).toHaveBeenCalled());
     thread = newThread;
-    act(() => receive({ event: "history_replaced", chat_id: "trace-replaced", previous_generation: "before", thread }));
+    act(() => receive({ event: "history_invalidated", chat_id: "trace-replaced" }));
     await screen.findByText("replacement answer");
     await act(async () => resolveOld(detail("obsolete suffix")));
     // The old detail completed after the replacement; even reusing its ref cannot revive it.

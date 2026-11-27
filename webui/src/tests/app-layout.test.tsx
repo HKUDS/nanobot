@@ -272,10 +272,6 @@ vi.mock("@/lib/bootstrap", () => ({
 vi.mock("@/lib/nanobot-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/nanobot-client")>();
   class MockClient {
-    private history = new actual.NanobotClient({ url: "ws://test", reconnect: false });
-    historyReadEpoch = this.history.historyReadEpoch.bind(this.history);
-    adoptHistorySnapshot = this.history.adoptHistorySnapshot.bind(this.history);
-    isRetiredHistorySnapshot = this.history.isRetiredHistorySnapshot.bind(this.history);
     constructor(options: NanobotClientOptions) { clientOptions = options; }
     onTaskNotice = () => () => {};
     status = "idle" as const;

@@ -15,8 +15,8 @@ import type {
   SidebarStatePayload,
   GoalStateWsPayload,
   WorkspaceScopePayload,
-  WebuiThreadPersistedPayload,
 } from "./types";
+import { webuiThreadCache } from "./webui-thread-cache";
 import { createHostWebSocket } from "./runtime";
 import { ClientRunLedger } from "./client-run-ledger";
 import type { CanonicalRunSnapshot, RunEffect, RunObservation, RunState } from "./client-run-ledger";
@@ -96,16 +96,6 @@ export interface TaskNotice {
 type StatusHandler = (status: ConnectionStatus) => void;
 type RunCompletionHandler = (chatId: string) => void;
 type RuntimeModelHandler = (modelName: string | null, modelPreset?: string | null) => void;
-interface ChatHistory {
-  generation?: string;
-  version?: WebuiThreadPersistedPayload["history_version"];
-  epoch: number;
-  snapshotTurns: Set<string>;
-  retired: Set<string>;
-  retiredLifetimes: Set<string>;
-  deferred: Map<string, { lifetime: string; turnIds: string[] }>;
-}
-
 type SessionUpdateScope = "metadata" | "thread" | string;
 type SessionUpdateHandler = (
   chatId: string,
@@ -275,7 +265,6 @@ export class NanobotClient {
   private transcriptHandlers = new Map<string, { handler: EventHandler }>();
   /** Inbound frames received while the transcript owner is absent, regardless of observers. */
   private pendingInboundByChat = new Map<string, InboundEvent[]>();
-  private historyGenerations = new Map<string, ChatHistory>();
   private static readonly PENDING_INBOUND_MAX = 2000;
   private static readonly PENDING_TEMP_INBOUND_MAX = 20_000;
   private knownChats = new Set<string>();
@@ -417,114 +406,6 @@ export class NanobotClient {
 
   isRunCompleted(chatId: string, turnId: string): boolean {
     return this.runs.isCompleted({ chatId, turnId });
-  }
-
-  historyReadEpoch(chatId: string): number {
-    return this.historyGenerations.get(chatId)?.epoch ?? 0;
-  }
-
-  private historyFor(chatId: string): ChatHistory {
-    let history = this.historyGenerations.get(chatId);
-    if (!history) {
-      history = { epoch: 0, snapshotTurns: new Set(), retired: new Set(), retiredLifetimes: new Set(), deferred: new Map() };
-      this.historyGenerations.set(chatId, history);
-    }
-    return history;
-  }
-
-  /** Only a validated latest read may move between incomparable session clocks. */
-  adoptHistorySnapshot(chatId: string, body: WebuiThreadPersistedPayload, readEpoch: number, cachedGeneration?: string): boolean {
-    const generation = body.history_generation;
-    if (!generation) return false;
-    const history = this.historyFor(chatId);
-    const clock = body.history_version;
-    const foreign = clock && history.version && clock.created_at !== history.version.created_at;
-    if (foreign && (readEpoch !== history.epoch || history.retiredLifetimes.has(clock.created_at))) return false;
-    if (history.retired.has(generation) || (!foreign && this.isRetiredHistorySnapshot(chatId, body))) return false;
-    if (foreign && history.version) history.retiredLifetimes.add(history.version.created_at);
-    const retiredTurns = history.deferred.get(generation)?.turnIds ?? [];
-    const earlierTurns: string[] = [];
-    for (const [candidate, notice] of history.deferred) {
-      if (candidate === generation) continue;
-      history.retired.add(candidate);
-      if (notice.lifetime === clock?.created_at) earlierTurns.push(...notice.turnIds);
-      else history.retiredLifetimes.add(notice.lifetime);
-    }
-    history.deferred.clear();
-    const missedBoundary = !history.generation && cachedGeneration !== generation ? cachedGeneration : undefined;
-    this.installHistory(chatId, history, body, retiredTurns, missedBoundary, earlierTurns);
-    return true;
-  }
-
-  private receiveHistoryNotice(notice: Extract<InboundEvent, { event: "history_replaced" }>): void {
-    const { chat_id: chatId, thread: body, previous_generation: previous, retired_turn_ids: turnIds = [] } = notice;
-    const generation = body.history_generation;
-    if (!generation) return;
-    const history = this.historyFor(chatId);
-    if (previous && previous !== history.generation) history.retired.add(previous);
-    const lifetime = body.history_version?.created_at;
-    if (history.version && lifetime !== undefined && lifetime !== history.version.created_at) {
-      if (history.retiredLifetimes.has(lifetime)) history.retired.add(generation);
-      else {
-        // Never fence a reused turn ID in the current lifetime. Let the thread
-        // owner validate the notice before admitting its generation or turn IDs.
-        history.deferred.set(generation, { lifetime, turnIds });
-        this.emitSessionUpdate(chatId, "thread");
-      }
-      return;
-    }
-    if (this.isRetiredHistorySnapshot(chatId, body)) {
-      history.retired.add(generation);
-      this.fenceEarlierHistoryTurns(chatId, history, turnIds);
-      return;
-    }
-    this.installHistory(chatId, history, body, turnIds, previous);
-  }
-
-  private installHistory(chatId: string, history: ChatHistory, body: WebuiThreadPersistedPayload,
-    retiredTurnIds: string[], previousGeneration?: string, earlierTurnIds: string[] = []): void {
-    const generation = body.history_generation;
-    const previous = history.generation;
-    const replaced = previous !== generation && !!(previous || previousGeneration);
-    if (previous !== generation || (body.history_version && (!history.version || body.history_version.revision >= history.version.revision))) {
-      history.version = body.history_version;
-      history.snapshotTurns.clear();
-      if (body.active_turn_id) history.snapshotTurns.add(body.active_turn_id);
-      for (const event of body.events) {
-        if (event.event === "user_message" && event.turn_id) history.snapshotTurns.add(event.turn_id);
-      }
-    }
-    history.generation = generation ?? undefined;
-    history.epoch++;
-    if (replaced && previous) history.retired.add(previous);
-    if (previousGeneration) history.retired.add(previousGeneration);
-    if (replaced) {
-      this.pendingInboundByChat.delete(chatId);
-      this.goalStateByChatId.delete(chatId);
-      this.applyRunEffects(this.runs.transition({ kind: "forget", chatId }));
-    }
-    // WS can add tombstones after HTTP installed this generation and a new run started.
-    if (retiredTurnIds.length) this.fenceCanonicalCompletedTurns(chatId, retiredTurnIds);
-    this.fenceEarlierHistoryTurns(chatId, history, earlierTurnIds);
-    if (replaced) this.dispatch(chatId, { event: "history_replaced", chat_id: chatId, thread: body });
-  }
-
-  private fenceEarlierHistoryTurns(chatId: string, history: ChatHistory, turnIds: string[]): void {
-    if (!turnIds.length) return;
-    // Generation IDs are unique; a discarded input's turn ID can be accepted
-    // again. Older generations cannot fence an input in the installed page.
-    const discarded = turnIds.filter(id => !history.snapshotTurns.has(id));
-    if (discarded.length) this.fenceCanonicalCompletedTurns(chatId, discarded);
-  }
-
-  isRetiredHistorySnapshot(chatId: string, body: Pick<WebuiThreadPersistedPayload, "history_generation" | "history_version">): boolean {
-    const generation = body.history_generation;
-    if (!generation) return false;
-    const current = this.historyGenerations.get(chatId);
-    if (current?.retired.has(generation)) return true;
-    const clock = body.history_version;
-    return !!(current?.version && clock && (current.version.created_at !== clock.created_at
-      || (current.generation !== generation && clock.revision < current.version.revision)));
   }
 
   /** End the local optimistic run without confirming gateway cancellation. */
@@ -1113,14 +994,15 @@ export class NanobotClient {
       return;
     }
 
-    if (parsed.event === "history_replaced") {
-      this.receiveHistoryNotice(parsed);
+    if (parsed.event === "history_invalidated") {
+      const chatId = parsed.chat_id;
+      webuiThreadCache.delete(`websocket:${chatId}`);
+      this.pendingInboundByChat.delete(chatId);
+      this.goalStateByChatId.delete(chatId);
+      this.applyRunEffects(this.runs.transition({ kind: "forget", chatId }));
+      this.dispatch(chatId, parsed);
+      this.emitSessionUpdate(chatId, "history_invalidated");
       return;
-    }
-    if ("history_generation" in parsed && typeof parsed.history_generation === "string"
-      && "chat_id" in parsed && parsed.chat_id) {
-      const history = this.historyGenerations.get(parsed.chat_id);
-      if (history?.retired.has(parsed.history_generation) || history?.deferred.has(parsed.history_generation)) return;
     }
     if (parsed.event === "error" && parsed.request_id !== undefined) {
       const pending = this.pendingChatRequest;

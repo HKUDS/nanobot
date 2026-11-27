@@ -219,10 +219,6 @@ class AgentLoop:
     """
 
     @property
-    def session_inputs(self) -> SessionInboxes:
-        return self._pending_queues
-
-    @property
     def tool_names(self) -> list[str]:
         return self.tools.tool_names
 
@@ -371,8 +367,7 @@ class AgentLoop:
         # It remains the only admission path until that worker atomically
         # observes the queue empty and removes it.
         self._pending_queues = SessionInboxes(
-            bus.admission, self.sessions.state, self._get_session_lock, self._start_session_worker,
-            self._prepare_followup, self._invalidate_session,
+            bus.admission, self._get_session_lock, self._start_session_worker, self._prepare_followup,
         )
         self._preserve_inflight_turns_on_shutdown = False
         self._cron_turns = CronTurnCoordinator(enqueue=self._enqueue_session_message)
@@ -921,10 +916,6 @@ class AgentLoop:
                 finally:
                     self.discard_session_file_state(key)
 
-    def _invalidate_session(self, key: str) -> None:
-        self.auto_compact.discard_summary(key)
-        self.discard_session_file_state(key)
-
     def discard_session_file_state(self, key: str) -> None:
         """Forget ephemeral file-read state for a reset or removed session."""
         self._file_state_store.discard(key)
@@ -1431,6 +1422,23 @@ class AgentLoop:
             },
         )
         return pending_msg
+
+    async def enqueue_if_idle(self, message: InboundMessage, prepare: Callable[[], Awaitable[bool]]) -> bool:
+        """If idle, run prepare and enqueue the input iff requested. Return False only if busy."""
+        key = message.session_key
+
+        async def prepare_input() -> bool:
+            previous = self.sessions.state.peek_identity(key)
+            if not await prepare():
+                return False
+            if message.session_generation is not None and (
+                previous is None or previous.generation != message.session_generation
+            ):
+                self.auto_compact.discard_summary(key)
+                self.discard_session_file_state(key)
+            return True
+
+        return await self._pending_queues.enqueue_if_idle(message, prepare_input)
 
     async def _enqueue_session_message(self, msg: InboundMessage) -> None:
         if self.subagents.accepts_result(msg, msg.session_key):

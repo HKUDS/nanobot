@@ -100,8 +100,8 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
     }
     submitting.current = current.turnId;
     setDraft({ ...current, submitting: true, error: null });
-    void client.requestMutation<{ accepted: boolean }>("chat.fork", {
-      mode: "replace", chat_id: chatId, text: current.text, turn_id: current.turnId,
+    void client.requestMutation<{ accepted: boolean }>("chat.edit", {
+      chat_id: chatId, text: current.text, turn_id: current.turnId,
       source_id: editSourceId(current.message),
     }).then(() => {
       if (submitting.current === current.turnId) setDraft((value) => value?.turnId === current.turnId ? null : value);

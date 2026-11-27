@@ -10,8 +10,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketConfig
@@ -21,12 +21,13 @@ from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.recovery import pending_followups
-from nanobot.session.state import ForkError
+from nanobot.session.state import EditError
 from nanobot.session.webui_turns import clear_websocket_turns
 from nanobot.webui import transcript
-from nanobot.webui.forking import create_webui_chat_fork, fork_webui_chat_in_place
+from nanobot.webui.forking import create_webui_chat_fork
 from nanobot.webui.gateway_services import build_gateway_services
 from nanobot.webui.history import fact_from_record
+from nanobot.webui.message_edit import edit_webui_message
 
 KEY = "websocket:edit-chat"
 
@@ -48,15 +49,14 @@ async def editing(tmp_path):
     manager.save(session)
     manager.append_history(KEY, facts)
 
-    async def submit(message, anchor, projection, accepted):
-        updated = await manager.state.fork_in_place(message.session_key, anchor, message, projection)
-        if updated is not None:
-            await accepted(updated)
+    async def submit(message, prepare):
+        await prepare()
+        return True
 
-    gateway = SimpleNamespace(session_manager=manager, fork_in_place=submit,
+    gateway = SimpleNamespace(session_manager=manager, enqueue_if_idle=submit,
                               transcripts=transcript.WebUITranscriptRecorder(manager),
                               ingress=SimpleNamespace(validate_text=lambda _: None))
-    yield manager, SimpleNamespace(gateway=gateway, announce_webui_history_replacement=AsyncMock())
+    yield manager, SimpleNamespace(gateway=gateway, invalidate_history=AsyncMock())
     clear_websocket_turns("edit-chat")
     await manager.state.aclose()
 
@@ -68,27 +68,26 @@ def page(manager, **paging):
 
 
 def payload(source_id, text="replacement"):
-    return {"mode": "replace", "chat_id": "edit-chat", "text": text, "turn_id": "new-edit", "source_id": source_id}
+    return {"chat_id": "edit-chat", "text": text, "turn_id": "new-edit", "source_id": source_id}
 
 
 @pytest.mark.parametrize("index", [0, 2, 27], ids=["first", "within-turn", "long-prefix"])
 async def test_edit_keeps_the_same_topic_and_prefix_in_both_histories(editing, index):
     manager, host = editing
     before = await manager.state.read(KEY)
-    await fork_webui_chat_in_place(host, payload(f"user:old-{index}"))
+    await edit_webui_message(host, payload(f"user:old-{index}"))
     after = await manager.state.read(KEY)
     assert len(await manager.state.list_sessions()) == 1
     assert after.key == before.key and after.created_at == before.created_at
     snapshot = page(manager)
     assert snapshot["history_version"] == {"created_at": before.created_at.isoformat(), "revision": after.revision}
     assert after.revision > before.revision
-    assert host.announce_webui_history_replacement.await_args.args[1]["history_version"] == snapshot["history_version"]
+    host.invalidate_history.assert_awaited_once_with("edit-chat")
     assert before.metadata.items() <= after.metadata.items()
     assert after.messages == before.messages[:index * 2]
     assert [(msg.content, msg.metadata["webui_turn_id"]) for msg in pending_followups(after)] == [("replacement", "new-edit")]
 
-    live = host.announce_webui_history_replacement.await_args.args[1]
-    assert live["events"] == page(manager, limit=40)["events"]
+    live = page(manager, limit=40)
     events = live["events"]
     cursor = live["page"]["before_cursor"]
     while cursor:
@@ -100,7 +99,21 @@ async def test_edit_keeps_the_same_topic_and_prefix_in_both_histories(editing, i
     ]
 
 
-async def test_fork_at_a_displayed_input_discards_a_later_append(editing, tmp_path, monkeypatch):
+async def test_retry_after_lost_ack_runs_the_edited_input_only_once(editing):
+    manager, host = editing
+    request = payload("user:old-1")
+    expected = {"accepted": True, "turn_id": request["turn_id"]}
+    assert await edit_webui_message(host, request) == expected
+    accepted = await manager.state.read(KEY)
+    assert await edit_webui_message(host, request) == expected
+    with pytest.raises(EditError, match="edit_request_conflict"):
+        await edit_webui_message(host, {**request, "text": "different"})
+    assert (await manager.state.read(KEY)).revision == accepted.revision
+    assert [msg.content for msg in pending_followups(accepted)] == [request["text"]]
+    host.invalidate_history.assert_awaited_once_with("edit-chat")
+
+
+async def test_edit_at_a_displayed_input_discards_a_later_append(editing, tmp_path, monkeypatch):
     import json
     from concurrent.futures import ThreadPoolExecutor
 
@@ -148,7 +161,7 @@ async def test_fork_at_a_displayed_input_discards_a_later_append(editing, tmp_pa
     current = json.loads(changed.body)
     assert current["events"][-1]["text"] == "later question"
     user = next(event for event in old["events"] if event["event"] == "user_message")
-    await fork_webui_chat_in_place(host, payload(f"user:{user['turn_id']}"))
+    await edit_webui_message(host, payload(f"user:{user['turn_id']}"))
     assert "later question" not in [m["content"] for m in manager.read_session_snapshot(KEY).messages]
     assert [e["text"] for e in page(manager)["events"] if e["event"] == "user_message"][-1] == "replacement"
 
@@ -168,7 +181,7 @@ async def test_edit_pre_id_history_uses_the_selected_row_not_its_text(editing):
     latest = page(manager, limit=40)
     first, second = [e for e in latest["events"] if e.get("text") == "same question"]
     assert first["projection_id"] != second["projection_id"]
-    await fork_webui_chat_in_place(host, payload(second["projection_id"]))
+    await edit_webui_message(host, payload(second["projection_id"]))
     after = await manager.state.read(KEY)
     assert [m["content"] for m in after.messages[-2:]] == ["same question", "first answer"]
 
@@ -182,7 +195,7 @@ async def test_display_write_failure_leaves_both_histories_intact_after_reopen(e
         db.execute("""CREATE TRIGGER reject_replacement BEFORE INSERT ON history_entries
                       BEGIN SELECT RAISE(ABORT, 'display write failed'); END""")
     with pytest.raises(sqlite3.IntegrityError, match="display write failed"):
-        await fork_webui_chat_in_place(host, payload(source))
+        await edit_webui_message(host, payload(source))
     reopened = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
     after = reopened.read_session_snapshot(KEY)
     assert (after.generation, after.messages) == (before.generation, before.messages)
@@ -199,7 +212,7 @@ async def test_discarded_summary_and_provider_continuation_cannot_survive(editin
         payload={"response_id": "discarded-suffix"},
     )
     await manager.state.prepare_input(source)
-    await fork_webui_chat_in_place(host, payload("user:old-1"))
+    await edit_webui_message(host, payload("user:old-1"))
     value = await manager.state.read(KEY)
     assert value.last_archived == 0
     assert "_last_summary" not in value.metadata
@@ -218,8 +231,8 @@ async def test_unsupported_metadata_is_explicitly_rejected(editing, extra, code)
     source = await manager.state.get(KEY)
     source.messages[2].update(extra)
     await manager.state.prepare_input(source)
-    with pytest.raises(ForkError, match=code):
-        await fork_webui_chat_in_place(host, payload("user:old-1"))
+    with pytest.raises(EditError, match=code):
+        await edit_webui_message(host, payload("user:old-1"))
 
 
 @pytest.mark.parametrize("text", ["", "/new", "! rm anything", "use @editable", "> [!QUOTE]\n> quote\n\nreply"])
@@ -227,8 +240,8 @@ async def test_edit_never_dispatches_control_or_context_syntax(editing, text):
     manager, host = editing
     prepared = "user:old-1"
     before = await manager.state.read(KEY)
-    with pytest.raises(ForkError):
-        await fork_webui_chat_in_place(host, payload(prepared, text))
+    with pytest.raises(EditError):
+        await edit_webui_message(host, payload(prepared, text))
     assert (await manager.state.read(KEY)).messages == before.messages
 
 
@@ -241,8 +254,8 @@ async def test_mismatched_display_and_model_input_cannot_truncate_history(editin
     before = await manager.state.read(KEY)
     rows = page(manager)["events"]
     prepared = "user:old-1"
-    with pytest.raises(ForkError, match="edit_source_changed"):
-        await fork_webui_chat_in_place(host, payload(prepared))
+    with pytest.raises(EditError, match="edit_source_changed"):
+        await edit_webui_message(host, payload(prepared))
     assert (await manager.state.read(KEY)).messages == before.messages
     assert page(manager)["events"] == rows
 
@@ -255,9 +268,9 @@ async def media_turn(tmp_path, monkeypatch):
     manager = SessionManager(workspace, sessions_root=tmp_path / "sessions")
     provider = MagicMock(generation=GenerationSettings(), aclose=AsyncMock())
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="answer"))
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=workspace, model="test-model", session_manager=manager)
+    loop = make_agent_loop(bus=MessageBus(), provider=provider, workspace=workspace, model="test-model", session_manager=manager)
     gateway = build_gateway_services(
-        config=WebSocketConfig(), bus=loop.bus, session_manager=manager, fork_in_place=loop.session_inputs.fork_in_place,
+        config=WebSocketConfig(), bus=loop.bus, session_manager=manager, enqueue_if_idle=loop.enqueue_if_idle,
         static_dist_path=None, workspace_path=workspace, config_path=tmp_path / "config.json",
         default_restrict_to_workspace=True, runtime_model_name=None,
         runtime_surface="browser", runtime_capabilities_overrides=None,
@@ -285,7 +298,7 @@ async def media_turn(tmp_path, monkeypatch):
     await loop._process_message(InboundMessage(
         channel="websocket", chat_id="edit-chat", sender_id="browser", content="", media=paths, metadata=metadata,
     ))
-    host = SimpleNamespace(gateway=gateway, announce_webui_history_replacement=AsyncMock())
+    host = SimpleNamespace(gateway=gateway, invalidate_history=AsyncMock())
     try:
         yield loop, host, paths
     finally:
@@ -298,7 +311,7 @@ async def test_edit_retains_original_files_images_and_local_origin(media_turn):
     document, borrowed, image = paths
     source = "user:attached"
     for turn_id, caption in (("captioned", "[Attachment: typed by the user]"), ("uncaptioned", "")):
-        await fork_webui_chat_in_place(host, {
+        await edit_webui_message(host, {
             **payload(source, caption), "turn_id": turn_id,
             "media": [{"path": "/untrusted", "url": "/api/media/preview"}], "local_media_paths": ["/untrusted"],
         })
@@ -307,7 +320,11 @@ async def test_edit_retains_original_files_images_and_local_origin(media_turn):
         assert row["media"] == [image] and row[INBOUND_META_LOCAL_MEDIA] == [borrowed]
         assert row["content"][0]["type"] == "image_attachment"
         assert row["content"][1]["text"] == (caption + "\n\n" if caption else "") + f"[Attachment: {document}]\n[Attachment: {borrowed}]"
-        event = host.announce_webui_history_replacement.await_args.args[1]["events"][-1]
+        event = loop.sessions.project_history(KEY, lambda h: transcript.build_webui_thread_response(
+            KEY, history=h, augment_user_media=lambda media, local: host.gateway.media.augment_transcript_user_media(
+                media, local, session_key=KEY,
+            ),
+        ))["events"][-1]
         assert event["text"] == caption
         assert event["media_urls"] == host.gateway.media.augment_transcript_user_media(paths, [borrowed], session_key=KEY)
         # This backend-only fixture has no WebSocket turn_end dispatcher.
@@ -327,8 +344,8 @@ async def test_unavailable_attachment_preserves_both_histories(media_turn, loss)
         await manager.state.prepare_input(session)
     before = await manager.state.read(KEY)
     events = page(manager)["events"]
-    with pytest.raises(ForkError, match="edit_attachments_unavailable"):
-        await fork_webui_chat_in_place(host, payload("user:attached"))
+    with pytest.raises(EditError, match="edit_attachments_unavailable"):
+        await edit_webui_message(host, payload("user:attached"))
     after = await manager.state.read(KEY)
     assert (after.generation, after.messages) == (before.generation, before.messages)
     assert page(manager)["events"] == events
@@ -341,6 +358,6 @@ async def test_fork_without_original_display_facts_does_not_drop_a_document(edit
     await manager.state.prepare_input(model_only)
     chat_id, key = await create_webui_chat_fork(manager, source_chat_id="without-display", before_user_index=1)
     before = await manager.state.read(key)
-    with pytest.raises(ForkError, match="edit_attachments_unavailable"):
-        await fork_webui_chat_in_place(host, {**payload("user:attached"), "chat_id": chat_id})
+    with pytest.raises(EditError, match="edit_attachments_unavailable"):
+        await edit_webui_message(host, {**payload("user:attached"), "chat_id": chat_id})
     assert (await manager.state.read(key)).generation == before.generation

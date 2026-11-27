@@ -38,7 +38,7 @@ from nanobot.security.workspace_access import (
     WorkspaceScopeError,
 )
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
-from nanobot.session.state import ForkError
+from nanobot.session.state import EditError
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -57,12 +57,10 @@ from nanobot.webui.file_preview import (
     file_preview_payload,
     file_reference_payload,
 )
-from nanobot.webui.forking import (
-    fork_webui_chat_in_place,
-    handle_webui_fork_chat,
-)
+from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
+from nanobot.webui.message_edit import edit_webui_message
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_RESTART_CONTROL_METADATA_KEY,
@@ -218,15 +216,10 @@ class WebUICommandRouter:
         )
         await self._outbound.hydrate(fork_id)
 
-    async def announce_webui_history_replacement(
-        self, chat_id: str, body: dict[str, Any], *, retired_turn_ids: list[str], previous_generation: str,
-    ) -> None:
+    async def invalidate_history(self, chat_id: str) -> None:
         self._outbound.discard(chat_id)
         for connection in self._transport.webui_subscribers(chat_id):
-            await self._transport.webui_send_event(
-                connection, "history_replaced", chat_id=chat_id,
-                thread=body, retired_turn_ids=retired_turn_ids, previous_generation=previous_generation,
-            )
+            await self._transport.webui_send_event(connection, "history_invalidated", chat_id=chat_id)
         await self._outbound.session_updated(chat_id, scope="thread")
 
     async def discard_owned_chat(
@@ -1256,15 +1249,15 @@ class WebUICommandRouter:
         try:
             lock = self.request_locks.setdefault(connection, asyncio.Lock())
             async with lock:
-                if action == "chat.fork":
+                if action == "chat.edit":
                     try:
                         chat_id = payload.get("chat_id")
                         if not is_valid_webui_chat_id(chat_id):
-                            raise ForkError("edit_invalid_request")
+                            raise EditError("edit_invalid_request")
                         with self._http_router.bus.admission.activity():
                             async with self._message_lock(chat_id), self._outbound.history_lock(chat_id):
-                                result = await fork_webui_chat_in_place(self, payload)
-                    except ForkError as exc:
+                                result = await edit_webui_message(self, payload)
+                    except EditError as exc:
                         return WebUIRequestResult(status=409, message=exc.code)
                     except RuntimeMaintenanceError:
                         return WebUIRequestResult(

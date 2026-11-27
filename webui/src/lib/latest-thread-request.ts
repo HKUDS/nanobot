@@ -7,7 +7,6 @@ interface LatestThreadRequest {
   cached: WebuiThreadPersistedPayload | undefined;
   controller: AbortController;
   promise: Promise<WebuiThreadPersistedPayload | null>;
-  historyEpoch: number;
   consumers: number;
   settled: boolean;
   shareable: boolean;
@@ -31,16 +30,13 @@ export function fetchLatestWebuiThread(
   const requests = requestsByClient.get(client) ?? new Map<string, LatestThreadRequest>();
   requestsByClient.set(client, requests);
   const requestKey = JSON.stringify([token, key]);
-  const chatId = key.startsWith("websocket:") ? key.slice("websocket:".length) : null;
-  const seed = webuiThreadCache.get(key);
-  const cached = chatId && seed && client.isRetiredHistorySnapshot(chatId, seed) ? undefined : seed;
+  const cached = webuiThreadCache.get(key);
   let request = requests.get(requestKey);
   if (!request || !request.shareable || request.controller.signal.aborted || request.cached !== cached) {
     const controller = new AbortController();
     request = {
       cached,
       controller,
-      historyEpoch: chatId ? client.historyReadEpoch(chatId) : 0,
       consumers: 0,
       settled: false,
       shareable: client.status === "open",
@@ -105,12 +101,6 @@ export function fetchLatestWebuiThread(
     void current.promise.then((body) => {
       if (!active) return;
       release();
-      if (chatId && (body?.history_generation
-        ? !client.adoptHistorySnapshot(chatId, body, current.historyEpoch, cached?.history_generation ?? undefined)
-        : !body && client.historyReadEpoch(chatId) !== current.historyEpoch)) {
-        resolve(fetchLatestWebuiThread(client, token, key, signal));
-        return;
-      }
       resolve(body);
     }, (error: unknown) => {
       if (!active) return;

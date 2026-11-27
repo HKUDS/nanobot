@@ -307,17 +307,6 @@ class HistoryReader:
         ):
             yield ordinal, position, HistoryFact.decode(record)
 
-    def retired_turn_ids(self, ordinal: int, position: int) -> list[str]:
-        """Fence the discarded turns without loading their message bodies."""
-        rows = self._db.execute(
-            """SELECT json_extract(record, '$.turn_id') FROM history_entries
-               WHERE session_key=? AND (turn_ordinal, position)>=(?, ?)
-               AND kind IN (?, ?, ?, ?, ?) ORDER BY turn_ordinal, position""",
-            (self.key, ordinal, position, HistoryKind.INPUT, HistoryKind.ANSWER,
-             HistoryKind.ANSWER_SEGMENT, HistoryKind.ANSWER_FRAGMENT, HistoryKind.COMPLETION),
-        )
-        return list(dict.fromkeys(turn_id for (turn_id,) in rows if turn_id is not None))[-256:]
-
     def navigation(self) -> Iterator[tuple[int, int, HistoryFact]]:
         """Read input/answer records only, never file diffs or tool result bodies."""
         kinds = (HistoryKind.INPUT, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT,

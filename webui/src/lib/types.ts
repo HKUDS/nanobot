@@ -1562,14 +1562,13 @@ export type ConnectionStatus =
   | "error";
 
 interface InboundTurnMetadata {
-  history_generation?: string;
   turn_id?: string;
   turn_phase?: UITurnPhase;
   turn_seq?: number;
 }
 
 export type InboundEvent =
-  | { event: "history_replaced"; chat_id: string; thread: WebuiThreadPersistedPayload; retired_turn_ids?: string[]; previous_generation?: string }
+  | { event: "history_invalidated"; chat_id: string }
   | { event: "subagent_task"; chat_id: string; task: SubagentTaskSnapshot }
   | { event: "ready"; chat_id: string; client_id: string; upload?: unknown }
   | {
@@ -1864,10 +1863,6 @@ export interface PromptIndex {
 }
 
 export interface WebuiThreadPersistedPayload {
-  /** Owner lifecycle fence; changes only when canonical history is replaced. */
-  history_generation?: string | null;
-  /** SQLite session revision is ordered within the lifetime of the row. */
-  history_version?: { created_at: string; revision: number };
   schemaVersion: number;
   sessionKey?: string;
   savedAt?: string;
