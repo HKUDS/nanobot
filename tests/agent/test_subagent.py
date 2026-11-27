@@ -25,6 +25,7 @@ from nanobot.security.workspace_access import (
     build_workspace_scope,
     reset_workspace_scope,
 )
+from nanobot.session.manager import SessionPolicy
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -128,6 +129,31 @@ async def test_subagent_respects_disabled_cli_apps_in_model_tools(tmp_path, proj
     tool_names = {definition["function"]["name"] for definition in definitions}
     assert "read_file" in tool_names
     assert "run_cli_app" not in tool_names
+
+
+async def test_subagent_discovery_keeps_parent_tool_restrictions(tmp_path):
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[
+            ToolCallRequest(id="find", name="tool_search", arguments={"query": "web_fetch"}),
+        ]),
+        LLMResponse(content="done"),
+    ])
+    manager = SubagentManager(
+        workspace=tmp_path, bus=MessageBus(), max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator), tools_config=ToolsConfig(schema_token_budget=1),
+    )
+    await manager.run_inline(
+        task="Find the web fetch tool", session_key="test:restricted", runtime=_runtime(provider),
+        session_policy=SessionPolicy(disabled_tools=frozenset({"read_file", "web_fetch"})),
+    )
+    initial, next_request = provider.chat_stream_with_retry.await_args_list
+    for request in (initial, next_request):
+        names = {t["function"]["name"] for t in request.kwargs["tools"]}
+        assert {"tool_search", "edit_file"} <= names
+        assert {"read_file", "web_fetch"}.isdisjoint(names)
+    result = next(m for m in next_request.kwargs["messages"] if m.get("tool_call_id") == "find")
+    assert "web_fetch" not in result["content"]
 
 
 def test_subagent_inherits_cli_app_runtime_settings(tmp_path):

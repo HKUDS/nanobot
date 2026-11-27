@@ -1,4 +1,4 @@
-"""In-memory BM25 search over an already filtered MCP tool catalog."""
+"""In-memory BM25 search over the tools available to an agent run."""
 
 from __future__ import annotations
 
@@ -15,11 +15,14 @@ _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 _WORD = re.compile(r"[^\W_]+")
 _K1 = 1.2
 _B = 0.75
-_NAME_BOOST = 2.2
+_NAME_WEIGHT = 2
 
 
 def _tokens(text: str) -> list[str]:
-    return _WORD.findall(_CAMEL_BOUNDARY.sub(" ", text).casefold())
+    words = _WORD.findall(_CAMEL_BOUNDARY.sub(" ", text).casefold())
+    # Index adjacent pairs within each field: a specific phrase in the description
+    # can distinguish an operation from tools with just one matching name token.
+    return words + [f"{a} {b}" for a, b in zip(words, words[1:])]
 
 
 def _parameter_text(schema: object) -> Iterator[str]:
@@ -46,24 +49,23 @@ def _parameter_text(schema: object) -> Iterator[str]:
             yield from _parameter_text(fields[key])
 
 
-class McpSearchIndex:
+class ToolSearchIndex:
     """Read-only index returning registered names, with ties ordered by name."""
 
     def __init__(self, tools: list[Tool]) -> None:
-        self._postings: dict[str, list[tuple[str, int, bool]]] = {}
+        self._postings: dict[str, list[tuple[str, int]]] = {}
         lengths: dict[str, int] = {}
         for tool in tools:
             name = tool.name
             # The transport namespace is shared by every registered MCP tool.
             name_tokens = _tokens(name.removeprefix("mcp_"))
-            name_terms = set(name_tokens)
-            counts = Counter(name_tokens)
+            counts = Counter(name_tokens * _NAME_WEIGHT)
             counts.update(_tokens(tool.description))
             for text in _parameter_text(tool.parameters):
                 counts.update(_tokens(text))
             lengths[name] = counts.total()
             for term, tf in counts.items():
-                self._postings.setdefault(term, []).append((name, tf, term in name_terms))
+                self._postings.setdefault(term, []).append((name, tf))
 
         avg_length = (sum(lengths.values()) or 1) / max(len(lengths), 1)
         self._length_norm = {
@@ -81,10 +83,8 @@ class McpSearchIndex:
                 continue
             df = len(matches)
             idf = math.log1p((len(self._length_norm) - df + 0.5) / (df + 0.5))
-            for name, tf, in_name in matches:
+            for name, tf in matches:
                 weight = tf * (_K1 + 1) / (tf + self._length_norm[name])
-                if in_name:
-                    weight += _NAME_BOOST
                 scores[name] = scores.get(name, 0.0) + idf * weight
 
         exact = query.strip()

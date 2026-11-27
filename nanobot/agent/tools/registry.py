@@ -5,10 +5,14 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ContextAware, current_request_context
-from nanobot.utils.helpers import estimate_prompt_tokens
 
 if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
+
+CORE_TOOL_NAMES = frozenset({
+    "exec", "exec_session", "list_exec_sessions",
+    "read_file", "edit_file", "apply_patch", "write_file", "tool_search",
+})
 
 _ERROR_HINT = (
     "\n\n[Consider this result in the context of the user's goal "
@@ -37,25 +41,25 @@ class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, Tool] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
-        self._mcp_definitions: list[dict[str, Any]] | None = None
+        self._searchable_tokens: int | None = None
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
-        self._cached_definitions = self._mcp_definitions = None
+        self._cached_definitions = self._searchable_tokens = None
 
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         self._tools.pop(name, None)
-        self._cached_definitions = self._mcp_definitions = None
+        self._cached_definitions = self._searchable_tokens = None
 
-    def mcp_schema_tokens(self) -> int:
-        if self._mcp_definitions is None:
-            mcp_names = {name for name, tool in self._tools.items() if tool.mcp_server is not None}
-            self._mcp_definitions = [
-                schema for schema in self.get_definitions() if self._schema_name(schema) in mcp_names
-            ] if mcp_names else []
-        return estimate_prompt_tokens([], self._mcp_definitions) if self._mcp_definitions else 0
+    def searchable_schema_tokens(self) -> int:
+        """Stable catalog-size estimate, independent of model and tokenizer warm-up."""
+        if self._searchable_tokens is None:
+            schemas = [s for s in self.get_definitions() if self._schema_name(s) not in CORE_TOOL_NAMES]
+            encoded = json.dumps(schemas, ensure_ascii=False, separators=(",", ":")).encode() if schemas else b""
+            self._searchable_tokens = (len(encoded) + 2) // 3
+        return self._searchable_tokens
 
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""

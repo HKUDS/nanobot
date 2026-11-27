@@ -1,7 +1,7 @@
 from unittest.mock import Mock
 
 from nanobot.agent.tools.base import Tool
-from nanobot.agent.tools.mcp_search_index import McpSearchIndex
+from nanobot.agent.tools.tool_search_index import ToolSearchIndex
 
 
 def _tool(name: str, description: str = "", **properties: object) -> Tool:
@@ -13,18 +13,18 @@ def _tool(name: str, description: str = "", **properties: object) -> Tool:
 
 
 def test_name_match_outranks_description_without_filling_from_mcp_prefix() -> None:
-    named = _tool("mcp_git_listHTTPHeaders")
+    named = _tool("listHTTPHeaders")
     described = _tool("mcp_docs_lookup", "HTTP headers reference")
-    index = McpSearchIndex([described, _tool("mcp_git_clone"), named])
+    index = ToolSearchIndex([described, _tool("mcp_git_clone"), named])
 
     assert index.search("mcp HTTP headers") == [named.name, described.name]
     assert index.search("unknown") == []
 
 
 def test_exact_registered_name_wins_over_equivalent_tokens() -> None:
-    snake = _tool("mcp_repo_find_issues")
-    camel = _tool("mcp_repo_findIssues")
-    index = McpSearchIndex([camel, snake])
+    snake = _tool("repo_find_issues")
+    camel = _tool("repo_findIssues")
+    index = ToolSearchIndex([camel, snake])
 
     assert index.search(snake.name, limit=1) == [snake.name]
     assert index.search(camel.name, limit=0) == []
@@ -35,7 +35,7 @@ def test_nested_parameter_names_and_descriptions_are_searchable() -> None:
         "postalCode": {"type": "string", "description": "Recipient zipcode"},
     }}
     tool = _tool("mcp_reports_run", filters={"type": "array", "items": address})
-    index = McpSearchIndex([tool, _tool("mcp_reports_list")])
+    index = ToolSearchIndex([tool, _tool("mcp_reports_list")])
 
     assert index.search("postal code") == [tool.name]
     assert index.search("zipcode") == [tool.name]
@@ -47,4 +47,13 @@ def test_rare_term_outweighs_common_server_name_and_ties_are_stable() -> None:
     expected = [ledger.name, "mcp_docs_add", "mcp_docs_get"]
 
     for catalog in ([*tools, ledger], [ledger, *reversed(tools)]):
-        assert McpSearchIndex(catalog).search("docs ledger", limit=3) == expected
+        assert ToolSearchIndex(catalog).search("docs ledger", limit=3) == expected
+
+
+def test_descriptive_phrase_can_beat_a_single_name_match() -> None:
+    checks = _tool("lookup_inspection", "Read the customs clearance date for a parcel")
+    near = _tool("parcel_customs", "Read the parcel tariff category")
+    date = _tool("date_lookup", "Look up a calendar entry")
+    index = ToolSearchIndex([near, date, checks])
+
+    assert index.search("parcel customs clearance date")[0] == checks.name

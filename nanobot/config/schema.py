@@ -454,7 +454,7 @@ class ToolsConfig(Base):
         ),
     )  # allow non-local WebUI clients to install optional packages and agent skills
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
-    mcp_schema_token_budget: int = Field(default=8192, ge=0)
+    schema_token_budget: int = Field(default=8192, ge=0)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 

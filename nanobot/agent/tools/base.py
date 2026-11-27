@@ -95,7 +95,7 @@ class Tool(ABC):
 
     @property
     def mcp_server(self) -> str | None:
-        """Source server for MCP capabilities; native tools stay directly visible."""
+        """Source server for MCP tools, used to identify available services."""
         return None
 
     @property

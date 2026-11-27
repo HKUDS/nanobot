@@ -32,6 +32,7 @@ from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.tool_search import tool_view
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -825,6 +826,10 @@ class SubagentManager:
             cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
         # Construct from the agent workspace; the bound scope below supplies the project cwd.
         tools = self._build_tools(tools_config=cfg, exec_owner_key=record.exec_owner_key)
+        for name in record.session.policy.disabled_tools:
+            tools.unregister(name)
+        if "tool_search" not in record.session.policy.disabled_tools:
+            tools = tool_view(tools, self.tools_config.schema_token_budget)
         system_prompt = self._build_subagent_prompt(workspace=root)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
