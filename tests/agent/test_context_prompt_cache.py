@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.context import ContextBuilder
-from nanobot.channels.registry import channel_reply_formats
+from nanobot.channels.registry import make_reply_format_resolver
 from nanobot.runtime_context import RuntimeContextBlock
 
 
@@ -153,7 +153,7 @@ def test_scheduling_contract_reaches_fresh_and_legacy_workspaces(tmp_path, legac
 
 @pytest.mark.parametrize("include_memory", [True, False])
 def test_channel_format_follows_delivery_medium(tmp_path, include_memory) -> None:
-    builder = ContextBuilder(_make_workspace(tmp_path), reply_formats=channel_reply_formats())
+    builder = ContextBuilder(_make_workspace(tmp_path), reply_format_for=make_reply_format_resolver())
 
     def system(channel: str | None) -> str:
         return builder.build_system_prompt(channel=channel, include_memory=include_memory)
@@ -169,7 +169,7 @@ def test_channel_format_follows_delivery_medium(tmp_path, include_memory) -> Non
 
 
 def test_build_messages_uses_manifest_guidance_for_named_instance(tmp_path) -> None:
-    builder = ContextBuilder(_make_workspace(tmp_path), reply_formats=channel_reply_formats())
+    builder = ContextBuilder(_make_workspace(tmp_path), reply_format_for=make_reply_format_resolver())
     messages = builder.build_messages(history=[], current_message="hi", channel="telegram.work")
     assert "messaging app" in messages[0]["content"]
 

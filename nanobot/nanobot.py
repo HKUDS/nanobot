@@ -11,7 +11,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.image_generation import register_image_generation_tool
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.channels.registry import channel_reply_formats
+from nanobot.channels.registry import make_reply_format_resolver
 from nanobot.config.schema import Config
 from nanobot.providers.base import LLMUsage
 from nanobot.sdk.clients import MemoryClient, RuntimeClient, SessionClient
@@ -138,7 +138,7 @@ class Nanobot:
             config,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
-            reply_formats=channel_reply_formats(),
+            reply_format_for=make_reply_format_resolver(),
             builtin_assembly=install_goal,
         )
         return cls(loop, config=config, mcp_provider=mcp_provider)
