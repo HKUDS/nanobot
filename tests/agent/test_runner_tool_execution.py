@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -12,7 +13,7 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ToolContext
-from nanobot.agent.tools.execution import execute_tool_calls
+from nanobot.agent.tools.execution import ToolCallResult, execute_tool_calls
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import AgentDefaults
@@ -285,15 +286,108 @@ async def test_tool_execution_propagates_cancellation_without_error_hook():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stop", ["caller", "caller_twice", "caller_late_hook_error", "tool", "hook"])
+async def test_runner_waits_for_parallel_tool_cleanup_before_finalizing(stop):
+    started, abort, cleaning, release, cleaned = (asyncio.Event() for _ in range(5))
+    finalized = asyncio.Event()
+    failure = RuntimeError("hook failed") if stop == "hook" else asyncio.CancelledError("stop")
+    active_tools = []
+    loop = asyncio.get_running_loop()
+    unhandled = []
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+
+    class CleanupTool(_DelayTool):
+        async def execute(self, **kwargs):
+            active_tools.append(asyncio.current_task())
+            if self.name == "quick":
+                await abort.wait()
+                raise failure
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                await release.wait()
+                cleaned.set()
+
+    class CleanupHook(AgentHook):
+        async def before_execute_tool(self, context, tool_call, tool, params):
+            if stop in {"hook", "caller_late_hook_error"} and tool_call.name == "quick":
+                try:
+                    await abort.wait()
+                except asyncio.CancelledError:
+                    if stop == "caller_late_hook_error":
+                        raise RuntimeError("hook failed during cancellation") from None
+                    raise
+                raise failure
+
+        async def on_finally(self, context):
+            finalized.set()
+
+    tools = ToolRegistry()
+    for name in ("quick", "slow"):
+        tools.register(CleanupTool(name, delay=0, read_only=True, shared_events=[]))
+    provider = MagicMock()
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content=None,
+        tool_calls=[ToolCallRequest(id=name, name=name, arguments={}) for name in ("quick", "slow")],
+    ))
+    run = asyncio.create_task(AgentRunner().run(make_run_spec(
+        provider, tools=tools, model="test-model", max_iterations=2,
+        initial_messages=[{"role": "user", "content": "Run the two tools"}],
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS, concurrent_tools=True,
+        hook=CleanupHook(), error_message=None,
+    )))
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        if stop.startswith("caller"):
+            run.cancel("stop")
+        else:
+            abort.set()
+        await asyncio.wait_for(cleaning.wait(), 2)
+        if stop == "caller_twice":
+            run.cancel("second stop")
+        done, _ = await asyncio.wait({run}, timeout=0.05)
+        assert not done, "the runner returned while a parallel tool still owned cleanup"
+        assert not finalized.is_set()
+        release.set()
+        with pytest.raises(type(failure), match="hook failed" if stop == "hook" else "^stop$") as exc:
+            await asyncio.wait_for(run, 2)
+        if stop in {"tool", "hook"}:
+            assert exc.value is failure
+        assert cleaned.is_set()
+        assert finalized.is_set()
+        assert provider.chat_stream_with_retry.await_count == 1
+        gc.collect()
+        await asyncio.sleep(0)
+        assert unhandled == []
+    finally:
+        release.set()
+        for task in active_tools:
+            if not task.done():
+                task.cancel()
+        if not run.done():
+            run.cancel()
+        await asyncio.gather(run, *active_tools, return_exceptions=True)
+        loop.set_exception_handler(previous_handler)
+
+
+@pytest.mark.asyncio
 async def test_tool_execution_batches_read_only_tools_before_exclusive_work():
     tools = ToolRegistry()
     shared_events: list[str] = []
     read_a = _DelayTool("read_a", delay=0.05, read_only=True, shared_events=shared_events)
-    read_b = _DelayTool("read_b", delay=0.05, read_only=True, shared_events=shared_events)
+    read_b = _DelayTool("read_b", delay=0.01, read_only=True, shared_events=shared_events)
     write_a = _DelayTool("write_a", delay=0.01, read_only=False, shared_events=shared_events)
     tools.register(read_a)
     tools.register(read_b)
     tools.register(write_a)
+
+    settled: list[ToolCallResult] = []
+
+    async def collect(results: list[ToolCallResult]) -> None:
+        settled.extend(results)
 
     await execute_tool_calls(
         tools,
@@ -307,13 +401,18 @@ async def test_tool_execution_batches_read_only_tools_before_exclusive_work():
         workspace_violation_counts={},
         hook=AgentHook(),
         context=AgentHookContext(iteration=0, messages=[]),
+        on_settled=collect,
     )
+    results = [result.result for result in settled]
+    events = [result.event for result in settled]
 
     assert shared_events[0:2] == ["start:read_a", "start:read_b"]
     assert "end:read_a" in shared_events and "end:read_b" in shared_events
     assert shared_events.index("end:read_a") < shared_events.index("start:write_a")
     assert shared_events.index("end:read_b") < shared_events.index("start:write_a")
     assert shared_events[-2:] == ["start:write_a", "end:write_a"]
+    assert results == ["read_a", "read_b", "write_a"]
+    assert [event["name"] for event in events] == ["read_a", "read_b", "write_a"]
 
 
 @pytest.mark.asyncio
