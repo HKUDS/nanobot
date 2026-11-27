@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 RequestAPI = Literal["chat_completions", "responses", "anthropic_messages"]
 ProviderAPI = Literal[
-    "chat_completions", "responses", "anthropic_messages", "bedrock_converse", "transcription",
+    "chat_completions", "responses", "anthropic_messages", "bedrock_converse", "google_interactions", "transcription",
 ]
 
 

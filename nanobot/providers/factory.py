@@ -89,6 +89,10 @@ def _make_provider_core(
             extra_body=p.extra_body if p else None,
             provider_name=provider_name,
         )
+    elif backend == "google_ai_plan":
+        from nanobot.providers.google_ai_plan_provider import GoogleAIPlanProvider
+
+        provider = GoogleAIPlanProvider(default_model=model, proxy=proxy)
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 

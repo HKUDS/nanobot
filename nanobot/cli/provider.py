@@ -28,6 +28,7 @@ _PROVIDER_DISPLAY: dict[str, str] = {
 _OAUTH_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "openai_codex": "openai-codex/gpt-5.6-sol",
     "xai_grok": "xai-grok/grok-4.6",
+    "google_ai_plan": "google-ai-plan/gemini-4-hydrogen",
     "github_copilot": "github-copilot/gpt-5.4-mini",
 }
 
@@ -300,6 +301,36 @@ def _logout_xai_grok() -> None:
         console.print(f"[yellow]! No local OAuth credentials found for {provider_label}[/yellow]")
 
 
+def _login_google_ai_plan() -> None:
+    import webbrowser
+
+    from nanobot.config.loader import load_config, resolve_config_env_vars
+    from nanobot.providers.google_ai_plan_oauth import login_google_ai_plan
+
+    def authorize(url: str) -> None:
+        console.print("Open this URL in a browser on this computer:")
+        console.print(url, markup=False, soft_wrap=True)
+        webbrowser.open(url)
+
+    try:
+        config = resolve_config_env_vars(load_config())
+        proxy = config.network.resolve_proxy(config.providers.google_ai_plan.use_proxy)
+        login_google_ai_plan(on_url=authorize, proxy=proxy)
+    except (RuntimeError, ValueError, OSError) as exc:
+        console.print(str(exc), style="red", markup=False)
+        raise typer.Exit(1) from exc
+    console.print("[green]✓ Signed in with Google[/green]")
+
+
+def _logout_google_ai_plan() -> None:
+    from nanobot.providers.google_ai_plan_oauth import logout_google_ai_plan
+
+    if logout_google_ai_plan():
+        console.print("Removed local Google AI Ultra credentials.")
+    else:
+        console.print("No local Google AI Ultra credentials found.")
+
+
 def _logout_github_copilot() -> None:
     try:
         from nanobot.providers.github_copilot_provider import get_storage
@@ -357,10 +388,12 @@ def _login_github_copilot() -> None:
 _LOGIN_HANDLERS: dict[str, Callable[[], None]] = {
     "openai_codex": _login_openai_codex,
     "xai_grok": _login_xai_grok,
+    "google_ai_plan": _login_google_ai_plan,
     "github_copilot": _login_github_copilot,
 }
 _LOGOUT_HANDLERS: dict[str, Callable[[], None]] = {
     "openai_codex": _logout_openai_codex,
     "xai_grok": _logout_xai_grok,
+    "google_ai_plan": _logout_google_ai_plan,
     "github_copilot": _logout_github_copilot,
 }

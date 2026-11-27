@@ -782,6 +782,22 @@ For proxy, remote/headless login, model-name, or config-key errors, see [`troubl
 
 
 <details>
+<summary><b>Google AI Ultra (OAuth, approved apps only)</b></summary>
+
+Use Gemini with your Google AI Ultra subscription instead of a Gemini API key. This requires **both** an eligible subscription and a Google Desktop OAuth client approved for this plan for your application. Creating an OAuth client in Google Cloud is not enough. nanobot does not ship an approved client. As [pi's integration notes](https://github.com/earendil-works/pi/blob/628d2ccabbb9df625c2d6035c44172b6776232d2/packages/ai/README.md#L1925) explain, each app needs its own approval; do not reuse pi's client. For regular Gemini API keys, keep using the `gemini` provider.
+
+If you operate an approved application, set `NANOBOT_GOOGLE_AI_PLAN_CLIENT_ID` and `NANOBOT_GOOGLE_AI_PLAN_CLIENT_SECRET` in the environment of the CLI and the gateway. Then sign in on the computer running nanobot:
+
+```bash
+nanobot provider login google-ai-plan --set-main
+nanobot agent -m "Hello"
+```
+
+Use `--model google-ai-plan/gemini-4-neon` to choose a different model at login. The other plan models are `gemini-4-hydrogen` (default), `gemini-4-carbon`, and `gemini-3.5-flash-lite`. Run `nanobot provider logout google-ai-plan` to remove local credentials; this does not revoke access in your Google account.
+
+</details>
+
+<details>
 <summary><b>xAI Grok (OAuth)</b></summary>
 
 Use an eligible X Premium / Grok subscription without putting an API key in `config.json`:

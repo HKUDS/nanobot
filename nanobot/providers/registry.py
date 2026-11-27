@@ -70,7 +70,7 @@ class ProviderSpec:
     settings_alias_for: str = ""  # compatibility alias grouped under this provider in Settings
 
     # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "xai_grok"
-    # | "github_copilot" | "bedrock"
+    # | "google_ai_plan" | "github_copilot" | "bedrock"
     backend: str = "openai_compat"
 
     # extra env vars / request headers supplied by the provider integration.
@@ -586,6 +586,26 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_codex",
         detect_by_base_keyword="codex",
         default_api_base="https://chatgpt.com/backend-api",
+        is_oauth=True,
+    ),
+    # Ultra uses its own quota. Never route a bare Gemini model away from the API-key provider.
+    ProviderSpec(
+        name="google_ai_plan",
+        keywords=(),
+        env_key="",
+        request_apis=("google_interactions",),
+        display_name="Google AI Ultra",
+        model_catalog="builtin",
+        builtin_models=tuple(
+            ProviderModelSpec(id=f"google-ai-plan/{model}", label=label, context_window=1_048_576)
+            for model, label in (
+                ("gemini-4-hydrogen", "Gemini 4 Hydrogen"),
+                ("gemini-4-neon", "Gemini 4 Neon"),
+                ("gemini-4-carbon", "Gemini 4 Carbon"),
+                ("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite"),
+            )
+        ),
+        backend="google_ai_plan",
         is_oauth=True,
     ),
     # xAI subscription: OAuth-based, with capability-gated server-hosted X Search.

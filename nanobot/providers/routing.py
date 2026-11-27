@@ -124,11 +124,11 @@ def resolve_provider_route(
     if (
         provider_config
         and provider_config.use_proxy
-        and backend not in {"openai_compat", "openai_codex", "xai_grok", "anthropic"}
+        and backend not in {"openai_compat", "openai_codex", "xai_grok", "google_ai_plan", "anthropic"}
     ):
         raise ValueError(
             f"providers.{provider_name}.use_proxy is only supported for "
-            "OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, and xAI Grok."
+            "OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, Google AI Ultra, and xAI Grok."
         )
 
     if provider_config:
