@@ -104,17 +104,13 @@ class HistoryReader:
     # A reader belongs to one transaction snapshot. Page cursors, edit sources and
     # conditional responses can reuse its header, never one from an earlier request.
     @cached_property
-    def _versions(self) -> tuple[str, int, int, str] | None:
+    def _versions(self) -> tuple[str, int, int] | None:
         row = self._db.execute(
-            """SELECT sessions.generation, sessions.revision, coalesce(history_heads.revision, -1), sessions.created_at FROM sessions
+            """SELECT sessions.generation, sessions.revision, coalesce(history_heads.revision, -1) FROM sessions
                LEFT JOIN history_heads ON history_heads.session_key=sessions.key WHERE sessions.key=?""",
             (self.key,),
         ).fetchone()
-        return (str(row[0]), int(row[1]), int(row[2]), str(row[3])) if row is not None else None
-
-    @property
-    def session_created_at(self) -> str | None:
-        return self._versions[3] if self._versions is not None else None
+        return (str(row[0]), int(row[1]), int(row[2])) if row is not None else None
 
     @property
     def session_version(self) -> tuple[str, int] | None:
@@ -317,23 +313,6 @@ class HistoryReader:
             (self.key, *kinds),
         ):
             yield int(row[0]), int(row[1]), HistoryFact.decode(row[2])
-
-    def fork_prefix(self, before_input: int) -> list[HistoryFact] | None:
-        """Read the portable prefix before a visible input, or None if model projection is needed."""
-        if self.revision is None or self.revision[1] < 0:
-            return None
-        facts: list[HistoryFact] = []
-        inputs = 0
-        for kind, record in self._db.execute(
-            """SELECT kind, record FROM history_entries WHERE session_key=? AND kind!=?
-               ORDER BY turn_ordinal, position""", (self.key, HistoryKind.FORK_BOUNDARY),
-        ):
-            if kind == HistoryKind.INPUT:
-                if inputs == before_input:
-                    return facts
-                inputs += 1
-            facts.append(HistoryFact.decode(record))
-        return facts if inputs == before_input else None
 
     def all_facts(self) -> list[HistoryFact]:
         return [HistoryFact.decode(row[0]) for row in self._db.execute(

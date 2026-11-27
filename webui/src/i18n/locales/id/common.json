@@ -2130,7 +2130,6 @@
     "editFailed": "Pengiriman ulang belum dikonfirmasi. Periksa koneksi lalu coba lagi.",
     "editFinishCurrent": "Selesaikan atau batalkan edit saat ini terlebih dahulu.",
     "editErrors": {
-      "edit_shared_history": "Riwayat bersama tidak dapat diedit dari satu percakapan.",
       "edit_session_busy": "Tunggu hingga percakapan ini selesai berjalan sebelum mengedit.",
       "edit_source_changed": "Pesan asli tidak lagi tersedia. Anda dapat menyalin draf sebelum membatalkan.",
       "edit_special_message": "Pesan dari otomatisasi atau percakapan lain tidak dapat diedit.",

@@ -79,8 +79,6 @@ async def test_edit_keeps_the_same_topic_and_prefix_in_both_histories(editing, i
     after = await manager.state.read(KEY)
     assert len(await manager.state.list_sessions()) == 1
     assert after.key == before.key and after.created_at == before.created_at
-    snapshot = page(manager)
-    assert snapshot["history_version"] == {"created_at": before.created_at.isoformat(), "revision": after.revision}
     assert after.revision > before.revision
     host.invalidate_history.assert_awaited_once_with("edit-chat")
     assert before.metadata.items() <= after.metadata.items()

@@ -2130,7 +2130,6 @@
     "editFailed": "再送信を確認できませんでした。接続を確認して再試行してください。",
     "editFinishCurrent": "先に現在の編集を完了またはキャンセルしてください。",
     "editErrors": {
-      "edit_shared_history": "共有履歴は個別の会話から編集できません。",
       "edit_session_busy": "この会話の処理が完了してから編集してください。",
       "edit_source_changed": "元のメッセージは利用できなくなりました。キャンセルする前に下書きをコピーできます。",
       "edit_special_message": "自動化や他のトピックから送られたメッセージは編集できません。",

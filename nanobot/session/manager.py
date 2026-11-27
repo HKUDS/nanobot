@@ -553,9 +553,13 @@ class SessionManager:
             source = self._store.load(source_key)
             if source is None:
                 return None
-            return self._store.fork_before_user_index(
+            target = fork_session(
                 source, target_key, before_user_index, exclude_metadata=frozenset(self._generation_exclusions),
             )
+            if target is not None:
+                self._store.save(target)
+                self._store.copy_history_prefix(source_key, target, before_user_index)
+            return target
 
         return self._store.run_write(fork)
 

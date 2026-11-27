@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, TypeVar, cast
 
 from nanobot.bus.events import INBOUND_META_TURN_ID, InboundMessage
-from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryReader
+from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import (
     EDIT_RECEIPT_KEY,
@@ -21,6 +21,7 @@ from nanobot.session.manager import (
     SessionIdentity,
     SessionInfo,
     SessionPolicy,
+    fork_session,
 )
 from nanobot.session.sqlite_store import SessionConflictError, SqliteSessionStore
 from nanobot.session.types import PARENT_SESSION_KEY, SessionTypes
@@ -1034,23 +1035,36 @@ class SessionState:
         if source_key == target_key:
             raise ValueError("new fork requires a different target session")
 
-        def write() -> Session | None:
-            source = self._load(source_key)
-            if source is None:
-                return None
-            return self._store.fork_before_user_index(
-                source, target_key, before_user_index, exclude_metadata=frozenset(self._generation_exclusions),
-                title=title, history_projection=history_projection,
-            )
-
         def commit() -> Session | None:
+            def write() -> Session | None:
+                source = self._load(source_key)
+                if source is None:
+                    return None
+                target = fork_session(
+                    source, target_key, before_user_index, exclude_metadata=frozenset(self._generation_exclusions),
+                )
+                if target is None:
+                    return None
+                if title:
+                    target.metadata["title"] = title
+                self._commit(target)
+                copied = self._store.copy_history_prefix(source_key, target, before_user_index)
+                if not copied and history_projection is not None:
+                    facts = history_projection(target)
+                    facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
+                    self._store.append_history(target.key, facts, expected_generation=target.generation)
+                return target
+
             target = self._store.run_write(write)
             if target is None:
                 return None
             self._publish(target)
             return self._draft(target)
-
-        return await self._execute((source_key, target_key), commit, operation_name="fork")
+        return await self._execute(
+            (source_key, target_key),
+            commit,
+            operation_name="fork",
+        )
 
     async def replace_input(
         self, key: str, source_id: str, message: InboundMessage, locate: InputLocator | None,

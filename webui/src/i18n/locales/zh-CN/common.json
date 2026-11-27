@@ -2519,7 +2519,6 @@
     "editFailed": "未收到重发确认，请检查连接后重试。",
     "editFinishCurrent": "请先完成或取消当前编辑。",
     "editErrors": {
-      "edit_shared_history": "共享历史不能在单个会话中编辑。",
       "edit_session_busy": "会话执行中，请结束后再编辑。",
       "edit_source_changed": "原消息已不可用。你可以先复制草稿，再取消编辑。",
       "edit_special_message": "无法编辑自动化或跨会话发来的消息。",

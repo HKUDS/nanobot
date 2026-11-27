@@ -2519,7 +2519,6 @@
     "editFailed": "Resend not confirmed. Check the connection and retry.",
     "editFinishCurrent": "Finish or cancel the current edit first.",
     "editErrors": {
-      "edit_shared_history": "Shared history cannot be edited from an individual conversation.",
       "edit_session_busy": "Wait for this conversation to finish before editing.",
       "edit_source_changed": "The original message is no longer available. You can copy your draft before canceling.",
       "edit_special_message": "Messages from automations or other topics cannot be edited.",

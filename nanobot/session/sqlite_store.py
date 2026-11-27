@@ -22,7 +22,6 @@ from nanobot.session.manager import (
     SessionInfo,
     SessionMetadataPayload,
     SessionPayload,
-    fork_session,
     message_preview_text,
     metadata_title,
 )
@@ -796,26 +795,31 @@ class SqliteSessionStore:
         session.generation = generation
         session.revision += 1
 
-    def fork_before_user_index(
-        self, source: Session, target_key: str, before_user_index: int, *, exclude_metadata: frozenset[str],
-        title: str | None = None, history_projection: Callable[[Session], list[HistoryFact]] | None = None,
-    ) -> Session | None:
-        """Materialize a new fork within the transaction that loaded its source."""
-        target = fork_session(source, target_key, before_user_index, exclude_metadata=exclude_metadata)
-        if target is None:
-            return None
-        if title:
-            target.metadata["title"] = title
+    def copy_history_prefix(self, source_key: str, target: Session, before_input: int) -> bool:
+        """Copy a display prefix alongside its canonical fork, in the caller's transaction."""
+        def select(reader: HistoryReader) -> list[HistoryFact] | None:
+            revision = reader.revision
+            if revision is None or revision[1] < 0:
+                return None
+            copied: list[HistoryFact] = []
+            inputs = 0
+            for fact in reader.all_facts():
+                if fact.kind is HistoryKind.FORK_BOUNDARY:
+                    continue
+                if fact.kind is HistoryKind.INPUT:
+                    if inputs == before_input:
+                        return copied
+                    inputs += 1
+                copied.append(fact)
+            return copied if inputs == before_input else None
 
-        self.save(target)
-        facts = self.project_history(source.key, lambda reader: reader.fork_prefix(before_user_index))
+        facts = self.project_history(source_key, select)
         if facts is None:
-            if history_projection is None:
-                return target
-            facts = history_projection(target)
+            return False
         facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
         self.append_history(target.key, facts, expected_generation=target.generation)
-        return target
+        return True
+
 
     def archives_imported(self) -> bool:
         with self.transaction(write=False) as db:
