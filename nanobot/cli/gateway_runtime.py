@@ -453,7 +453,6 @@ def _run_claimed_gateway(
     from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
-    from nanobot.channels.registry import make_reply_format_resolver
     from nanobot.config.watcher import watch_config_file
     from nanobot.cron.bound_runner import run_bound_cron_job
     from nanobot.cron.service import CronJobSkippedError, CronService
@@ -461,6 +460,7 @@ def _run_claimed_gateway(
     from nanobot.cron.types import CronJob, CronRunResult
     from nanobot.llm_usage import record_llm_call
     from nanobot.llm_usage.context import llm_usage_source
+    from nanobot.prompt_assembly import build_context_builder
     from nanobot.providers.factory import (
         ProviderSnapshot,
         build_provider_snapshot,
@@ -584,7 +584,7 @@ def _run_claimed_gateway(
         hooks=[_MCPReadinessHook(mcp_provider)],
         hook_factories=[create_file_edit_activity_hook, create_context_source_hook],
         tool_registry=tools,
-        reply_format_for=make_reply_format_resolver(),
+        context_builder=build_context_builder(config),
         recovery_admission=recovery,
         builtin_assembly=install_goal,
     )

@@ -168,12 +168,6 @@ def test_channel_format_follows_delivery_medium(tmp_path, include_memory) -> Non
     assert formula not in generic
 
 
-def test_build_messages_uses_manifest_guidance_for_named_instance(tmp_path) -> None:
-    builder = ContextBuilder(_make_workspace(tmp_path), reply_format_for=make_reply_format_resolver())
-    messages = builder.build_messages(history=[], current_message="hi", channel="telegram.work")
-    assert "messaging app" in messages[0]["content"]
-
-
 @pytest.mark.parametrize("disabled", [False, True])
 def test_memory_skill_is_discoverable_and_lazy_only_when_enabled(tmp_path, disabled) -> None:
     builder = ContextBuilder(_make_workspace(tmp_path), disabled_skills=["memory"] if disabled else None)

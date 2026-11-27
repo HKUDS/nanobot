@@ -101,6 +101,8 @@ def test_from_config_creates_instance(tmp_path):
     assert bot._loop is not None
     assert bot._loop.workspace == workspace
     assert bot._loop.sessions.sessions_dir.parent == config_path.parent / "sessions"
+    messages = bot._loop.context.build_messages(history=[], current_message="hi", channel="telegram.work")
+    assert "messaging app" in messages[0]["content"]
 
 
 @pytest.mark.asyncio
