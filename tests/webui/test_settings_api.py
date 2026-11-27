@@ -120,6 +120,26 @@ def test_settings_payload_includes_versioned_docs(
     }
 
 
+def test_settings_payload_exposes_aimlapi_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.aimlapi.api_key = "aimlapi-test-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    aimlapi = next(row for row in payload["providers"] if row["name"] == "aimlapi")
+
+    assert aimlapi["label"] == "aimlapi.com"
+    assert aimlapi["configured"] is True
+    assert aimlapi["default_api_base"] == "https://api.aimlapi.com/v1"
+    assert aimlapi["model_catalog"] == "catalog"
+    assert aimlapi["model_selectable"] is True
+
+
 def test_settings_payload_exposes_edenai_provider(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1342,6 +1362,70 @@ def test_legacy_shengsuanyun_keeps_custom_route_and_settings(tmp_path, api_base,
     assert route.spec is not None and route.spec.request_model_name(route.model) == "example-model"
     row = next(row for row in settings_payload(config_path=config_path)["providers"] if row["name"] == "shengsuanyun")
     assert row["label"] == "My private router"
+
+
+@pytest.mark.parametrize(("api_base", "api_key"), [
+    ("https://legacy-private.test/v1", None),
+    ("https://api.aimlapi.com/v1", "legacy-test-key"),
+])
+def test_legacy_aimlapi_custom_provider_keeps_route_and_model_prefix(tmp_path, api_base, api_key):
+    config_path = tmp_path / "legacy.json"
+    config_path.write_text(json.dumps({
+        "agents": {"defaults": {"model": "aimlapi/example-model"}},
+        "providers": {
+            "openrouter": {"apiKey": "must-not-route-here"},
+            "aimlapi": {
+                "apiBase": api_base, "apiKey": api_key,
+                "api": {"supportedApis": ["chat_completions"]},
+            },
+        },
+    }), encoding="utf-8")
+
+    initial = settings_payload(config_path=config_path)
+    assert initial["agent"]["resolved_provider"] == "aimlapi"
+    initial_row = next(row for row in initial["providers"] if row["name"] == "aimlapi")
+    assert initial_row["is_custom"] and initial_row["provider_api_configurable"]
+
+    saved = load_config(config_path)
+    route = resolve_provider_route(saved, preset=saved.resolve_preset())
+    assert route.provider_name == "aimlapi"
+    assert saved.get_api_base() == api_base
+    assert route.model_api is not None and route.model_api.preferred_api == "chat_completions"
+    assert route.spec is not None and route.spec.request_model_name(route.model) == "example-model"
+
+
+def test_provider_models_payload_offers_only_aimlapi_chat_models(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.aimlapi.api_key = "aimlapi-test-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    def fake_get(url: str, **kwargs):
+        assert url == "https://api.aimlapi.com/v1/models"
+        return httpx.Response(
+            200,
+            json={"data": [
+                {"id": "openai/gpt-5", "type": "openai/responses/submit"},
+                {"id": "openai/gpt-5", "type": "openai/chat-completions"},
+                {"id": "flux/schnell", "type": "openai/image-generations"},
+                {"id": "google/veo-3", "type": "internal/video-generations/submit"},
+                {"id": "openai/text-embedding-3-small", "type": "openai/embeddings"},
+                {"id": "anthropic/claude-sonnet-4.6", "type": "anthropic/messages"},
+                {"id": "aimlapi/dynamic-router", "type": "openai/chat-completions"},
+            ]},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
+
+    payload = provider_models_payload({"provider": ["aimlapi"]})
+
+    assert payload["status"] == "available"
+    assert [model["id"] for model in payload["models"]] == ["openai/gpt-5", "aimlapi/dynamic-router"]
 
 
 def test_settings_payload_resolves_provider_for_each_auto_preset(
