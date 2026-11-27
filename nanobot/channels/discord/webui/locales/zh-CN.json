@@ -45,6 +45,13 @@
           "false": "关闭"
         }
       },
+      "silentProgress": {
+        "label": "静默进度",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
       "replyToMessage": {
         "label": "回复消息",
         "choices": {

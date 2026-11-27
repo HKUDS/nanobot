@@ -309,6 +309,7 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
       "allowChannels": [],
       "groupPolicy": "mention",
       "streaming": true,
+      "silentProgress": true,
       "replyToMessage": false
     }
   }
@@ -320,7 +321,7 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 > - `"open"` — Reply to all messages in group channels.
 > - In direct messages, the bot replies only when the sender is listed in `allowFrom`.
 >
-> For open group policy, create a private thread and @mention the bot to start a session there. Otherwise, the bot starts a session in both the thread and the channel where you created it. `allowChannels` restricts the bot to specific Discord channel IDs. The default empty list allows every channel the bot can see. Example: `["1234567890", "0987654321"]`. The `allowFrom` and `allowChannels` filters both apply. Threads under an allowed channel are also allowed; for Forum channels, allowing the parent Forum channel allows all its threads and posts. `streaming` defaults to `true`; disable it only if you want non-streaming replies. `replyToMessage` defaults to `false`; enable it to use Discord's native reply UI for responses.
+> For open group policy, create a private thread and @mention the bot to start a session there. Otherwise, the bot starts a session in both the thread and the channel where you created it. `allowChannels` restricts the bot to specific Discord channel IDs. The default empty list allows every channel the bot can see. Example: `["1234567890", "0987654321"]`. The `allowFrom` and `allowChannels` filters both apply. Threads under an allowed channel are also allowed; for Forum channels, allowing the parent Forum channel allows all its threads and posts. `streaming` defaults to `true`; disable it only if you want non-streaming replies. `replyToMessage` defaults to `false`; enable it to use Discord's native reply UI for responses. `silentProgress` defaults to `true`; intermediate progress messages are sent with Discord's silent flag, so they appear in the channel without pushing a notification or badge. Final replies always notify. Set it to `false` to have progress messages ping as well.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator

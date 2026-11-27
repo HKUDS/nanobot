@@ -45,6 +45,13 @@
           "false": "Mati"
         }
       },
+      "silentProgress": {
+        "label": "Progres tanpa notifikasi",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
       "replyToMessage": {
         "label": "Balas pesan",
         "choices": {
