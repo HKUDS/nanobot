@@ -784,6 +784,25 @@ def test_provider_login_can_set_openai_codex_as_main_provider(tmp_path):
     assert make_provider(saved).__class__.__name__ == "OpenAICodexProvider"
 
 
+def test_google_ai_plan_sign_in_routes_only_the_subscription_model(tmp_path, monkeypatch):
+    from nanobot.providers import google_ai_plan_oauth
+    from nanobot.providers.google_ai_plan_provider import GoogleAIPlanProvider
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr(google_ai_plan_oauth, "login_google_ai_plan", lambda **kwargs: None)
+    result = runner.invoke(app, ["provider", "login", "google-ai-plan", "--set-main", "-c", str(config_path)])
+    assert result.exit_code == 0, result.output
+    saved = Config.model_validate_json(config_path.read_text())
+    assert saved.agents.defaults.provider == "google_ai_plan"
+    assert saved.agents.defaults.model == "google-ai-plan/gemini-4-hydrogen"
+    assert isinstance(make_provider(saved), GoogleAIPlanProvider)
+
+    saved.agents.defaults.provider = "auto"
+    saved.providers.gemini.api_key = "fixture"
+    assert saved.get_provider_name("gemini-4-hydrogen") == "gemini"
+    assert saved.get_provider_name("google-ai-plan/gemini-4-hydrogen") == "google_ai_plan"
+
+
 def test_provider_login_can_set_github_copilot_as_main_provider(tmp_path):
     config_path = tmp_path / "config.json"
     original = provider_commands._LOGIN_HANDLERS["github_copilot"]

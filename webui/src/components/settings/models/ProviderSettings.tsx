@@ -712,7 +712,9 @@ export function ProvidersSettings({
             {supportName && capabilityError ? (
               <p className="text-[12px] text-destructive">{capabilityError}</p>
             ) : null}
-            {isOauthProvider ? (
+            {provider.name === "google_ai_plan" ? (
+              <code>nanobot provider {oauthAuthenticated ? "logout" : "login"} google-ai-plan</code>
+            ) : isOauthProvider ? (
               <>
                 <div className="flex flex-col gap-3 rounded-floating border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">

@@ -475,6 +475,7 @@ describe("Settings models", () => {
     ["openai_codex", "OpenAI Codex", "responses", "Responses"],
     ["anthropic", "Anthropic", "anthropic_messages", "Anthropic Messages"],
     ["bedrock", "AWS Bedrock", "bedrock_converse", "Bedrock Converse"],
+    ["google_ai_plan", "Google AI Ultra", "google_interactions", "Google Interactions"],
   ] as const)("shows the fixed connection for %s", async (provider, label, api, apiLabel) => {
     const payload = settingsPayload();
     payload.providers = [{ name: provider, label, configured: true, request_apis: [api] }];

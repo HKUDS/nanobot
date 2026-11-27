@@ -249,6 +249,11 @@ def oauth_provider_adapter(spec: ProviderSpec) -> OAuthProviderAdapter | None:
 
 def oauth_provider_status(spec: ProviderSpec | None) -> dict[str, Any]:
     unconfigured = {"configured": False, "account": None, "expires_at": None, "login_supported": False}
+    if spec is not None and spec.name == "google_ai_plan":
+        from nanobot.providers.google_ai_plan_oauth import has_google_ai_plan_login
+
+        # Desktop sign-in runs on the host CLI, never on a remote browser.
+        return {**unconfigured, "configured": has_google_ai_plan_login()}
     if spec is None or (adapter := oauth_provider_adapter(spec)) is None:
         return unconfigured
     try:

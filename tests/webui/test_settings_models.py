@@ -208,6 +208,25 @@ def test_provider_model_refresh_reaches_oauth_catalog(monkeypatch, provider, ref
     catalog.assert_called_once_with(provider, proxy=None, refresh=refresh)
 
 
+def test_google_plan_lists_fixed_models_and_reports_host_login(monkeypatch):
+    from unittest.mock import Mock
+
+    from nanobot.webui.settings_model_oauth import oauth_provider_status
+
+    monkeypatch.setattr("nanobot.providers.google_ai_plan_oauth.has_google_ai_plan_login", lambda: True)
+    config = Config()
+    row = next(row for row in model_settings_payload(config, oauth_status=oauth_provider_status)["providers"]
+               if row["name"] == "google_ai_plan")
+    assert row["configured"] and not row["oauth_login_supported"]
+    assert row["request_apis"] == ["google_interactions"]
+    http_get = Mock(side_effect=AssertionError("fixed catalog must not contact Google"))
+    result = provider_models_payload(config, {"provider": ["google_ai_plan"]}, http_get=http_get)
+    assert result["status"] == "available"
+    assert {row["id"] for row in result["models"]} == {
+        f"google-ai-plan/{model}" for model in ("gemini-4-hydrogen", "gemini-4-neon", "gemini-4-carbon", "gemini-3.5-flash-lite")
+    }
+
+
 def _catalog_http_get(body: object) -> Callable[..., httpx.Response]:
     def get(url: str, **_kwargs: object) -> httpx.Response:
         return httpx.Response(200, json=body, request=httpx.Request("GET", url))

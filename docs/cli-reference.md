@@ -315,6 +315,7 @@ Document and PDF reading are included in the standard installation. The old `nan
 | Command | Description |
 |---|---|
 | `nanobot provider login openai-codex --set-main` | Authenticate Codex and select its current default model |
+| `nanobot provider login google-ai-plan --set-main` | Sign in to Google AI Ultra with an approved app client and select Gemini 4 Hydrogen |
 | `nanobot provider login xai-grok --set-main` | Authenticate an eligible X Premium / Grok subscription and select Grok 4.6; hosted X Search is enabled for models that advertise support |
 | `nanobot provider login github-copilot --set-main` | Authenticate GitHub Copilot and select its current default model |
 | `nanobot provider logout openai-codex` | Remove OpenAI Codex OAuth state |

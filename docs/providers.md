@@ -73,11 +73,11 @@ These fields answer different questions:
 | `model` | `modelPresets.<name>.model` | The model ID expected by that provider or gateway. |
 | `apiKey` | `providers.<provider>.apiKey` | Credential for that provider. Use `${ENV_VAR}` for secrets. |
 | `apiBase` | `providers.<provider>.apiBase` | HTTP base URL of the provider endpoint. |
-| `use_proxy` | `providers.<provider>.useProxy` | Use the shared `network.proxy` address for this provider. Supported for OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, and xAI OAuth. |
+| `use_proxy` | `providers.<provider>.useProxy` | Use the shared `network.proxy` address for this provider. Supported for OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, Google AI Ultra, and xAI OAuth. |
 
 You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers, provider proxies, regional endpoints, or subscription endpoints. Include the API version path when the endpoint requires it, for example `https://api.example.com/v1` or `http://localhost:11434/v1`.
 
-Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. Supported providers include `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, Anthropic Messages, `openai_codex`, and `xai_grok`. For OAuth providers, this also covers exchanging and refreshing tokens. `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
+Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. Supported providers include `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, Anthropic Messages, `openai_codex`, `google_ai_plan`, and `xai_grok`. For OAuth providers, this also covers exchanging and refreshing tokens. `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
 
 Tool calling requires a model and endpoint that return structured tool calls (if replies show raw `<tool_call>` or `<function=...>` text, enable your server's tool-call parser or switch to a tool-capable model).
 
@@ -652,6 +652,8 @@ These providers use account sign-in instead of API keys in `config.json`. You ca
 ```bash
 nanobot provider login openai-codex --set-main
 ```
+
+**Google AI Ultra** uses plan quota rather than a Gemini API key. It requires an approved app client; see [requirements and CLI sign-in](configuration.md#providers) under Google AI Ultra.
 
 **xAI Grok (requires an eligible X Premium / Grok subscription)**
 

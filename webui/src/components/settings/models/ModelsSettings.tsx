@@ -538,20 +538,24 @@ export function ModelsSettings({
             "Sign in before saving this provider in the preset.",
           )}
         >
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => selectedProvider && onProviderOAuthLogin(selectedProvider.name)}
-            disabled={!selectedProvider?.oauth_login_supported || selectedProviderSigningIn}
-            className="rounded-full"
-          >
-            {selectedProviderSigningIn ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-            ) : null}
-            {selectedProviderSigningIn
-              ? tx("settings.oauth.signingIn", "Signing in...")
-              : tx("settings.oauth.signIn", "Sign in")}
-          </Button>
+          {selectedProvider?.name === "google_ai_plan" ? (
+            <code>nanobot provider login google-ai-plan</code>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => selectedProvider && onProviderOAuthLogin(selectedProvider.name)}
+              disabled={!selectedProvider?.oauth_login_supported || selectedProviderSigningIn}
+              className="rounded-full"
+            >
+              {selectedProviderSigningIn ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : null}
+              {selectedProviderSigningIn
+                ? tx("settings.oauth.signingIn", "Signing in...")
+                : tx("settings.oauth.signIn", "Sign in")}
+            </Button>
+          )}
         </SettingsRow>
       ) : null}
       <SettingsRow title={t("settings.rows.model")}>

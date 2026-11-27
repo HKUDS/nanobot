@@ -30,6 +30,7 @@ export function ModelAPIControl({
   const labels = {
     ...REQUEST_API_LABELS,
     bedrock_converse: "Bedrock Converse",
+    google_interactions: "Google Interactions",
     transcription: t("settings.models.apiTranscription"),
   };
   const fixedLabel = fixedAPI ? labels[fixedAPI] : undefined;
