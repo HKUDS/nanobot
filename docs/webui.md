@@ -170,6 +170,8 @@ Open **Apps → Ready** and filter by **Agent Plugins**, **CLI Apps**, or **MCP*
 
 Once enabled, mention a CLI App or MCP server with `@` in the composer to use it in your next message, or invoke plugin skills with `$skill-name`.
 
+The FXMacroData preset connects to FXMacroData's hosted MCP endpoint for official-source macroeconomic data: central-bank rates, inflation, jobs and GDP releases, release calendars and FX rates. USD data works without an API key (each release is readable 15 minutes after publication, covering the last 90 days); other currencies and FX rates need an FXMacroData key, which you can send as an `Authorization: Bearer` header on a custom MCP server. Mention `@fxmacrodata` when a turn needs macro data.
+
 ## Skills
 
 - **Skills → Installed:** Search, inspect, enable/disable, or delete built-in and workspace skills.
