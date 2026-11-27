@@ -1,4 +1,4 @@
-from nanobot.channels._manifest import field, required_fields
+from nanobot.channels._manifest import field, one_of, required_fields
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.email.validation import validate
 from nanobot.channels.plugin import ChannelPlugin
@@ -35,15 +35,24 @@ SETUP_SPEC = ChannelSetupSpec(
         "maxAttachmentSize": field("int", default=2_000_000),
         "maxAttachmentsPerEmail": field("int", default=5),
         "trustedAuthservIds": field("list"),
+        # Microsoft OAuth (delegated user auth) for Office365/Outlook. Alternative to
+        # imapPassword/smtpPassword; run `nanobot channels login email` after setting these.
+        "oauthTenantId": field(),
+        "oauthClientId": field(),
+        "oauthClientSecret": field("secret"),
     },
-    required=required_fields(
-        "consentGranted",
-        "imapHost",
-        "imapUsername",
-        "imapPassword",
-        "smtpHost",
-        "smtpUsername",
-        "smtpPassword",
+    required=(
+        *required_fields(
+            "consentGranted",
+            "imapHost",
+            "imapUsername",
+            "smtpHost",
+            "smtpUsername",
+        ),
+        one_of(
+            ("imapPassword", "smtpPassword"),
+            ("oauthTenantId", "oauthClientId", "oauthClientSecret"),
+        ),
     ),
     official_url="https://support.google.com/accounts/answer/185833",
     validator=validate,

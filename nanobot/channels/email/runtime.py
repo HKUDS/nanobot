@@ -26,6 +26,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.email import ms_oauth as email_oauth
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
@@ -52,6 +53,13 @@ class EmailConfig(Base):
     smtp_use_tls: bool = True
     smtp_use_ssl: bool = False
     from_address: str = ""
+
+    # Microsoft OAuth (delegated user auth) for Office365/Outlook mailboxes.
+    # When set, IMAP/SMTP authenticate via XOAUTH2 instead of imap_password/smtp_password.
+    # Run `nanobot channels login email` to obtain the initial token.
+    oauth_tenant_id: str = ""
+    oauth_client_id: str = ""
+    oauth_client_secret: str = ""
 
     auto_reply_enabled: bool = True
     poll_interval_seconds: int = 30
@@ -403,23 +411,56 @@ class EmailChannel(BaseChannel):
             self.logger.exception("Error sending to {}", to_addr)
             raise
 
+    def _oauth_configured(self) -> bool:
+        return bool(
+            self.config.oauth_tenant_id
+            and self.config.oauth_client_id
+            and self.config.oauth_client_secret
+        )
+
+    def _oauth_mailbox(self) -> str:
+        return self.config.from_address or self.config.imap_username or self.config.smtp_username
+
+    def _get_oauth_access_token(self) -> str:
+        token = email_oauth.get_email_oauth_token(
+            tenant_id=self.config.oauth_tenant_id,
+            client_id=self.config.oauth_client_id,
+            client_secret=self.config.oauth_client_secret,
+            mailbox=self._oauth_mailbox(),
+        )
+        return token.access
+
+    @staticmethod
+    def _xoauth2_string(user: str, access_token: str) -> str:
+        return f"user={user}\x01auth=Bearer {access_token}\x01\x01"
+
     def _validate_config(self) -> bool:
         missing: list[str] = []
         if not self.config.imap_host:
             missing.append("imap_host")
         if not self.config.imap_username:
             missing.append("imap_username")
-        if not self.config.imap_password:
-            missing.append("imap_password")
         if not self.config.smtp_host:
             missing.append("smtp_host")
         if not self.config.smtp_username:
             missing.append("smtp_username")
-        if not self.config.smtp_password:
-            missing.append("smtp_password")
 
         if (self.config.verify_spf or self.config.verify_dkim) and not self.config.trusted_authserv_ids:
             missing.append("trusted_authserv_ids")
+
+        if self._oauth_configured():
+            if not email_oauth.get_email_oauth_login_status(
+                self.config.oauth_tenant_id, self.config.oauth_client_id, self._oauth_mailbox()
+            ):
+                self.logger.error(
+                    "Email OAuth is configured but not signed in. Run `nanobot channels login email`."
+                )
+                return False
+        else:
+            if not self.config.imap_password:
+                missing.append("imap_password")
+            if not self.config.smtp_password:
+                missing.append("smtp_password")
 
         if self.config.post_action == "move" and not (self.config.post_action_move_mailbox or "").strip():
             missing.append("post_action_move_mailbox")
@@ -429,23 +470,76 @@ class EmailChannel(BaseChannel):
             return False
         return True
 
+    async def login(self, force: bool = False) -> bool:
+        """Run the Microsoft OAuth sign-in flow for this mailbox.
+
+        Returns True if already signed in or sign-in succeeds; False on failure.
+        No-op (returns True) when OAuth isn't configured for this channel.
+        """
+        if not self._oauth_configured():
+            self.logger.info(
+                "Email OAuth is not configured (set oauth_tenant_id/oauth_client_id/"
+                "oauth_client_secret); nothing to sign in to."
+            )
+            return True
+
+        mailbox = self._oauth_mailbox()
+        if not force and email_oauth.get_email_oauth_login_status(
+            self.config.oauth_tenant_id, self.config.oauth_client_id, mailbox
+        ):
+            self.logger.info(
+                "Email is already signed in for {}. Use --force to sign in again.", mailbox
+            )
+            return True
+
+        try:
+            await asyncio.to_thread(
+                email_oauth.login_email_oauth,
+                tenant_id=self.config.oauth_tenant_id,
+                client_id=self.config.oauth_client_id,
+                client_secret=self.config.oauth_client_secret,
+                mailbox=mailbox,
+                print_fn=self.logger.info,
+                prompt_fn=input,
+            )
+        except email_oauth.MicrosoftOAuthError as exc:
+            self.logger.error("Microsoft sign-in failed: {}", exc)
+            return False
+        self.logger.info("Signed in to Microsoft for {}.", mailbox)
+        return True
+
     def _smtp_send(self, msg: EmailMessage) -> None:
         timeout = 30
+        use_oauth = self._oauth_configured()
         if self.config.smtp_use_ssl:
             with smtplib.SMTP_SSL(
                 self.config.smtp_host,
                 self.config.smtp_port,
                 timeout=timeout,
             ) as smtp:
-                smtp.login(self.config.smtp_username, self.config.smtp_password)
+                self._smtp_authenticate(smtp, use_oauth)
                 smtp.send_message(msg)
             return
 
         with smtplib.SMTP(self.config.smtp_host, self.config.smtp_port, timeout=timeout) as smtp:
             if self.config.smtp_use_tls:
                 smtp.starttls(context=ssl.create_default_context())
-            smtp.login(self.config.smtp_username, self.config.smtp_password)
+            self._smtp_authenticate(smtp, use_oauth)
             smtp.send_message(msg)
+
+    def _smtp_authenticate(self, smtp: smtplib.SMTP, use_oauth: bool) -> None:
+        if not use_oauth:
+            smtp.login(self.config.smtp_username, self.config.smtp_password)
+            return
+        # smtp.auth(), unlike smtp.login(), does not issue EHLO itself.
+        smtp.ehlo_or_helo_if_needed()
+        user = self._normalize_address(self.config.smtp_username) or self._oauth_mailbox()
+        auth_string = self._xoauth2_string(user, self._get_oauth_access_token())
+
+        def _authobject(challenge: bytes | None = None) -> str:
+            return auth_string
+
+        smtp.auth("XOAUTH2", _authobject, initial_response_ok=True)
 
     def _fetch_new_messages(self) -> tuple[list[dict[str, Any]], set[str]]:
         return self._fetch_messages(
@@ -708,7 +802,16 @@ class EmailChannel(BaseChannel):
             client = imaplib.IMAP4(self.config.imap_host, self.config.imap_port)
 
         try:
-            client.login(self.config.imap_username, self.config.imap_password)
+            if self._oauth_configured():
+                user = self._normalize_address(self.config.imap_username) or self._oauth_mailbox()
+                auth_string = self._xoauth2_string(user, self._get_oauth_access_token())
+
+                def _authobject(_challenge: bytes) -> bytes:
+                    return auth_string.encode()
+
+                client.authenticate("XOAUTH2", _authobject)
+            else:
+                client.login(self.config.imap_username, self.config.imap_password)
             try:
                 status, _ = client.select(mailbox)
             except Exception as exc:
