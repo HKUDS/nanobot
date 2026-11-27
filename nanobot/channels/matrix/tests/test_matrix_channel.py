@@ -2366,6 +2366,18 @@ def test_build_matrix_text_content_with_event_id_preserves_thread_relation() -> 
     assert result["m.new_content"]["m.relates_to"] == relates_to
 
 
+def test_build_matrix_text_content_with_event_id_preserves_html_formatting() -> None:
+    """HTML formatting for edits should be repeated inside m.new_content."""
+    result = _build_matrix_text_content("**Updated** message", "event-1")
+
+    assert result["m.new_content"] == {
+        "body": "**Updated** message",
+        "msgtype": "m.text",
+        "format": MATRIX_HTML_FORMAT,
+        "formatted_body": "<p><strong>Updated</strong> message</p>",
+    }
+
+
 @pytest.mark.asyncio
 async def test_send_room_content_returns_room_send_response():
     client = _FakeAsyncClient("", "", "", None)
