@@ -825,9 +825,24 @@ class AgentLoop:
                     and not turn_continuation.internal_continuation_inbound(msg.metadata)
                 ),
             )
-            result = await dispatch_fn(ctx)
-            if isinstance(result, CommandExpansion):
-                result = await self._prepare_command_expansion(ctx, result)
+            try:
+                result = await dispatch_fn(ctx)
+                if isinstance(result, CommandExpansion):
+                    result = await self._prepare_command_expansion(ctx, result)
+            except (SessionOperationQueueFullError, SessionConflictError):
+                raise
+            except Exception:
+                session = self.sessions.state.peek_header(ctx.key)
+                log_content = session is None or (
+                    session.policy.persist and session.policy.log_content
+                )
+                logger.opt(exception=log_content).error(
+                    "Error executing command {} for session {}",
+                    self.commands.command_name(raw), ctx.key,
+                )
+                delivery = self.turn_delivery_factory.unrouted(msg, ctx.key)
+                await delivery.fail(publish_completion=ctx.key not in self._pending_queues)
+                return
             if isinstance(result, InboundMessage):
                 await self._enqueue_session_message(result)
             elif result is not None:
