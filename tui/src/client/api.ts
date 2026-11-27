@@ -342,11 +342,10 @@ export async function fetchSlashCommands(
 export async function fetchAvailableSkills(
   apiUrl: string,
   apiToken: string,
-  chatId: string,
   reauthenticate?: ApiReauthenticator,
 ): Promise<SkillCandidate[]> {
-  if (!apiUrl || !apiToken || !chatId) return []
-  const response = await fetchApi(apiUrl, apiToken, `/api/webui/skills?chat_id=${encodeURIComponent(chatId)}`, reauthenticate)
+  if (!apiUrl || !apiToken) return []
+  const response = await fetchApi(apiUrl, apiToken, "/api/webui/skills", reauthenticate)
   if (!response.ok) throw new Error(`skill request failed: HTTP ${response.status}`)
   const payload = await response.json() as { skills?: unknown[] }
   return (payload.skills || []).flatMap((value) => {

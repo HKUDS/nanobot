@@ -164,7 +164,7 @@ Once enabled, mention a CLI App or MCP server with `@` in the composer to use it
 
 ## Skills
 
-- **Skills → Installed:** Search, inspect, or toggle skills. Only skills installed in the nanobot workspace can be deleted here. See [Skills](configuration.md#skills) for shared locations and name conflicts.
+- **Skills → Installed:** Search, inspect, enable/disable, or delete built-in and workspace skills.
 - **Skills → Discover:** Browse and install skills from **skills.sh** (requires Node.js / `npx`) and **SkillHub** (no `npx` needed).
 
 > [!CAUTION]

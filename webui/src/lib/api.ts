@@ -1,4 +1,3 @@
-import { skillScopeParams, type SkillScope } from "@/lib/skill-events";
 import { isContextGraph, isContextInspection } from "@/lib/context-graph";
 import { isCompactionPhase, isCompactionReason } from "../../../packages/client-events/notifications";
 import type {
@@ -772,18 +771,12 @@ export async function cancelSubagentTask(
   return result;
 }
 
-function skillScopeQuery(scope: SkillScope): string {
-  const query = new URLSearchParams(skillScopeParams(scope)).toString();
-  return query ? `?${query}` : "";
-}
-
 export async function fetchSkills(
   token: string,
-  scope: SkillScope = {},
   base: string = "",
 ): Promise<SkillsPayload> {
   return request<SkillsPayload>(
-    `${base}/api/webui/skills${skillScopeQuery(scope)}`,
+    `${base}/api/webui/skills`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,
@@ -793,11 +786,10 @@ export async function fetchSkills(
 export async function fetchSkillDetail(
   token: string,
   name: string,
-  scope: SkillScope = {},
   base: string = "",
 ): Promise<SkillDetail> {
   return request<SkillDetail>(
-    `${base}/api/webui/skills/${encodeURIComponent(name)}${skillScopeQuery(scope)}`,
+    `${base}/api/webui/skills/${encodeURIComponent(name)}`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,
@@ -808,27 +800,24 @@ export async function updateSkillEnabled(
   transport: WebUIMutationTransport,
   name: string,
   enabled: boolean,
-  scope: SkillScope = {},
 ): Promise<SkillActionPayload> {
-  return mutation<SkillActionPayload>(transport, "skill.update", { name, enabled, ...skillScopeParams(scope) });
+  return mutation<SkillActionPayload>(transport, "skill.update", { name, enabled });
 }
 
 export async function deleteSkill(
   transport: WebUIMutationTransport,
   name: string,
-  scope: SkillScope = {},
 ): Promise<SkillActionPayload> {
-  return mutation<SkillActionPayload>(transport, "skill.delete", { name, ...skillScopeParams(scope) });
+  return mutation<SkillActionPayload>(transport, "skill.delete", { name });
 }
 
 export async function searchMarketplaceSkills(
   token: string,
   query: string,
   provider: MarketplaceProvider = "all",
-  scope: SkillScope = {},
   base: string = "",
 ): Promise<SkillsSearchPayload> {
-  const params = new URLSearchParams({ q: query, provider, ...skillScopeParams(scope) });
+  const params = new URLSearchParams({ q: query, provider });
   return request<SkillsSearchPayload>(
     `${base}/api/webui/skills/search?${params}`,
     token,
@@ -840,10 +829,9 @@ export async function searchMarketplaceSkills(
 export async function fetchTrendingMarketplaceSkills(
   token: string,
   provider: MarketplaceProvider = "all",
-  scope: SkillScope = {},
   base: string = "",
 ): Promise<SkillsTrendingPayload> {
-  const params = new URLSearchParams({ provider, ...skillScopeParams(scope) });
+  const params = new URLSearchParams({ provider });
   return request<SkillsTrendingPayload>(
     `${base}/api/webui/skills/trending?${params}`,
     token,
@@ -873,12 +861,11 @@ export async function installMarketplaceSkill(
   source: string,
   skill: string,
   version: string = "",
-  scope: SkillScope = {},
 ): Promise<SkillInstallPayload> {
   return mutation<SkillInstallPayload>(
     transport,
     "skill.install",
-    { provider, source, skill, ...skillScopeParams(scope), ...(version ? { version } : {}) },
+    { provider, source, skill, ...(version ? { version } : {}) },
     PACKAGE_MUTATION_TIMEOUT_MS,
   );
 }

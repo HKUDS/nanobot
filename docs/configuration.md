@@ -2611,16 +2611,7 @@ Common examples: `UTC`, `America/New_York`, `America/Los_Angeles`, `Europe/Londo
 
 To share a skill with your team, put it in `<project>/.agents/skills/<name>/SKILL.md`. To use it across your projects, put it in `~/.agents/skills/<name>/SKILL.md` on the machine running the gateway. nanobot looks in the selected project, not its parent directories. Only use skills from projects you trust.
 
-For example, save this as `.agents/skills/release-check/SKILL.md` and type `$release-check` in a chat for that project:
-
-```markdown
----
-name: release-check
-description: Review a release before it is tagged.
----
-
-Check that the changelog and package version agree.
-```
+For example, use `/skill` in the project chat to see `.agents/skills/release-check/SKILL.md`, then type `$release-check` to use it. The chat’s autocomplete menu does not switch to the project catalog.
 
 Use the [Agent Skills format](https://agentskills.io/specification): the name matches the directory, and the description tells the agent when to use the skill. References, assets, and scripts can sit alongside `SKILL.md`; discovery does not execute scripts. Keep the user-level `.agents/skills/` root in place: redirecting it with a symlink does not grant access to another directory. The shared convention is `.agents/skills/`, not `.agent/skills/`. Installing or deleting skills through nanobot still targets its workspace.
 
@@ -2628,7 +2619,7 @@ If names collide, the first match wins: selected project `.agents/skills/`, nano
 
 ### Disabled Skills
 
-To stop the agent loading a skill without deleting its files, turn it off in **Skills** in the sidebar, or add its directory name to `agents.defaults.disabledSkills`:
+For skills listed in the sidebar, use the switch in **Skills**. To disable a skill from any source without deleting its files, add its directory name to `agents.defaults.disabledSkills`:
 
 <details>
 <summary>Manual configuration</summary>

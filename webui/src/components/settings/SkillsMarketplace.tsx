@@ -1,4 +1,3 @@
-import { DEFAULT_SKILL_SCOPE, type SkillScope } from "@/lib/skill-events";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
@@ -40,7 +39,6 @@ import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
 export function SkillsMarketplace({
-  skillScope = DEFAULT_SKILL_SCOPE,
   query,
   provider,
   installedSkills,
@@ -50,7 +48,6 @@ export function SkillsMarketplace({
   query: string;
   provider: MarketplaceProvider;
   installedSkills: SkillSummary[];
-  skillScope?: SkillScope;
   installing: string;
   onInstallingChange: (skillId: string) => void;
 }) {
@@ -90,7 +87,7 @@ export function SkillsMarketplace({
   useEffect(() => {
     let cancelled = false;
     setTrendingLoading(true);
-    fetchTrendingMarketplaceSkills(getToken(), "all", skillScope)
+    fetchTrendingMarketplaceSkills(getToken())
       .then((payload) => {
         if (cancelled) return;
         setTrending(payload.skills);
@@ -104,7 +101,7 @@ export function SkillsMarketplace({
     return () => {
       cancelled = true;
     };
-  }, [getToken, inventory, installRevision, skillScope]);
+  }, [getToken, inventory, installRevision]);
 
   useEffect(() => {
     const skills = query.trim().length < 2 ? trending : results;
@@ -142,7 +139,7 @@ export function SkillsMarketplace({
     setLoading(true);
     setError("");
     const timer = window.setTimeout(() => {
-      searchMarketplaceSkills(getToken(), normalized, "all", skillScope)
+      searchMarketplaceSkills(getToken(), normalized)
         .then((payload) => {
           if (cancelled) return;
           setResults(payload.skills);
@@ -167,7 +164,7 @@ export function SkillsMarketplace({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [getToken, query, t, inventory, installRevision, skillScope]);
+  }, [getToken, query, t, inventory, installRevision]);
 
   const install = async (skill: MarketplaceSkillSummary) => {
     setSelected(null);
@@ -180,9 +177,8 @@ export function SkillsMarketplace({
         skill.source,
         skill.skill_id,
         skill.version,
-        skillScope,
       );
-      notifySkillsChanged(payload, skillScope);
+      notifySkillsChanged(payload);
     } catch (reason) {
       setInstallError(
         reason instanceof ApiError && reason.status === 409

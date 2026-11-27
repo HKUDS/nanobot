@@ -15,7 +15,7 @@ import {
 } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import type { MarketplaceSkillSummary } from "@/lib/types";
-import { DEFAULT_SKILL_SCOPE, notifySkillsChanged, requestSkillsRefresh } from "@/lib/skill-events";
+import { requestSkillsRefresh, SKILLS_CHANGED_EVENT } from "@/lib/skill-events";
 import { ClientProvider } from "@/providers/ClientProvider";
 import { useSkills } from "@/hooks/useSkills";
 
@@ -54,29 +54,6 @@ function marketplace(token: string) {
 }
 
 describe("useSkills", () => {
-  it("drops the old project immediately and ignores its late inventory", async () => {
-    const getToken = () => "token";
-    const first = { chat_id: "chat", projectRevision: "first" };
-    const second = { chat_id: "chat", projectRevision: "second" };
-    const skill = { name: "review", description: "First project", source: "project", available: true };
-    let finishOld!: (value: { skills: typeof skill[] }) => void;
-    let finishNew!: (value: { skills: typeof skill[] }) => void;
-    vi.mocked(fetchSkills).mockReset().mockResolvedValueOnce({ skills: [skill] })
-      .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }))
-      .mockImplementationOnce(() => new Promise(resolve => { finishNew = resolve; }));
-    const { result, rerender } = renderHook(({ scope }) => useSkills(getToken, scope), { initialProps: { scope: first } });
-    await act(async () => {});
-    expect(result.current.skills).toEqual([skill]);
-    act(requestSkillsRefresh);
-    rerender({ scope: second });
-    expect(result.current.skills).toEqual([]);
-    await act(async () => finishOld({ skills: [skill] }));
-    expect(result.current.skills).toEqual([]);
-    const replacement = { ...skill, description: "Second project" };
-    await act(async () => finishNew({ skills: [replacement] }));
-    expect(result.current.skills).toEqual([replacement]);
-  });
-
   it("shows loading, retries a failed first read, and preserves an empty catalog during refresh", async () => {
     let rejectInitial!: (error: Error) => void;
     let resolveRetry!: (value: Awaited<ReturnType<typeof fetchSkills>>) => void;
@@ -268,7 +245,9 @@ describe("useSkills", () => {
 
     expect(fetchSkills).toHaveBeenCalledTimes(1);
     act(() => {
-      notifySkillsChanged({ skills: [installed] }, DEFAULT_SKILL_SCOPE);
+      window.dispatchEvent(new CustomEvent(SKILLS_CHANGED_EVENT, {
+        detail: { skills: [installed] },
+      }));
     });
     expect(result.current).toEqual({ skills: [installed], loading: false, error: false });
 
@@ -354,7 +333,7 @@ describe("SkillsMarketplace", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Install agent-browser" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "Install skill" }));
     await act(async () => {});
-    expect(installMarketplaceSkill).toHaveBeenCalledWith(client, "skills_sh", "vercel-labs/agent-browser", "agent-browser", undefined, DEFAULT_SKILL_SCOPE);
+    expect(installMarketplaceSkill).toHaveBeenCalledWith(client, "skills_sh", "vercel-labs/agent-browser", "agent-browser", undefined);
     expect(screen.getAllByRole("button", { name: "Installed agent-browser" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Name already in use agent-browser" })).toBeDisabled();
   });
@@ -405,7 +384,7 @@ describe("SkillsMarketplace", () => {
     expect(screen.getByRole("status", { name: "Loading skills…" })).toHaveAttribute("aria-busy", "true");
     expect(searchMarketplaceSkills).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(300); });
-    expect(searchMarketplaceSkills).toHaveBeenCalledWith("tok", "React", "all", DEFAULT_SKILL_SCOPE);
+    expect(searchMarketplaceSkills).toHaveBeenCalledWith("tok", "React");
     expect(screen.getByRole("status", { name: "Loading skills…" })).toBeInTheDocument();
     await act(async () => {
       resolveSearch({ query: "React", provider: "all", install_supported: true, skills: [skill] });
@@ -428,7 +407,7 @@ describe("SkillsMarketplace", () => {
 
     await act(async () => {});
     expect(fetchTrendingMarketplaceSkills).toHaveBeenCalledTimes(1);
-    expect(fetchTrendingMarketplaceSkills).toHaveBeenCalledWith("tok-old", "all", DEFAULT_SKILL_SCOPE);
+    expect(fetchTrendingMarketplaceSkills).toHaveBeenCalledWith("tok-old");
 
     fireEvent.change(screen.getByRole("textbox", { name: "Search skills" }), {
       target: { value: "React" },
@@ -437,7 +416,7 @@ describe("SkillsMarketplace", () => {
       await vi.advanceTimersByTimeAsync(300);
     });
     expect(searchMarketplaceSkills).toHaveBeenCalledTimes(1);
-    expect(searchMarketplaceSkills).toHaveBeenLastCalledWith("tok-old", "React", "all", DEFAULT_SKILL_SCOPE);
+    expect(searchMarketplaceSkills).toHaveBeenLastCalledWith("tok-old", "React");
 
     rerender(marketplace("tok-new"));
     await act(async () => {
@@ -454,6 +433,6 @@ describe("SkillsMarketplace", () => {
       await vi.advanceTimersByTimeAsync(300);
     });
     expect(searchMarketplaceSkills).toHaveBeenCalledTimes(2);
-    expect(searchMarketplaceSkills).toHaveBeenLastCalledWith("tok-new", "Vue", "all", DEFAULT_SKILL_SCOPE);
+    expect(searchMarketplaceSkills).toHaveBeenLastCalledWith("tok-new", "Vue");
   });
 });

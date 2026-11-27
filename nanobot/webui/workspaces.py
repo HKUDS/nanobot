@@ -306,20 +306,14 @@ class WebUIWorkspaceController:
         return self._scope_from_snapshot(data) if data is not None else None
 
     async def async_scope_for_session_key(self, session_key: str) -> WorkspaceScope:
-        return await self.async_existing_scope_for_session_key(session_key) or self.default_scope()
-
-    async def async_existing_scope_for_session_key(self, session_key: str) -> WorkspaceScope | None:
         draft = self._draft_scopes.get(session_key)
         if draft is not None:
             self._draft_scopes.move_to_end(session_key)
             return draft
         if self._sessions is None:
-            return None
-        identity = self._sessions.state.peek_identity(session_key)
-        if identity is not None and not identity.policy.persist:
-            return self.restricted_default_scope()
+            return self.default_scope()
         data = await self._sessions.state.read_metadata(session_key)
-        return self._scope_from_snapshot(data) if data is not None else None
+        return self._scope_from_snapshot(data)
 
     def _scope_from_snapshot(
         self, data: dict[str, Any] | None, *, default_scope: WorkspaceScope | None = None,

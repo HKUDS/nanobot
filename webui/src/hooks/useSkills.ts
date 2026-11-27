@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { fetchSkills } from "@/lib/api";
-import { DEFAULT_SKILL_SCOPE, type SkillScope, isSkillsPayload, SKILLS_CHANGED_EVENT, SKILLS_REFRESH_EVENT } from "@/lib/skill-events";
-import type { SkillsPayload, SkillSummary } from "@/lib/types";
+import { isSkillsPayload, SKILLS_CHANGED_EVENT, SKILLS_REFRESH_EVENT } from "@/lib/skill-events";
+import type { SkillSummary } from "@/lib/types";
 
 type SkillsState =
   | { status: "loading" | "error"; skills: null }
@@ -10,15 +10,8 @@ type SkillsState =
 
 const EMPTY_SKILLS: SkillSummary[] = [];
 
-export function useSkills(getToken: () => string, scope: SkillScope = DEFAULT_SKILL_SCOPE, preview?: () => Promise<SkillsPayload>) {
+export function useSkills(getToken: () => string) {
   const [state, setState] = useState<SkillsState>({ status: "loading", skills: null });
-
-  // Discard the previous result during render, before a new effect can run.
-  const [owner, setOwner] = useState({ getToken, scope, preview });
-  if (owner.scope !== scope || owner.getToken !== getToken || owner.preview !== preview) {
-    setOwner({ getToken, scope, preview });
-    setState({ status: "loading", skills: null });
-  }
 
   useEffect(() => {
     let cancelled = false;
@@ -36,8 +29,7 @@ export function useSkills(getToken: () => string, scope: SkillScope = DEFAULT_SK
       refreshQueued = false;
       setState((current) => current.skills === null ? { status: "loading", skills: null } : current);
       const version = payloadVersion;
-      const request = preview ? preview() : fetchSkills(getToken(), scope);
-      request
+      fetchSkills(getToken())
         .then(({ skills: nextSkills }) => {
           if (!cancelled && version === payloadVersion) setState({ status: "ready", skills: nextSkills });
         })
@@ -52,12 +44,7 @@ export function useSkills(getToken: () => string, scope: SkillScope = DEFAULT_SK
         });
     };
     const onSkillsChanged = (event: Event) => {
-      const { payload, scope: changedScope } = (event as CustomEvent).detail;
-      if (preview || changedScope !== scope) {
-        // Agent-owned installs and enabled names can affect other projects too.
-        refresh();
-        return;
-      }
+      const payload = (event as CustomEvent<unknown>).detail;
       if (!cancelled && isSkillsPayload(payload)) {
         payloadVersion += 1;
         setState({ status: "ready", skills: payload.skills });
@@ -72,7 +59,7 @@ export function useSkills(getToken: () => string, scope: SkillScope = DEFAULT_SK
       window.removeEventListener(SKILLS_CHANGED_EVENT, onSkillsChanged);
       window.removeEventListener(SKILLS_REFRESH_EVENT, refresh);
     };
-  }, [getToken, scope, preview]);
+  }, [getToken]);
 
   return {
     skills: state.skills ?? EMPTY_SKILLS,

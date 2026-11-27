@@ -17,7 +17,7 @@ from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import build_gateway_services
 from nanobot.webui.workspaces import write_webui_default_access_mode
 
-from .ws_test_client import WsTestClient, http_get
+from .ws_test_client import WsTestClient
 
 
 @asynccontextmanager
@@ -214,40 +214,3 @@ async def test_client_uses_operator_config_not_owner_full_default(tmp_path, rest
             msg = await asyncio.wait_for(bus.consume_inbound(), timeout=5)
             assert msg.metadata["workspace_scope"]["access_mode"] == ("restricted" if restricted else "full")
             await _check_file_authority(msg, workspace, project, allowed=not restricted, restricted=restricted)
-
-
-@pytest.mark.asyncio
-async def test_skill_catalog_uses_validated_draft_preview_and_then_the_real_chat(tmp_path):
-    async with _running_gateway(tmp_path) as (channel, uri, workspace, project, _bus):
-        for root, description in ((project / ".agents" / "skills", "Project"), (workspace / "skills", "Workspace")):
-            package = root / "review"
-            package.mkdir(parents=True)
-            (package / "SKILL.md").write_text(f"---\nname: review\ndescription: {description}\n---\n{description} body")
-        gateway = channel.gateway
-        scope = {"project_path": str(project), "access_mode": "restricted"}
-        auth = {"Authorization": f"Bearer {gateway.tokens.issue_api_token(60)}"}
-        url = uri.replace("ws://", "http://").removesuffix("/ws") + "/api/webui/skills/review"
-        async with WsTestClient(uri, token=gateway.tokens.issue_token(60, audience="webui")) as client:
-            await client.recv_ready()
-            await client.send_json({
-                "type": "webui_request", "request_id": "preview", "action": "skill.preview",
-                "payload": {"workspace_scope": scope},
-            })
-            preview = await _result(client, "webui_response")
-            skill = next(item for item in preview["result"]["skills"] if item["name"] == "review")
-            assert (skill["source"], skill["deletable"]) == ("project", False)
-            assert not gateway.workspaces._draft_scopes
-
-            await client.send_json({"type": "new_chat", "workspace_scope": scope})
-            chat_id = (await _result(client, "attached"))["chat_id"]
-            detail = await http_get(f"{url}?chat_id={chat_id}", auth)
-            assert detail.json()["raw_markdown"].endswith("Project body")
-            assert (await http_get(url, auth)).json()["raw_markdown"].endswith("Workspace body")
-            assert (await http_get(f"{url}?project_path={project.as_posix()}", auth)).status_code == 400
-            await client.send_json({
-                "type": "webui_request", "request_id": "delete", "action": "skill.delete",
-                "payload": {"name": "review", "chat_id": chat_id},
-            })
-            denied = await _result(client, "webui_response")
-            assert denied["ok"] is False
-            assert (await http_get(url, auth)).json()["source"] == "workspace"

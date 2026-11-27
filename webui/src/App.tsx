@@ -93,7 +93,6 @@ import type {
   RuntimeSurface,
   SessionAutomationJob,
   SettingsPayload,
-  SkillsPayload,
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
@@ -571,6 +570,7 @@ function Shell({
   const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
   const [updatedChatIds, setUpdatedChatIds] = useState<Set<string>>(readSessionUpdateChatIds);
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
+  const { skills, loading: skillsLoading, error: skillsError } = useSkills(getToken);
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const settingsSnapshotRef = useRef(settingsSnapshot);
@@ -843,21 +843,6 @@ function Shell({
     workspaceOverrides,
     workspaces?.default_scope,
   ]);
-  const skillChatId = activeKey?.replace(/^websocket:/, "") || undefined;
-  const skillProject = skillChatId
-    ? workspaceOverrides[skillChatId]?.project_path ?? activePaneSession?.workspaceScope?.project_path
-    : temporaryChatRequested ? undefined : draftWorkspaceScope?.project_path;
-  const customDraftProject = view === "chat" && !skillChatId && skillProject !== workspaces?.default_scope.project_path
-    ? skillProject : undefined;
-  const skillScope = useMemo(() => ({ chat_id: skillChatId, projectRevision: skillProject }), [skillChatId, skillProject]);
-  // Without a chat, Settings manages the default catalog; only the draft composer
-  // previews the selected project, using the gateway's new-chat validation.
-  const previewSkills = useMemo(() => customDraftProject
-    ? () => client.requestMutation<SkillsPayload>("skill.preview", {
-        workspace_scope: { project_path: customDraftProject, access_mode: "restricted" },
-      })
-    : undefined, [client, customDraftProject]);
-  const { skills, loading: skillsLoading, error: skillsError } = useSkills(getToken, skillScope, previewSkills);
   const activeChatRunning = activeChatId ? runningChatIds.has(activeChatId) : false;
 
   const refreshWorkspaces = useCallback(async () => {
@@ -2404,7 +2389,7 @@ function Shell({
                             onOpenModelSettings={onOpenModelSettings}
                             onInspectImagePreset={onInspectImagePreset}
                             onOpenSandboxSettings={onOpenSandboxSettings}
-                            skills={context.active ? skills : []}
+                            skills={skills}
                           />
                         );
                       }
@@ -2461,6 +2446,10 @@ function Shell({
                             if (paneRunning) return;
                             const next = normalizeWorkspaceScope(scope);
                             setWorkspaceError(null);
+                            setWorkspaceOverrides((current) => ({
+                              ...current,
+                              [paneSession.chatId]: next,
+                            }));
                             client.setWorkspaceScope(paneSession.chatId, next);
                           }}
                           settingsSnapshot={settingsSnapshot}
@@ -2468,7 +2457,7 @@ function Shell({
                           onOpenModelSettings={onOpenModelSettings}
                           onInspectImagePreset={onInspectImagePreset}
                           onOpenSandboxSettings={onOpenSandboxSettings}
-                          skills={context.active ? skills : []}
+                          skills={skills}
                         />
                       );
                     }}
@@ -2496,7 +2485,6 @@ function Shell({
                     onModelNameChange={onModelNameChange}
                     onSettingsChange={setSettingsSnapshot}
                     skills={skills}
-                    skillScope={skillScope}
                     skillsLoading={skillsLoading}
                     skillsError={skillsError}
                     onStartAutomationChat={onStartAutomationChat}
