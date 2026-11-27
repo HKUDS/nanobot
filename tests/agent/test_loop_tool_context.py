@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.context import TranscriptInput
+from agent.session_helpers import make_agent_loop
+from nanobot.agent.context import ContextBuilder, TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import (
@@ -50,7 +51,7 @@ def test_loop_registers_default_tools_in_injected_registry(tmp_path: Path) -> No
     provider.get_default_model.return_value = "test-model"
     registry = ToolRegistry()
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -75,17 +76,20 @@ def test_loop_from_config_requires_caller_owned_registry(tmp_path: Path) -> None
     signature = inspect.signature(AgentLoop.from_config)
 
     with pytest.raises(TypeError, match="tool_registry"):
-        signature.bind(_config_for_loop(tmp_path))
+        signature.bind(_config_for_loop(tmp_path), context_builder=ContextBuilder(tmp_path))
 
 
-def test_loop_from_config_uses_caller_owned_registry(tmp_path: Path) -> None:
+def test_loop_from_config_uses_caller_owned_context_and_registry(tmp_path: Path) -> None:
     registry = ToolRegistry()
+    context = ContextBuilder(tmp_path)
     loop = AgentLoop.from_config(
         _config_for_loop(tmp_path),
+        context_builder=context,
         tool_registry=registry,
         provider=_provider_for_loop(),
     )
 
+    assert loop.context is context
     assert loop.tools is registry
     assert loop.tools.has("read_file")
 
@@ -102,7 +106,9 @@ def test_loop_uses_pre_registered_image_tool(
     registry = ToolRegistry()
     register_image_generation_tool(config, registry, workspace=config.workspace_path)
     configured_tool = registry.get("generate_image")
-    loop = AgentLoop.from_config(config, tool_registry=registry, provider=_provider_for_loop())
+    loop = AgentLoop.from_config(
+        config, context_builder=ContextBuilder(tmp_path), tool_registry=registry, provider=_provider_for_loop(),
+    )
 
     tool = registry.get("generate_image")
     assert loop.tools is registry
@@ -129,7 +135,7 @@ async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> 
     provider.chat_stream_with_retry = chat_stream_with_retry
     provider.get_default_model.return_value = "test-model"
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -217,7 +223,7 @@ async def test_agent_loop_restores_outer_request_context_after_runner_exception(
 ) -> None:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -274,7 +280,7 @@ async def test_process_message_captures_original_text_before_restore(
 ) -> None:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,

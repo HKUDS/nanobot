@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from loguru import logger
 
-from agent.session_helpers import run_session
+from agent.session_helpers import make_agent_loop, run_session
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.runner import AgentRunResult
@@ -17,6 +17,7 @@ from nanobot.bus.events import (
     InboundMessage,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import ToolsConfig
 from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
 from nanobot.runtime_context import RuntimeContextBlock
 from nanobot.session.manager import SessionPolicy
@@ -42,7 +43,7 @@ def _loop(tmp_path, responses: list[str], **kwargs) -> AgentLoop:
     provider.chat_stream_with_retry = AsyncMock(
         side_effect=[LLMResponse(content=response, usage=None) for response in responses]
     )
-    return AgentLoop(
+    return make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -143,7 +144,7 @@ async def test_temporary_chat_does_not_execute_unadvertised_subagent_call(tmp_pa
 
 
 async def test_transient_session_file_tools_keep_shared_memory_out_of_the_turn(tmp_path) -> None:
-    loop = _loop(tmp_path, [], restrict_to_workspace=True)
+    loop = _loop(tmp_path, [], tools_config=ToolsConfig(restrict_to_workspace=True))
     memory = loop.context.memory
     memory.user_file.write_text("Profile contains Private Marker", encoding="utf-8")
     memory.wiki_dir.mkdir()
@@ -209,7 +210,7 @@ async def test_transient_session_file_tools_keep_shared_memory_out_of_the_turn(t
 @pytest.mark.parametrize("selection", ["explicit_empty", "disable_all", "default"])
 async def test_turn_tool_selection_preserves_empty_registries(tmp_path, monkeypatch, selection) -> None:
     monkeypatch.setattr("nanobot.agent.tools.loader.entry_points", lambda **kwargs: [])
-    loop = _loop(tmp_path, [], max_iterations=2)
+    loop = _loop(tmp_path, [], max_tool_iterations=2)
     key = "cli:tool-selection"
     write_tool = loop.tools.get("write_file")
     assert write_tool is not None

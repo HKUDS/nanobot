@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
 from nanobot.agent.goal_permission import goal_mutation_allowed
 from nanobot.agent.loop import AgentLoop
@@ -36,7 +37,7 @@ def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
 
 
 def _make_loop(tmp_path, *, preset_snapshot_loader=None, model_presets=None) -> AgentLoop:
-    return AgentLoop(
+    return make_agent_loop(
         bus=MessageBus(),
         provider=_provider("base-model", max_tokens=123),
         workspace=tmp_path,

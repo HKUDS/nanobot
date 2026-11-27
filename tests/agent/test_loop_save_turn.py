@@ -8,7 +8,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from loguru import logger
 
-from agent.session_helpers import run_session, save_completed_subagent, visible_message
+from agent.session_helpers import (
+    make_agent_loop,
+    run_session,
+    save_completed_subagent,
+    visible_message,
+)
 from nanobot.agent.context import ContextBuilder, TranscriptInput
 from nanobot.agent.dream import DreamResult
 from nanobot.agent.loop import AgentLoop
@@ -134,7 +139,7 @@ def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider.estimate_prompt_tokens.return_value = (100, "test")
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
     bus = MessageBus()
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus, provider=provider, workspace=tmp_path, model="test-model",
         builtin_assembly=install_goal,
     )

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
 from nanobot.context_graph import graph_from_sources
 from nanobot.context_sources import PromptSourcesEvent, capture_sources
@@ -190,7 +191,6 @@ async def test_queued_skill_sources_reach_the_request(tmp_path: Path):
     from unittest.mock import AsyncMock, MagicMock
 
     from nanobot.agent.context import TranscriptInput
-    from nanobot.agent.loop import AgentLoop
     from nanobot.agent.tools.context import RequestContext
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -202,7 +202,7 @@ async def test_queued_skill_sources_reach_the_request(tmp_path: Path):
     provider = MagicMock()
     provider.get_default_model.return_value = 'test-model'
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content='Done', tool_calls=[], usage=None))
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model='test-model')
+    loop = make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model='test-model')
     loop.tools.get_definitions = MagicMock(return_value=[])
     session = await loop.sessions.state.get('websocket:skill-provenance')
     message = InboundMessage(channel='websocket', sender_id='user', chat_id='skill-provenance', content='$example')

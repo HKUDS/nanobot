@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.shell import ExecTool
@@ -93,7 +94,6 @@ async def test_user_command_keeps_waiting_for_full_result_while_model_observatio
     import shlex
     import sys
 
-    from nanobot.agent.loop import AgentLoop
     from nanobot.agent.tools.exec_session import ExecSessionManager
     from nanobot.bus.queue import MessageBus
     from nanobot.security.workspace_access import default_workspace_scope
@@ -104,7 +104,7 @@ async def test_user_command_keeps_waiting_for_full_result_while_model_observatio
     command = f"{shlex.quote(sys.executable)} -I -c {shlex.quote(snippet)}"
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "unused-model"
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path)
+    loop = make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path)
     loop.tools.register(tool)
     ctx = _context(loop, trusted=True, command=command)
     scope = default_workspace_scope(tmp_path, False, source_channel="websocket")

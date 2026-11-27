@@ -14,12 +14,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from agent.session_helpers import make_agent_loop
 from aiohttp import web
 from loguru import logger
 from PIL import Image
 from pypdf import PdfWriter
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.model_runtime import ModelRuntimeResolver
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ProviderCallContext
@@ -245,7 +245,7 @@ async def test_gateway_continues_image_then_pdf_attachment_turn(codex_peer, tmp_
     writer = PdfWriter()
     writer.add_blank_page(width=100, height=100)
     writer.write(pdf)
-    agent = AgentLoop(
+    agent = make_agent_loop(
         bus=MessageBus(), provider=provider, workspace=tmp_path,
         model=provider.get_default_model(), context_window_tokens=128_000,
     )
@@ -289,7 +289,7 @@ async def test_gateway_prepares_image_batch_and_preserves_originals(codex_peer, 
     small = tmp_path / "thumbnail.jpg"
     Image.new("RGB", (32, 32), "white").save(small, "JPEG", quality=95)
     small_bytes = small.read_bytes()
-    agent = AgentLoop(
+    agent = make_agent_loop(
         bus=MessageBus(), provider=provider, workspace=tmp_path,
         model=provider.get_default_model(), context_window_tokens=128_000,
     )

@@ -7,6 +7,7 @@ import pytest
 import tiktoken
 
 from agent.runner_helpers import make_run_spec
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.context_governance import (
     BACKFILL_CONTENT,
@@ -1562,7 +1563,6 @@ async def test_runner_drops_orphan_tool_results_before_model_request():
 
 @pytest.mark.asyncio
 async def test_backfill_repairs_model_context_without_shifting_save_turn_boundary(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
 
@@ -1571,7 +1571,7 @@ async def test_backfill_repairs_model_context_without_shifting_save_turn_boundar
     response = LLMResponse(content="new answer", tool_calls=[], usage=None)
     provider.chat_stream_with_retry = AsyncMock(return_value=response)
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,

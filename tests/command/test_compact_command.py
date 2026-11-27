@@ -6,9 +6,8 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from agent.session_helpers import run_session
+from agent.session_helpers import make_agent_loop, run_session
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import CommandResultEvent, ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
@@ -32,7 +31,7 @@ async def loop(tmp_path):
         content="Portable checkpoint.",
         finish_reason="stop",
     ))
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus,
         provider=provider,
         workspace=tmp_path,

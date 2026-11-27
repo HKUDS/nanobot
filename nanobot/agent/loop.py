@@ -120,7 +120,6 @@ from nanobot.utils.progress_events import output_events
 
 if TYPE_CHECKING:
     from nanobot.config.schema import (
-        ChannelsConfig,
         Config,
         ToolsConfig,
     )
@@ -275,48 +274,20 @@ class AgentLoop:
     _PROVIDER_STATE_CHECKPOINT_VERSION = "v1"
 
     def __init__(
-        self,
-        bus: MessageBus,
-        provider: LLMProvider,
-        workspace: Path,
-        model: str | None = None,
-        max_iterations: int | None = None,
-        max_concurrent_subagents: int | None = None,
-        context_window_tokens: int | None = None,
-        max_tool_result_chars: int | None = None,
-        provider_retry_mode: str = "standard",
+        self, *, bus: MessageBus, context_builder: ContextBuilder, runtime_resolver: ModelRuntimeResolver,
+        session_manager: SessionManager, tool_registry: ToolRegistry,
+        settings: AgentDefaults, tools_config: ToolsConfig, network_config: NetworkConfig,
         cron_service: CronService | None = None,
-        restrict_to_workspace: bool = False,
-        session_manager: SessionManager | None = None,
-        tool_registry: ToolRegistry | None = None,
-        channels_config: ChannelsConfig | None = None,
-        timezone: str | None = None,
-        session_ttl_minutes: int = 0,
         hooks: list[AgentHook] | None = None,
         hook_factories: list[AgentTurnHookFactory] | None = None,
-        disabled_skills: list[str] | None = None,
-        tools_config: ToolsConfig | None = None,
-        network_config: NetworkConfig | None = None,
-        provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None,
-        provider_signature: tuple[object, ...] | None = None,
-        model_presets: dict[str, ModelPresetConfig] | None = None,
-        preset_catalog_loader: preset_helpers.PresetCatalogLoader | None = None,
-        model_preset: str | None = None,
-        dream_model_preset: str | None = None,
-        preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         turn_delivery_factory: TurnDeliveryFactory | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
         restart_mode: str = "auto",
         local_trigger_store: LocalTriggerStore | None = None,
-        idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
         builtin_assembly: Callable[[SessionManager, MessageBus, ToolRegistry, CommandRouter], ExecutionPolicy] | None = None,
-        context_builder: ContextBuilder | None = None,
+        provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None,
     ):
-        from nanobot.config.schema import ToolsConfig
-
-        _tc = tools_config or ToolsConfig()
-        defaults = AgentDefaults()
         self.bus = bus
         self.execution_policy: ExecutionPolicy | None = None
         self._recovery_admission = recovery_admission
@@ -327,59 +298,30 @@ class AgentLoop:
         else:
             self.turn_delivery_factory = TurnDeliveryFactory(bus)
         self.runtime_event_publisher = self.turn_delivery_factory.runtime_event_publisher
-        self.channels_config = channels_config
         self.restart_mode = restart_mode
         self._runtime_model_publisher = runtime_model_publisher
-        self.workspace = workspace
-        initial_model = model or provider.get_default_model()
-        self.max_iterations = (
-            max_iterations if max_iterations is not None else defaults.max_tool_iterations
-        )
-        initial_context_window = (
-            context_window_tokens
-            if context_window_tokens is not None
-            else defaults.context_window_tokens
-        )
-        configured_presets = model_presets or {}
-        self.runtime_resolver = ModelRuntimeResolver(
-            LLMRuntime.capture(
-                provider,
-                initial_model,
-                context_window_tokens=initial_context_window,
-                snapshot_signature=provider_signature,
-            ),
-            model_presets=configured_presets,
-            preset_catalog_loader=preset_catalog_loader,
-            configured_default_preset=model_preset,
-            provider_snapshot_loader=provider_snapshot_loader,
-            preset_snapshot_loader=preset_snapshot_loader,
-        )
-        self.dream_model_preset = dream_model_preset
-        self.max_tool_result_chars = (
-            max_tool_result_chars
-            if max_tool_result_chars is not None
-            else defaults.max_tool_result_chars
-        )
-        self.provider_retry_mode = provider_retry_mode
-        self.tools_config = _tc
-        self.network_config = network_config or NetworkConfig()
-        self.web_config = _tc.web
-        self.exec_config = _tc.exec
+        self.context = context_builder
+        self.workspace = context_builder.workspace
+        self.runtime_resolver = runtime_resolver
+        self.max_iterations = settings.max_tool_iterations
+        self.dream_model_preset = settings.dream.model_override
+        self.max_tool_result_chars = settings.max_tool_result_chars
+        self.provider_retry_mode = settings.provider_retry_mode
+        self.tools_config = tools_config
+        self.network_config = network_config
+        self.web_config = tools_config.web
+        self.exec_config = tools_config.exec
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
-        self.restrict_to_workspace = restrict_to_workspace
+        self.restrict_to_workspace = tools_config.restrict_to_workspace
         self.workspace_scopes = WorkspaceScopeResolver(
-            default_workspace=workspace,
-            default_restrict_to_workspace=restrict_to_workspace,
+            default_workspace=self.workspace, default_restrict_to_workspace=self.restrict_to_workspace,
         )
         self._start_time = time.time()
         self._extra_hooks: list[AgentHook] = hooks or []
         self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
-        self.context = context_builder if context_builder is not None else ContextBuilder(
-            workspace, timezone=timezone, disabled_skills=disabled_skills,
-        )
-        self.sessions = session_manager or SessionManager(workspace)
+        self.sessions = session_manager
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore(max_sessions=SESSION_CACHE_MAX_SIZE)
@@ -387,7 +329,7 @@ class AgentLoop:
         # WebUI and fork rollback paths.  Observe that boundary once instead of
         # duplicating cleanup in each consumer.
         self.sessions.set_delete_observer(self._file_state_store.discard)
-        self.tools = tool_registry if tool_registry is not None else ToolRegistry()
+        self.tools = tool_registry
         self._exec_session_manager = ExecSessionManager()
         self.runner = AgentRunner()
         self.consolidator = Consolidator(
@@ -400,15 +342,15 @@ class AgentLoop:
             ),
         )
         self.subagents = SubagentManager(
-            workspace=workspace,
+            workspace=self.workspace,
             bus=bus,
-            tools_config=_tc,
+            tools_config=tools_config,
             network_config=self.network_config,
             max_tool_result_chars=self.max_tool_result_chars,
-            restrict_to_workspace=restrict_to_workspace,
-            disabled_skills=disabled_skills,
+            restrict_to_workspace=self.restrict_to_workspace,
+            disabled_skills=settings.disabled_skills,
             max_iterations=self.max_iterations,
-            max_concurrent_subagents=max_concurrent_subagents,
+            max_concurrent_subagents=settings.max_concurrent_subagents,
             consolidator=self.consolidator,
             session_manager=self.sessions,
             exec_session_manager=self._exec_session_manager,
@@ -440,15 +382,13 @@ class AgentLoop:
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
             consolidator=self.consolidator,
-            session_ttl_minutes=session_ttl_minutes,
+            session_ttl_minutes=settings.session_ttl_minutes,
             bind_events=self._idle_events,
             session_lock=self._get_session_lock,
         )
-        self._idle_compact_check_interval_s = idle_compact_check_interval_seconds
+        self._idle_compact_check_interval_s = settings.idle_compact_check_interval_seconds
         self._next_idle_compact_check_at = time.monotonic()
         self._idle_compact_check_running = False
-        if model_preset:
-            self.set_model_preset(model_preset, publish_update=False)
         self.commands = CommandRouter()
         register_core_commands(self.commands)
         if builtin_assembly is not None:
@@ -457,68 +397,41 @@ class AgentLoop:
 
     @classmethod
     def from_config(
-        cls,
-        config: Config,
-        bus: MessageBus | None = None,
-        *,
-        tool_registry: ToolRegistry,
-        **extra: Any,
+        cls, config: Config, bus: MessageBus | None = None, *,
+        context_builder: ContextBuilder, tool_registry: ToolRegistry,
+        provider: LLMProvider | ProviderSnapshot | None = None,
+        provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None,
+        preset_catalog_loader: preset_helpers.PresetCatalogLoader | None = None,
+        session_manager: SessionManager | None = None,
+        cron_service: CronService | None = None,
+        local_trigger_store: LocalTriggerStore | None = None,
+        hooks: list[AgentHook] | None = None,
+        hook_factories: list[AgentTurnHookFactory] | None = None,
+        turn_delivery_factory: TurnDeliveryFactory | None = None,
+        runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        recovery_admission: RecoveryAdmission | None = None,
+        builtin_assembly: Callable[[SessionManager, MessageBus, ToolRegistry, CommandRouter], ExecutionPolicy] | None = None,
     ) -> AgentLoop:
-        """Create an AgentLoop from config with the common parameter set.
-
-        The tool registry is caller-owned so application composition can share
-        it with infrastructure such as an ``MCPProvider``.
-
-        Extra keyword arguments are forwarded to ``AgentLoop.__init__``,
-        allowing callers to override or extend the standard config-derived
-        parameters (e.g. ``cron_service``, ``session_manager``).
-        """
-        from nanobot.providers.factory import make_provider
-
-        if bus is None:
-            bus = MessageBus()
-        defaults = config.agents.defaults
-        if "session_manager" not in extra:
+        """Assemble a configured loop using the host's prompt builder and shared tools."""
+        if session_manager is None:
             data_dir = config.runtime_data_dir
-            extra["session_manager"] = SessionManager(
-                config.workspace_path,
+            session_manager = SessionManager(
+                context_builder.workspace,
                 sessions_root=data_dir / "sessions" if data_dir is not None else None,
             )
-        provider = extra.pop("provider", None) or make_provider(config)
-        resolved = config.resolve_preset()
-        model = extra.pop("model", None) or resolved.model
-        context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
-        provider_snapshot_loader = extra.pop("provider_snapshot_loader", None)
-        preset_snapshot_loader = extra.pop("preset_snapshot_loader", None) or preset_helpers.make_preset_snapshot_loader(
-            config,
-            provider_snapshot_loader,
+        runtime_resolver = ModelRuntimeResolver.from_config(
+            config, provider=provider, provider_snapshot_loader=provider_snapshot_loader,
+            preset_catalog_loader=preset_catalog_loader,
         )
         return cls(
-            bus=bus,
-            provider=provider,
-            workspace=config.workspace_path,
-            model=model,
-            max_iterations=defaults.max_tool_iterations,
-            max_concurrent_subagents=defaults.max_concurrent_subagents,
-            context_window_tokens=context_window_tokens,
-            max_tool_result_chars=defaults.max_tool_result_chars,
-            provider_retry_mode=defaults.provider_retry_mode,
-            restrict_to_workspace=config.tools.restrict_to_workspace,
-            channels_config=config.channels,
-            timezone=defaults.timezone,
-            disabled_skills=defaults.disabled_skills,
-            session_ttl_minutes=defaults.session_ttl_minutes,
-            idle_compact_check_interval_seconds=defaults.idle_compact_check_interval_seconds,
-            tools_config=config.tools,
-            network_config=config.network,
-            model_presets=preset_helpers.configured_model_presets(config),
-            model_preset=defaults.model_preset,
-            dream_model_preset=defaults.dream.model_override,
+            bus=bus if bus is not None else MessageBus(), context_builder=context_builder,
+            runtime_resolver=runtime_resolver, session_manager=session_manager, tool_registry=tool_registry,
+            settings=config.agents.defaults, tools_config=config.tools, network_config=config.network,
             restart_mode=config.gateway.restart_mode,
+            hooks=hooks, hook_factories=hook_factories, turn_delivery_factory=turn_delivery_factory,
+            runtime_model_publisher=runtime_model_publisher, recovery_admission=recovery_admission,
+            cron_service=cron_service, local_trigger_store=local_trigger_store, builtin_assembly=builtin_assembly,
             provider_snapshot_loader=provider_snapshot_loader,
-            preset_snapshot_loader=preset_snapshot_loader,
-            tool_registry=tool_registry,
-            **extra,
         )
 
     def _sync_subagent_runtime_limits(self) -> None:

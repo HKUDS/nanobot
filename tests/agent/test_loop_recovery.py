@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.session_helpers import save_completed_subagent
+from agent.session_helpers import make_agent_loop, save_completed_subagent
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.session_inbox import SessionInboxes
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
@@ -61,7 +61,7 @@ async def test_committed_model_failure_continues_with_tool_results_without_resen
 
     provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
     (tmp_path / "note.txt").write_text("saved evidence", encoding="utf-8")
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus, provider=provider, workspace=tmp_path, model="test-model",
         session_manager=sessions, recovery_admission=recovery,
     )
@@ -183,7 +183,7 @@ async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
         entered.set()
         await asyncio.Event().wait()
 
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
     loop.turn_delivery_factory = TurnDeliveryFactory(bus, WebuiTurnRoutePolicy(loop.sessions))
     coordinator = WebuiTurnCoordinator(bus, loop.sessions, loop.schedule_background)
     request = InboundMessage(
@@ -259,7 +259,7 @@ async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
         LLMResponse(content="Logs verified"),
         LLMResponse(content="Log inspection complete"),
     ])
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus, provider=provider, workspace=tmp_path, model="test-model",
         session_manager=sessions, recovery_admission=recovery,
     )
@@ -323,7 +323,7 @@ async def test_recovery_distinguishes_explicit_stop_from_gateway_shutdown(
         await asyncio.Event().wait()
 
     provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus, provider=provider, workspace=tmp_path, model="test-model",
         session_manager=sessions, recovery_admission=recovery,
         turn_delivery_factory=TurnDeliveryFactory(bus, WebuiTurnRoutePolicy(sessions)),
@@ -375,7 +375,7 @@ def _recovery_loop(tmp_path, provider, sessions=None):
     bus = MessageBus()
     sessions = sessions or SessionManager(tmp_path)
     recovery = RecoveryCoordinator(sessions, bus)
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus, provider=provider, workspace=tmp_path, model="test-model",
         session_manager=sessions, recovery_admission=recovery,
         turn_delivery_factory=TurnDeliveryFactory(bus, WebuiTurnRoutePolicy(sessions)),
@@ -580,7 +580,7 @@ async def test_length_recovery_retains_original_prompt_attribution(tmp_path: Pat
         return next(responses)
 
     provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model",
+    loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model",
                      session_manager=sessions, recovery_admission=recovery)
     loop.turn_delivery_factory = TurnDeliveryFactory(bus, WebuiTurnRoutePolicy(sessions))
     coordinator = WebuiTurnCoordinator(bus, sessions, loop.schedule_background, recovery=recovery)

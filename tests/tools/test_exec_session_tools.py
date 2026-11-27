@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.session_helpers import make_agent_loop
 from loguru import logger
 
 from nanobot.agent.loop import AgentLoop
@@ -990,7 +991,7 @@ def test_exec_session_manager_preserves_single_cleanup_error():
 @pytest.fixture
 def shutdown_loop(tmp_path) -> AgentLoop:
     provider = MagicMock(aclose=AsyncMock(), generation=GenerationSettings())
-    return AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    return make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
 
 
 async def test_agent_loop_shutdown_closes_exec_sessions(shutdown_loop, tmp_path, monkeypatch):

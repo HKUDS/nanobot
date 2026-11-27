@@ -228,26 +228,26 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             reasoning: bool = False,
             **_kwargs: Any,
         ) -> None:
-            ch = agent_loop.channels_config
+            ch = runtime_config.channels
 
             if _kwargs.get("reasoning_end"):
-                if ch and not ch.show_reasoning:
+                if not ch.show_reasoning:
                     reasoning_buffer.clear()
                 else:
                     cli_terminal._flush_cli_reasoning(reasoning_buffer, _thinking, renderer)
                 return
 
             if reasoning:
-                if ch and not ch.show_reasoning:
+                if not ch.show_reasoning:
                     reasoning_buffer.clear()
                     return
                 text = reasoning_buffer.add(content)
                 if text:
                     cli_terminal._print_cli_reasoning(text, _thinking, renderer)
                 return
-            if ch and tool_hint and not ch.send_tool_hints:
+            if tool_hint and not ch.send_tool_hints:
                 return
-            if ch and not tool_hint and not ch.send_progress:
+            if not tool_hint and not ch.send_progress:
                 return
             if tool_hint and tool_events:
                 content = format_tool_event_hints(
@@ -383,7 +383,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                         if await cli_terminal._maybe_print_interactive_progress(
                             msg,
                             None,
-                            agent_loop.channels_config,
+                            runtime_config.channels,
                             renderer,
                             reasoning_buffer,
                             tool_hint_max_length=runtime_config.agents.defaults.tool_hint_max_length,

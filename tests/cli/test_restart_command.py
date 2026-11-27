@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
 from nanobot.agent.context import TranscriptInput
 from nanobot.bus.events import InboundMessage
@@ -19,7 +20,6 @@ from nanobot.session.state import SessionState
 
 def _make_loop():
     """Create a minimal AgentLoop with mocked dependencies."""
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
@@ -28,16 +28,18 @@ def _make_loop():
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager") as mock_sessions, \
-         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
-        mock_sessions.return_value.state = MagicMock(spec=SessionState)
-        mock_sessions.return_value.state.get = AsyncMock(side_effect=lambda key: Session(key))
-        mock_sessions.return_value.state.peek.return_value = None
-        mock_sessions.return_value.state.project_history = AsyncMock(return_value=None)
+    sessions = MagicMock()
+    with patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
+        sessions.state = MagicMock(spec=SessionState)
+        sessions.state.get = AsyncMock(side_effect=lambda key: Session(key))
+        sessions.state.peek.return_value = None
+        sessions.state.project_history = AsyncMock(return_value=None)
         mock_sub_mgr.return_value.close = AsyncMock()
         mock_sub_mgr.return_value.get_running_count_by_session.return_value = 0
-        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
+        loop = make_agent_loop(
+            bus=bus, provider=provider, workspace=workspace,
+            context_builder=MagicMock(workspace=workspace), session_manager=sessions,
+        )
     return loop, bus
 
 

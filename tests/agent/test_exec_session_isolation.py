@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from nanobot.agent.loop import AgentLoop
+from agent.session_helpers import make_agent_loop
 from nanobot.bus.queue import MessageBus
 
 
@@ -13,14 +13,14 @@ def _provider() -> MagicMock:
 
 
 def test_agent_loops_do_not_share_exec_session_managers(tmp_path):
-    loop_a = AgentLoop(
+    loop_a = make_agent_loop(
         bus=MessageBus(),
         provider=_provider(),
         workspace=tmp_path / "a",
         model="test-model",
         context_window_tokens=4096,
     )
-    loop_b = AgentLoop(
+    loop_b = make_agent_loop(
         bus=MessageBus(),
         provider=_provider(),
         workspace=tmp_path / "b",

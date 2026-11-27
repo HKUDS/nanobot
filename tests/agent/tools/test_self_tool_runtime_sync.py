@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.tools.runtime_control import AgentRuntimeControl
 from nanobot.agent.tools.self import MyTool
 from nanobot.bus.queue import MessageBus
@@ -12,11 +12,11 @@ from nanobot.bus.queue import MessageBus
 async def test_my_tool_max_iterations_syncs_subagent_limit(tmp_path) -> None:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
-        max_iterations=40,
+        max_tool_iterations=40,
     )
     tool = MyTool(runtime_control=AgentRuntimeControl(loop))
 

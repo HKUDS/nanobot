@@ -571,15 +571,12 @@ def _run_claimed_gateway(
 
     agent = AgentLoop.from_config(
         config, bus,
-        provider=provider_snapshot.provider,
-        model=provider_snapshot.model,
-        context_window_tokens=provider_snapshot.context_window_tokens,
+        provider=provider_snapshot,
         cron_service=cron,
         session_manager=session_manager,
         provider_snapshot_loader=_load_gateway_provider_snapshot,
         preset_catalog_loader=load_model_preset_catalog,
         turn_delivery_factory=turn_delivery_factory,
-        provider_signature=provider_snapshot.signature,
         local_trigger_store=trigger_store,
         hooks=[_MCPReadinessHook(mcp_provider)],
         hook_factories=[create_file_edit_activity_hook, create_context_source_hook],

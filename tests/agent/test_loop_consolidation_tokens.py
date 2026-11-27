@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import (
@@ -28,7 +29,7 @@ def _make_loop(
     _response = LLMResponse(content="ok", tool_calls=[])
     provider.chat_stream_with_retry = AsyncMock(return_value=_response)
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,

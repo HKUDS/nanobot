@@ -3,6 +3,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
@@ -157,7 +158,7 @@ async def test_injected_inputs_keep_their_own_identity_through_runner_and_commit
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="completed answer"))
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path / "workspace", model="test-model")
+    loop = make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path / "workspace", model="test-model")
     loop.sessions = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
     # Plain-text inputs are valid without extension-provided runtime context.
     monkeypatch.setattr(loop, "_resolve_runtime_context_for_request", AsyncMock(return_value=[]))

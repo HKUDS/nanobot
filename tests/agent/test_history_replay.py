@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -17,7 +18,7 @@ def _make_loop(tmp_path: Path, context_window_tokens: int = 200_000) -> AgentLoo
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation.max_tokens = 4096
-    return AgentLoop(
+    return make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,

@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.skills import SkillsLoader
@@ -25,7 +26,7 @@ def _provider(default_model: str = "test-model") -> MagicMock:
 
 
 def _make_loop(tmp_path: Path) -> AgentLoop:
-    return AgentLoop(
+    return make_agent_loop(
         bus=MessageBus(),
         provider=_provider(),
         workspace=tmp_path,
