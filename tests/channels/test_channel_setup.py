@@ -24,6 +24,7 @@ EXPECTED_CHANNELS = {
     "msteams",
     "napcat",
     "qq",
+    "sendblue",
     "signal",
     "slack",
     "telegram",
