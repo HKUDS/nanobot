@@ -118,7 +118,7 @@ export function ThreadHeader({
       </div>
 
       {goal}
-      <div data-theme-surface data-header-controls="end" className={cn(controlsClassName, "ms-auto shrink-0")}>
+      <div data-theme-surface data-header-controls="end" className={cn(controlsClassName, "ml-auto shrink-0")}>
         {sessionInfoAction}
         {promptNavigatorAction}
         {actions}

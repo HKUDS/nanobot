@@ -1005,7 +1005,7 @@ export const ChatList = memo(function ChatList({
                               aria-current={topicActive ? "page" : undefined}
                               aria-pressed={deleteSelectionMode ? tabSelected : undefined}
                               className={cn(
-                                "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-start",
+                                "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left",
                                 TOPIC_BUTTON_FOCUS_CLASS,
                                 canDragSession && "cursor-grab active:cursor-grabbing",
                                 deleteSelectionMode && "cursor-default",
@@ -1266,7 +1266,7 @@ function WorkbenchTabHeader({
           aria-controls={deleteSelectionMode ? undefined : controlsId}
           aria-pressed={deleteSelectionMode ? selected : undefined}
           className={cn(
-            "flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1 text-start",
+            "flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1 text-left",
             "text-[13px] leading-5",
             active ? "font-medium" : "font-normal",
             deleteSelectionMode && "cursor-default",
@@ -1489,7 +1489,7 @@ function ActivePaneRows({
                   aria-current={active ? "true" : undefined}
                   aria-pressed={deleteSelectionMode ? selected : undefined}
                   className={cn(
-                    "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-start font-normal leading-5",
+                    "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left font-normal leading-5",
                     TOPIC_BUTTON_FOCUS_CLASS,
                     canDragSession && "cursor-grab active:cursor-grabbing",
                     compact ? "py-1" : "py-1.5",
@@ -1667,7 +1667,7 @@ function TemporaryChatSection({
                     type="button"
                     onClick={() => onSelect(session.key)}
                     aria-current={active ? "page" : undefined}
-                    className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1.5 text-start"
+                    className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1.5 text-left"
                   >
                     <MessageCircleDashed
                       className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--temporary-foreground))]"
@@ -1727,7 +1727,7 @@ function ProjectGroupHeader({
       aria-expanded={!collapsed}
       onClick={onToggle}
       className={cn(
-        "flex min-w-0 flex-1 items-center gap-2 rounded-control py-1 text-start transition-colors media-hover:hover:text-sidebar-foreground",
+        "flex min-w-0 flex-1 items-center gap-2 rounded-control py-1 text-left transition-colors media-hover:hover:text-sidebar-foreground",
         active ? "font-medium text-sidebar-foreground" : "font-normal",
       )}
     >
@@ -1851,7 +1851,7 @@ function ChatsFoldFooter({
       <button
         type="button"
         onClick={onToggle}
-        className="h-7 w-full rounded-control text-start text-[12px] font-medium text-sidebar-muted-foreground transition-colors media-hover:hover:bg-sidebar-accent/50 media-hover:hover:text-sidebar-muted-foreground"
+        className="h-7 w-full rounded-control text-left text-[12px] font-medium text-sidebar-muted-foreground transition-colors media-hover:hover:bg-sidebar-accent/50 media-hover:hover:text-sidebar-muted-foreground"
       >
         <span className="px-2">
           {folded

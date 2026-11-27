@@ -37,7 +37,7 @@ for (const locale of locales) {
     await expect(page.locator(".gallery-code").first()).toHaveText(code);
     expect(inventoryRequests).toBe(1);
     await expect(page.locator("html")).toHaveAttribute("lang", locale.code);
-    await expect(page.locator("html")).toHaveAttribute("dir", locale.code === "he" ? "rtl" : "ltr");
+    await expect(page.locator("html")).toHaveCSS("direction", "ltr");
     expect(await page.evaluate(() => localStorage.getItem("nanobot.locale"))).toBe(locale.code);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 

@@ -92,7 +92,6 @@ function CodeTextBlock({
   const lines = showLineNumbers ? code.split("\n") : [];
   return (
     <pre
-      dir="ltr"
       className={cn(
         "m-0 bg-transparent font-mono text-code text-foreground/90",
         compact ? "overflow-visible" : "overflow-x-auto",

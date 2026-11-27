@@ -26,7 +26,7 @@
   display: flex;
   min-height: 0;
   flex-direction: column;
-  border-inline-end: 1px solid hsl(var(--border));
+  border-right: 1px solid hsl(var(--border));
   padding: 1rem;
   background: hsl(var(--sidebar));
 }
@@ -44,7 +44,7 @@ html.dark .gallery-startup-preview .startup-composer { background: rgba(255, 255
 @media (max-width: 700px) {
   .gallery-header { padding: 0.75rem 1rem; }
   .gallery-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, min(22rem, 50%)) minmax(0, 1fr); }
-  .gallery-sidebar { overflow-y: auto; border-inline-end: 0; border-bottom: 1px solid hsl(var(--border)); padding: 0.75rem 1rem; }
+  .gallery-sidebar { overflow-y: auto; border-right: 0; border-bottom: 1px solid hsl(var(--border)); padding: 0.75rem 1rem; }
   .gallery-source-list { min-height: 6rem; }
   .gallery-main { padding: 1.25rem 1rem; }
   .gallery-preview { padding: 1rem; }

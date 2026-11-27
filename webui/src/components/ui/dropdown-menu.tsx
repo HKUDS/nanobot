@@ -1,7 +1,6 @@
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { ChevronRight, Circle } from "lucide-react";
-import { useTranslation } from "react-i18next";
 
 import {
   floatingItemClassName,
@@ -12,12 +11,8 @@ import {
 import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
 import { useFloatingPortal } from "@/components/ui/floating-portal";
-import { localeDirection } from "@/i18n/config";
 
-function DropdownMenu(props: React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Root>) {
-  const { i18n } = useTranslation();
-  return <DropdownMenuPrimitive.Root dir={localeDirection(i18n.language)} {...props} />;
-}
+const DropdownMenu = DropdownMenuPrimitive.Root;
 const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 const DropdownMenuSub = DropdownMenuPrimitive.Sub;
@@ -65,7 +60,7 @@ const DropdownMenuItem = React.forwardRef<
     ref={ref}
     className={cn(
       menuItemClassName,
-      inset && "ps-8",
+      inset && "pl-8",
       tone === "destructive" && "text-destructive focus:text-destructive",
       className,
     )}
@@ -82,12 +77,12 @@ const DropdownMenuRadioItem = React.forwardRef<
     ref={ref}
     className={cn(
       menuItemClassName,
-      "ps-8 pe-2.5",
+      "pl-8 pr-2.5",
       className,
     )}
     {...props}
   >
-    <span className="absolute start-2.5 flex h-3.5 w-3.5 items-center justify-center">
+    <span className="absolute left-2.5 flex h-3.5 w-3.5 items-center justify-center">
       <DropdownMenuPrimitive.ItemIndicator>
         <Circle className="h-2 w-2 fill-current" />
       </DropdownMenuPrimitive.ItemIndicator>
@@ -107,7 +102,7 @@ const DropdownMenuLabel = React.forwardRef<
     ref={ref}
     className={cn(
       "px-2.5 pb-1.5 pt-1 text-[12px] font-semibold text-muted-foreground",
-      inset && "ps-8",
+      inset && "pl-8",
       className,
     )}
     {...props}
@@ -135,11 +130,11 @@ const DropdownMenuSubTrigger = React.forwardRef<
 >(({ className, inset, children, ...props }, ref) => (
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
-    className={cn(menuItemClassName, inset && "ps-8", className)}
+    className={cn(menuItemClassName, inset && "pl-8", className)}
     {...props}
   >
     {children}
-    <ChevronRight className="ms-auto h-3.5 w-3.5 text-muted-foreground rtl:rotate-180" aria-hidden />
+    <ChevronRight className="ml-auto h-3.5 w-3.5 text-muted-foreground" aria-hidden />
   </DropdownMenuPrimitive.SubTrigger>
 ));
 DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;

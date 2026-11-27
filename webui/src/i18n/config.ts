@@ -80,9 +80,4 @@ export function persistLocale(locale: SupportedLocale): void {
 export function applyDocumentLocale(locale: SupportedLocale): void {
   if (typeof document === "undefined") return;
   document.documentElement.lang = locale;
-  document.documentElement.dir = localeDirection(locale);
-}
-
-export function localeDirection(locale: string): "rtl" | "ltr" {
-  return normalizeLocale(locale) === "he" ? "rtl" : "ltr";
 }

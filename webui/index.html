@@ -192,7 +192,6 @@
           var locale = normalizeLocale(detected);
           var localized = copy[locale] || copy.en;
           document.documentElement.lang = locale;
-          document.documentElement.dir = locale === "he" ? "rtl" : "ltr";
           var description = document.querySelector('[data-i18n-meta=\"description\"]');
           if (description) description.setAttribute("content", localized.description);
           var boot = document.querySelector("[data-boot-copy]");
