@@ -1960,7 +1960,6 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     bot._loop.consolidator.compact_idle_session.assert_awaited_once_with(
         "sdk:history",
         runtime=runtime,
-        max_suffix=4,
     )
 
 

@@ -135,7 +135,8 @@ Important files:
 | Tool area | Files |
 |---|---|
 | Tool base and schema | `nanobot/agent/tools/base.py`, `nanobot/agent/tools/schema.py` |
-| Discovery | `nanobot/agent/tools/registry.py` |
+| Discovery and plugin compatibility | `nanobot/agent/tools/loader.py` |
+| Registration and execution | `nanobot/agent/tools/registry.py` |
 | Shell execution | `nanobot/agent/tools/shell.py` |
 | Filesystem tools | `nanobot/agent/tools/filesystem.py` |
 | Web search/fetch | `nanobot/agent/tools/web.py` |
@@ -145,6 +146,8 @@ Important files:
 | Runtime self-inspection | `nanobot/agent/tools/self.py` |
 
 Tool behavior is part of the model contract. Keep user-visible tool names, schemas, and error messages stable unless a change is intentional.
+
+New tools should read per-call state with `current_request_context()` and return `ToolResult.error(...)` for failures. Do not store request state on a shared tool instance. The `set_context()` hook and the plain `"Error:"` failure prefix on tools loaded through `nanobot.tools` entry points are supported for older plugins; do not use them in new code.
 
 Before tool execution, arguments are validated against JSON Schema without coercion. Numeric strings and serialized nested objects or arrays are rejected when their JSON types do not match the schema; actionable tool errors let the model correct the call. MCP validation uses the server's original input schema, independently of provider-facing adaptations. Validation defaults to draft 2020-12, honors supported explicit dialects, and does not retrieve external references. The original tool-call arguments in history remain unchanged. JSON Schema integers include numbers such as 2.0; built-in tools adapt these validated values to Python integers where an index is required.
 

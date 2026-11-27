@@ -143,6 +143,27 @@ class Nanobot:
         )
         return cls(loop, config=config, mcp_provider=mcp_provider)
 
+    def _resolve_override(self, model: str | None, model_preset: str | None) -> LLMRuntime | None:
+        return self._loop.runtime_resolver.resolve_override(
+            model=model, model_preset=model_preset, config=self._config,
+        )
+
+    async def _execute_turn(
+        self,
+        message: str,
+        kwargs: dict[str, Any],
+        runtime: LLMRuntime | None,
+        hooks: list[AgentHook],
+    ) -> RunResult:
+        capture = SDKCaptureHook()
+        per_run_hooks = [capture, *hooks]
+        if runtime is not None:
+            kwargs["runtime"] = runtime
+        if self._mcp_provider is not None:
+            await self._mcp_provider.connect()
+        response = await self._loop.process_direct(message, **kwargs, hooks=per_run_hooks)
+        return result_from_response(response, capture)
+
     async def run(
         self,
         message: str,
@@ -176,13 +197,7 @@ class Nanobot:
             model: Override the model for this run only.
             model_preset: Override the model preset for this run only.
         """
-        capture = SDKCaptureHook()
-        per_run_hooks = [capture, *(hooks or [])]
-        runtime = self._loop.runtime_resolver.resolve_override(
-            model=model,
-            model_preset=model_preset,
-            config=self._config,
-        )
+        runtime = self._resolve_override(model, model_preset)
         kwargs = build_process_direct_kwargs(
             session_key=session_key,
             channel=channel,
@@ -192,17 +207,7 @@ class Nanobot:
             ephemeral=ephemeral,
             attributes=attributes,
         )
-        if runtime is not None:
-            kwargs["runtime"] = runtime
-        if self._mcp_provider is not None:
-            await self._mcp_provider.connect()
-        response = await self._loop.process_direct(
-            message,
-            **kwargs,
-            hooks=per_run_hooks,
-        )
-
-        return result_from_response(response, capture)
+        return await self._execute_turn(message, kwargs, runtime, hooks or [])
 
     async def run_streamed(
         self,
@@ -220,16 +225,10 @@ class Nanobot:
         model_preset: str | None = None,
     ) -> RunStream:
         """Start a streamed run and return a handle for events and final result."""
-        override_runtime = self._loop.runtime_resolver.resolve_override(
-            model=model,
-            model_preset=model_preset,
-            config=self._config,
-        )
+        override_runtime = self._resolve_override(model, model_preset)
         queue: asyncio.Queue[StreamEvent | object] = asyncio.Queue(maxsize=256)
         emitter = SDKStreamEmitter(queue)
-        stream_hook = SDKStreamingHook(emitter)
-        capture = SDKCaptureHook()
-        per_run_hooks = [capture, stream_hook, *(hooks or [])]
+        stream_hooks = [SDKStreamingHook(emitter), *(hooks or [])]
         run_started = False
 
         async def _emit_run_started(runtime: LLMRuntime | None = None) -> None:
@@ -274,19 +273,10 @@ class Nanobot:
                 on_stream_end=_on_stream_end,
             )
             kwargs["on_runtime_admitted"] = _emit_run_started
-            if override_runtime is not None:
-                kwargs["runtime"] = override_runtime
             try:
-                if self._mcp_provider is not None:
-                    await self._mcp_provider.connect()
-                response = await self._loop.process_direct(
-                    message,
-                    **kwargs,
-                    hooks=per_run_hooks,
-                )
+                result = await self._execute_turn(message, kwargs, override_runtime, stream_hooks)
                 await _emit_run_started()
                 await emitter.text_completed(resuming=False, force=False)
-                result = result_from_response(response, capture)
                 await emitter.emit(StreamEvent(
                     type=STREAM_EVENT_RUN_COMPLETED,
                     content=result.content,

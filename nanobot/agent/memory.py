@@ -1186,16 +1186,11 @@ class Consolidator:
         session_key: str,
         *,
         runtime: LLMRuntime,
-        max_suffix: int = 0,
         events: EventSink = NO_EVENTS,
         notify: bool = False,
         reason: CompactionReason | None = None,
     ) -> str | None:
-        """Replace archived history with a summary checkpoint.
-
-        ``max_suffix`` is accepted for SDK compatibility and no longer retains
-        archived messages. All compaction triggers share checkpoint replay.
-        """
+        """Replace archived history with a summary checkpoint."""
         lock = self.get_lock(session_key)
         async with lock:
             await self.sessions.state.discard(session_key)
