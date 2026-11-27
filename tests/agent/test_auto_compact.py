@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import make_agent_loop
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.agent.tools.context import current_request_context
@@ -34,7 +36,7 @@ def _make_loop(
     provider.estimate_prompt_tokens.return_value = (10_000, "test")
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
     provider.generation.max_tokens = 4096
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus,
         provider=provider,
         workspace=tmp_path,
@@ -346,6 +348,7 @@ class TestIdleScanThrottling:
         provider.get_default_model.return_value = "test-model"
         loop = AgentLoop.from_config(
             config,
+            context_builder=ContextBuilder(config.workspace_path),
             tool_registry=ToolRegistry(),
             provider=provider,
         )

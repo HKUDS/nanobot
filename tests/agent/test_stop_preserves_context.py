@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.session_helpers import mock_session_manager, run_session
+from agent.session_helpers import make_agent_loop, mock_session_manager, run_session
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.session.recovery import RUNTIME_CHECKPOINT_KEY
@@ -36,11 +36,12 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     """Create a real AgentLoop with mocked provider — avoids patching __init__."""
     bus = MessageBus()
     provider = _make_provider()
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager", side_effect=mock_session_manager), \
-         patch("nanobot.agent.loop.SubagentManager") as mock_subagent_manager:
+    with patch("nanobot.agent.loop.SubagentManager") as mock_subagent_manager:
         mock_subagent_manager.return_value.cancel_by_session = AsyncMock(return_value=0)
-        return AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
+        return make_agent_loop(
+            bus=bus, provider=provider, workspace=tmp_path,
+            context_builder=MagicMock(workspace=tmp_path), session_manager=mock_session_manager(),
+        )
 
 
 @pytest.mark.asyncio
@@ -59,11 +60,12 @@ async def test_dispatch_cancellation_restores_checkpoint():
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager", side_effect=mock_session_manager), \
-         patch("nanobot.agent.loop.SubagentManager") as mock_subagent_manager:
+    with patch("nanobot.agent.loop.SubagentManager") as mock_subagent_manager:
         mock_subagent_manager.return_value.cancel_by_session = AsyncMock(return_value=0)
-        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
+        loop = make_agent_loop(
+            bus=bus, provider=provider, workspace=workspace,
+            context_builder=MagicMock(workspace=workspace), session_manager=mock_session_manager(),
+        )
 
     checkpoint_key = RUNTIME_CHECKPOINT_KEY
     session = SimpleNamespace(

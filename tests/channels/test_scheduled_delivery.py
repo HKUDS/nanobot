@@ -7,8 +7,8 @@ from functools import partial
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.message import MessageTool
@@ -154,7 +154,7 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
         return LLMResponse(content="Diagnostic result")
 
     provider.chat_stream_with_retry = reply
-    agent = AgentLoop(bus=bus, provider=provider, workspace=workspace,
+    agent = make_agent_loop(bus=bus, provider=provider, workspace=workspace,
                       model="offline-test-model", session_manager=sessions,
                       tools_config=manager.config.tools, cron_service=cron)
     cron.on_job = partial(run_bound_cron_job, agent=agent, cron=cron)

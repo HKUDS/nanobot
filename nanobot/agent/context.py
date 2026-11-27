@@ -1,6 +1,7 @@
 import base64
 import mimetypes
 import platform
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, cast
@@ -73,9 +74,13 @@ class ContextBuilder:
     _SKIPPABLE_DEFAULTS = {"AGENTS.md", "USER.md"}
     _MEMORY_SKILLS = frozenset({"memory"})
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(
+        self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None,
+        *, reply_format_for: Callable[[str], str] | None = None,
+    ):
         self.workspace = workspace
         self.timezone = timezone
+        self._reply_format_for = reply_format_for
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
@@ -153,7 +158,7 @@ class ContextBuilder:
             include_memory=include_memory,
             runtime=runtime,
             platform_policy=render_template("agent/platform_policy.md", system=system),
-            channel=channel or "",
+            reply_format=self._reply_format_for(channel) if channel and self._reply_format_for else "",
         )
 
     @staticmethod

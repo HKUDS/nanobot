@@ -12,6 +12,7 @@ from nanobot.agent.tools.image_generation import register_image_generation_tool
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import Config
+from nanobot.prompt_assembly import build_context_builder
 from nanobot.providers.base import LLMUsage
 from nanobot.sdk.clients import MemoryClient, RuntimeClient, SessionClient
 from nanobot.sdk.runtime import (
@@ -137,6 +138,7 @@ class Nanobot:
             config,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
+            context_builder=build_context_builder(config),
             builtin_assembly=install_goal,
         )
         return cls(loop, config=config, mcp_provider=mcp_provider)

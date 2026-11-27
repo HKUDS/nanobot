@@ -8,13 +8,13 @@ import httpx
 import pytest
 from openai import AsyncOpenAI
 
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop, TurnContext, TurnKind
 from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.filesystem import ReadFileTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import ChannelsConfig
 from nanobot.providers.base import LLMResponse
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import ModelAPICapabilities
@@ -22,19 +22,15 @@ from nanobot.runtime_context import public_history_message
 from nanobot.utils.document import reference_non_image_attachments
 
 
-def _make_loop(
-    workspace: Path,
-    channels_config: ChannelsConfig | None = None,
-) -> AgentLoop:
+def _make_loop(workspace: Path) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ok"))
-    return AgentLoop(
+    return make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=workspace,
         model="test-model",
-        channels_config=channels_config,
     )
 
 
@@ -50,11 +46,9 @@ def _turn_context(loop: AgentLoop, msg: InboundMessage) -> TurnContext:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("extract_document_text", [True, False])
 async def test_document_attachment_is_referenced_and_read_on_demand(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    extract_document_text: bool,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -64,10 +58,7 @@ async def test_document_attachment_is_referenced_and_read_on_demand(
     csv_path.write_text("name,value\nnanobot,1", encoding="utf-8")
     monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
 
-    loop = _make_loop(
-        workspace,
-        ChannelsConfig(extract_document_text=extract_document_text),
-    )
+    loop = _make_loop(workspace)
     msg = InboundMessage(
         channel="websocket",
         sender_id="u",
@@ -283,7 +274,7 @@ async def test_user_images_replay_in_order_after_cold_reload(tmp_path: Path, pro
         provider._client = AsyncOpenAI(
             api_key="fixture", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
         )
-        return AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="gpt-4o")
+        return make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="gpt-4o")
 
     loop = new_loop()
     try:

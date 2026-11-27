@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.session_helpers import run_session, save_completed_subagent
+from agent.session_helpers import make_agent_loop, run_session, save_completed_subagent
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
@@ -35,7 +35,7 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     bus = MessageBus()
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
-    return AgentLoop(
+    return make_agent_loop(
         bus=bus,
         provider=provider,
         workspace=tmp_path,
@@ -217,7 +217,7 @@ class TestToolEventProgress:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
 
         tool_call = ToolCallRequest(id="tc1", name="exec", arguments={"command": "ls"})
         calls = iter([
@@ -283,7 +283,7 @@ class TestToolEventProgress:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         edit_events = [{
             "call_id": "call-write",
             "tool": "write_file",
@@ -339,7 +339,7 @@ class TestToolEventProgress:
         provider.chat_with_retry = AsyncMock()
         from nanobot.goal.assembly import install_goal
 
-        loop = AgentLoop(
+        loop = make_agent_loop(
             bus=bus,
             provider=provider,
             workspace=tmp_path,
@@ -402,7 +402,7 @@ class TestToolEventProgress:
         provider.get_default_model.return_value = "openai-codex/gpt-5.5"
         provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Hello", tool_calls=[]))
         provider.chat_with_retry = AsyncMock()
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         await run_session(loop, InboundMessage(
@@ -438,7 +438,7 @@ class TestToolEventProgress:
 
         provider.chat_stream_with_retry = chat_stream_with_retry
         provider.chat_with_retry = AsyncMock()
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -491,7 +491,7 @@ class TestToolEventProgress:
 
         provider.chat_stream_with_retry = chat_stream_with_retry
         provider.chat_with_retry = AsyncMock()
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -600,7 +600,7 @@ class TestToolEventProgress:
 
         provider.chat_stream_with_retry = chat_stream_with_retry
         provider.chat_with_retry = AsyncMock()
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -641,7 +641,7 @@ class TestToolEventProgress:
             return LLMResponse(content="partial", finish_reason="length")
 
         provider.chat_stream_with_retry = chat_stream_with_retry
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.max_iterations = 1
         loop.tools.get_definitions = MagicMock(return_value=[])
@@ -675,7 +675,7 @@ class TestToolEventProgress:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
 
         async def cancel_after_merge(
             _msg: InboundMessage,
@@ -723,7 +723,7 @@ class TestToolEventProgress:
             LLMResponse(content=None, tool_calls=[]),
             LLMResponse(content="final answer", tool_calls=[]),
         ])
-        loop = AgentLoop(
+        loop = make_agent_loop(
             bus=bus,
             provider=provider,
             workspace=tmp_path,
@@ -782,7 +782,7 @@ class TestToolEventProgress:
 
         provider.chat_stream_with_retry = chat_stream_with_retry
         provider.chat_with_retry = AsyncMock()
-        loop = AgentLoop(
+        loop = make_agent_loop(
             bus=bus,
             provider=provider,
             workspace=tmp_path,
@@ -935,7 +935,7 @@ class TestToolEventProgress:
 
         provider.chat_stream_with_retry = chat_stream_with_retry
         provider.chat_with_retry = AsyncMock()
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -981,7 +981,7 @@ class TestToolEventProgress:
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -1014,7 +1014,7 @@ class TestToolEventProgress:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
 
         async def raise_from_turn(*_args, **_kwargs):
@@ -1064,7 +1064,7 @@ class TestToolEventProgress:
             return LLMResponse(content="Generated title", tool_calls=[])
 
         provider.chat_stream_with_retry = AsyncMock(side_effect=chat_stream_with_retry)
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -1113,7 +1113,7 @@ class TestToolEventProgress:
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -1172,7 +1172,7 @@ class TestToolEventProgress:
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Done"))
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
         session = loop.sessions.get_or_create("websocket:chat1")
@@ -1208,7 +1208,7 @@ class TestToolEventProgress:
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
 
         scheduled: list[object] = []
@@ -1230,7 +1230,7 @@ class TestToolEventProgress:
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         await run_session(loop, InboundMessage(

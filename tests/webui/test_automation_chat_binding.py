@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 import websockets
+from agent.session_helpers import make_agent_loop
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import current_request_context
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
@@ -220,7 +220,7 @@ async def test_real_gateway_move_run_reload_and_previous_result(tmp_path, target
         return LLMResponse(content="Synthetic result")
     provider.chat_stream_with_retry = reply
     bus = MessageBus()
-    agent = AgentLoop(bus=bus, provider=provider, workspace=tmp_path / "workspace",
+    agent = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path / "workspace",
         model="test-model", session_manager=sessions, tools_config=Config().tools)
     agent.tools.get_definitions = MagicMock(return_value=[])
     async def execute(job):
@@ -390,7 +390,7 @@ async def test_late_subagent_result_stays_with_moved_task(tmp_path, monkeypatch)
         return LLMResponse(content="Preparing the report")
     provider.chat_stream_with_retry = reply
     bus = MessageBus()
-    agent = AgentLoop(bus=bus, provider=provider, workspace=tmp_path / "workspace",
+    agent = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path / "workspace",
         model="test-model", session_manager=sessions, tools_config=Config().tools)
     consumer = asyncio.create_task(agent.run())
     await cron.start()

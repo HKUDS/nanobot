@@ -460,6 +460,7 @@ def _run_claimed_gateway(
     from nanobot.cron.types import CronJob, CronRunResult
     from nanobot.llm_usage import record_llm_call
     from nanobot.llm_usage.context import llm_usage_source
+    from nanobot.prompt_assembly import build_context_builder
     from nanobot.providers.factory import (
         ProviderSnapshot,
         build_provider_snapshot,
@@ -570,19 +571,17 @@ def _run_claimed_gateway(
 
     agent = AgentLoop.from_config(
         config, bus,
-        provider=provider_snapshot.provider,
-        model=provider_snapshot.model,
-        context_window_tokens=provider_snapshot.context_window_tokens,
+        provider=provider_snapshot,
         cron_service=cron,
         session_manager=session_manager,
         provider_snapshot_loader=_load_gateway_provider_snapshot,
         preset_catalog_loader=load_model_preset_catalog,
         turn_delivery_factory=turn_delivery_factory,
-        provider_signature=provider_snapshot.signature,
         local_trigger_store=trigger_store,
         hooks=[_MCPReadinessHook(mcp_provider)],
         hook_factories=[create_file_edit_activity_hook, create_context_source_hook],
         tool_registry=tools,
+        context_builder=build_context_builder(config),
         recovery_admission=recovery,
         builtin_assembly=install_goal,
     )

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.session_messages import SendSessionMessageTool
@@ -36,7 +37,7 @@ async def loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="Reviewed", tool_calls=[], usage=None)
     )
-    agent = AgentLoop(
+    agent = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,

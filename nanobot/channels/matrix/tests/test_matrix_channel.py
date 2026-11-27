@@ -12,6 +12,7 @@ import pytest
 pytest.importorskip("nio")
 pytest.importorskip("nh3")
 pytest.importorskip("mistune")
+from agent.session_helpers import make_agent_loop
 from nio import JoinResponse, RoomSendResponse, SyncError
 from pydantic import ValidationError
 
@@ -3107,7 +3108,6 @@ async def test_listen_control_command_preserves_context_for_next_question(comman
 
 @pytest.mark.asyncio
 async def test_listen_help_round_trip_does_not_consume_discussion(monkeypatch, tmp_path) -> None:
-    from nanobot.agent.loop import AgentLoop
     from nanobot.providers.base import LLMProvider
 
     monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
@@ -3120,7 +3120,7 @@ async def test_listen_help_round_trip_does_not_consume_discussion(monkeypatch, t
     provider.estimate_prompt_tokens = MagicMock(return_value=(1000, "test"))
     provider.chat_stream_with_retry = AsyncMock()
     provider.aclose = AsyncMock()
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus, provider=provider, workspace=tmp_path / "workspace",
         model="test-model", context_window_tokens=128000, session_ttl_minutes=0,
     )

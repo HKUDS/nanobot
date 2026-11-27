@@ -4,9 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.session_helpers import run_session, stop_loop, visible_message
+from agent.session_helpers import make_agent_loop, run_session, stop_loop, visible_message
 from nanobot.agent.automation_turns import AutomationTurnError
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.session_inbox import SessionInbox
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.cron import CronTool
@@ -41,7 +40,7 @@ async def loop(tmp_path):
     provider.generation = GenerationSettings(max_tokens=100)
     provider.can_resume_conversation_state.return_value = False
     provider.estimate_prompt_tokens.return_value = (100, "test")
-    agent = AgentLoop(
+    agent = make_agent_loop(
         bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
         builtin_assembly=install_goal,
     )

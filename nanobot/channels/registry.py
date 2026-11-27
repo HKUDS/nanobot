@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pkgutil
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -10,6 +11,7 @@ from nanobot.channels.plugin import (
     has_channel_package,
     load_channel_package,
 )
+from nanobot.channels.reply_formats import PLAIN_TEXT
 
 if TYPE_CHECKING:
     from nanobot.channels.base import BaseChannel
@@ -40,6 +42,18 @@ def discover_plugins(
         except Exception as exc:
             logger.warning("Failed to load channel package descriptor '{}': {}", name, exc)
     return plugins
+
+
+def make_reply_format_resolver(**local_formats: str) -> Callable[[str], str]:
+    """Resolve named channel instances against the application's manifest snapshot."""
+    formats = {"sms": PLAIN_TEXT} | {
+        name: plugin.reply_format for name, plugin in discover_plugins().items() if plugin.reply_format
+    } | local_formats
+
+    def reply_format_for(channel: str) -> str:
+        return formats.get(channel.partition(".")[0], "")
+
+    return reply_format_for
 
 
 def load_channel_plugin(name: str) -> ChannelPlugin:
@@ -99,4 +113,5 @@ __all__ = [
     "discover_plugins",
     "load_channel_class",
     "load_channel_plugin",
+    "make_reply_format_resolver",
 ]

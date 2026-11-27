@@ -1,6 +1,7 @@
 from nanobot.channels._manifest import field, required
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin
+from nanobot.channels.reply_formats import TERMINAL
 
 SETUP_SPEC = ChannelSetupSpec(
     fields={
@@ -32,6 +33,7 @@ SETUP_SPEC = ChannelSetupSpec(
 
 PLUGIN = ChannelPlugin(
     name="mochat",
+    reply_format=TERMINAL,
     display_name="MoChat",
     runtime=f"{__package__}.runtime:MochatChannel",
     setup=SETUP_SPEC,

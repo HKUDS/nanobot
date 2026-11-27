@@ -101,6 +101,53 @@ class ModelRuntimeResolver:
             configured_default_preset,
         )
 
+    @classmethod
+    def from_config(
+        cls, config: Config, *, provider: LLMProvider | ProviderSnapshot | None = None,
+        provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None,
+        preset_catalog_loader: preset_helpers.PresetCatalogLoader | None = None,
+    ) -> ModelRuntimeResolver:
+        from nanobot.providers.factory import make_provider
+
+        if isinstance(provider, ProviderSnapshot):
+            selected = provider
+            backend = provider.provider
+            signature = provider.signature
+        else:
+            selected = config.resolve_preset()
+            backend = provider if provider is not None else make_provider(config)
+            signature = None
+        return cls.from_provider(
+            backend, model=selected.model, context_window_tokens=selected.context_window_tokens,
+            provider_signature=signature, model_presets=preset_helpers.configured_model_presets(config),
+            model_preset=config.agents.defaults.model_preset, preset_catalog_loader=preset_catalog_loader,
+            provider_snapshot_loader=provider_snapshot_loader,
+            preset_snapshot_loader=preset_helpers.make_preset_snapshot_loader(config, provider_snapshot_loader),
+        )
+
+    @classmethod
+    def from_provider(
+        cls, provider: LLMProvider, *, model: str | None = None, context_window_tokens: int,
+        provider_signature: tuple[object, ...] | None = None,
+        model_presets: Mapping[str, ModelPresetConfig] | None = None,
+        model_preset: str | None = None,
+        preset_catalog_loader: preset_helpers.PresetCatalogLoader | None = None,
+        provider_snapshot_loader: Callable[[], ProviderSnapshot] | None = None,
+        preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
+    ) -> ModelRuntimeResolver:
+        initial = LLMRuntime.capture(
+            provider, model or provider.get_default_model(), context_window_tokens=context_window_tokens,
+            snapshot_signature=provider_signature,
+        )
+        resolver = cls(
+            initial, model_presets=model_presets, configured_default_preset=model_preset,
+            preset_catalog_loader=preset_catalog_loader, provider_snapshot_loader=provider_snapshot_loader,
+            preset_snapshot_loader=preset_snapshot_loader,
+        )
+        if model_preset:
+            resolver.select_preset(model_preset)
+        return resolver
+
     @property
     def runtime(self) -> LLMRuntime:
         """Return the current immutable default without refreshing configuration."""

@@ -3,8 +3,8 @@ import sqlite3
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import GoalStateSyncEvent
 from nanobot.bus.queue import MessageBus
@@ -24,7 +24,7 @@ async def loop(tmp_path):
     provider.generation = GenerationSettings()
     provider.estimate_prompt_tokens.return_value = (100, "test")
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Answer."))
-    agent = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path,
+    agent = make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path,
                       model="test-model", builtin_assembly=install_goal)
     WebuiTurnCoordinator(bus=agent.bus, sessions=agent.sessions,
                          schedule_background=lambda coro: coro.close()).subscribe()

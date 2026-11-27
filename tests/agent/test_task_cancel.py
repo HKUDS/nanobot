@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.session_helpers import mock_session_manager, run_session
+from agent.session_helpers import make_agent_loop, mock_session_manager, run_session
 from nanobot.agent.memory import Consolidator
 from nanobot.bus.outbound_events import StreamDeltaEvent, StreamEndEvent
 from nanobot.command.results import message_text
@@ -28,7 +28,6 @@ def _runtime(provider: MagicMock | None = None) -> LLMRuntime:
 
 def _make_loop(*, tools_config=None):
     """Create a minimal AgentLoop with mocked dependencies."""
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
@@ -37,11 +36,12 @@ def _make_loop(*, tools_config=None):
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager", side_effect=mock_session_manager), \
-         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
+    with patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
-        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, tools_config=tools_config)
+        loop = make_agent_loop(
+            bus=bus, provider=provider, workspace=workspace, tools_config=tools_config,
+            context_builder=MagicMock(workspace=workspace), session_manager=mock_session_manager(),
+        )
     return loop, bus
 
 
@@ -121,13 +121,14 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from nanobot.agent.loop import AgentLoop
+sys.path.insert(0, str(Path.cwd() / "tests"))
+from agent.session_helpers import make_agent_loop
 from nanobot.bus.queue import MessageBus
 
 async def main():
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
-    agent = AgentLoop(bus=MessageBus(), provider=provider, workspace=Path(sys.argv[1]))
+    agent = make_agent_loop(bus=MessageBus(), provider=provider, workspace=Path(sys.argv[1]))
 
     async def finish():
         return

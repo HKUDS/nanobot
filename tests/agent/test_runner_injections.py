@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.runner_helpers import make_run_spec
-from agent.session_helpers import run_session, visible_message
+from agent.session_helpers import make_agent_loop, run_session, visible_message
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.session_inbox import SessionInbox
 from nanobot.agent.tools.context import RequestContext
@@ -28,18 +28,17 @@ def _make_injection_callback(queue: asyncio.Queue):
 
 
 def _make_loop(tmp_path, *, recovery_admission=None):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
+    with patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         mock_sub_mgr.return_value.close = AsyncMock()
-        loop = AgentLoop(
+        loop = make_agent_loop(
+            context_builder=MagicMock(workspace=tmp_path),
             bus=bus,
             provider=provider,
             workspace=tmp_path,
@@ -623,7 +622,6 @@ async def test_checkpoint2_preserves_final_response_in_history_before_followup()
 
 @pytest.mark.asyncio
 async def test_loop_injected_followup_preserves_image_media(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
 
@@ -653,7 +651,7 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
         return LLMResponse(content="second answer", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     pending_queue = asyncio.Queue()
@@ -682,7 +680,6 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
 
 @pytest.mark.asyncio
 async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
     from nanobot.runtime_context import (
@@ -698,7 +695,7 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         LLMResponse(content="first answer", tool_calls=[], usage=None),
         LLMResponse(content="second answer", tool_calls=[], usage=None),
     ])
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -816,7 +813,6 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
 
 @pytest.mark.asyncio
 async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
     from nanobot.session.history_visibility import HIDDEN_HISTORY_META
@@ -846,7 +842,7 @@ async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_p
         return LLMResponse(content="second answer", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     payload = (
@@ -1171,7 +1167,6 @@ async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_pa
 
 @pytest.mark.asyncio
 async def test_pending_queue_batches_full_snapshot_before_first_model_call(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
 
@@ -1187,7 +1182,7 @@ async def test_pending_queue_batches_full_snapshot_before_first_model_call(tmp_p
         return LLMResponse(content=f"answer-{call_count['n']}", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     pending_queue = asyncio.Queue()
@@ -1231,7 +1226,6 @@ async def test_pending_queue_batches_full_snapshot_before_first_model_call(tmp_p
 
 @pytest.mark.asyncio
 async def test_pending_queue_snapshot_excludes_messages_arriving_during_conversion(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
 
@@ -1248,7 +1242,7 @@ async def test_pending_queue_snapshot_excludes_messages_arriving_during_conversi
         )
 
     provider.chat_stream_with_retry = chat_stream_with_retry
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -1304,14 +1298,13 @@ async def test_pending_queue_snapshot_excludes_messages_arriving_during_conversi
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_conversion", [False, True])
 async def test_pending_snapshot_rolls_back_before_later_arrivals(tmp_path, cancel_conversion):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
 
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="answer"))
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop = make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
     pending = asyncio.Queue()
     contents = ["before", "bad", "after"]
@@ -1361,14 +1354,13 @@ async def test_pending_snapshot_rolls_back_before_later_arrivals(tmp_path, cance
 
 @pytest.mark.asyncio
 async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
     from nanobot.bus.runtime_events import TurnCompleted
 
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop = make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
     completions = []
     loop.bus.subscribe(completions.append, TurnCompleted)
@@ -1468,7 +1460,6 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
 ):
     from loguru import logger
 
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import SessionPolicy
@@ -1493,7 +1484,7 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
         return LLMResponse(content="batch answer", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
@@ -2023,7 +2014,6 @@ async def test_error_path_is_not_stopped_by_an_arbitrary_injection_cap():
 
 @pytest.mark.asyncio
 async def test_cancelling_input_conversion_preserves_other_concurrent_run(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.agent.tools.context import current_request_context, request_context
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -2042,7 +2032,7 @@ async def test_cancelling_input_conversion_preserves_other_concurrent_run(tmp_pa
         return LLMResponse(content="second run finished")
 
     provider.chat_stream_with_retry = respond
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop = make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
     conversion_started = asyncio.Event()
     never_release = asyncio.Event()

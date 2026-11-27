@@ -1570,7 +1570,6 @@ def mock_agent_runtime(tmp_path):
          patch("nanobot.cron.service.CronService"), \
          patch("nanobot.cli.agent.AgentLoop.from_config") as mock_from_config:
         agent_loop = MagicMock()
-        agent_loop.channels_config = None
         agent_loop.process_direct = AsyncMock(
             return_value=OutboundMessage(channel="cli", chat_id="direct", content="mock-response"),
         )
@@ -1662,7 +1661,6 @@ def test_one_shot_agent_renders_structured_tool_hints(mock_agent_runtime, enable
     config.channels.send_tool_hints = enabled
     config.channels.send_progress = False
     config.agents.defaults.tool_hint_max_length = 20
-    mock_agent_runtime["agent_loop"].channels_config = config.channels
     events = [{
         "phase": "start", "call_id": "search-1", "name": "web_search",
         "arguments": {"query": "abcdefghijklmnopqrstuvwxyz"},
@@ -3554,7 +3552,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     kwargs = seen["local_trigger_queue_kwargs"]
     assert seen["webui_subagent_manager"] is agent.subagents
     assert seen["webui_discard_session"] == agent.discard_session
-    assert isinstance(agent_kwargs["provider"], UnconfiguredProvider) is bool(setup_error)
+    assert isinstance(agent_kwargs["provider"].provider, UnconfiguredProvider) is bool(setup_error)
     refreshed_snapshot = agent_kwargs["provider_snapshot_loader"]()
     assert not isinstance(refreshed_snapshot.provider, UnconfiguredProvider)
     assert "local_trigger_store" in agent_kwargs

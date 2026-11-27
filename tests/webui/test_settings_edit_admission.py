@@ -7,9 +7,9 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from agent.session_helpers import make_agent_loop
 from websockets.datastructures import Headers
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig, ProviderConfig
@@ -37,7 +37,7 @@ async def test_model_save_commits_before_refreshing_next_session_admission(
     config.agents.defaults.model_preset = "chat"
     save_config(config, config_path)
     snapshot = load_provider_snapshot(config_path)
-    agent = AgentLoop(
+    agent = make_agent_loop(
         bus=MessageBus(),
         provider=snapshot.provider,
         workspace=tmp_path / "workspace",

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import make_agent_loop
 from nanobot.utils.prompt_templates import render_template
 
 _ARCHIVE_PROMPT = render_template("agent/consolidator_archive.md", strip=True)
@@ -15,7 +16,6 @@ class TestNewCommandArchival:
 
     @staticmethod
     def _make_loop(tmp_path: Path):
-        from nanobot.agent.loop import AgentLoop
         from nanobot.bus.queue import MessageBus
         from nanobot.providers.base import GenerationSettings, LLMResponse
 
@@ -24,7 +24,7 @@ class TestNewCommandArchival:
         provider.get_default_model.return_value = "test-model"
         provider.estimate_prompt_tokens.return_value = (10_000, "test")
         provider.generation = GenerationSettings(max_tokens=100)
-        loop = AgentLoop(
+        loop = make_agent_loop(
             bus=bus,
             provider=provider,
             workspace=tmp_path,

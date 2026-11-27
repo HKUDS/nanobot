@@ -18,6 +18,7 @@ If a matching config section has `"enabled": true`, the channel is instantiated 
 | Persisted config expansion, instance updates, and runtime naming | `ChannelPlugin.management` backed by a dependency-free module |
 | Interactive setup connections and their short-lived state | `ChannelPlugin.connector` backed by package-local `connect.py` |
 | Reusable local login-state detection | `ChannelPlugin.management.local_state_present` backed by package-local code |
+| Stable model-facing reply conventions, such as math delimiters | Optional `ChannelPlugin.reply_format` in `manifest.py`: plain text, without a heading; omit for generic replies |
 | Discovery metadata and lazy runtime target | `PLUGIN` in `manifest.py` |
 | WebUI structure, components, URLs, field keys, actions, and preset values | `webui/index.ts` or `webui/index.tsx` |
 | Channel-specific user-facing copy | `webui/locales/<locale>.json` |

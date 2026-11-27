@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from agent.session_helpers import make_agent_loop
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
@@ -78,7 +79,7 @@ async def runtime(tmp_path: Path) -> AsyncIterator[_Runtime]:
     bus = MessageBus()
     sessions = SessionManager(workspace)
     provider = _Provider()
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus, provider=provider, workspace=workspace,
         session_manager=sessions, model_presets={"default": ModelPresetConfig(model=provider.get_default_model())},
     )

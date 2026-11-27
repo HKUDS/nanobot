@@ -1,6 +1,7 @@
 from nanobot.channels._manifest import GROUP_POLICIES, field, required
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin
+from nanobot.channels.reply_formats import MESSAGING
 from nanobot.channels.telegram.validation import validate
 
 SETUP_SPEC = ChannelSetupSpec(
@@ -33,6 +34,7 @@ SETUP_SPEC = ChannelSetupSpec(
 
 PLUGIN = ChannelPlugin(
     name="telegram",
+    reply_format=MESSAGING,
     display_name="Telegram",
     runtime=f"{__package__}.runtime:TelegramChannel",
     setup=SETUP_SPEC,

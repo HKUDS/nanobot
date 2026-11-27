@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from loguru import logger
 
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
@@ -223,7 +224,8 @@ async def test_default_loop_keeps_slack_thread_for_late_subagent_result(
     }}})
     bus = MessageBus()
     loop = AgentLoop.from_config(
-        config, bus, provider=Provider(), session_manager=sessions, tool_registry=ToolRegistry(),
+        config, bus, context_builder=ContextBuilder(workspace), provider=Provider(),
+        session_manager=sessions, tool_registry=ToolRegistry(),
     )
     session_key = "slack:C1:1234.5678"
     slack_route = {"thread_ts": "1234.5678", "channel_type": "channel"}

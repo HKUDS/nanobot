@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
@@ -40,13 +41,12 @@ def _make_loop(
         my=MyToolConfig(allow_set=allow_set), restrict_to_workspace=restricted,
     )
     tools_config.exec.sandbox = sandbox
-    return AgentLoop(
+    return make_agent_loop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
         model="test-model",
         tools_config=tools_config,
-        restrict_to_workspace=restricted,
     )
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.channels.registry import make_reply_format_resolver
 from nanobot.runtime_context import RuntimeContextBlock
 
 
@@ -150,37 +151,21 @@ def test_scheduling_contract_reaches_fresh_and_legacy_workspaces(tmp_path, legac
     assert agents_path.read_bytes() == original
 
 
-def test_channel_format_hint_whatsapp(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
+@pytest.mark.parametrize("include_memory", [True, False])
+def test_channel_format_follows_delivery_medium(tmp_path, include_memory) -> None:
+    builder = ContextBuilder(_make_workspace(tmp_path), reply_format_for=make_reply_format_resolver())
 
-    prompt = builder.build_system_prompt(channel="whatsapp")
-    assert "Format Hint" in prompt
-    assert "plain text only" in prompt
+    def system(channel: str | None) -> str:
+        return builder.build_system_prompt(channel=channel, include_memory=include_memory)
 
-
-def test_channel_format_hint_absent_for_unknown(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    prompt = builder.build_system_prompt(channel=None)
-    assert "Format Hint" not in prompt
-
-    prompt2 = builder.build_system_prompt(channel="feishu")
-    assert "Format Hint" not in prompt2
-
-
-def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    messages = builder.build_messages(
-        history=[], current_message="hi",
-        channel="telegram",
-    )
-    system = messages[0]["content"]
-    assert "Format Hint" in system
-    assert "messaging app" in system
+    generic = system(None)
+    assert system("feishu") == generic
+    assert system("sms") == system("whatsapp")
+    assert "plain text only" in system("sms")
+    formula = r"use LaTeX with `\(...\)` for inline math and `\[...\]` for display math"
+    websocket = system("websocket")
+    assert websocket.index("## Workspace") < websocket.index(formula) < websocket.index("## External Content")
+    assert formula not in generic
 
 
 @pytest.mark.parametrize("disabled", [False, True])

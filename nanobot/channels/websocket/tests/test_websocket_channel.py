@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 import websockets
+from agent.session_helpers import make_agent_loop
 from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
@@ -5055,7 +5056,6 @@ async def test_image_settings_hot_reload_without_restart(
     provider_name: str,
     start_listener,
 ) -> None:
-    from nanobot.agent.loop import AgentLoop
     from nanobot.agent.tools.image_generation import (
         ImageGenerationTool,
         reload_image_generation_tool,
@@ -5073,7 +5073,7 @@ async def test_image_settings_hot_reload_without_restart(
     runtime_bus = MessageBus()
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
-    agent = AgentLoop(bus=runtime_bus, provider=provider, workspace=tmp_path)
+    agent = make_agent_loop(bus=runtime_bus, provider=provider, workspace=tmp_path)
 
     async def image_reload() -> dict[str, Any]:
         return await reload_image_generation_tool(

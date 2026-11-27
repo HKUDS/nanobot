@@ -8,10 +8,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.session_helpers import make_agent_loop
 from websockets.datastructures import Headers
 from websockets.http11 import Request
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.model_presets import configured_model_presets
 from nanobot.bus.events import INBOUND_META_MODEL_OPTIONS
 from nanobot.bus.queue import MessageBus
@@ -90,7 +90,7 @@ class Gateway:
             )
 
         config = self.config
-        loop = AgentLoop(
+        loop = make_agent_loop(
             bus=self.bus, provider=provider, workspace=config.workspace_path,
             session_manager=self.sessions if sessions is None else sessions,
             model=config.resolve_preset().model, context_window_tokens=128000,

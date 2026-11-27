@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import (
     RequestContext,
@@ -463,7 +463,7 @@ async def test_goal_tools_registered_by_builtin_assembly(tmp_path):
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model",
+    loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model",
                      builtin_assembly=install_goal)
 
     create = loop.tools.get("create_goal")
@@ -519,7 +519,7 @@ async def test_goal_assembly_preserves_builtin_plugin_precedence(tmp_path, monke
         registry.register(supplied)
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+    loop = make_agent_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
                      tool_registry=registry, builtin_assembly=install_goal)
     try:
         if caller_supplied:

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.session_helpers import make_agent_loop
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
@@ -564,19 +565,18 @@ def test_subagent_default_max_iterations_matches_agent_defaults(tmp_path):
 
 
 def test_agent_loop_passes_max_iterations_to_subagents(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus,
         provider=provider,
         workspace=tmp_path,
         model="test-model",
-        max_iterations=42,
+        max_tool_iterations=42,
     )
 
     assert loop.subagents.max_iterations == 42
@@ -584,19 +584,18 @@ def test_agent_loop_passes_max_iterations_to_subagents(tmp_path):
 
 @pytest.mark.asyncio
 async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=bus,
         provider=provider,
         workspace=tmp_path,
         model="test-model",
-        max_iterations=42,
+        max_tool_iterations=42,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -626,14 +625,13 @@ async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
 
 @pytest.mark.asyncio
 async def test_drain_pending_no_block_when_no_subagents(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
 
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
 
     pending_queue: asyncio.Queue = asyncio.Queue()
     injection_callback = None
@@ -674,7 +672,6 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
 
 @pytest.mark.asyncio
 async def test_terminal_drain_timeout(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import Session
 
@@ -682,7 +679,7 @@ async def test_terminal_drain_timeout(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
 
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop = make_agent_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
 
     pending_queue: asyncio.Queue = asyncio.Queue()
     session = Session(key="test:drain-timeout")
@@ -739,12 +736,11 @@ async def test_terminal_drain_timeout(tmp_path):
 
 @pytest.mark.asyncio
 async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import Session
 
-    loop = AgentLoop(
+    loop = make_agent_loop(
         bus=MessageBus(),
         provider=MagicMock(),
         workspace=tmp_path,

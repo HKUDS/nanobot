@@ -10,6 +10,10 @@ SETUP_SPEC = ChannelSetupSpec(
 
 PLUGIN = ChannelPlugin(
     name="websocket",
+    reply_format=(
+        r"For math meant to render, use LaTeX with `\(...\)` for inline math and `\[...\]` for display math. "
+        "Keep those formulas outside inline code and fenced code blocks."
+    ),
     display_name="WebSocket",
     runtime=f"{__package__}.runtime:WebSocketChannel",
     setup=SETUP_SPEC,

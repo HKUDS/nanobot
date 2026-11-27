@@ -193,6 +193,7 @@ pythonVersion = "3.11"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests", "nanobot/channels"]
+pythonpath = ["tests"]
 
 [tool.coverage.run]
 source = ["nanobot"]
