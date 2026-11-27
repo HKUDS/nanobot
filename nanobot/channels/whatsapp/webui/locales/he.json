@@ -1,0 +1,35 @@
+{
+  "setup": {
+    "primaryAction": "חיבור ל־WhatsApp",
+    "docsLabel": "מדריך להגדרת WhatsApp",
+    "officialLabel": "מרכז העזרה של WhatsApp",
+    "fields": {
+      "allowFrom": {
+        "label": "אנשי קשר מורשים",
+        "placeholder": "מספרי טלפון או מזהי WhatsApp"
+      },
+      "groupPolicy": {
+        "label": "כללים לקבוצות",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות",
+          "allowlist": "רשימת מורשים"
+        }
+      },
+      "useProxy": {
+        "label": "שימוש בשרת פרוקסי"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "קוד QR לקישור WhatsApp",
+    "scanTitle": "קישור WhatsApp",
+    "scanDescription": "ב־WhatsApp יש לפתוח את ״מכשירים מקושרים״, לבחור ב״קישור מכשיר״ ולסרוק את הקוד הזה.",
+    "waiting": "בהמתנה ל־WhatsApp…",
+    "connected": "החיבור ל־WhatsApp פעיל.",
+    "stopped": "ניסיון החיבור ל־WhatsApp הופסק. כדי לקבל קוד חדש, יש להתחיל שוב.",
+    "connecting": "החיבור מתבצע…",
+    "scanAgain": "קישור חשבון נוסף",
+    "connect": "קישור WhatsApp"
+  }
+}

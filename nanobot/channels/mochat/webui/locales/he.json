@@ -1,0 +1,85 @@
+{
+  "setup": {
+    "docsLabel": "מדריך להגדרת MoChat",
+    "officialLabel": "פתיחת MoChat",
+    "fields": {
+      "clawToken": {
+        "label": "אסימון Claw",
+        "placeholder": "אסימון Claw של MoChat"
+      },
+      "baseUrl": {
+        "label": "כתובת השרת",
+        "placeholder": "https://mochat.io"
+      },
+      "agentUserId": {
+        "label": "מזהה המשתמש של הסוכן",
+        "placeholder": "מזהה המשתמש של הסוכן (לא חובה)"
+      },
+      "sessions": {
+        "label": "שיחות",
+        "placeholder": "מזהי שיחות בהפרדה בפסיקים"
+      },
+      "panels": {
+        "label": "פאנלים",
+        "placeholder": "מזהי פאנלים בהפרדה בפסיקים"
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי משתמשים בהפרדה בפסיקים"
+      },
+      "socketUrl": {
+        "label": "כתובת Socket.IO"
+      },
+      "socketPath": {
+        "label": "נתיב Socket.IO"
+      },
+      "socketDisableMsgpack": {
+        "label": "השבתת MessagePack",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "socketReconnectDelayMs": {
+        "label": "השהיה לפני חיבור מחדש"
+      },
+      "socketMaxReconnectDelayMs": {
+        "label": "השהיה מרבית לפני חיבור מחדש (ms)"
+      },
+      "socketConnectTimeoutMs": {
+        "label": "זמן המתנה מרבי לחיבור"
+      },
+      "refreshIntervalMs": {
+        "label": "זמן בין רענונים"
+      },
+      "watchTimeoutMs": {
+        "label": "זמן המתנה מרבי לעדכונים"
+      },
+      "watchLimit": {
+        "label": "גודל אצווה"
+      },
+      "retryDelayMs": {
+        "label": "השהיה לפני ניסיון חוזר"
+      },
+      "maxRetryAttempts": {
+        "label": "מספר מרבי של ניסיונות חוזרים"
+      },
+      "mention_requireInGroups": {
+        "label": "דרישת אזכור של הבוט בקבוצות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "groups": {
+        "label": "כללים לקבוצות (JSON)"
+      },
+      "replyDelayMode": {
+        "label": "מצב השהיית המענה"
+      },
+      "replyDelayMs": {
+        "label": "השהיה לפני מענה"
+      }
+    }
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "מדריך להגדרת Teams",
+    "officialLabel": "פורטל המפתחים של Teams",
+    "fields": {
+      "appId": {
+        "label": "מזהה אפליקציה",
+        "placeholder": "מזהה אפליקציה של Microsoft"
+      },
+      "appPassword": {
+        "label": "מפתח הלקוח הסודי (Client Secret)",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "מזהה דייר (Tenant ID)",
+        "placeholder": "מזהה דייר (לא חובה)"
+      },
+      "path": {
+        "label": "נתיב Callback",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי משתמשים ב־Teams בהפרדה בפסיקים"
+      },
+      "host": {
+        "label": "כתובת להאזנה"
+      },
+      "port": {
+        "label": "יציאת האזנה"
+      },
+      "replyInThread": {
+        "label": "מענה בתוך השרשור",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "מענה רק כשהבוט מוזכר"
+      },
+      "validateInboundAuth": {
+        "label": "אימות בקשות נכנסות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "refTtlDays": {
+        "label": "משך שמירת ההפניות לשיחות (ימים)"
+      },
+      "pruneWebChatRefs": {
+        "label": "ניקוי הפניות לשיחות Web Chat",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "ניקוי הפניות לשיחות קבוצתיות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "זמן בין רענונים (שניות)"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "שרתים מהימנים"
+      }
+    }
+  }
+}

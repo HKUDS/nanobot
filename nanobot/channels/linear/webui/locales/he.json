@@ -1,0 +1,117 @@
+{
+  "setup": {
+    "docsLabel": "מדריך להגדרת Linear",
+    "officialLabel": "יצירת אפליקציית OAuth ב־Linear",
+    "fields": {
+      "clientId": {
+        "label": "מזהה לקוח OAuth",
+        "placeholder": "מזהה לקוח OAuth של Linear"
+      },
+      "clientSecret": {
+        "label": "מפתח לקוח OAuth סודי (Client Secret)",
+        "placeholder": "••••••"
+      },
+      "webhookSigningSecret": {
+        "label": "מפתח החתימה הסודי של ה־Webhook",
+        "placeholder": "••••••"
+      },
+      "publicBaseUrl": {
+        "label": "כתובת HTTPS ציבורית",
+        "placeholder": "https://nanobot.example.com"
+      },
+      "host": {
+        "label": "כתובת להאזנה",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "יציאת האזנה",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "נתיב Webhook",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "נתיב החזרה מ־OAuth",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים ב־Linear",
+        "placeholder": "מזהי משתמשים ב־Linear בהפרדה בפסיקים"
+      },
+      "showReasoning": {
+        "label": "הצגת הנימוקים"
+      }
+    }
+  },
+  "custom": {
+    "secretSaved": "נשמר",
+    "replaceSecret": "החלפה",
+    "replaceSecretLabel": "החלפת {{name}}",
+    "enterSecret": "הזנת מפתח סודי",
+    "secretSaveFailed": "לא ניתן לוודא שהמפתח נשמר. אפשר לנסות שוב או לבטל.",
+    "authorizeTitle": "מתן הרשאה ב־Linear",
+    "authorizeDescription": "את ההרשאה נותנים ב־Linear. בסיום חוזרים לכאן.\n\nבמסך הבא בוחרים סביבת עבודה ומעניקים ל־nanobot הרשאה לפעול בה. לאחר האישור אפשר לחזור לכאן.",
+    "waiting": "בהמתנה לאישור מ־Linear…",
+    "connected": "החיבור ל־Linear פעיל.",
+    "stopped": "תהליך מתן ההרשאה הופסק.",
+    "connecting": "החיבור מתבצע…",
+    "connect": "חיבור ל־Linear",
+    "openLinear": "המשך ב־Linear",
+    "createApp": "יצירת אפליקציה ב־Linear",
+    "savePublicUrl": "כדי ליצור אפליקציה ב־Linear, יש להזין כתובת HTTPS ציבורית.",
+    "retrySave": "ניסיון חוזר",
+    "channelRunning": "הערוץ פועל",
+    "configureTools": "הגדרת Linear MCP",
+    "workspacesTitle": "סביבות עבודה מורשות",
+    "refreshWorkspaces": "רענון סביבות העבודה",
+    "loadingWorkspaces": "טעינת סביבות העבודה",
+    "noWorkspaces": "אין סביבות עבודה מורשות. כדי לקבל בקשות לסוכן מ־Linear, יש לחבר סביבת עבודה.",
+    "refreshRequired": "נדרש חידוש הרשאה",
+    "missingScopes": "כדי להעניק את ההרשאות הבאות, יש להתחבר מחדש: {{scopes}}",
+    "authorized": "ניתנה הרשאה",
+    "confirmDisconnect": "הסרת סביבת העבודה",
+    "disconnect": "הסרת סביבת העבודה",
+    "workspaceActions": "ניהול {{name}}",
+    "reauthorize": "חידוש הרשאה",
+    "disconnectTitle": "להסיר את {{name}}?",
+    "disconnectDescription": "הגישה לסביבת העבודה תבוטל. ההיסטוריה תישמר.\n\nההרשאה של סביבת העבודה הזו תבוטל והגדרות הגישה של חבריה יימחקו מ־nanobot. המשימות והתגובות ב־Linear והיסטוריית השיחות ב־nanobot יישמרו. סביבות עבודה אחרות לא יושפעו. אפשר לאשר מחדש את סביבת העבודה הזו בהמשך.",
+    "disconnectLast": "זו סביבת העבודה המחוברת האחרונה. הסרתה תשבית גם את הערוץ של Linear.",
+    "disconnecting": "ההסרה מתבצעת…",
+    "addWorkspace": "חיבור סביבת עבודה",
+    "addWorkspaceDetails": "על חיבור סביבות עבודה",
+    "addWorkspaceHelp": "החיבור נעשה דרך אפליקציית Linear הנוכחית. כדי לחבר סביבת עבודה נוספת, האפליקציה צריכה לאפשר התקנה בסביבות עבודה אחרות. אפליקציה פרטית פועלת רק בסביבת העבודה שלה. מתן הרשאה לסביבה שכבר מחוברת מעדכן את החיבור הקיים בלי ליצור חיבור כפול.",
+    "resetConnection": "איפוס החיבור ל־Linear",
+    "resetTitle": "לאפס את החיבור ל־Linear?",
+    "resetDescription": "האיפוס ינתק את כל סביבות העבודה שמחוברות דרך האפליקציה הזו ויעצור את הערוץ.",
+    "resetClears": "מה יימחק",
+    "resetClearsDetail": "הגדרות הגישה לחברי סביבות העבודה והגדרות האפליקציה במופע הזה של nanobot, כולל פרטי הגישה השמורים.",
+    "resetKeeps": "מה יישמר",
+    "resetKeepsDetail": "האפליקציה, המשימות והתגובות ב־Linear, היסטוריית השיחות ואישורי הצימוד.",
+    "resetConfirm": "איפוס",
+    "resetting": "האיפוס מתבצע…",
+    "resetIncomplete": "האיפוס לא הושלם. סביבות העבודה שכבר נותקו לא יחוברו מחדש. כדי להשלים את השלבים שנותרו, יש לנסות שוב.",
+    "resetInspectFailed": "לא ניתן לוודא אילו סביבות עבודה מחוברות. הגדרות האפליקציה נשמרו.",
+    "resetChanged": "חוברה סביבת עבודה נוספת. יש לבדוק את רשימת החיבורים ולנסות שוב.",
+    "resetStopFailed": "לא ניתן לעצור את הערוץ של Linear. הגדרות האפליקציה נשמרו.",
+    "resetSaveFailed": "לא ניתן למחוק את הגדרות האפליקציה. אפשר לנסות שוב."
+  },
+  "members": {
+    "title": "גישה לחברי סביבת העבודה",
+    "help": "אפשר לתת לחברי סביבת העבודה גישה ל־nanobot ללא קוד צימוד. ההרשאות הקיימות ב־Linear עדיין חלות. הגישה אינה כוללת את ממשק הניהול של nanobot. ביטול הגישה חוסם בקשות חדשות, אך לא עוצר משימות שכבר פועלות.",
+    "allowAll": "בהגדרות המתקדמות ניתנת כרגע גישה לכל חברי סביבת העבודה (*), כולל מצטרפים חדשים. אם הגישה בוטלה עבור מישהו בנפרד, היא תישאר חסומה. כדי לדרוש אישור למצטרפים חדשים, יש להסיר את *.",
+    "search": "חיפוש חברים",
+    "refresh": "רענון רשימת החברים",
+    "working": "הנתונים נשמרים…",
+    "saved": "נשמר",
+    "retry": "יש לרענן את רשימת החברים כדי לבדוק את מצב הגישה ולנסות שוב.",
+    "empty": "לא נמצאו חברים פעילים שתואמים לחיפוש.",
+    "allow": "מתן גישה ל־nanobot עבור {{name}}",
+    "saveUnconfirmed": "לא התקבל אישור לשינוי הגישה. יש לרענן את רשימת החברים לפני ניסיון נוסף.",
+    "guide": "דרך ״גישה לחברי סביבת העבודה״ אפשר לאשר גישה לצוות ללא קודי צימוד. אישורים קיימים נשארים בתוקף כל עוד הגישה לא בוטלה. כדי לחפש משימות ב־Linear או לערוך אותן, יש לחבר את Linear MCP.",
+    "details": "על הגישה לחברי סביבת העבודה",
+    "summary": "עם הרשאת גישה: {{allowed}}",
+    "loading": "איתור חברים…",
+    "refreshing": "בדיקת עדכונים…"
+  }
+}

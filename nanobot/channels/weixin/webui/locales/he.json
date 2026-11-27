@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "primaryAction": "חיבור ל־WeChat",
+    "docsLabel": "מדריך להגדרת WeChat",
+    "officialLabel": "פתיחת WeChat",
+    "fields": {
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי משתמשים בהפרדה בפסיקים"
+      },
+      "token": {
+        "label": "אסימון",
+        "placeholder": "נשמר בעת כניסה באמצעות קוד QR"
+      },
+      "sendProgress": {
+        "label": "שליחת עדכוני התקדמות"
+      },
+      "sendToolHints": {
+        "label": "עדכונים על הפעלת כלים"
+      },
+      "streaming": {
+        "label": "שימוש ב־API להזרמה"
+      },
+      "replyProgressMessages": {
+        "label": "עדכוני התקדמות מפורטים"
+      },
+      "replyProgressMaxMessages": {
+        "label": "מספר מרבי של הודעות התקדמות"
+      },
+      "contextMessageBudget": {
+        "label": "מספר הודעות מרבי להקשר"
+      },
+      "blockStreaming": {
+        "label": "שליחת התשובה במקטעים"
+      },
+      "blockStreamingMinChars": {
+        "label": "אורך מזערי למקטע (תווים)"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "מספר מקטעים מרבי"
+      },
+      "baseUrl": {
+        "label": "כתובת API"
+      },
+      "cdnBaseUrl": {
+        "label": "כתובת CDN"
+      },
+      "routeTag": {
+        "label": "תג ניתוב"
+      },
+      "stateDir": {
+        "label": "תיקייה לשמירת נתוני מצב"
+      },
+      "pollTimeout": {
+        "label": "זמן המתנה מרבי בתשאול (שניות)"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "קוד QR לכניסה ל־WeChat",
+    "scanTitle": "סריקה באפליקציית WeChat",
+    "waiting": "בהמתנה לסריקה באפליקציית WeChat…",
+    "connected": "החיבור ל־WeChat פעיל.",
+    "stopped": "הכניסה ל־WeChat הופסקה.",
+    "connecting": "החיבור מתבצע…",
+    "verifyTitle": "נדרש אימות",
+    "verifyDescription": "כדי להמשיך, יש להזין את המספר שמופיע ב־WeChat.",
+    "verifyMismatch": "הקוד לא תואם. יש להזין את המספר החדש שמופיע ב־WeChat.",
+    "expired": "פג תוקף בקשת הכניסה ל־WeChat. כדי להתחבר מחדש, יש לסרוק את הקוד שוב.",
+    "failed": "החיבור ל־WeChat נכשל. אפשר לנסות שוב.",
+    "verifyPlaceholder": "קוד",
+    "verifySubmit": "אימות"
+  }
+}

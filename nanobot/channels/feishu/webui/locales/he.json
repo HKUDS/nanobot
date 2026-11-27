@@ -1,0 +1,88 @@
+{
+  "setup": {
+    "primaryAction": "חיבור ל־Feishu",
+    "docsLabel": "מדריך להגדרת Feishu",
+    "officialLabel": "מסוף הניהול של Feishu",
+    "fields": {
+      "appId": {
+        "label": "מזהה אפליקציה",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "מפתח האפליקציה הסודי (App Secret)",
+        "placeholder": "אפשר להשאיר ריק כדי לשמור על המפתח הקיים"
+      },
+      "domain": {
+        "label": "אזור",
+        "choices": {
+          "feishu": "Feishu",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "כללים לקבוצות",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות",
+          "allowlist": "רשימת מורשים"
+        }
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "מזהי משתמשים בהפרדה בפסיקים"
+      },
+      "topicIsolation": {
+        "label": "שיחות לפי נושא",
+        "choices": {
+          "true": "שיחות נפרדות",
+          "false": "שיחה משותפת"
+        }
+      },
+      "name": {
+        "label": "שם חשבון"
+      },
+      "encryptKey": {
+        "label": "מפתח הצפנה"
+      },
+      "verificationToken": {
+        "label": "אסימון אימות"
+      },
+      "reactEmoji": {
+        "label": "אימוג׳י לאישור קריאה"
+      },
+      "doneEmoji": {
+        "label": "אימוג׳י לציון סיום הטיפול"
+      },
+      "toolHintPrefix": {
+        "label": "קידומת לעדכונים על הפעלת כלים"
+      },
+      "replyToMessage": {
+        "label": "מענה להודעה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "streaming": {
+        "label": "הזרמה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      }
+    }
+  },
+  "custom": {
+    "addAssistant": "הוספת עוזר נוסף",
+    "toggleAssistant": "העוזר {{name}}",
+    "configured": "מחובר",
+    "needsSetup": "נדרשת הרשאה",
+    "qrAlt": "קוד QR לחיבור ל־Feishu",
+    "scanTitle": "סריקה באפליקציית Feishu",
+    "scanDescription": "יש לסרוק את הקוד באפליקציית Feishu או Lark בטלפון. לאחר מתן ההרשאה, nanobot ישלים את ההגדרה אוטומטית.",
+    "waiting": "בהמתנה לאישור…",
+    "connected": "החיבור ל־Feishu פעיל.",
+    "stopped": "החיבור הופסק.",
+    "connecting": "החיבור מתבצע…"
+  }
+}

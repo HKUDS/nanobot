@@ -1,0 +1,92 @@
+{
+  "setup": {
+    "docsLabel": "מדריך להגדרת Telegram",
+    "officialLabel": "פתיחת BotFather",
+    "fields": {
+      "token": {
+        "label": "אסימון גישה של הבוט",
+        "placeholder": "123456:ABC..."
+      },
+      "useProxy": {
+        "label": "שימוש בשרת פרוקסי"
+      },
+      "allowFrom": {
+        "label": "משתמשים מורשים",
+        "placeholder": "* או מזהי משתמשים ב־Telegram"
+      },
+      "groupPolicy": {
+        "label": "כללים לקבוצות",
+        "choices": {
+          "mention": "אזכורים בלבד",
+          "open": "כל ההודעות",
+          "allowlist": "רשימת מורשים"
+        }
+      },
+      "mode": {
+        "label": "מצב חיבור",
+        "choices": {
+          "polling": "תשאול ממושך (Long polling)",
+          "webhook": "Webhook"
+        }
+      },
+      "replyToMessage": {
+        "label": "מענה להודעה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "reactEmoji": {
+        "label": "אימוג׳י לאישור קריאה"
+      },
+      "connectionPoolSize": {
+        "label": "גודל מאגר החיבורים"
+      },
+      "poolTimeout": {
+        "label": "זמן המתנה מרבי לחיבור פנוי"
+      },
+      "streaming": {
+        "label": "הזרמה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "כפתורי הודעה",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "richMessages": {
+        "label": "הודעות עשירות",
+        "choices": {
+          "true": "פעיל",
+          "false": "כבוי"
+        }
+      },
+      "streamEditInterval": {
+        "label": "זמן בין עדכונים (שניות)"
+      },
+      "webhookUrl": {
+        "label": "כתובת Webhook"
+      },
+      "webhookListenHost": {
+        "label": "כתובת האזנה של ה־Webhook"
+      },
+      "webhookListenPort": {
+        "label": "יציאת האזנה של ה־Webhook"
+      },
+      "webhookPath": {
+        "label": "נתיב Webhook"
+      },
+      "webhookSecretToken": {
+        "label": "אסימון סודי של ה־Webhook"
+      },
+      "webhookMaxConnections": {
+        "label": "מגבלת החיבורים של ה־Webhook"
+      }
+    }
+  }
+}
