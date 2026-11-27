@@ -137,10 +137,13 @@ def tool_call_signature(tool_name: str, arguments: Any) -> str | None:
     if not isinstance(arguments, dict):
         return f"{tool_name}:none"
 
+    # Narrowed from Any, so cast to a fully known type: basedpyright
+    # (strict) rejects passing dict[Unknown, Unknown] to str().
+    args_dict = cast(dict[str, Any], arguments)
     try:
-        args_json = json.dumps(arguments, sort_keys=True)
+        args_json = json.dumps(args_dict, sort_keys=True)
     except Exception:
-        args_json = str(arguments)
+        args_json = str(args_dict)
 
     return f"{tool_name}:{args_json}"
 
