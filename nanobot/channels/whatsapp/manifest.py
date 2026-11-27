@@ -1,6 +1,7 @@
 from nanobot.channels._manifest import DIRECT_GROUP_POLICIES, field
 from nanobot.channels.contracts import ChannelManagementSpec, ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin
+from nanobot.channels.reply_formats import PLAIN_TEXT
 from nanobot.channels.whatsapp.state import local_state_present
 from nanobot.channels.whatsapp.validation import validate
 
@@ -23,6 +24,7 @@ SETUP_SPEC = ChannelSetupSpec(
 
 PLUGIN = ChannelPlugin(
     name="whatsapp",
+    reply_format=PLAIN_TEXT,
     display_name="WhatsApp",
     runtime=f"{__package__}.runtime:WhatsAppChannel",
     connector=f"{__package__}.connect:WhatsAppConnectStore",

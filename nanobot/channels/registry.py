@@ -10,6 +10,7 @@ from nanobot.channels.plugin import (
     has_channel_package,
     load_channel_package,
 )
+from nanobot.channels.reply_formats import PLAIN_TEXT
 
 if TYPE_CHECKING:
     from nanobot.channels.base import BaseChannel
@@ -40,6 +41,13 @@ def discover_plugins(
         except Exception as exc:
             logger.warning("Failed to load channel package descriptor '{}': {}", name, exc)
     return plugins
+
+
+def channel_reply_formats() -> dict[str, str]:
+    """Snapshot manifest guidance, including the package-less SMS label used by SDK callers."""
+    return {"sms": PLAIN_TEXT} | {
+        name: plugin.reply_format for name, plugin in discover_plugins().items() if plugin.reply_format
+    }
 
 
 def load_channel_plugin(name: str) -> ChannelPlugin:
@@ -94,6 +102,7 @@ def discover_all() -> dict[str, type[BaseChannel]]:
 
 __all__ = [
     "channel_default_enabled",
+    "channel_reply_formats",
     "discover_all",
     "discover_enabled",
     "discover_plugins",

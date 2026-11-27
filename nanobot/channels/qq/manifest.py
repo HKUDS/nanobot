@@ -1,6 +1,7 @@
 from nanobot.channels._manifest import field, required_fields
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin
+from nanobot.channels.reply_formats import MESSAGING
 
 SETUP_SPEC = ChannelSetupSpec(
     fields={
@@ -20,6 +21,7 @@ SETUP_SPEC = ChannelSetupSpec(
 
 PLUGIN = ChannelPlugin(
     name="qq",
+    reply_format=MESSAGING,
     display_name="QQ",
     runtime=f"{__package__}.runtime:QQChannel",
     connector=f"{__package__}.connect:QQConnectStore",

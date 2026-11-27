@@ -38,6 +38,7 @@ class ChannelPlugin:
     settings_visible: bool = True
     capabilities: frozenset[str] = frozenset()
     webui: str | None = None
+    reply_format: str = ""
 
     def __post_init__(self) -> None:
         if _CHANNEL_PACKAGE_NAME.fullmatch(self.name) is None:

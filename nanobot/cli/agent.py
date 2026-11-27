@@ -140,6 +140,8 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
         TurnFailureNotice,
     )
     from nanobot.bus.queue import MessageBus
+    from nanobot.channels.registry import channel_reply_formats
+    from nanobot.channels.reply_formats import TERMINAL
     from nanobot.channels.turn_notices import turn_failure_notice_text
     from nanobot.cli import terminal as cli_terminal
     from nanobot.cli.stream import ThinkingSpinner
@@ -192,6 +194,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             cron_service=cron,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
+            reply_formats=channel_reply_formats() | {"cli": TERMINAL},
             builtin_assembly=install_goal,
         )
     except ValueError as exc:
