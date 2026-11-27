@@ -400,9 +400,10 @@ async def test_start_registers_native_menus_without_blocking_polling(monkeypatch
         await channel._teardown_app()
 
     menus = app.bot.menus
-    assert set(menus) == {None, "zh", "fr", "ja", "ko", "es", "pt", "vi", "id"}
+    assert set(menus) == {None, "zh", "fr", "ja", "ko", "es", "pt", "vi", "id", "he"}
     assert menus[None]["start"] == "Start the bot"
     assert menus["zh"]["start"] == "启动机器人 / 啟動機器人"
+    assert menus["he"]["start"] == "הפעלת הבוט"
     assert menus["pt"]["dream_log"] == command_text("palette.dream-log.description", "pt-BR")
     assert {"status", "skill", "dream", "dream_log", "dream_restore", "dream_prompt",
             "evaluator_prompt", "compact", "cancel_goal"} <= menus[None].keys()
