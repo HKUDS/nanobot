@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from typing import Any, cast
 
@@ -165,6 +166,133 @@ def responses_state_items(
     """Return an isolated copy of canonical input items for tests/consumers."""
     items = _state_items(state)
     return deepcopy(items) if items is not None else None
+
+
+def responses_state_before_input(
+    state: ProviderConversationState | None,
+    messages: list[dict[str, Any]],
+    boundary: int,
+) -> ProviderConversationState | None:
+    """Recover native items strictly before the original user record at *boundary*.
+
+    Walk from both origins, including the target as a witness but not in the
+    result. Never search forward to resynchronize: repeated turns are legal.
+    """
+    if (
+        state is None or state.kind != RESPONSES_STATE_KIND
+        or state.version != RESPONSES_STATE_VERSION or state.pending_messages
+        or not 0 < boundary < len(messages) or messages[boundary].get("role") != "user"
+        or messages[0].get("role") != "user"
+    ):
+        return None
+    items = _state_items(state)
+    if not items or any(isinstance(kind := item.get("type"), str) and kind in _COMPACTION_ITEM_TYPES
+                        for item in items):
+        return None
+
+    cursor = 0
+
+    def take(*, assistant: bool = False) -> dict[str, Any]:
+        nonlocal cursor
+        while cursor < len(items):
+            item = items[cursor]
+            cursor += 1
+            if item.get("status") not in (None, "completed"):
+                break
+            # Only an assistant record can anchor otherwise opaque reasoning.
+            if not assistant or item.get("type") != "reasoning":
+                return item
+        return {}
+
+    seen: set[str] = set()
+    pending: set[str] = set()
+    for index in range(boundary + 1):
+        message = messages[index]
+        role, content = message.get("role"), message.get("content")
+        if pending and role != "tool":
+            return None
+        if role == "user":
+            start = cursor
+            if not _matches_text_item(take(), "user", content):
+                return None
+            if index == boundary:
+                return ProviderConversationState(
+                    kind=state.kind, version=state.version, provider=state.provider, model=state.model,
+                    payload={_ITEMS_KEY: deepcopy(items[:start])},
+                )
+        elif role == "assistant":
+            calls = message.get("tool_calls", [])
+            if not isinstance(calls, list) or (content in (None, "") and not calls):
+                return None
+            if content not in (None, "") and not _matches_text_item(take(assistant=True), role, content):
+                return None
+            for call in cast(list[object], calls):
+                full_id = _matched_call_id(call, take(assistant=True))
+                if full_id is None or (call_id := full_id.partition("|")[0]) in seen:
+                    return None
+                seen.add(call_id)
+                pending.add(full_id)
+        elif role == "tool":
+            full_id = message.get("tool_call_id")
+            item = take()
+            if (not isinstance(full_id, str) or full_id not in pending or not isinstance(content, str)
+                    or item.get("type") != "function_call_output" or item.get("output") != content
+                    or item.get("call_id") != full_id.partition("|")[0]):
+                return None
+            pending.remove(full_id)
+        else:
+            return None
+    return None
+
+
+def _matches_text_item(item: dict[str, Any], role: str, text: Any) -> bool:
+    if not isinstance(text, str) or item.get("role") != role or item.get("type", "message") != "message":
+        return False
+    content = item.get("content")
+    if isinstance(content, str):
+        return content == text
+    if not isinstance(content, list):
+        return False
+    blocks = cast(list[object], content)
+    if len(blocks) != 1 or not isinstance(blocks[0], dict):
+        return False
+    block = cast(dict[str, Any], blocks[0])
+    return block.get("type") == ("input_text" if role == "user" else "output_text") and block.get("text") == text
+
+
+def _matched_call_id(raw: object, item: dict[str, Any]) -> str | None:
+    if not isinstance(raw, dict) or item.get("type") != "function_call":
+        return None
+    call = cast(dict[str, Any], raw)
+    full_id, fn = call.get("id"), call.get("function")
+    if not isinstance(full_id, str) or not isinstance(fn, dict) or call.get("type", "function") != "function":
+        return None
+    function = cast(dict[str, Any], fn)
+    call_id, _, item_id = full_id.partition("|")
+    name, arguments = function.get("name"), function.get("arguments")
+    if (call_id and item.get("call_id") == call_id and (not item_id or item.get("id") in (None, item_id))
+            and isinstance(name, str) and name and item.get("name") == name
+            and isinstance(arguments, str) and _same_call_arguments(arguments, item.get("arguments"))):
+        return full_id
+    return None
+
+
+def _same_call_arguments(chat: str, native: Any) -> bool:
+    # Accept exact JSON or the two common JSON serializations. Requiring both
+    # sides to round-trip avoids equating duplicate keys or repaired arguments.
+    if not isinstance(native, str):
+        return False
+    try:
+        value = json.loads(chat)
+        if not isinstance(value, dict):
+            return False
+        if native == chat:
+            return True
+        forms = (json.dumps(value, ensure_ascii=False, allow_nan=False),
+                 json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
+        return chat in forms and native in forms
+    except (ValueError, RecursionError):
+        return False
 
 
 def responses_state_context_tokens(state: ProviderConversationState) -> int:

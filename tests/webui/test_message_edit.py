@@ -16,6 +16,9 @@ from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.providers.base import GenerationSettings, LLMResponse
+from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+from nanobot.providers.openai_responses.converters import convert_messages, convert_user_message
+from nanobot.providers.openai_responses.state import build_responses_state, prepare_responses_input
 from nanobot.runtime_context import public_history_message
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
@@ -33,8 +36,24 @@ KEY = "websocket:edit-chat"
 
 
 @pytest.fixture
-async def editing(tmp_path):
+async def edit_host(tmp_path):
     manager = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
+
+    async def submit(message, prepare):
+        await prepare()
+        return True
+
+    gateway = SimpleNamespace(session_manager=manager, enqueue_if_idle=submit,
+                              transcripts=transcript.WebUITranscriptRecorder(manager),
+                              ingress=SimpleNamespace(validate_text=lambda _: None))
+    yield manager, SimpleNamespace(gateway=gateway, invalidate_history=AsyncMock())
+    clear_websocket_turns("edit-chat")
+    await manager.state.aclose()
+
+
+@pytest.fixture
+def editing(edit_host):
+    manager, host = edit_host
     session = Session(key=KEY, metadata={"title": "Keep title", "session_handle": "editable", "model_preset": "precise"})
     facts = []
     for i in range(32):  # Enough turns for the replacement to span multiple pages.
@@ -48,17 +67,7 @@ async def editing(tmp_path):
             facts.append(fact_from_record({"event": "turn_end", **turn}))
     manager.save(session)
     manager.append_history(KEY, facts)
-
-    async def submit(message, prepare):
-        await prepare()
-        return True
-
-    gateway = SimpleNamespace(session_manager=manager, enqueue_if_idle=submit,
-                              transcripts=transcript.WebUITranscriptRecorder(manager),
-                              ingress=SimpleNamespace(validate_text=lambda _: None))
-    yield manager, SimpleNamespace(gateway=gateway, invalidate_history=AsyncMock())
-    clear_websocket_turns("edit-chat")
-    await manager.state.aclose()
+    return manager, host
 
 
 def page(manager, **paging):
@@ -198,6 +207,60 @@ async def test_display_write_failure_leaves_both_histories_intact_after_reopen(e
     after = reopened.read_session_snapshot(KEY)
     assert (after.generation, after.messages) == (before.generation, before.messages)
     assert page(reopened)["events"] == rows
+
+
+@pytest.mark.parametrize("compacted", [False, True], ids=["native-prefix", "boundary-lost-to-compaction"])
+async def test_edit_reopens_with_only_the_safe_codex_prefix(edit_host, tmp_path, compacted):
+    manager, host = edit_host
+    session = Session(key=KEY)
+    function = {"name": "read_file", "arguments": '{"path":"notes.txt"}'}
+    session.add_message("user", "read my notes", webui_turn_id="read")
+    session.add_message("assistant", "", tool_calls=[{"type": "function", "id": "call_1|fc_1", "function": function}])
+    session.add_message("tool", "shopping list", tool_call_id="call_1|fc_1")
+    session.add_message("assistant", "Your notes contain a shopping list.")
+    retained_history = session.get_history()
+    _, chat_prefix = convert_messages(retained_history)
+    user, _, result, answer = chat_prefix
+    # Neither the encrypted item nor the call status can be recovered from Chat history.
+    native_prefix = [
+        user,
+        {"type": "reasoning", "encrypted_content": "opaque-kept", "summary": []},
+        {"type": "function_call", "call_id": "call_1", **function, "status": "completed"},
+        result,
+        answer,
+    ]
+
+    session.add_message("user", "discard this question", webui_turn_id="old")
+    session.add_message("assistant", "discard this answer")
+    _, (old_question, old_answer) = convert_messages(session.get_history()[-2:])
+    endpoint = {"provider": OpenAICodexProvider._responses_state_provider(), "model": "gpt-5.6-sol"}
+    output = [{"type": "reasoning", "encrypted_content": "opaque-discarded", "summary": []}, old_answer]
+    if compacted:
+        output.append({"type": "compaction", "encrypted_content": "includes-discarded-question"})
+    session.provider_state = build_responses_state(
+        **endpoint, input_items=[*native_prefix, old_question], output_items=output,
+    )
+    manager.save(session)
+    manager.append_history(KEY, [
+        fact_from_record({"event": "user", "turn_id": "read", "text": "read my notes"}),
+        fact_from_record({"event": "user", "turn_id": "old", "text": "discard this question"}),
+    ])
+
+    await edit_webui_message(host, payload("user:old"))
+    reopened = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions").read_session_snapshot(KEY)
+    assert reopened.get_history() == retained_history
+    followup, = pending_followups(reopened)
+    assert followup.content == "replacement"
+    replacement = {"role": "user", "content": followup.content}
+    state = reopened.provider_state
+    if compacted:
+        assert state is None  # The opaque summary includes the discarded question.
+    else:
+        assert state is not None
+        state = state.with_pending_messages([*state.pending_messages, replacement])
+    _, items, replayed = prepare_responses_input([*reopened.get_history(), replacement], state=state, **endpoint)
+    assert replayed == (not compacted)
+    assert items == [*(chat_prefix if compacted else native_prefix), convert_user_message("replacement")]
 
 
 async def test_discarded_summary_and_provider_continuation_cannot_survive(editing):

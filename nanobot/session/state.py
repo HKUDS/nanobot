@@ -1089,8 +1089,14 @@ class SessionState:
             boundary, ordinal, entry, new_input = self._store.project_history(key, lambda history: resolve(session, history))
             if not 0 <= boundary < len(session.messages):
                 raise EditError("edit_source_changed")
+            if session.provider_state is not None:
+                from nanobot.providers.openai_responses.state import responses_state_before_input
+
+                session.provider_state = (
+                    responses_state_before_input(session.provider_state, session.messages, boundary)
+                    if not session.last_archived else None
+                )
             del session.messages[boundary:]
-            session.provider_state = None
             if session.last_archived > boundary:
                 session.last_archived = 0
                 session.metadata.pop("_last_summary", None)

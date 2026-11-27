@@ -778,12 +778,13 @@ class SqliteSessionStore:
         """Delete only the model/display suffix and persist the journal with its displayed input."""
         key = session.key
         generation = uuid4().hex
+        provider = _encode(session.provider_state.to_private_record()) if session.provider_state else None
         preview, last_visible = self._message_list_summary(session)
         with self.transaction() as db:
             changed = db.execute(
-                """UPDATE sessions SET generation=?, revision=revision+1, updated_at=?, provider_state=NULL,
+                """UPDATE sessions SET generation=?, revision=revision+1, updated_at=?, provider_state=?,
                           last_archived=?, preview=?, visible_updated_at=? WHERE key=? AND generation=? AND revision=?""",
-                (generation, session.updated_at.isoformat(), session.last_archived, preview, last_visible,
+                (generation, session.updated_at.isoformat(), provider, session.last_archived, preview, last_visible,
                  key, session.generation, session.revision),
             ).rowcount
             if changed != 1:
