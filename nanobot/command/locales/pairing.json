@@ -9,7 +9,8 @@
     "es": "No hay solicitudes de vinculación pendientes.",
     "pt-BR": "Nenhuma solicitação de pareamento pendente.",
     "vi": "Không có yêu cầu ghép nối nào đang chờ.",
-    "id": "Tidak ada permintaan pemasangan yang tertunda."
+    "id": "Tidak ada permintaan pemasangan yang tertunda.",
+    "he": "אין בקשות שיוך שממתינות לאישור."
   },
   "pairing.pending": {
     "en": "Pending pairing requests:",
@@ -21,7 +22,8 @@
     "es": "Solicitudes de vinculación pendientes:",
     "pt-BR": "Solicitações de pareamento pendentes:",
     "vi": "Yêu cầu ghép nối đang chờ:",
-    "id": "Permintaan pemasangan yang tertunda:"
+    "id": "Permintaan pemasangan yang tertunda:",
+    "he": "בקשות שיוך שממתינות לאישור:"
   },
   "pairing.entry": {
     "en": "- `{code}` | {channel} | {sender} | {seconds}s",
@@ -33,7 +35,8 @@
     "es": "- `{code}` | {channel} | {sender} | {seconds} s",
     "pt-BR": "- `{code}` | {channel} | {sender} | {seconds} s",
     "vi": "- `{code}` | {channel} | {sender} | {seconds} giây",
-    "id": "- `{code}` | {channel} | {sender} | {seconds} detik"
+    "id": "- `{code}` | {channel} | {sender} | {seconds} detik",
+    "he": "- `{code}` | {channel} | {sender} | {seconds} שנ׳"
   },
   "pairing.expired_entry": {
     "en": "- `{code}` | {channel} | {sender} | expired",
@@ -45,7 +48,8 @@
     "es": "- `{code}` | {channel} | {sender} | caducada",
     "pt-BR": "- `{code}` | {channel} | {sender} | expirada",
     "vi": "- `{code}` | {channel} | {sender} | đã hết hạn",
-    "id": "- `{code}` | {channel} | {sender} | kedaluwarsa"
+    "id": "- `{code}` | {channel} | {sender} | kedaluwarsa",
+    "he": "- `{code}` | {channel} | {sender} | פג התוקף"
   },
   "pairing.usage": {
     "en": "Usage: `{syntax}`",
@@ -57,7 +61,8 @@
     "es": "Uso: `{syntax}`",
     "pt-BR": "Uso: `{syntax}`",
     "vi": "Cú pháp: `{syntax}`",
-    "id": "Penggunaan: `{syntax}`"
+    "id": "Penggunaan: `{syntax}`",
+    "he": "שימוש: `{syntax}`"
   },
   "pairing.invalid": {
     "en": "Invalid or expired pairing code: `{code}`",
@@ -69,7 +74,8 @@
     "es": "Código de vinculación no válido o caducado: `{code}`",
     "pt-BR": "Código de pareamento inválido ou expirado: `{code}`",
     "vi": "Mã ghép nối không hợp lệ hoặc đã hết hạn: `{code}`",
-    "id": "Kode pemasangan tidak valid atau kedaluwarsa: `{code}`"
+    "id": "Kode pemasangan tidak valid atau kedaluwarsa: `{code}`",
+    "he": "קוד השיוך אינו תקין או שפג תוקפו: `{code}`"
   },
   "pairing.approved": {
     "en": "Approved pairing code `{code}` — {sender} can now access {channel}",
@@ -81,7 +87,8 @@
     "es": "Código de vinculación `{code}` aprobado. Ahora {sender} tiene acceso a {channel}.",
     "pt-BR": "Código de pareamento `{code}` aprovado. Agora {sender} tem acesso a {channel}.",
     "vi": "Đã duyệt mã ghép nối `{code}`. Giờ đây {sender} có thể truy cập {channel}.",
-    "id": "Kode pemasangan `{code}` disetujui. Kini {sender} dapat mengakses {channel}."
+    "id": "Kode pemasangan `{code}` disetujui. Kini {sender} dapat mengakses {channel}.",
+    "he": "קוד השיוך `{code}` אושר. כעת יש ל־{sender} גישה לערוץ {channel}."
   },
   "pairing.denied": {
     "en": "Denied pairing code `{code}`",
@@ -93,7 +100,8 @@
     "es": "Código de vinculación `{code}` rechazado.",
     "pt-BR": "Código de pareamento `{code}` recusado.",
     "vi": "Đã từ chối mã ghép nối `{code}`.",
-    "id": "Kode pemasangan `{code}` ditolak."
+    "id": "Kode pemasangan `{code}` ditolak.",
+    "he": "בקשת השיוך עם הקוד `{code}` נדחתה."
   },
   "pairing.not_found": {
     "en": "Pairing code `{code}` not found or already expired",
@@ -105,7 +113,8 @@
     "es": "No se encontró el código de vinculación `{code}` o ya ha caducado.",
     "pt-BR": "O código de pareamento `{code}` não foi encontrado ou já expirou.",
     "vi": "Không tìm thấy mã ghép nối `{code}` hoặc mã đã hết hạn.",
-    "id": "Kode pemasangan `{code}` tidak ditemukan atau sudah kedaluwarsa."
+    "id": "Kode pemasangan `{code}` tidak ditemukan atau sudah kedaluwarsa.",
+    "he": "קוד השיוך `{code}` לא נמצא או שפג תוקפו."
   },
   "pairing.revoked": {
     "en": "Revoked {sender} from {channel}",
@@ -117,7 +126,8 @@
     "es": "Se revocó el acceso de {sender} a {channel}.",
     "pt-BR": "O acesso de {sender} a {channel} foi revogado.",
     "vi": "Đã thu hồi quyền truy cập {channel} của {sender}.",
-    "id": "Akses {sender} ke {channel} telah dicabut."
+    "id": "Akses {sender} ke {channel} telah dicabut.",
+    "he": "הרשאת הגישה של {sender} לערוץ {channel} בוטלה."
   },
   "pairing.not_approved": {
     "en": "{sender} was not in the approved list for {channel}",
@@ -129,7 +139,8 @@
     "es": "{sender} no estaba en la lista de usuarios autorizados de {channel}.",
     "pt-BR": "{sender} não estava na lista de usuários autorizados de {channel}.",
     "vi": "{sender} không có trong danh sách được duyệt của {channel}.",
-    "id": "{sender} tidak ada dalam daftar pengguna yang disetujui untuk {channel}."
+    "id": "{sender} tidak ada dalam daftar pengguna yang disetujui untuk {channel}.",
+    "he": "{sender} לא נמצא ברשימת המורשים של הערוץ {channel}."
   },
   "pairing.revoke_usage": {
     "en": "Usage: `/pairing revoke <user_id>` or `/pairing revoke <channel> <user_id>`",
@@ -141,7 +152,8 @@
     "es": "Uso: `/pairing revoke <user_id>` o `/pairing revoke <channel> <user_id>`",
     "pt-BR": "Uso: `/pairing revoke <user_id>` ou `/pairing revoke <channel> <user_id>`",
     "vi": "Cú pháp: `/pairing revoke <user_id>` hoặc `/pairing revoke <channel> <user_id>`",
-    "id": "Penggunaan: `/pairing revoke <user_id>` atau `/pairing revoke <channel> <user_id>`"
+    "id": "Penggunaan: `/pairing revoke <user_id>` atau `/pairing revoke <channel> <user_id>`",
+    "he": "שימוש: `/pairing revoke <user_id>` או `/pairing revoke <channel> <user_id>`"
   },
   "pairing.unknown": {
     "en": "Unknown pairing command.\nUsage: `{syntax}`",
@@ -153,7 +165,8 @@
     "es": "Comando de vinculación desconocido.\nUso: `{syntax}`",
     "pt-BR": "Comando de pareamento desconhecido.\nUso: `{syntax}`",
     "vi": "Lệnh ghép nối không xác định.\nCú pháp: `{syntax}`",
-    "id": "Perintah pemasangan tidak dikenal.\nPenggunaan: `{syntax}`"
+    "id": "Perintah pemasangan tidak dikenal.\nPenggunaan: `{syntax}`",
+    "he": "פקודת שיוך לא מוכרת.\nשימוש: `{syntax}`"
   },
   "pairing.unavailable": {
     "en": "The pairing store is temporarily unavailable. Please try again.",
@@ -165,6 +178,7 @@
     "es": "Los datos de vinculación no están disponibles temporalmente. Inténtalo de nuevo.",
     "pt-BR": "Os dados de pareamento estão temporariamente indisponíveis. Tente novamente.",
     "vi": "Tạm thời không thể truy cập kho dữ liệu ghép nối. Vui lòng thử lại.",
-    "id": "Data pemasangan untuk sementara tidak tersedia. Silakan coba lagi."
+    "id": "Data pemasangan untuk sementara tidak tersedia. Silakan coba lagi.",
+    "he": "נתוני השיוך אינם זמינים כרגע. אפשר לנסות שוב."
   }
 }

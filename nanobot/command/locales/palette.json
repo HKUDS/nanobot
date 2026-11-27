@@ -9,7 +9,8 @@
     "es": "Nuevo chat",
     "pt-BR": "Nova conversa",
     "vi": "Cuộc trò chuyện mới",
-    "id": "Obrolan baru"
+    "id": "Obrolan baru",
+    "he": "שיחה חדשה"
   },
   "palette.new.description": {
     "en": "Reset this topic and start a new one.",
@@ -21,7 +22,8 @@
     "es": "Reinicia este tema y empieza otro.",
     "pt-BR": "Reinicie este tópico e comece um novo.",
     "vi": "Đặt lại chủ đề này và bắt đầu chủ đề mới.",
-    "id": "Reset topik ini dan mulai yang baru."
+    "id": "Reset topik ini dan mulai yang baru.",
+    "he": "איפוס הנושא הנוכחי ופתיחת נושא חדש."
   },
   "palette.compact.title": {
     "en": "Compact context",
@@ -33,7 +35,8 @@
     "es": "Compactar contexto",
     "pt-BR": "Compactar contexto",
     "vi": "Nén ngữ cảnh",
-    "id": "Ringkas konteks"
+    "id": "Ringkas konteks",
+    "he": "דחיסת ההקשר"
   },
   "palette.compact.description": {
     "en": "Compact context and continue chatting.",
@@ -45,7 +48,8 @@
     "es": "Compacta el contexto y sigue conversando.",
     "pt-BR": "Compacte o contexto e continue a conversa.",
     "vi": "Nén ngữ cảnh và tiếp tục trò chuyện.",
-    "id": "Ringkas konteks dan lanjutkan chat."
+    "id": "Ringkas konteks dan lanjutkan chat.",
+    "he": "דחיסת ההקשר והמשך השיחה."
   },
   "palette.stop.title": {
     "en": "Stop task",
@@ -57,7 +61,8 @@
     "es": "Detener tarea",
     "pt-BR": "Parar tarefa",
     "vi": "Dừng tác vụ",
-    "id": "Hentikan tugas"
+    "id": "Hentikan tugas",
+    "he": "עצירת המשימה"
   },
   "palette.stop.description": {
     "en": "Stop the active task in this chat.",
@@ -69,7 +74,8 @@
     "es": "Detén la tarea activa de este chat.",
     "pt-BR": "Pare a tarefa ativa nesta conversa.",
     "vi": "Dừng tác vụ đang chạy trong trò chuyện này.",
-    "id": "Hentikan tugas aktif di chat ini."
+    "id": "Hentikan tugas aktif di chat ini.",
+    "he": "עצירת המשימה הפעילה בשיחה הזו."
   },
   "palette.restart.title": {
     "en": "Restart nanobot",
@@ -81,7 +87,8 @@
     "es": "Reiniciar nanobot",
     "pt-BR": "Reiniciar nanobot",
     "vi": "Khởi động lại nanobot",
-    "id": "Mulai ulang nanobot"
+    "id": "Mulai ulang nanobot",
+    "he": "הפעלה מחדש של nanobot"
   },
   "palette.restart.description": {
     "en": "Restart the nanobot process.",
@@ -93,7 +100,8 @@
     "es": "Reinicia el proceso nanobot.",
     "pt-BR": "Reinicie o processo nanobot.",
     "vi": "Khởi động lại tiến trình nanobot.",
-    "id": "Mulai ulang proses nanobot."
+    "id": "Mulai ulang proses nanobot.",
+    "he": "הפעלה מחדש של תהליך nanobot."
   },
   "palette.status.title": {
     "en": "Show status",
@@ -105,7 +113,8 @@
     "es": "Mostrar estado",
     "pt-BR": "Mostrar status",
     "vi": "Hiển thị trạng thái",
-    "id": "Tampilkan status"
+    "id": "Tampilkan status",
+    "he": "הצגת מצב"
   },
   "palette.status.description": {
     "en": "Check runtime, provider, and channel status.",
@@ -117,7 +126,8 @@
     "es": "Consulta el estado de ejecución, proveedores y canales.",
     "pt-BR": "Confira o status de execução, provedores e canais.",
     "vi": "Xem trạng thái chạy, nhà cung cấp và kênh.",
-    "id": "Periksa status eksekusi, penyedia, dan kanal."
+    "id": "Periksa status eksekusi, penyedia, dan kanal.",
+    "he": "בדיקת מצב המערכת, הספק והערוצים."
   },
   "palette.model.title": {
     "en": "Model",
@@ -129,7 +139,8 @@
     "es": "Modelo",
     "pt-BR": "Modelo",
     "vi": "Mô hình",
-    "id": "Model"
+    "id": "Model",
+    "he": "מודל"
   },
   "palette.model.description": {
     "en": "View or switch the current model preset.",
@@ -141,7 +152,8 @@
     "es": "Consulta o cambia el preajuste de modelo actual.",
     "pt-BR": "Veja ou troque o preset de modelo atual.",
     "vi": "Xem hoặc đổi bộ thiết lập mô hình hiện tại.",
-    "id": "Lihat atau ganti preset model saat ini."
+    "id": "Lihat atau ganti preset model saat ini.",
+    "he": "הצגת תצורת המודל הנוכחית או מעבר לתצורה אחרת."
   },
   "palette.dream.title": {
     "en": "Run Dream",
@@ -153,7 +165,8 @@
     "es": "Ejecutar Dream",
     "pt-BR": "Executar Dream",
     "vi": "Chạy Dream",
-    "id": "Jalankan Dream"
+    "id": "Jalankan Dream",
+    "he": "הפעלת Dream"
   },
   "palette.dream.description": {
     "en": "Organize memory now.",
@@ -165,7 +178,8 @@
     "es": "Organiza la memoria ahora.",
     "pt-BR": "Organize a memória agora.",
     "vi": "Sắp xếp bộ nhớ ngay.",
-    "id": "Atur memori sekarang."
+    "id": "Atur memori sekarang.",
+    "he": "ארגון הזיכרון כעת."
   },
   "palette.dream-log.title": {
     "en": "Dream log",
@@ -177,7 +191,8 @@
     "es": "Registro Dream",
     "pt-BR": "Log Dream",
     "vi": "Nhật ký Dream",
-    "id": "Log Dream"
+    "id": "Log Dream",
+    "he": "יומן Dream"
   },
   "palette.dream-log.description": {
     "en": "View changes from the last Dream run.",
@@ -189,7 +204,8 @@
     "es": "Consulta los cambios de la última ejecución de Dream.",
     "pt-BR": "Veja as alterações da última execução do Dream.",
     "vi": "Xem thay đổi từ lần chạy Dream gần nhất.",
-    "id": "Lihat perubahan dari eksekusi Dream terakhir."
+    "id": "Lihat perubahan dari eksekusi Dream terakhir.",
+    "he": "הצגת השינויים מהרצת Dream האחרונה."
   },
   "palette.dream-restore.title": {
     "en": "Restore memory",
@@ -201,7 +217,8 @@
     "es": "Restaurar memoria",
     "pt-BR": "Restaurar memória",
     "vi": "Khôi phục bộ nhớ",
-    "id": "Pulihkan memori"
+    "id": "Pulihkan memori",
+    "he": "שחזור הזיכרון"
   },
   "palette.dream-restore.description": {
     "en": "Restore a previous Dream memory snapshot.",
@@ -213,7 +230,8 @@
     "es": "Restaura una instantánea anterior de memoria de Dream.",
     "pt-BR": "Restaure um snapshot anterior da memória Dream.",
     "vi": "Khôi phục ảnh chụp bộ nhớ Dream trước đó.",
-    "id": "Pulihkan snapshot memori Dream sebelumnya."
+    "id": "Pulihkan snapshot memori Dream sebelumnya.",
+    "he": "שחזור גרסה קודמת של הזיכרון ששמר Dream."
   },
   "palette.dream-prompt.title": {
     "en": "Dream settings",
@@ -225,7 +243,8 @@
     "es": "Ajustes Dream",
     "pt-BR": "Ajustes do Dream",
     "vi": "Thiết lập Dream",
-    "id": "Pengaturan Dream"
+    "id": "Pengaturan Dream",
+    "he": "הגדרות Dream"
   },
   "palette.dream-prompt.description": {
     "en": "Set how Dream organizes this workspace's memory.",
@@ -237,7 +256,8 @@
     "es": "Define cómo organiza Dream la memoria de este espacio.",
     "pt-BR": "Defina como Dream organiza a memória deste espaço.",
     "vi": "Đặt cách Dream sắp xếp bộ nhớ vùng làm việc này.",
-    "id": "Atur cara Dream mengelola memori ruang kerja ini."
+    "id": "Atur cara Dream mengelola memori ruang kerja ini.",
+    "he": "קביעה כיצד Dream יארגן את הזיכרון בסביבת העבודה הזו."
   },
   "palette.goal.title": {
     "en": "Long-running goal",
@@ -249,7 +269,8 @@
     "es": "Objetivo a largo plazo",
     "pt-BR": "Objetivo de longa duração",
     "vi": "Mục tiêu dài hạn",
-    "id": "Tujuan jangka panjang"
+    "id": "Tujuan jangka panjang",
+    "he": "יעד לטווח ארוך"
   },
   "palette.goal.description": {
     "en": "Have the assistant keep working toward this goal.",
@@ -261,7 +282,8 @@
     "es": "Haz que el asistente siga trabajando en este objetivo.",
     "pt-BR": "Peça ao assistente para continuar trabalhando neste objetivo.",
     "vi": "Để trợ lý tiếp tục làm việc hướng đến mục tiêu này.",
-    "id": "Minta asisten terus mengerjakan tujuan ini."
+    "id": "Minta asisten terus mengerjakan tujuan ini.",
+    "he": "הגדרת יעד שהעוזר ימשיך לעבוד עליו."
   },
   "palette.cancel_goal.title": {
     "en": "Cancel goal",
@@ -273,7 +295,8 @@
     "es": "Cancelar objetivo",
     "pt-BR": "Cancelar objetivo",
     "vi": "Hủy mục tiêu",
-    "id": "Batalkan tujuan"
+    "id": "Batalkan tujuan",
+    "he": "ביטול היעד"
   },
   "palette.cancel_goal.description": {
     "en": "Cancel the active or blocked goal in this chat.",
@@ -285,7 +308,8 @@
     "es": "Cancela el objetivo activo o bloqueado de este chat.",
     "pt-BR": "Cancela o objetivo ativo ou bloqueado desta conversa.",
     "vi": "Hủy mục tiêu đang chạy hoặc bị chặn trong cuộc trò chuyện này.",
-    "id": "Batalkan tujuan aktif atau terblokir di chat ini."
+    "id": "Batalkan tujuan aktif atau terblokir di chat ini.",
+    "he": "ביטול היעד בשיחה הזו, בין שהוא פעיל ובין שהוא חסום."
   },
   "palette.trigger.title": {
     "en": "CLI trigger",
@@ -297,7 +321,8 @@
     "es": "Activador CLI",
     "pt-BR": "Gatilho CLI",
     "vi": "Kích hoạt CLI",
-    "id": "Pemicu CLI"
+    "id": "Pemicu CLI",
+    "he": "טריגר CLI"
   },
   "palette.trigger.description": {
     "en": "Create a CLI trigger for this chat.",
@@ -309,7 +334,8 @@
     "es": "Crea un activador CLI para este chat.",
     "pt-BR": "Crie um gatilho CLI para esta conversa.",
     "vi": "Tạo kích hoạt CLI cho trò chuyện này.",
-    "id": "Buat pemicu CLI untuk chat ini."
+    "id": "Buat pemicu CLI untuk chat ini.",
+    "he": "יצירת טריגר לשיחה הזו דרך שורת הפקודה."
   },
   "palette.help.title": {
     "en": "Show help",
@@ -321,7 +347,8 @@
     "es": "Mostrar ayuda",
     "pt-BR": "Mostrar ajuda",
     "vi": "Hiển thị trợ giúp",
-    "id": "Tampilkan bantuan"
+    "id": "Tampilkan bantuan",
+    "he": "הצגת עזרה"
   },
   "palette.help.description": {
     "en": "Show available slash commands.",
@@ -333,7 +360,8 @@
     "es": "Muestra los comandos de barra disponibles.",
     "pt-BR": "Mostre os comandos de barra disponíveis.",
     "vi": "Hiện các lệnh slash có thể dùng.",
-    "id": "Tampilkan perintah slash yang tersedia."
+    "id": "Tampilkan perintah slash yang tersedia.",
+    "he": "הצגת פקודות הלוכסן הזמינות."
   },
   "palette.pairing.title": {
     "en": "Pairing",
@@ -345,7 +373,8 @@
     "es": "Emparejamiento",
     "pt-BR": "Pareamento",
     "vi": "Ghép nối",
-    "id": "Pemasangan"
+    "id": "Pemasangan",
+    "he": "שיוך"
   },
   "palette.pairing.description": {
     "en": "Manage pairing requests.",
@@ -357,7 +386,8 @@
     "es": "Gestiona las solicitudes de vinculación.",
     "pt-BR": "Gerencie solicitações de pareamento.",
     "vi": "Quản lý yêu cầu ghép.",
-    "id": "Kelola permintaan pemasangan."
+    "id": "Kelola permintaan pemasangan.",
+    "he": "ניהול בקשות שיוך."
   },
   "palette.skill.title": {
     "en": "List skills",
@@ -369,7 +399,8 @@
     "es": "Ver habilidades",
     "pt-BR": "Listar habilidades",
     "vi": "Danh sách kỹ năng",
-    "id": "Daftar keterampilan"
+    "id": "Daftar keterampilan",
+    "he": "רשימת המיומנויות"
   },
   "palette.skill.description": {
     "en": "List skills available to the agent.",
@@ -381,7 +412,8 @@
     "es": "Muestra las habilidades disponibles.",
     "pt-BR": "Lista as habilidades disponíveis.",
     "vi": "Liệt kê các kỹ năng hiện có.",
-    "id": "Tampilkan keterampilan yang tersedia."
+    "id": "Tampilkan keterampilan yang tersedia.",
+    "he": "הצגת המיומנויות הזמינות לסוכן."
   },
   "palette.evaluator-prompt.title": {
     "en": "Heartbeat evaluator",
@@ -393,7 +425,8 @@
     "es": "Evaluador de Heartbeat",
     "pt-BR": "Avaliador do Heartbeat",
     "vi": "Bộ đánh giá Heartbeat",
-    "id": "Evaluator Heartbeat"
+    "id": "Evaluator Heartbeat",
+    "he": "הגדרות ההתראות של Heartbeat"
   },
   "palette.evaluator-prompt.description": {
     "en": "Customize when Heartbeat sends notifications.",
@@ -405,6 +438,7 @@
     "es": "Configura cuándo Heartbeat envía notificaciones.",
     "pt-BR": "Configure quando o Heartbeat envia notificações.",
     "vi": "Đặt điều kiện gửi thông báo Heartbeat.",
-    "id": "Atur kapan Heartbeat mengirim notifikasi."
+    "id": "Atur kapan Heartbeat mengirim notifikasi.",
+    "he": "קביעה מתי Heartbeat ישלח התראות."
   }
 }
