@@ -86,9 +86,10 @@ def _assistant_steps(message: _Json, model: str, text: str, calls: dict[str, _Js
                 end = offset + step["length"]
                 ordered.append({"type": "model_output", "content": _content(text[offset:end])})
                 offset = end
-            elif step["type"] == "function_call" and step["id"] in calls:
+            elif step["type"] == "function_call":
                 call_ids.append(step["id"])
-                ordered.append(calls[step["id"]])
+                if step["id"] in calls:
+                    ordered.append(calls[step["id"]])
         if offset == len(text) and call_ids == list(calls):
             break
         ordered.clear()
@@ -109,26 +110,35 @@ def _assistant_steps(message: _Json, model: str, text: str, calls: dict[str, _Js
     return steps
 
 
-def _request(messages: list[_Json], tools: list[_Json] | None, model: str, max_tokens: int,
-             effort: str | None, choice: str | _Json | None) -> _Json:
-    config: _Json = {"max_output_tokens": max_tokens}
-    # The plan models reject sampling settings and cannot turn thinking off.
-    level = (effort or "minimal").lower()
+def _thinking_level(model: str, effort: str) -> str:
+    # Plan models cannot disable thinking. Clamp explicit settings to their supported range.
+    level = effort.lower()
     if level in {"off", "none", "minimal"}:
-        level = "minimal" if model == "gemini-3.5-flash-lite" else "low"
-    elif level in {"xhigh", "max"}:
-        level = "xhigh" if model in {"gemini-4-hydrogen", "gemini-4-neon"} else "high"
-    elif level not in {"low", "medium", "high"}:
+        return "minimal" if model == "gemini-3.5-flash-lite" else "low"
+    if level in {"xhigh", "max"}:
+        return "xhigh" if model in {"gemini-4-hydrogen", "gemini-4-neon"} else "high"
+    if level not in {"low", "medium", "high"}:
         raise ValueError("Unsupported Google AI Ultra reasoning effort")
-    config.update(thinking_level=level, thinking_summaries="auto")
+    return level
+
+
+def _request(
+    messages: list[_Json], tools: list[_Json] | None, model: str, max_tokens: int,
+    effort: str | None, choice: str | _Json | None,
+) -> _Json:
+    config: _Json = {"max_output_tokens": max_tokens}
+    if effort and effort.lower() != "adaptive":
+        config.update(thinking_level=_thinking_level(model, effort), thinking_summaries="auto")
     steps: list[_Json] = []
     body: _Json = {"model": model, "store": False, "stream": True, "input": steps, "generation_config": config}
     if tools:
         definitions: list[_Json] = []
         for tool in tools:
             function = tool["function"]
-            definitions.append({"type": "function", **{k: function[k] for k in
-                                ("name", "description", "parameters") if k in function}})
+            definitions.append({
+                "type": "function", "name": function["name"],
+                **{k: function[k] for k in ("description", "parameters") if k in function},
+            })
         if isinstance(choice, dict):
             name = choice["function"]["name"]
             definitions = [d for d in definitions if d["name"] == name]
@@ -154,16 +164,23 @@ def _request(messages: list[_Json], tools: list[_Json] | None, model: str, max_t
             for call in _objects(message.get("tool_calls") or []):
                 call_id, function = call["id"], call["function"]
                 names[call_id] = function["name"]
-                calls[call_id] = {"type": "function_call", "id": call_id, "name": names[call_id],
-                                  "arguments": tool_arguments_object_for_replay(function.get("arguments"))}
+                calls[call_id] = {
+                    "type": "function_call", "id": call_id, "name": names[call_id],
+                    "arguments": tool_arguments_object_for_replay(function.get("arguments")),
+                }
             steps.extend(_assistant_steps(message, model, _text(parts), calls))
         elif role == "tool":
             call_id = message["tool_call_id"]
             text = _text(parts)
             images = [p for p in parts if p["type"] == "image"]
-            steps.append({"type": "function_result", "call_id": call_id, "name": message.get("name") or names[call_id],
-                          "result": ((_content(text) if text else []) + images) if images else text,
-                          **({"is_error": True} if message.get("is_error") else {})})
+            result: str | list[_Json] = text
+            if images:
+                result = (_content(text) if text else []) + images
+            steps.append({
+                "type": "function_result", "call_id": call_id,
+                "name": message.get("name") or names[call_id], "result": result,
+                **({"is_error": True} if message.get("is_error") else {}),
+            })
         else:
             raise ValueError("Unsupported Google AI Ultra message role")
     if instructions:
@@ -205,8 +222,10 @@ def _finish(steps: Iterable[_Step], interaction: _Json, model: str) -> LLMRespon
     for step in steps:
         value = "".join(step.fragments)
         if step.kind == "thought":
-            layout.append({"type": "thought", **({"signature": step.signature} if step.signature else {}),
-                           **({"summary": _content(value)} if value.strip() else {})})
+            layout.append({
+                "type": "thought", **({"signature": step.signature} if step.signature else {}),
+                **({"summary": _content(value)} if value.strip() else {}),
+            })
             if value:
                 thoughts.append(value)
         elif step.kind == "model_output" and value:
@@ -215,16 +234,19 @@ def _finish(steps: Iterable[_Step], interaction: _Json, model: str) -> LLMRespon
         elif step.kind == "function_call":
             calls.append(ToolCallRequest(step.id, step.name, parse_tool_arguments(value)))
             layout.append({"type": "function_call", "id": step.id})
-    usage = interaction.get("usage")
+    usage = None
+    if counts := interaction.get("usage"):
+        usage = LLMUsage.reported(
+            input_tokens=counts.get("total_input_tokens", 0),
+            output_tokens=counts.get("total_output_tokens", 0) + counts.get("total_thought_tokens", 0),
+            cache_read_tokens=counts.get("total_cached_tokens"), total_tokens=counts.get("total_tokens"),
+        )
+    metadata = None
+    if any(s["type"] != "model_output" for s in layout):
+        metadata = [{"type": _LAYOUT, "model": model, "steps": layout}]
     return LLMResponse(
-        content="".join(text) or None, finish_reason=reason, tool_calls=calls,
-        reasoning_content="\n\n".join(thoughts) or None,
-        thinking_blocks=[{"type": _LAYOUT, "model": model, "steps": layout}]
-        if any(s["type"] != "model_output" for s in layout) else None,
-        usage=LLMUsage.reported(input_tokens=usage.get("total_input_tokens", 0),
-                                output_tokens=usage.get("total_output_tokens", 0) + usage.get("total_thought_tokens", 0),
-                                cache_read_tokens=usage.get("total_cached_tokens"), total_tokens=usage.get("total_tokens"))
-        if usage else None,
+        content="".join(text) or None, finish_reason=reason, tool_calls=calls, usage=usage,
+        reasoning_content="\n\n".join(thoughts) or None, thinking_blocks=metadata,
     )
 
 
@@ -240,8 +262,10 @@ def _api_error(error: _Json, status: int | None, token: str) -> LLMResponse:
         )
     code = error.get("status") or error.get("code")
     label = f" ({status})" if status else ""
-    return LLMResponse(content=f"Google AI Ultra{label}: {message}", finish_reason="error",
-                       error_status_code=status, error_code=str(code) if code else None, error_should_retry=retry)
+    return LLMResponse(
+        content=f"Google AI Ultra{label}: {message}", finish_reason="error",
+        error_status_code=status, error_code=str(code) if code else None, error_should_retry=retry,
+    )
 
 
 def _http_error(response: httpx.Response, token: str) -> LLMResponse:
@@ -259,8 +283,10 @@ def _http_error(response: httpx.Response, token: str) -> LLMResponse:
     return _api_error(error, response.status_code, token)
 
 
-async def _consume(response: httpx.Response, model: str, token: str, on_text: _TextSink | None,
-                   on_thought: _TextSink | None, on_tool: _ToolSink | None) -> LLMResponse:
+async def _consume(
+    response: httpx.Response, model: str, token: str, on_text: _TextSink | None,
+    on_thought: _TextSink | None, on_tool: _ToolSink | None,
+) -> LLMResponse:
     steps: dict[int, _Step] = {}
     open_steps: set[int] = set()
     async for event in _events(response):
@@ -323,24 +349,31 @@ class GoogleAIPlanProvider(LLMProvider):
     def get_default_model(self) -> str:
         return self.default_model
 
-    async def chat(self, messages: list[_Json], tools: list[_Json] | None = None, model: str | None = None,
-                   max_tokens: int = 4096, temperature: float = 0.7, reasoning_effort: str | None = None,
-                   tool_choice: str | _Json | None = None) -> LLMResponse:
+    async def chat(
+        self, messages: list[_Json], tools: list[_Json] | None = None, model: str | None = None,
+        max_tokens: int = 4096, temperature: float = 0.7, reasoning_effort: str | None = None,
+        tool_choice: str | _Json | None = None,
+    ) -> LLMResponse:
         return await self.chat_stream(messages, tools, model, max_tokens, temperature, reasoning_effort, tool_choice)
 
-    async def chat_stream(self, messages: list[_Json], tools: list[_Json] | None = None, model: str | None = None,
-                          max_tokens: int = 4096, temperature: float = 0.7, reasoning_effort: str | None = None,
-                          tool_choice: str | _Json | None = None, on_content_delta: _TextSink | None = None,
-                          on_thinking_delta: _TextSink | None = None, on_tool_call_delta: _ToolSink | None = None,
-                          ) -> LLMResponse:
+    async def chat_stream(
+        self, messages: list[_Json], tools: list[_Json] | None = None, model: str | None = None,
+        max_tokens: int = 4096, temperature: float = 0.7, reasoning_effort: str | None = None,
+        tool_choice: str | _Json | None = None, on_content_delta: _TextSink | None = None,
+        on_thinking_delta: _TextSink | None = None, on_tool_call_delta: _ToolSink | None = None,
+    ) -> LLMResponse:
         model = (model or self.default_model).removeprefix("google-ai-plan/").removeprefix("google_ai_plan/")
         try:
-            body = _request(await prepare_message_images(messages), tools, model, max_tokens, reasoning_effort, tool_choice)
+            messages = await prepare_message_images(messages)
+            body = sanitize_surrogates_deep(_request(messages, tools, model, max_tokens, reasoning_effort, tool_choice))
             token = await asyncio.to_thread(get_google_ai_plan_token, proxy=self.proxy)
-            headers = {"Authorization": f"Bearer {token}", "User-Agent": f"nanobot/{__version__}",
-                       "Accept": "text/event-stream", "Content-Type": "application/json"}
-            async with httpx.AsyncClient(proxy=self.proxy, trust_env=False, timeout=resolve_stream_idle_timeout_s()) as client:
-                async with client.stream("POST", _ENDPOINT, headers=headers, json=sanitize_surrogates_deep(body)) as response:
+            headers = {
+                "Authorization": f"Bearer {token}", "User-Agent": f"nanobot/{__version__}",
+                "Accept": "text/event-stream", "Content-Type": "application/json",
+            }
+            timeout = resolve_stream_idle_timeout_s()
+            async with httpx.AsyncClient(proxy=self.proxy, trust_env=False, timeout=timeout) as client:
+                async with client.stream("POST", _ENDPOINT, headers=headers, json=body) as response:
                     if not response.is_success:
                         await response.aread()
                         error = _http_error(response, token)
