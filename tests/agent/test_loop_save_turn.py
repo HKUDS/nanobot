@@ -74,6 +74,7 @@ from nanobot.session.webui_turns import (
     WEBUI_TITLE_METADATA_KEY,
     WebuiTurnCoordinator,
     clean_generated_title,
+    clear_websocket_turns,
     maybe_generate_webui_title,
 )
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
@@ -434,6 +435,8 @@ async def test_model_turns_use_separate_project_catalogs(tmp_path: Path) -> None
             assert f"Policy for {other.name}" not in messages[0]["content"]
             assert f"Procedure for {other.name}" not in messages[-1]["content"]
     finally:
+        for msg in inputs:
+            clear_websocket_turns(msg.chat_id)
         await loop.aclose()
 
 
@@ -462,6 +465,8 @@ async def test_injected_skill_uses_turn_snapshot_and_next_turn_refreshes(tmp_pat
         await loop._process_message(InboundMessage("websocket", "user", "next", "Use $review", metadata=metadata))
         assert "Revised procedure" in requests[-1][-1]["content"]
     finally:
+        clear_websocket_turns("first")
+        clear_websocket_turns("next")
         await loop.aclose()
 
 
