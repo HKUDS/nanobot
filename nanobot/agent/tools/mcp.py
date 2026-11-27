@@ -105,21 +105,6 @@ _mcp_last_accessed: dict[str, float] = {}
 _mcp_watchdog_tasks: dict[str, asyncio.Task[None]] = {}
 
 
-async def _mcp_idle_watchdog(provider: MCPProvider, name: str, timeout: int) -> None:
-    try:
-        while True:
-            await asyncio.sleep(_MCP_IDLE_POLL_SECONDS)
-            if name not in provider.connected_server_names:
-                break
-            last_used = _mcp_last_accessed.get(name, 0)
-            if last_used and (time.time() - last_used) > timeout:
-                logger.info("MCP server '{}' idled for {}s, closing...", name, timeout)
-                await provider._close_server(name)
-                break
-    except asyncio.CancelledError:
-        pass
-
-
 class _OwnedMCPConnection:
     """Close an MCP transport from the task that originally opened it."""
 
@@ -1730,6 +1715,21 @@ class MCPProvider:
                 return None
             return self._registry.get(tool_name)
 
+    async def _idle_watchdog(self, name: str, timeout: int) -> None:
+        """Close a server that stays idle longer than its idle_timeout."""
+        try:
+            while True:
+                await asyncio.sleep(_MCP_IDLE_POLL_SECONDS)
+                if name not in self.connected_server_names:
+                    break
+                last_used = _mcp_last_accessed.get(name, 0)
+                if last_used and (time.time() - last_used) > timeout:
+                    logger.info("MCP server '{}' idled for {}s, closing...", name, timeout)
+                    await self._close_server(name)
+                    break
+        except asyncio.CancelledError:
+            pass
+
     def _start_idle_watchdog(self, name: str) -> None:
         """(Re)start the idle watchdog for a freshly connected server."""
         cfg = self._servers.get(name)
@@ -1741,7 +1741,7 @@ class MCPProvider:
         if old is not None:
             old.cancel()
         _mcp_watchdog_tasks[name] = asyncio.create_task(
-            _mcp_idle_watchdog(self, name, idle_timeout)
+            self._idle_watchdog(name, idle_timeout)
         )
 
     async def _close_server(self, server_name: str) -> None:
