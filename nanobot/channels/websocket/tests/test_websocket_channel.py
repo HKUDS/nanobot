@@ -3377,7 +3377,6 @@ async def test_turn_end_keeps_unclosed_text_out_of_the_next_stream_segment(histo
     assert payloads[-2]["text"] == "new thought"
     assert payloads[-1] == {
         "event": "reasoning_end", "chat_id": "chat-unclosed", "stream_id": "r1",
-        "history_generation": history.sessions.read_session_version("websocket:chat-unclosed")[0],
     }
     lines = history.read("websocket:chat-unclosed")
     assert [(line["event"], line.get("text")) for line in lines] == [
@@ -3442,7 +3441,6 @@ async def test_retry_status_is_transient_and_turn_scoped(
         "max_attempts": 4,
         "error_kind": "connection",
         "retry_after_s": 3.5,
-        "history_generation": history.sessions.read_session_version("websocket:chat-1")[0],
     }]
     assert history.read("websocket:chat-1") == []
 
@@ -3536,7 +3534,6 @@ async def test_context_compaction_started_is_live_only(history, notify, show_not
         "chat_id": "chat-compaction-started",
         "compaction_id": "compact-started",
         "phase": "started",
-        "history_generation": history.sessions.read_session_version("websocket:chat-compaction-started")[0],
     }]
     assert history.read("websocket:chat-compaction-started") == []
 
@@ -3575,10 +3572,7 @@ async def test_context_compaction_is_structured_persisted_and_summary_free(histo
         "phase": phase,
         "reason": "manual",
     }
-    assert _sent_ws_payloads(mock_ws) == [{
-        **expected,
-        "history_generation": history.sessions.read_session_version("websocket:chat-compaction")[0],
-    }]
+    assert _sent_ws_payloads(mock_ws) == [expected]
     [persisted] = history.read("websocket:chat-compaction")
     assert {key: persisted[key] for key in expected} == expected
 
@@ -3692,7 +3686,6 @@ async def test_recovery_state_is_a_structured_event_not_assistant_text(history) 
         "recovery_id": "recovery-1",
         "reason": "tool_state_unknown",
         "attempts": 1,
-        "history_generation": history.sessions.read_session_version("websocket:chat-1")[0],
     }]
     assert history.read("websocket:chat-1") == []
 
