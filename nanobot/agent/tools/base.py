@@ -10,7 +10,6 @@ if typing.TYPE_CHECKING:
     from pydantic import BaseModel
 
     from nanobot.agent.tools.context import ToolContext
-    from nanobot.agent.tools.mcp_metadata import MCPServerInfo
     from nanobot.runtime_context import RuntimeContextProvider
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
@@ -93,11 +92,6 @@ class Tool(ABC):
     def parameters(self) -> dict[str, Any]:
         """JSON Schema for tool parameters."""
         ...
-
-    @property
-    def mcp_server_info(self) -> MCPServerInfo | None:
-        """Source of a discoverable MCP operation; direct tools have no source record."""
-        return None
 
     @property
     def read_only(self) -> bool:

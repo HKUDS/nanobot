@@ -37,7 +37,7 @@ class _Hygrometer(Tool):
         return f"{station}: 52%"
 
 
-def _sensor(client, name, *, server_info=None):
+def _sensor(client, name, *, server_info=MCPServerInfo("lab")):
     return MCPToolWrapper(client, "lab", types.Tool(
         name=name, description=f"Read the {name} measurement at a weather station.", inputSchema=_STATION,
     ), server_info=server_info)

@@ -601,11 +601,9 @@ class AgentLoop:
         session_summary: SessionSummary | None = None,
         workspace: Path | None = None,
     ) -> list[dict[str, Any]]:
-        return self.context.build_messages(
-            history=history,
-            current_message=current_message,
+        return self.context.build_transcript(
+            TranscriptInput(history=history, current_message=current_message, session_summary=session_summary),
             channel=channel,
-            session_summary=session_summary,
             workspace=workspace,
             has_cron=self.tools.has("cron"),
             mcp_servers=mcp_server_directory(tool_view(self.tools)),

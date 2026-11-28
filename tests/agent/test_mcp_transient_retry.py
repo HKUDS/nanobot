@@ -20,6 +20,7 @@ from nanobot.agent.tools.mcp import (
     _is_session_terminated,
     _is_transient,
 )
+from nanobot.agent.tools.mcp_metadata import MCPServerInfo
 from nanobot.agent.tools.registry import (
     ToolRegistry,
     is_tool_error_result,
@@ -27,6 +28,9 @@ from nanobot.agent.tools.registry import (
 )
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+
+_TEST_SERVER = MCPServerInfo("Test Server")
+_SRV = MCPServerInfo("Retry Server")
 
 
 class _FakeClosedResourceError(Exception):
@@ -112,7 +116,7 @@ async def test_tool_retries_on_transient_error():
     exc = _FakeClosedResourceError("connection lost")
     session.call_tool = AsyncMock(side_effect=[exc, result])
 
-    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
+    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5, server_info=_TEST_SERVER)
 
     with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
         output = await wrapper.execute(foo="bar")
@@ -128,7 +132,7 @@ async def test_tool_fails_after_retry_exhausted():
     exc2 = _FakeClosedResourceError("still dead again")
     session.call_tool = AsyncMock(side_effect=[exc1, exc2])
 
-    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
+    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5, server_info=_TEST_SERVER)
 
     with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
         output = await wrapper.execute()
@@ -144,7 +148,7 @@ async def test_tool_no_retry_on_non_transient_error():
     session = AsyncMock()
     session.call_tool = AsyncMock(side_effect=ValueError("bad input"))
 
-    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
+    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5, server_info=_TEST_SERVER)
     output = await wrapper.execute()
 
     assert "ValueError" in output
@@ -157,7 +161,7 @@ async def test_tool_no_retry_on_timeout():
     session = AsyncMock()
     session.call_tool = AsyncMock(side_effect=asyncio.TimeoutError())
 
-    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
+    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5, server_info=_TEST_SERVER)
     output = await wrapper.execute()
 
     assert "timed out" in output
@@ -170,7 +174,7 @@ async def test_tool_success_on_first_try_no_retry():
     result = _make_tool_result("hello")
     session.call_tool = AsyncMock(return_value=result)
 
-    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
+    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5, server_info=_TEST_SERVER)
     output = await wrapper.execute()
 
     assert output == "hello"
@@ -191,7 +195,7 @@ async def test_tool_does_not_retry_on_cancelled_error():
     session = AsyncMock()
     session.call_tool = AsyncMock(side_effect=asyncio.CancelledError())
 
-    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
+    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5, server_info=_TEST_SERVER)
 
     with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
         output = await wrapper.execute()
@@ -209,7 +213,7 @@ async def test_tool_retry_on_connection_reset():
         side_effect=[ConnectionResetError("reset by peer"), result]
     )
 
-    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
+    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5, server_info=_TEST_SERVER)
 
     with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
         output = await wrapper.execute()
@@ -224,7 +228,7 @@ async def test_tool_retry_on_end_of_stream():
     result = _make_tool_result("back")
     session.call_tool = AsyncMock(side_effect=[_FakeEndOfStreamError("eof"), result])
 
-    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
+    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5, server_info=_TEST_SERVER)
 
     with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
         output = await wrapper.execute()
@@ -240,8 +244,8 @@ async def test_tool_reconnects_on_transient_failure():
     new_session = AsyncMock()
     new_session.call_tool = AsyncMock(return_value=_make_tool_result("fresh"))
 
-    wrapper = MCPToolWrapper(old_session, "test_server", _make_tool_def(), tool_timeout=5)
-    replacement = MCPToolWrapper(new_session, "test_server", _make_tool_def(), tool_timeout=5)
+    wrapper = MCPToolWrapper(old_session, "test_server", _make_tool_def(), tool_timeout=5, server_info=_TEST_SERVER)
+    replacement = MCPToolWrapper(new_session, "test_server", _make_tool_def(), tool_timeout=5, server_info=_TEST_SERVER)
 
     async def reconnect(server_name: str, tool_name: str, stale_tool):
         assert server_name == "test_server"
@@ -487,8 +491,10 @@ async def test_tool_refresh_rechecks_replay_contract_and_keeps_retry_budget(fres
         name="test_tool", inputSchema={"type": "object"},
         annotations=mcp_types.ToolAnnotations(idempotentHint=True),
     )
-    wrapper = MCPToolWrapper(old, "srv", definition)
-    replacement = MCPToolWrapper(fresh, "srv", definition.model_copy(update={"annotations": fresh_annotations}))
+    wrapper = MCPToolWrapper(old, "srv", definition, server_info=_SRV)
+    replacement = MCPToolWrapper(
+        fresh, "srv", definition.model_copy(update={"annotations": fresh_annotations}), server_info=_SRV,
+    )
     reconnect = AsyncMock(return_value=replacement)
     wrapper.set_reconnect_handler(reconnect)
 
@@ -521,8 +527,8 @@ async def test_tool_later_refresh_does_not_reset_transient_budget():
     old, fresh = AsyncMock(), AsyncMock()
     old.call_tool.side_effect = [ConnectionResetError("first"), _session_terminated_error()]
     fresh.call_tool.side_effect = ConnectionResetError("last")
-    wrapper = MCPToolWrapper(old, "srv", _make_tool_def())
-    replacement = MCPToolWrapper(fresh, "srv", _make_tool_def())
+    wrapper = MCPToolWrapper(old, "srv", _make_tool_def(), server_info=_SRV)
+    replacement = MCPToolWrapper(fresh, "srv", _make_tool_def(), server_info=_SRV)
     reconnect = AsyncMock(side_effect=[None, replacement])
     wrapper.set_reconnect_handler(reconnect)
 
@@ -549,7 +555,7 @@ async def test_tool_real_cancellation_during_recovery_propagates(phase):
 
     session = AsyncMock()
     session.call_tool.side_effect = ConnectionResetError("gone")
-    wrapper = MCPToolWrapper(session, "srv", _make_tool_def())
+    wrapper = MCPToolWrapper(session, "srv", _make_tool_def(), server_info=_SRV)
     if phase == "refresh":
         wrapper.set_reconnect_handler(block)
     with patch("nanobot.agent.tools.mcp.asyncio.sleep", side_effect=block):
@@ -570,7 +576,7 @@ async def test_tool_real_cancellation_during_recovery_propagates(phase):
 async def test_tool_reconnect_failure_is_not_a_retryable_request_failure():
     session = AsyncMock()
     session.call_tool.side_effect = ConnectionResetError("request")
-    wrapper = MCPToolWrapper(session, "srv", _make_tool_def())
+    wrapper = MCPToolWrapper(session, "srv", _make_tool_def(), server_info=_SRV)
     failure = ConnectionResetError("refresh")
     reconnect = AsyncMock(side_effect=failure)
     wrapper.set_reconnect_handler(reconnect)
@@ -586,7 +592,7 @@ async def test_tool_reconnect_failure_is_not_a_retryable_request_failure():
 async def test_tool_transient_render_failure_cannot_replay_a_successful_request():
     session = AsyncMock()
     session.call_tool.return_value = _make_tool_result("ok")
-    wrapper = MCPToolWrapper(session, "srv", _make_tool_def())
+    wrapper = MCPToolWrapper(session, "srv", _make_tool_def(), server_info=_SRV)
     reconnect = AsyncMock()
     wrapper.set_reconnect_handler(reconnect)
     with (
@@ -615,7 +621,7 @@ async def test_request_error_logs_hide_content_and_prompt_retains_error_detail(k
         expected = "(MCP prompt call failed: private-request-content [code -32602])"
     else:
         session.call_tool.side_effect = ValueError("private-request-content")
-        wrapper = MCPToolWrapper(session, "srv", _make_tool_def())
+        wrapper = MCPToolWrapper(session, "srv", _make_tool_def(), server_info=_SRV)
         expected = "(MCP tool call failed: ValueError)"
     records = []
     sink = logger.add(lambda message: records.append(message.record), level="DEBUG")
@@ -684,8 +690,8 @@ async def test_submitted_tool_transport_loss_is_unknown_not_replayed(annotations
     old.call_tool.side_effect = submit_then_lose_response
     fresh.call_tool.side_effect = submit
     definition = mcp_types.Tool(name="create", inputSchema={"type": "object"}, annotations=annotations)
-    wrapper = MCPToolWrapper(old, "srv", definition)
-    replacement = MCPToolWrapper(fresh, "srv", definition)
+    wrapper = MCPToolWrapper(old, "srv", definition, server_info=_SRV)
+    replacement = MCPToolWrapper(fresh, "srv", definition, server_info=_SRV)
     reconnect = AsyncMock(return_value=replacement)
     wrapper.set_reconnect_handler(reconnect)
     registry = ToolRegistry()
@@ -740,7 +746,7 @@ async def test_explicitly_idempotent_tool_can_recover_with_the_same_arguments():
         name="set_record", inputSchema={"type": "object"},
         annotations=mcp_types.ToolAnnotations(readOnlyHint=False, idempotentHint=True),
     )
-    wrapper = MCPToolWrapper(session, "srv", definition)
+    wrapper = MCPToolWrapper(session, "srv", definition, server_info=_SRV)
     registry = ToolRegistry()
     registry.register(wrapper)
     with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock) as sleep:
@@ -823,7 +829,9 @@ async def test_unknown_tool_without_reconnect_does_not_retry_after_side_effect()
 
     session = AsyncMock()
     session.call_tool.side_effect = submit_then_disconnect
-    wrapper = MCPToolWrapper(session, "srv", mcp_types.Tool(name="send", inputSchema={"type": "object"}))
+    wrapper = MCPToolWrapper(
+        session, "srv", mcp_types.Tool(name="send", inputSchema={"type": "object"}), server_info=_SRV,
+    )
     registry = ToolRegistry()
     registry.register(wrapper)
     with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock) as sleep:
@@ -892,6 +900,7 @@ async def test_non_replayable_tool_timeout_and_cancellation_do_not_repeat(cancel
     wrapper = MCPToolWrapper(
         session, "srv", mcp_types.Tool(name="send", inputSchema={"type": "object"}),
         tool_timeout=5 if cancel else 0.01,
+        server_info=_SRV,
     )
     reconnect = AsyncMock()
     wrapper.set_reconnect_handler(reconnect)

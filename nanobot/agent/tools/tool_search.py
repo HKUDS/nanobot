@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.mcp import MCPToolWrapper
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.tool_search_index import ToolSearchIndex
 from nanobot.providers.base import ToolCallRequest, parse_tool_arguments
@@ -20,7 +21,7 @@ DISCOVERY_TOOLS = frozenset({"tool_search", "call_tool"})
 def tool_view(registry: ToolRegistry, *, disabled: frozenset[str] = frozenset()) -> ToolRegistry:
     """Keep permitted direct tools visible and scope MCP discovery to this run."""
     source = registry.excluding(disabled) if disabled else registry
-    if any((tool := source.get(name)) is not None and tool.mcp_server_info is not None for name in source.tool_names):
+    if any(isinstance(source.get(name), MCPToolWrapper) for name in source.tool_names):
         return _RunTools(source)
     return source
 
@@ -94,8 +95,8 @@ class _RunTools(ToolRegistry):
         self._snapshot: list[dict[str, Any]] | None = None
         self.disabled_names = source.disabled_names
         self._index: ToolSearchIndex | None = None
-        self._catalog: dict[str, Tool] = {}
-        self._discovered: dict[str, Tool] = {}
+        self._catalog: dict[str, MCPToolWrapper] = {}
+        self._discovered: dict[str, MCPToolWrapper] = {}
         self._gateways = (_SearchTool(self._search), _CallTool(self))
 
     def _refresh(self) -> None:
@@ -104,14 +105,13 @@ class _RunTools(ToolRegistry):
         if snapshot is self._snapshot:
             return
         direct: dict[str, Tool] = {}
-        deferred: dict[str, Tool] = {}
+        deferred: dict[str, MCPToolWrapper] = {}
         for name in self._source.tool_names:
             tool = self._source.get(name)
-            if tool is not None:
-                if tool.mcp_server_info is not None:
-                    deferred[name] = tool
-                else:
-                    direct[name] = tool
+            if isinstance(tool, MCPToolWrapper):
+                deferred[name] = tool
+            elif tool is not None:
+                direct[name] = tool
         visible = [schema for schema in snapshot if self._schema_name(schema) in direct]
         if deferred and not any(name in self.disabled_names or self._source.has(name) for name in DISCOVERY_TOOLS):
             for gateway in self._gateways:
@@ -147,23 +147,9 @@ class _RunTools(ToolRegistry):
         # A new restriction must filter searches and dispatch, not just the visible gateway names.
         return tool_view(self._source, disabled=disabled) if disabled - self.disabled_names else self
 
-    def _is_direct(self, name: str) -> bool:
-        tool = self.get(name)
-        return tool is not None and tool is self._source.get(name)
-
-    def prepare_call(self, name: str, params: Any) -> tuple[Tool | None, Any, str | None]:
-        if self._is_direct(name):
-            return self._source.prepare_call(name, params)
-        return super().prepare_call(name, params)
-
-    async def execute(self, name: str, params: Any) -> Any:
-        if self._is_direct(name):
-            return await self._source.execute(name, params)
-        return await super().execute(name, params)
-
     def server_directory(self) -> tuple[MCPServerInfo, ...]:
         self._refresh()
-        records = {info for tool in self._catalog.values() if (info := tool.mcp_server_info) is not None}
+        records = {tool.server_info for tool in self._catalog.values()}
         return tuple(sorted(records, key=lambda info: (
             info.name, info.description is not None, info.description or "",
             info.instructions is not None, info.instructions or "",
@@ -181,15 +167,12 @@ class _RunTools(ToolRegistry):
         ranked = [exact] if exact in self._catalog else self._index.search(query, limit=2 * _PAGE)
         matches = [self._catalog[name] for name in ranked[:_PAGE]]
         self._discovered.update((tool.name, tool) for tool in matches)
-        schemas = [tool.to_schema() for tool in matches]
-        result: dict[str, Any] = {"tools": [schema.get("function", schema) for schema in schemas],
+        result: dict[str, Any] = {"tools": [tool.to_schema()["function"] for tool in matches],
                                   "other_matches": ranked[_PAGE:]}
         if not ranked:
             result["hint"] = "Try the MCP server name, an operation, or a parameter name."
             if nearest := self._index.nearest_name(query):
-                info = self._catalog[nearest].mcp_server_info
-                assert info is not None  # Only MCP operations enter the index.
-                result["suggestion"] = {"name": nearest, "source": info.name}
+                result["suggestion"] = {"name": nearest, "source": self._catalog[nearest].server_info.name}
         return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
 

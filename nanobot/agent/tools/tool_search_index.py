@@ -10,7 +10,7 @@ from difflib import get_close_matches
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from nanobot.agent.tools.base import Tool
+    from nanobot.agent.tools.mcp import MCPToolWrapper
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 _WORD = re.compile(r"[^\W_]+")
@@ -53,7 +53,7 @@ def _parameter_text(schema: object) -> Iterator[str]:
 class ToolSearchIndex:
     """Read-only index returning registered names, with ties ordered by name."""
 
-    def __init__(self, tools: list[Tool]) -> None:
+    def __init__(self, tools: list[MCPToolWrapper]) -> None:
         self._postings: dict[str, list[tuple[str, int]]] = {}
         lengths: dict[str, int] = {}
         for tool in tools:
@@ -61,8 +61,7 @@ class ToolSearchIndex:
             # The transport namespace is shared by every registered MCP tool.
             name_tokens = _tokens(name.removeprefix("mcp_"))
             counts = Counter(name_tokens * _NAME_WEIGHT)
-            if info := tool.mcp_server_info:
-                counts.update(_tokens(info.name))
+            counts.update(_tokens(tool.server_info.name))
             counts.update(_tokens(tool.description))
             for text in _parameter_text(tool.parameters):
                 counts.update(_tokens(text))

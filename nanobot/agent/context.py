@@ -238,7 +238,6 @@ class ContextBuilder:
         workspace: Path | None = None,
         include_memory: bool = True,
         has_cron: bool = True,
-        mcp_servers: tuple[MCPServerInfo, ...] = (),
     ) -> list[dict[str, Any]]:
         """Compatibility wrapper for callers that need merged adjacent roles."""
         messages = self.build_transcript(
@@ -254,7 +253,6 @@ class ContextBuilder:
             workspace=workspace,
             include_memory=include_memory,
             has_cron=has_cron,
-            mcp_servers=mcp_servers,
         )
         if current_message is None:
             return messages

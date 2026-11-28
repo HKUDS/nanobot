@@ -332,8 +332,7 @@ def _partition_tool_batches(
     current: list[ToolCallRequest] = []
     for tool_call in tool_calls:
         effective_tools, effective_call = discovery_target(tools, tool_call)
-        get_tool = cast(Callable[[str], Any] | None, getattr(effective_tools, "get", None))
-        tool = get_tool(effective_call.name) if callable(get_tool) else None
+        tool = effective_tools.get(effective_call.name)
         can_batch = bool(tool and tool.concurrency_safe)
         if can_batch:
             current.append(tool_call)

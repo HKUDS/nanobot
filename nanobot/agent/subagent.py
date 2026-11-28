@@ -826,8 +826,6 @@ class SubagentManager:
             cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
         # Construct from the agent workspace; the bound scope below supplies the project cwd.
         tools = self._build_tools(tools_config=cfg, exec_owner_key=record.exec_owner_key)
-        for name in record.session.policy.disabled_tools:
-            tools.unregister(name)
         tools = tool_view(tools, disabled=record.session.policy.disabled_tools)
         system_prompt = self._build_subagent_prompt(workspace=root)
         if servers := mcp_server_directory(tools):

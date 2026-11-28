@@ -725,9 +725,9 @@ class MCPToolWrapper(_MCPWrapperBase):
         tool_def: MCPToolDefinition,
         tool_timeout: int = 30,
         *,
-        server_info: MCPServerInfo | None = None,
+        server_info: MCPServerInfo,
     ):
-        self._server_info = server_info or MCPServerInfo(server_name)
+        self.server_info = server_info
         self._original_name = tool_def.name
         self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_def.name}")
         self._description = tool_def.description or tool_def.name
@@ -758,10 +758,6 @@ class MCPToolWrapper(_MCPWrapperBase):
     @property
     def parameters(self) -> dict[str, Any]:
         return self._parameters
-
-    @property
-    def mcp_server_info(self) -> MCPServerInfo:
-        return self._server_info
 
     def validate_params(self, params: dict[str, Any]) -> list[str]:
         # Provider adaptations are not the server's validation contract.

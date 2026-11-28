@@ -16,6 +16,7 @@ from mcp.types import ErrorData
 from nanobot.agent.tools import mcp as mcp_runtime
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.mcp import MCPProvider, MCPResourceWrapper, MCPToolWrapper
+from nanobot.agent.tools.mcp_metadata import MCPServerInfo
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.network import NetworkConfig
@@ -582,7 +583,7 @@ async def test_mcp_tool_reconnects_before_submission_after_session_terminated(
                 description="quote tool",
                 inputSchema={"type": "object", "properties": {}},
             )
-            registry.register(MCPToolWrapper(session, name, tool_def, tool_timeout=5))
+            registry.register(MCPToolWrapper(session, name, tool_def, tool_timeout=5, server_info=MCPServerInfo(name)))
             stack = AsyncExitStack()
             await stack.__aenter__()
             stack.push_async_callback(_mark_closed, name)
@@ -640,7 +641,9 @@ async def test_mcp_reconnect_handler_uses_sanitized_server_prefix(
                 description="quote tool",
                 inputSchema={"type": "object", "properties": {}},
             )
-            registry.register(MCPToolWrapper(_FakeSession(connect_count), name, tool_def))
+            registry.register(MCPToolWrapper(
+                _FakeSession(connect_count), name, tool_def, server_info=MCPServerInfo(name),
+            ))
             stack = AsyncExitStack()
             await stack.__aenter__()
             stacks[name] = stack
@@ -760,7 +763,7 @@ async def test_shared_proxy_snapshot_survives_reconnect_and_reloads_only_opted_i
             sessions[name] = Session()
             registry.register(MCPToolWrapper(sessions[name], name, SimpleNamespace(
                 name="echo", description="echo", inputSchema={"type": "object"},
-            )))
+            ), server_info=MCPServerInfo(name)))
             stack = AsyncExitStack()
             await stack.__aenter__()
             stack.push_async_callback(mark_closed, name)
