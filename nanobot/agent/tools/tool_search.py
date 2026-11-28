@@ -1,19 +1,24 @@
 from __future__ import annotations
 
-from collections import Counter
+import json
 from collections.abc import Callable
-from typing import Any
+from dataclasses import replace
+from typing import Any, cast
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import CORE_TOOL_NAMES, ToolRegistry
 from nanobot.agent.tools.tool_search_index import ToolSearchIndex
+from nanobot.providers.base import ToolCallRequest, parse_tool_arguments
 
 _PAGE = 5
+DISCOVERY_TOOLS = frozenset({"tool_search", "call_tool"})
 
 
-def tool_view(registry: ToolRegistry, schema_token_budget: int) -> ToolRegistry:
-    """Create a run-local view when the allowed non-core tools exceed budget."""
-    if not schema_token_budget or registry.has("tool_search") or registry.searchable_schema_tokens() <= schema_token_budget:
+def tool_view(registry: ToolRegistry, schema_token_budget: int, *, disabled: frozenset[str] = frozenset()) -> ToolRegistry:
+    """Use fixed discovery entry points only when the allowed non-core catalog exceeds budget."""
+    if (not schema_token_budget or not DISCOVERY_TOOLS.isdisjoint(disabled)
+            or any(registry.has(name) for name in DISCOVERY_TOOLS)
+            or registry.searchable_schema_tokens() <= schema_token_budget):
         return registry
     return _RunTools(registry)
 
@@ -21,36 +26,58 @@ def tool_view(registry: ToolRegistry, schema_token_budget: int) -> ToolRegistry:
 class _SearchTool(Tool):
     _plugin_discoverable = False
 
-    def __init__(self, groups: list[str], search: Callable[[str], tuple[list[str], list[str]]]) -> None:
-        self._search = search
-        self._groups = groups
-
     @property
     def name(self) -> str:
         return "tool_search"
 
     @property
+    def description(self) -> str:
+        return (
+            "Find additional tools by operation and requested field, using English keywords or an exact tool name. "
+            "Returns names and full parameter schemas. To execute a match use call_tool, not a direct function call. "
+            "Search an other_matches name to get its schema."
+        )
+
+    def __init__(self, search: Callable[[str], str]) -> None:
+        self._search = search
+
+    @property
     def parameters(self) -> dict[str, Any]:
         return {"type": "object", "properties": {"query": {"type": "string", "minLength": 1}}, "required": ["query"]}
 
+    async def execute(self, **kwargs: Any) -> str:
+        return self._search(kwargs["query"])
+
+
+class _CallTool(Tool):
+    _plugin_discoverable = False
+
+    @property
+    def name(self) -> str:
+        return "call_tool"
+
     @property
     def description(self) -> str:
-        hints = " Catalog groups include: " + ", ".join(self._groups) + "." if self._groups else ""
         return (
-            "Find additional tools by the specific operation or result you need. Use English keywords "
-            "or an exact tool name. Include the domain and requested field, not record IDs. "
-            "If the matches do not provide that result, search again with different terms."
-            + hints
+            "Execute a tool returned by tool_search in this run. Pass its exact name and an arguments object "
+            "matching its returned parameter schema. For tools already listed directly, call them directly."
         )
 
-    async def execute(self, **kwargs: Any) -> str:
-        matches, other = self._search(kwargs["query"])
-        if not matches:
-            return "No matches. Try other service or action keywords."
-        result = "Available now: " + ", ".join(matches)
-        if other:
-            result += "\nOther matches (search by exact name to load): " + ", ".join(other)
-        return result
+    def __init__(self, catalog: _RunTools) -> None:
+        self._catalog = catalog
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {"name": {"type": "string", "minLength": 1},
+                "arguments": {"type": "object", "additionalProperties": True}},
+                "required": ["name", "arguments"], "additionalProperties": False}
+
+    async def execute(self, **kwargs: Any) -> Any:
+        name = kwargs["name"]
+        source = self._catalog.discovered_source(name)
+        if source is None:
+            return ToolResult.error("Tool not available through call_tool. Search for it with tool_search in this run.")
+        return await source.execute(name, kwargs["arguments"])
 
 
 class _RunTools(ToolRegistry):
@@ -58,69 +85,53 @@ class _RunTools(ToolRegistry):
         super().__init__()
         self._source = source
         self._snapshot: list[dict[str, Any]] | None = None
-        self._catalog: dict[str, Tool] = {}
         self._index: ToolSearchIndex | None = None
-        self._loaded: dict[str, None] = {}
-        self._visible: list[dict[str, Any]] = []
-        self._schemas: dict[str, dict[str, Any]] = {}
-        self._refresh()
-
-    def _refresh(self) -> None:
-        # Registration/reconnect replaces the source snapshot. Never execute a retired wrapper.
-        snapshot = self._source.get_definitions()
-        if snapshot is self._snapshot:
-            return
-        self._snapshot = snapshot
-        self._index = None
-        self._catalog = {}
-        self._schemas = {}
-        self._visible = []
-        groups: Counter[str] = Counter()
-        for old in self.tool_names:
-            self.unregister(old)
-        for schema in snapshot:
-            name = self._schema_name(schema)
-            tool = self._source.get(name)
-            if tool is None:
-                continue
-            if name in CORE_TOOL_NAMES:
+        self._catalog: dict[str, Tool] = {}
+        self._discovered: dict[str, Tool] = {}
+        for name in sorted(CORE_TOOL_NAMES - DISCOVERY_TOOLS):
+            if (tool := source.get(name)) is not None:
                 self.register(tool)
-                self._visible.append(schema)
-            else:
-                # MCP has explicit namespaces; plugins often use a shared name prefix.
-                group = tool.mcp_server or (name.split("_", 1)[0] if "_" in name else "")
-                if group:
-                    groups[group] += 1
-                self._schemas[name] = schema
-                self._catalog[name] = tool
-        hints = [name for name, count in groups.most_common(16) if count > 1]
-        search = _SearchTool(hints, self._search)
-        self.register(search)
-        self._visible.append(search.to_schema())
-        self._loaded = {name: None for name in self._loaded if name in self._catalog}
-        for name in self._loaded:
-            self.register(self._catalog[name])
-            self._visible.append(self._schemas[name])
-
-    def _search(self, query: str) -> tuple[list[str], list[str]]:
-        self._refresh()
-        if self._index is None:
-            self._index = ToolSearchIndex(list(self._catalog.values()))
-        ranked = self._index.search(query, limit=2 * _PAGE)
-        matches = ranked[:_PAGE]
-        new = [name for name in matches if name not in self._loaded]
-        if new:
-            # Append, don't re-sort or mutate an already-issued request's tools list.
-            self._visible = [*self._visible, *(self._schemas[name] for name in new)]
-            for name in new:
-                self.register(self._catalog[name])
-                self._loaded[name] = None
-        return matches, [name for name in ranked[_PAGE:] if name not in self._loaded]
+        self.register(_SearchTool(self._search))
+        self.register(_CallTool(self))
 
     def get(self, name: str) -> Tool | None:
-        self._refresh()
-        return super().get(name)
+        registered = super().get(name)
+        if registered is None or name in DISCOVERY_TOOLS:
+            return registered
+        return self._source.get(name)
 
-    def get_definitions(self) -> list[dict[str, Any]]:
-        self._refresh()
-        return self._visible
+    def discovered_source(self, name: str) -> ToolRegistry | None:
+        # A reconnect may replace a tool under the same name with a different schema.
+        known = self._discovered.get(name)
+        return self._source if known is not None and self._source.get(name) is known else None
+
+    def _search(self, query: str) -> str:
+        snapshot = self._source.get_definitions()
+        if snapshot is not self._snapshot or self._index is None:
+            self._snapshot = snapshot
+            self._catalog = {name: tool for name in self._source.tool_names if name not in CORE_TOOL_NAMES
+                             and (tool := self._source.get(name)) is not None}
+            self._index = ToolSearchIndex(list(self._catalog.values()))
+        exact = query.strip()
+        ranked = [exact] if exact in self._catalog else self._index.search(query, limit=2 * _PAGE)
+        matches = [self._catalog[name] for name in ranked[:_PAGE]]
+        self._discovered.update((tool.name, tool) for tool in matches)
+        schemas = [tool.to_schema() for tool in matches]
+        return json.dumps(
+            {"tools": [schema.get("function", schema) for schema in schemas], "other_matches": ranked[_PAGE:]},
+            ensure_ascii=False, separators=(",", ":"),
+        )
+
+
+def discovery_target(tools: ToolRegistry, call: ToolCallRequest) -> tuple[ToolRegistry, ToolCallRequest]:
+    """Keep the wire call intact, but apply normal execution policy and hooks to the discovered operation."""
+    if not isinstance(tools, _RunTools) or call.name != "call_tool":
+        return tools, call
+    payload = parse_tool_arguments(call.arguments)
+    if isinstance(payload, dict):
+        envelope = cast(dict[str, Any], payload)
+        if envelope.keys() == {"name", "arguments"}:
+            name, args = envelope["name"], envelope["arguments"]
+            if isinstance(name, str) and isinstance(args, dict) and (source := tools.discovered_source(name)) is not None:
+                return source, replace(call, name=name, arguments=args)
+    return tools, call

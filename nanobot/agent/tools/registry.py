@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 CORE_TOOL_NAMES = frozenset({
     "exec", "exec_session", "list_exec_sessions",
-    "read_file", "edit_file", "apply_patch", "write_file", "tool_search",
+    "read_file", "edit_file", "apply_patch", "write_file", "tool_search", "call_tool",
 })
 
 _ERROR_HINT = (
@@ -53,10 +53,14 @@ class ToolRegistry:
         self._tools.pop(name, None)
         self._cached_definitions = self._searchable_tokens = None
 
+    def excluding(self, disabled: frozenset[str]) -> ToolRegistry:
+        return _AllowedTools(self, disabled) if disabled else self
+
     def searchable_schema_tokens(self) -> int:
         """Stable catalog-size estimate, independent of model and tokenizer warm-up."""
+        definitions = self.get_definitions()
         if self._searchable_tokens is None:
-            schemas = [s for s in self.get_definitions() if self._schema_name(s) not in CORE_TOOL_NAMES]
+            schemas = [s for s in definitions if self._schema_name(s) not in CORE_TOOL_NAMES]
             encoded = json.dumps(schemas, ensure_ascii=False, separators=(",", ":")).encode() if schemas else b""
             self._searchable_tokens = (len(encoded) + 2) // 3
         return self._searchable_tokens
@@ -68,8 +72,9 @@ class ToolRegistry:
     def get_runtime_context_providers(self) -> list[RuntimeContextProvider]:
         """Return tool-owned providers in stable tool-name order."""
         providers: list[RuntimeContextProvider] = []
-        for name in sorted(self._tools):
-            provider = self._tools[name].runtime_context_provider()
+        for name in sorted(self.tool_names):
+            tool = self.get(name)
+            provider = tool.runtime_context_provider() if tool is not None else None
             if provider is not None:
                 providers.append(provider)
         return providers
@@ -85,7 +90,7 @@ class ToolRegistry:
             return None
         matches = [
             registered
-            for registered in self._tools
+            for registered in self.tool_names
             if self._lookup_key(registered) == key
         ]
         if len(matches) == 1:
@@ -236,3 +241,31 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return self.has(name)
+
+
+class _AllowedTools(ToolRegistry):
+    """Session denials filter the live registry, not a copy of potentially retired MCP wrappers."""
+
+    def __init__(self, source: ToolRegistry, disabled: frozenset[str]) -> None:
+        super().__init__()
+        self._source = source
+        self._disabled = disabled
+        self._snapshot: list[dict[str, Any]] | None = None
+
+    def get(self, name: str) -> Tool | None:
+        return None if name in self._disabled else self._source.get(name)
+
+    @property
+    def tool_names(self) -> list[str]:
+        return [name for name in self._source.tool_names if name not in self._disabled]
+
+    def __len__(self) -> int:
+        return len(self.tool_names)
+
+    def get_definitions(self) -> list[dict[str, Any]]:
+        snapshot = self._source.get_definitions()
+        if snapshot is not self._snapshot or self._cached_definitions is None:
+            self._snapshot = snapshot
+            self._cached_definitions = [s for s in snapshot if self._schema_name(s) not in self._disabled]
+            self._searchable_tokens = None
+        return self._cached_definitions

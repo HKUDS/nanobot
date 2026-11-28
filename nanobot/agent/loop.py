@@ -1109,9 +1109,10 @@ class AgentLoop:
         include_memory = session is None or session.policy.persist
         allowed_tools = tools if tools is not None else self.tools
         has_cron = allowed_tools.has("cron")
-        effective_tools = tool_view(allowed_tools, self.tools_config.schema_token_budget) if (
-            session is None or "tool_search" not in session.policy.disabled_tools
-        ) else allowed_tools
+        effective_tools = tool_view(
+            allowed_tools, self.tools_config.schema_token_budget,
+            disabled=session.policy.disabled_tools if session is not None else frozenset(),
+        )
         transcript_builder = partial(
             self.context.build_transcript,
             channel=request_ctx.channel,
@@ -1975,12 +1976,7 @@ class AgentLoop:
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools if ctx.tools is not None else self.tools
         if session.policy.disabled_tools:
-            restricted = ToolRegistry()
-            for name in tools.tool_names:
-                tool = tools.get(name)
-                if name not in session.policy.disabled_tools and tool:
-                    restricted.register(tool)
-            tools = restricted
+            tools = tools.excluding(session.policy.disabled_tools)
         ctx.tools = tools
 
         if ctx.kind is TurnKind.SYSTEM:

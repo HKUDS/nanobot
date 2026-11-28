@@ -1778,7 +1778,7 @@ When message delivery fails, nanobot retries. `channels.sendMaxRetries` defaults
 
 ## Tool discovery
 
-File reads, edits, writes, patches and shell sessions are always directly available if permitted. If the definitions of all *other* allowed tools fit within `tools.schemaTokenBudget` (default: `8192` estimated tokens), those tools are directly available too. Above that budget, the agent searches for built-in, plugin and MCP tools as needed. Loaded tools stay available for the current run. Set the budget to `0` to always send all allowed definitions.
+File reads, edits, writes, patches and shell sessions are always directly available if permitted. If the definitions of all *other* allowed tools fit within `tools.schemaTokenBudget` (default: `8192` estimated tokens), those tools are directly available too. Above that budget, the agent looks up built-in, plugin and MCP tools as needed. Finding a tool adds its instructions to the conversation without changing the list sent with each model request. A lookup stays valid for the current run while the tool remains available and unchanged. Set the budget to `0` to always send all allowed definitions.
 
 ## File Search
 

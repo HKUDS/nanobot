@@ -828,8 +828,7 @@ class SubagentManager:
         tools = self._build_tools(tools_config=cfg, exec_owner_key=record.exec_owner_key)
         for name in record.session.policy.disabled_tools:
             tools.unregister(name)
-        if "tool_search" not in record.session.policy.disabled_tools:
-            tools = tool_view(tools, self.tools_config.schema_token_budget)
+        tools = tool_view(tools, self.tools_config.schema_token_budget, disabled=record.session.policy.disabled_tools)
         system_prompt = self._build_subagent_prompt(workspace=root)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
