@@ -1,5 +1,4 @@
 import asyncio
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -132,7 +131,7 @@ async def test_subagent_respects_disabled_cli_apps_in_model_tools(tmp_path, proj
     assert "run_cli_app" not in tool_names
 
 
-async def test_subagent_discovery_keeps_parent_tool_restrictions_and_project_scope(tmp_path):
+async def test_subagent_direct_tools_keep_parent_restrictions_and_project_scope(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     (project / "project-note.txt").touch()
@@ -142,59 +141,30 @@ async def test_subagent_discovery_keeps_parent_tool_restrictions_and_project_sco
     provider = MagicMock(spec=LLMProvider)
     provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(content=None, tool_calls=[
-            ToolCallRequest(id="find", name="tool_search", arguments={"query": "web_fetch read_session"}),
-            ToolCallRequest(id="find_dir", name="tool_search", arguments={"query": "list_dir"}),
-        ]),
-        LLMResponse(content=None, tool_calls=[
-            ToolCallRequest(id="inside", name="call_tool", arguments={"name": "list_dir", "arguments": {"path": "."}}),
-            ToolCallRequest(id="outside", name="call_tool", arguments={
-                "name": "list_dir", "arguments": {"path": str(private)},
-            }),
+            ToolCallRequest(id="inside", name="list_dir", arguments={"path": "."}),
+            ToolCallRequest(id="outside", name="list_dir", arguments={"path": str(private)}),
+            ToolCallRequest(id="denied", name="read_file", arguments={"path": "project-note.txt"}),
         ]),
         LLMResponse(content="done"),
     ])
     manager = SubagentManager(
         workspace=tmp_path, bus=MessageBus(), max_tool_result_chars=16_000,
-        consolidator=MagicMock(spec=Consolidator), tools_config=ToolsConfig(schema_token_budget=1),
+        consolidator=MagicMock(spec=Consolidator),
     )
     await manager.run_inline(
-        task="Discover the available tools and inspect the project", session_key="test:restricted",
+        task="Inspect the project", session_key="test:restricted",
         runtime=_runtime(provider), workspace_scope=build_workspace_scope(project, "restricted"),
         session_policy=SessionPolicy(disabled_tools=frozenset({"read_file", "web_fetch"})),
     )
-    initial, after_search, final = provider.chat_stream_with_retry.await_args_list
-    names = {t["function"]["name"] for t in initial.kwargs["tools"]}
-    assert {"tool_search", "call_tool", "edit_file"} <= names
-    assert {"read_file", "web_fetch", "read_session", "list_dir"}.isdisjoint(names)
-    assert initial.kwargs["tools"] == after_search.kwargs["tools"] == final.kwargs["tools"]
-    replies = {m["tool_call_id"]: m["content"] for m in final.kwargs["messages"] if m["role"] == "tool"}
-    found = json.loads(replies["find"])
-    assert {"web_fetch", "read_session"}.isdisjoint([t["name"] for t in found["tools"]] + found["other_matches"])
-    assert "project-note.txt" in replies["inside"]
-    assert replies["outside"].startswith("Error") and "private-note.txt" not in replies["outside"]
-
-
-@pytest.mark.parametrize("gateway", ["tool_search", "call_tool"])
-async def test_subagent_disabled_gateway_in_parent_policy_exposes_allowed_direct_tools(tmp_path, gateway):
-    (tmp_path / "visible.txt").touch()
-    provider = MagicMock(spec=LLMProvider)
-    provider.chat_stream_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content=None, tool_calls=[ToolCallRequest(id="ls", name="list_dir", arguments={"path": "."})]),
-        LLMResponse(content="done"),
-    ])
-    manager = SubagentManager(
-        workspace=tmp_path, bus=MessageBus(), max_tool_result_chars=16_000,
-        consolidator=MagicMock(spec=Consolidator), tools_config=ToolsConfig(schema_token_budget=1),
-    )
-    await manager.run_inline(
-        task="List the workspace", session_key="test:direct", runtime=_runtime(provider),
-        session_policy=SessionPolicy(disabled_tools=frozenset({gateway, "read_file"})),
-    )
     initial, final = provider.chat_stream_with_retry.await_args_list
     names = {t["function"]["name"] for t in initial.kwargs["tools"]}
-    assert "list_dir" in names and {"tool_search", "call_tool", "read_file", "subagent"}.isdisjoint(names)
-    reply = next(m for m in final.kwargs["messages"] if m.get("tool_call_id") == "ls")
-    assert "visible.txt" in reply["content"]
+    assert {"list_dir", "edit_file"} <= names
+    assert {"tool_search", "call_tool", "read_file", "web_fetch", "read_session", "subagent"}.isdisjoint(names)
+    assert initial.kwargs["tools"] == final.kwargs["tools"]
+    replies = {m["tool_call_id"]: m["content"] for m in final.kwargs["messages"] if m["role"] == "tool"}
+    assert "not found" in replies["denied"]
+    assert "project-note.txt" in replies["inside"]
+    assert replies["outside"].startswith("Error") and "private-note.txt" not in replies["outside"]
 
 
 def test_subagent_inherits_cli_app_runtime_settings(tmp_path):

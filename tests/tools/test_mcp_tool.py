@@ -5,6 +5,7 @@ import json
 import socket
 import sys
 from contextlib import asynccontextmanager
+from importlib import import_module
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
@@ -72,6 +73,8 @@ def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def _fake_mcp_module(
     monkeypatch: pytest.MonkeyPatch, fake_mcp_runtime: dict[str, object | None]
 ) -> None:
+    # Load the real SDK-dependent OAuth adapter before installing the transport fake.
+    import_module("nanobot.agent.tools.mcp_oauth")
     mod = ModuleType("mcp")
     mod.types = SimpleNamespace(
         TextContent=_FakeTextContent,
@@ -783,7 +786,8 @@ def _make_tool_def(name: str) -> SimpleNamespace:
 
 def _make_fake_session(tool_names: list[str]) -> SimpleNamespace:
     async def initialize() -> SimpleNamespace:
-        return SimpleNamespace(capabilities=SimpleNamespace(tools=SimpleNamespace()))
+        return SimpleNamespace(serverInfo=SimpleNamespace(name="Fixture"), instructions=None,
+                               capabilities=SimpleNamespace(tools=SimpleNamespace()))
 
     async def list_tools() -> SimpleNamespace:
         return SimpleNamespace(tools=[_make_tool_def(name) for name in tool_names], nextCursor=None)
@@ -2067,7 +2071,8 @@ def _make_fake_session_with_capabilities(
     prompt_names: list[str] | None = None,
 ) -> SimpleNamespace:
     async def initialize() -> SimpleNamespace:
-        return SimpleNamespace(capabilities=SimpleNamespace(tools=SimpleNamespace()))
+        return SimpleNamespace(serverInfo=SimpleNamespace(name="Fixture"), instructions=None,
+                               capabilities=SimpleNamespace(tools=SimpleNamespace()))
 
     async def list_tools() -> SimpleNamespace:
         return SimpleNamespace(tools=[_make_tool_def(name) for name in tool_names], nextCursor=None)
@@ -2263,7 +2268,8 @@ async def test_connect_accepts_servers_without_tools_capability(
         prompt_names=["review"] if catalog == "prompts" else [],
     )
     session.initialize = AsyncMock(
-        return_value=SimpleNamespace(capabilities=SimpleNamespace(tools=None)),
+        return_value=SimpleNamespace(serverInfo=SimpleNamespace(name="Fixture"), instructions=None,
+                                     capabilities=SimpleNamespace(tools=None)),
     )
     session.list_tools = AsyncMock(side_effect=McpError(code=-32601, message="Method not found"))
     fake_mcp_runtime["session"] = session
@@ -2546,7 +2552,8 @@ async def test_initialize_icons_follow_connection_replacement_and_shutdown(fake_
     async def initialize():
         return SimpleNamespace(
             capabilities=SimpleNamespace(tools=None),
-            serverInfo=SimpleNamespace(icons=[SimpleNamespace(src=png, sizes=None, mimeType=None, theme=theme)]),
+            serverInfo=SimpleNamespace(name="Fixture", icons=[SimpleNamespace(src=png, sizes=None, mimeType=None, theme=theme)]),
+            instructions=None,
         )
 
     fake_mcp_runtime["session"] = SimpleNamespace(initialize=initialize)
@@ -2564,3 +2571,44 @@ async def test_initialize_icons_follow_connection_replacement_and_shutdown(fake_
     finally:
         await provider.aclose()
     assert provider.runtime_snapshot().icons == {}
+
+
+@pytest.mark.asyncio
+async def test_server_directory_follows_handshake_replacement_and_removal(fake_mcp_runtime, tmp_path):
+    from nanobot.agent.context import ContextBuilder
+    from nanobot.agent.tools.tool_search import mcp_server_directory, tool_view
+
+    registry = ToolRegistry()
+    context = ContextBuilder(tmp_path)
+    config = {"catalog": MCPServerConfig(command="first")}
+    provider = MCPProvider(config, registry, server_loader=lambda: (config, mcp_mod.NetworkConfig()))
+    session = _make_fake_session(["lookup", "reserve"])
+    handshake = SimpleNamespace(name="City Library", description="Public holdings")
+    instructions = "Find the book by title.\n" + "保留原文" * 1400 + "。"
+    session.initialize = AsyncMock(return_value=SimpleNamespace(
+        serverInfo=handshake, instructions=instructions, capabilities=SimpleNamespace(tools={}),
+    ))
+    fake_mcp_runtime["session"] = session
+
+    def system_message():
+        return context.build_messages([], "Where is my book?", mcp_servers=mcp_server_directory(tool_view(registry)))[0]["content"]
+
+    try:
+        await provider.connect()
+        prompt = system_message()
+        assert prompt.count("- **City Library** — Public holdings") == 1
+        assert "  Instructions: " + instructions.replace("\n", "\n    ") in prompt
+        assert "mcp_catalog_lookup" not in prompt
+        config["catalog"] = MCPServerConfig(command="second")
+        session.initialize = AsyncMock(return_value=SimpleNamespace(
+            serverInfo=SimpleNamespace(name="Branch Library"), instructions=None, capabilities=SimpleNamespace(tools={}),
+        ))
+        await provider.reload()
+        updated = system_message()
+        assert "- **Branch Library**" in updated and "Public holdings" not in updated
+        config.clear()
+        await provider.reload()
+        assert "# MCP servers" not in system_message()
+        assert tool_view(registry).get_definitions() == []
+    finally:
+        await provider.aclose()

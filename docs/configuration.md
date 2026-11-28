@@ -1776,10 +1776,6 @@ When message delivery fails, nanobot retries. `channels.sendMaxRetries` defaults
 >
 > If a channel is completely unreachable, nanobot cannot notify the user through that same channel. Watch logs for `Failed to send to {channel} after N attempts` to spot persistent delivery failures.
 
-## Tool discovery
-
-File reads, edits, writes, patches and shell sessions are always directly available if permitted. If the definitions of all *other* allowed tools fit within `tools.schemaTokenBudget` (default: `8192` estimated tokens), those tools are directly available too. Above that budget, the agent looks up built-in, plugin and MCP tools as needed. Finding a tool adds its instructions to the conversation without changing the list sent with each model request. A lookup stays valid for the current run while the tool remains available and unchanged. Set the budget to `0` to always send all allowed definitions.
-
 ## File Search
 
 When ripgrep (`rg`) is installed, nanobot automatically uses it in place of the built-in `grep` and `find_files` tools.
@@ -2308,7 +2304,7 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 - Set `enabledTools` to `[]` to register no tools from that server. Resources and prompts are also skipped, since they have no per-name filter.
 - Set `enabledTools` to a non-empty list of names to register only those tools — resources and prompts are not registered.
 
-MCP tools are automatically discovered and registered on startup. Allowed tools follow the same [tool discovery](#tool-discovery) rules as built-in and plugin tools.
+The agent sees a directory of connected services that offer enabled tools, including each service’s name, description and usage instructions when provided. It looks up individual MCP tool definitions as needed. Built-in tools and ordinary plugin tools remain directly available.
 
 
 

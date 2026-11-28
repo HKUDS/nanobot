@@ -84,10 +84,8 @@ async def execute_tool_calls(
         call_context = replace(context, tool_calls=[event_call], tool_results=[], tool_events=[])
         try:
             await hook.on_tool_execution_event(call_context)
-            # Re-resolve after the asynchronous notification; a catalog can reconnect while it is pending.
-            effective_tools, effective_call = discovery_target(tools, tool_call)
             result, event = await _execute_tool_call_inner(
-                effective_tools, effective_call, external_lookup_counts, workspace_violation_counts,
+                tools, tool_call, external_lookup_counts, workspace_violation_counts,
                 hook, context, read_results,
             )
         except asyncio.CancelledError:
@@ -137,14 +135,15 @@ async def execute_tool_calls(
 
 
 async def _execute_tool_call_inner(
-    tools: ToolRegistry,
-    tool_call: ToolCallRequest,
+    run_tools: ToolRegistry,
+    wire_call: ToolCallRequest,
     external_lookup_counts: dict[str, int],
     workspace_violation_counts: dict[str, int],
     hook: AgentHook,
     context: AgentHookContext,
     read_results: Callable[[], dict[str, str]],
 ) -> tuple[Any, dict[str, str]]:
+    tools, tool_call = discovery_target(run_tools, wire_call)
     lookup_error = repeated_external_lookup_error(
         tool_call.name,
         tool_call.arguments,
@@ -187,10 +186,16 @@ async def _execute_tool_call_inner(
             return handled
         return payload, event
 
+    binding = tools.get(tool_call.name) if tool is not None else None
     await hook.before_execute_tool(context, tool_call, tool, params)
     try:
         with file_read_context(tool_call.id, read_results):
-            if tool is not None:
+            # The hook can yield through a reconnect or permission change. Don't invoke
+            # a retired wrapper, or transfer its authorization to a new same-name tool.
+            current, _ = discovery_target(run_tools, wire_call)
+            if current is not tools or (binding is not None and tools.get(tool_call.name) is not binding):
+                result = ToolResult.error("Tool availability changed before execution. Check the available tools again.")
+            elif tool is not None:
                 result = await tool.execute(**params)
             else:
                 result = await tools.execute(tool_call.name, params)

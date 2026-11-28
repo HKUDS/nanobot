@@ -1,12 +1,14 @@
 from unittest.mock import Mock
 
 from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.mcp_metadata import MCPServerInfo
 from nanobot.agent.tools.tool_search_index import ToolSearchIndex
 
 
 def _tool(name: str, description: str = "", **properties: object) -> Tool:
     tool = Mock(spec=Tool)
     tool.name = name
+    tool.mcp_server_info = None
     tool.description = description
     tool.parameters = {"type": "object", "properties": properties}
     return tool
@@ -57,3 +59,11 @@ def test_descriptive_phrase_can_beat_a_single_name_match() -> None:
     index = ToolSearchIndex([near, date, checks])
 
     assert index.search("parcel customs clearance date")[0] == checks.name
+
+
+def test_search_by_server_name_when_configured_alias_is_different() -> None:
+    weather = _tool("mcp_office_barometer")
+    weather.mcp_server_info = MCPServerInfo("Weather Station")
+    index = ToolSearchIndex([_tool("mcp_office_calendar"), weather])
+
+    assert index.search("weather station") == [weather.name]

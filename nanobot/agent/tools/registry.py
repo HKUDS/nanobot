@@ -9,11 +9,6 @@ from nanobot.agent.tools.context import ContextAware, current_request_context
 if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
 
-CORE_TOOL_NAMES = frozenset({
-    "exec", "exec_session", "list_exec_sessions",
-    "read_file", "edit_file", "apply_patch", "write_file", "tool_search", "call_tool",
-})
-
 _ERROR_HINT = (
     "\n\n[Consider this result in the context of the user's goal "
     "and decide whether and how to proceed.]"
@@ -38,32 +33,24 @@ class ToolRegistry:
     Allows dynamic registration and execution of tools.
     """
 
+    disabled_names: frozenset[str] = frozenset()
+
     def __init__(self):
         self._tools: dict[str, Tool] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
-        self._searchable_tokens: int | None = None
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
-        self._cached_definitions = self._searchable_tokens = None
+        self._cached_definitions = None
 
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         self._tools.pop(name, None)
-        self._cached_definitions = self._searchable_tokens = None
+        self._cached_definitions = None
 
     def excluding(self, disabled: frozenset[str]) -> ToolRegistry:
-        return _AllowedTools(self, disabled) if disabled else self
-
-    def searchable_schema_tokens(self) -> int:
-        """Stable catalog-size estimate, independent of model and tokenizer warm-up."""
-        definitions = self.get_definitions()
-        if self._searchable_tokens is None:
-            schemas = [s for s in definitions if self._schema_name(s) not in CORE_TOOL_NAMES]
-            encoded = json.dumps(schemas, ensure_ascii=False, separators=(",", ":")).encode() if schemas else b""
-            self._searchable_tokens = (len(encoded) + 2) // 3
-        return self._searchable_tokens
+        return _AllowedTools(self, disabled) if disabled - self.disabled_names else self
 
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
@@ -249,15 +236,15 @@ class _AllowedTools(ToolRegistry):
     def __init__(self, source: ToolRegistry, disabled: frozenset[str]) -> None:
         super().__init__()
         self._source = source
-        self._disabled = disabled
+        self.disabled_names = source.disabled_names | disabled
         self._snapshot: list[dict[str, Any]] | None = None
 
     def get(self, name: str) -> Tool | None:
-        return None if name in self._disabled else self._source.get(name)
+        return None if name in self.disabled_names else self._source.get(name)
 
     @property
     def tool_names(self) -> list[str]:
-        return [name for name in self._source.tool_names if name not in self._disabled]
+        return [name for name in self._source.tool_names if name not in self.disabled_names]
 
     def __len__(self) -> int:
         return len(self.tool_names)
@@ -266,6 +253,5 @@ class _AllowedTools(ToolRegistry):
         snapshot = self._source.get_definitions()
         if snapshot is not self._snapshot or self._cached_definitions is None:
             self._snapshot = snapshot
-            self._cached_definitions = [s for s in snapshot if self._schema_name(s) not in self._disabled]
-            self._searchable_tokens = None
+            self._cached_definitions = [s for s in snapshot if self._schema_name(s) not in self.disabled_names]
         return self._cached_definitions

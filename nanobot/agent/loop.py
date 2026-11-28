@@ -36,7 +36,7 @@ from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.runtime_control import AgentRuntimeControl
-from nanobot.agent.tools.tool_search import tool_view
+from nanobot.agent.tools.tool_search import mcp_server_directory, tool_view
 from nanobot.agent.turn_delivery import (
     TurnDelivery,
     TurnDeliveryFactory,
@@ -337,9 +337,7 @@ class AgentLoop:
             store=self.context.memory,
             sessions=self.sessions,
             build_messages=self._build_compaction_messages,
-            get_tool_definitions=lambda: tool_view(
-                self.tools, self.tools_config.schema_token_budget,
-            ).get_definitions(),
+            get_tool_definitions=lambda: tool_view(self.tools).get_definitions(),
             resolve_prompt_context=PersistedPromptContextResolver(
                 workspace_scopes=self.workspace_scopes,
             ),
@@ -610,6 +608,7 @@ class AgentLoop:
             session_summary=session_summary,
             workspace=workspace,
             has_cron=self.tools.has("cron"),
+            mcp_servers=mcp_server_directory(tool_view(self.tools)),
         )
 
     def register_runtime_context_provider(
@@ -1110,7 +1109,7 @@ class AgentLoop:
         allowed_tools = tools if tools is not None else self.tools
         has_cron = allowed_tools.has("cron")
         effective_tools = tool_view(
-            allowed_tools, self.tools_config.schema_token_budget,
+            allowed_tools,
             disabled=session.policy.disabled_tools if session is not None else frozenset(),
         )
         transcript_builder = partial(
@@ -1119,6 +1118,7 @@ class AgentLoop:
             workspace=effective_scope.project_path,
             include_memory=include_memory,
             has_cron=has_cron,
+            mcp_servers=mcp_server_directory(effective_tools),
         )
         if initial_message is not None and turn_continuation.internal_continuation_inbound(initial_message.metadata):
             build_transcript = transcript_builder

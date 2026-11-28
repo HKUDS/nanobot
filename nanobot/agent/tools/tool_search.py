@@ -3,24 +3,31 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.registry import CORE_TOOL_NAMES, ToolRegistry
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.tool_search_index import ToolSearchIndex
 from nanobot.providers.base import ToolCallRequest, parse_tool_arguments
+
+if TYPE_CHECKING:
+    from nanobot.agent.tools.mcp_metadata import MCPServerInfo
 
 _PAGE = 5
 DISCOVERY_TOOLS = frozenset({"tool_search", "call_tool"})
 
 
-def tool_view(registry: ToolRegistry, schema_token_budget: int, *, disabled: frozenset[str] = frozenset()) -> ToolRegistry:
-    """Use fixed discovery entry points only when the allowed non-core catalog exceeds budget."""
-    if (not schema_token_budget or not DISCOVERY_TOOLS.isdisjoint(disabled)
-            or any(registry.has(name) for name in DISCOVERY_TOOLS)
-            or registry.searchable_schema_tokens() <= schema_token_budget):
-        return registry
-    return _RunTools(registry)
+def tool_view(registry: ToolRegistry, *, disabled: frozenset[str] = frozenset()) -> ToolRegistry:
+    """Keep permitted direct tools visible and scope MCP discovery to this run."""
+    source = registry.excluding(disabled) if disabled else registry
+    if any((tool := source.get(name)) is not None and tool.mcp_server_info is not None for name in source.tool_names):
+        return _RunTools(source)
+    return source
+
+
+def mcp_server_directory(tools: ToolRegistry) -> tuple[MCPServerInfo, ...]:
+    """Describe only servers reachable through this view's discovery bridge."""
+    return tools.server_directory() if isinstance(tools, _RunTools) else ()
 
 
 class _SearchTool(Tool):
@@ -33,7 +40,7 @@ class _SearchTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Find additional tools by operation and requested field, using English keywords or an exact tool name. "
+            "Find MCP tools by server, operation, requested field, or exact tool name. "
             "Returns names and full parameter schemas. To execute a match use call_tool, not a direct function call. "
             "Search an other_matches name to get its schema."
         )
@@ -85,42 +92,105 @@ class _RunTools(ToolRegistry):
         super().__init__()
         self._source = source
         self._snapshot: list[dict[str, Any]] | None = None
+        self.disabled_names = source.disabled_names
         self._index: ToolSearchIndex | None = None
         self._catalog: dict[str, Tool] = {}
         self._discovered: dict[str, Tool] = {}
-        for name in sorted(CORE_TOOL_NAMES - DISCOVERY_TOOLS):
-            if (tool := source.get(name)) is not None:
-                self.register(tool)
-        self.register(_SearchTool(self._search))
-        self.register(_CallTool(self))
+        self._gateways = (_SearchTool(self._search), _CallTool(self))
+
+    def _refresh(self) -> None:
+        # Rebuild only on registration changes (including same-name reconnects), never on search.
+        snapshot = self._source.get_definitions()
+        if snapshot is self._snapshot:
+            return
+        direct: dict[str, Tool] = {}
+        deferred: dict[str, Tool] = {}
+        for name in self._source.tool_names:
+            tool = self._source.get(name)
+            if tool is not None:
+                if tool.mcp_server_info is not None:
+                    deferred[name] = tool
+                else:
+                    direct[name] = tool
+        visible = [schema for schema in snapshot if self._schema_name(schema) in direct]
+        if deferred and not any(name in self.disabled_names or self._source.has(name) for name in DISCOVERY_TOOLS):
+            for gateway in self._gateways:
+                direct[gateway.name] = gateway
+                visible.append(gateway.to_schema())
+        else:
+            deferred.clear()
+        self._tools = direct
+        self._catalog = deferred
+        self._discovered = {name: old for name, old in self._discovered.items() if deferred.get(name) is old}
+        self._index = None
+        self._cached_definitions = visible
+        self._snapshot = snapshot
 
     def get(self, name: str) -> Tool | None:
-        registered = super().get(name)
-        if registered is None or name in DISCOVERY_TOOLS:
-            return registered
-        return self._source.get(name)
+        self._refresh()
+        return super().get(name)
+
+    @property
+    def tool_names(self) -> list[str]:
+        self._refresh()
+        return super().tool_names
+
+    def __len__(self) -> int:
+        self._refresh()
+        return super().__len__()
+
+    def get_definitions(self) -> list[dict[str, Any]]:
+        self._refresh()
+        return super().get_definitions()
+
+    def excluding(self, disabled: frozenset[str]) -> ToolRegistry:
+        # A new restriction must filter searches and dispatch, not just the visible gateway names.
+        return tool_view(self._source, disabled=disabled) if disabled - self.disabled_names else self
+
+    def _is_direct(self, name: str) -> bool:
+        tool = self.get(name)
+        return tool is not None and tool is self._source.get(name)
+
+    def prepare_call(self, name: str, params: Any) -> tuple[Tool | None, Any, str | None]:
+        if self._is_direct(name):
+            return self._source.prepare_call(name, params)
+        return super().prepare_call(name, params)
+
+    async def execute(self, name: str, params: Any) -> Any:
+        if self._is_direct(name):
+            return await self._source.execute(name, params)
+        return await super().execute(name, params)
+
+    def server_directory(self) -> tuple[MCPServerInfo, ...]:
+        self._refresh()
+        records = {info for tool in self._catalog.values() if (info := tool.mcp_server_info) is not None}
+        return tuple(sorted(records, key=lambda info: (
+            info.name, info.description is not None, info.description or "",
+            info.instructions is not None, info.instructions or "",
+        )))
 
     def discovered_source(self, name: str) -> ToolRegistry | None:
-        # A reconnect may replace a tool under the same name with a different schema.
-        known = self._discovered.get(name)
-        return self._source if known is not None and self._source.get(name) is known else None
+        self._refresh()
+        return self._source if name in self._discovered else None
 
     def _search(self, query: str) -> str:
-        snapshot = self._source.get_definitions()
-        if snapshot is not self._snapshot or self._index is None:
-            self._snapshot = snapshot
-            self._catalog = {name: tool for name in self._source.tool_names if name not in CORE_TOOL_NAMES
-                             and (tool := self._source.get(name)) is not None}
+        self._refresh()
+        if self._index is None:
             self._index = ToolSearchIndex(list(self._catalog.values()))
         exact = query.strip()
         ranked = [exact] if exact in self._catalog else self._index.search(query, limit=2 * _PAGE)
         matches = [self._catalog[name] for name in ranked[:_PAGE]]
         self._discovered.update((tool.name, tool) for tool in matches)
         schemas = [tool.to_schema() for tool in matches]
-        return json.dumps(
-            {"tools": [schema.get("function", schema) for schema in schemas], "other_matches": ranked[_PAGE:]},
-            ensure_ascii=False, separators=(",", ":"),
-        )
+        result: dict[str, Any] = {"tools": [schema.get("function", schema) for schema in schemas],
+                                  "other_matches": ranked[_PAGE:]}
+        if not ranked:
+            result["hint"] = "Try the MCP server name, an operation, or a parameter name."
+            if nearest := self._index.nearest_name(query):
+                info = self._catalog[nearest].mcp_server_info
+                assert info is not None  # Only MCP operations enter the index.
+                result["suggestion"] = {"name": nearest, "source": info.name}
+        return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
 
 def discovery_target(tools: ToolRegistry, call: ToolCallRequest) -> tuple[ToolRegistry, ToolCallRequest]:

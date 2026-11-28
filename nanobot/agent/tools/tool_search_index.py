@@ -6,6 +6,7 @@ import math
 import re
 from collections import Counter
 from collections.abc import Iterator
+from difflib import get_close_matches
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -60,6 +61,8 @@ class ToolSearchIndex:
             # The transport namespace is shared by every registered MCP tool.
             name_tokens = _tokens(name.removeprefix("mcp_"))
             counts = Counter(name_tokens * _NAME_WEIGHT)
+            if info := tool.mcp_server_info:
+                counts.update(_tokens(info.name))
             counts.update(_tokens(tool.description))
             for text in _parameter_text(tool.parameters):
                 counts.update(_tokens(text))
@@ -71,6 +74,11 @@ class ToolSearchIndex:
         self._length_norm = {
             name: _K1 * (1 - _B + _B * length / avg_length) for name, length in lengths.items()
         }
+
+    def nearest_name(self, query: str) -> str | None:
+        """Suggest a similar registered name without treating it as a search hit."""
+        matches = get_close_matches(query.strip(), self._length_norm, n=1)
+        return matches[0] if matches else None
 
     def search(self, query: str, limit: int = 5) -> list[str]:
         """Rank only matching tools; a verbatim registered name always wins."""
