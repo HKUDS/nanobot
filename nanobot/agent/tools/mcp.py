@@ -18,7 +18,12 @@ from loguru import logger
 
 from nanobot.agent.tools.base import Schema, Tool, ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
-from nanobot.agent.tools.mcp_metadata import MCPIcon, MCPRuntimeSnapshot, server_icons
+from nanobot.agent.tools.mcp_metadata import (
+    MCPIcon,
+    MCPRuntimeSnapshot,
+    MCPServerInfo,
+    server_icons,
+)
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.network import NetworkConfig
 from nanobot.security.network import (
@@ -719,7 +724,10 @@ class MCPToolWrapper(_MCPWrapperBase):
         server_name: str,
         tool_def: MCPToolDefinition,
         tool_timeout: int = 30,
+        *,
+        server_info: MCPServerInfo,
     ):
+        self.server_info = server_info
         self._original_name = tool_def.name
         self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_def.name}")
         self._description = tool_def.description or tool_def.name
@@ -1126,6 +1134,13 @@ async def connect_mcp_servers(
             read = _filter_malformed_mcp_progress_notifications(read, name)
             session = await server_stack.enter_async_context(ClientSession(read, write))
             initialization = await session.initialize()
+            handshake = initialization.serverInfo
+            # SDK 1.x preserves serverInfo.description as an untyped protocol extension.
+            description = getattr(handshake, "description", None)
+            server_info = MCPServerInfo(
+                name=handshake.name, description=description if isinstance(description, str) else None,
+                instructions=initialization.instructions,
+            )
 
             # Finish discovery before registering tools so a failed page leaves no partial set.
             tool_defs: list[MCPToolDefinition] = []
@@ -1160,7 +1175,7 @@ async def connect_mcp_servers(
                         name,
                     )
                     continue
-                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
+                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout, server_info=server_info)
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
                 registered_count += 1
@@ -1260,7 +1275,7 @@ async def connect_mcp_servers(
                 "MCP server '{}': connected, {} capabilities registered", name, registered_count
             )
             return server_icons(
-                getattr(getattr(initialization, "serverInfo", None), "icons", None),
+                getattr(handshake, "icons", None),
                 remote_url=None if transport_type == "stdio" else cfg.url,
             )
 

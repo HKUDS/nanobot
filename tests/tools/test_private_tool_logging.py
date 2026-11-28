@@ -24,6 +24,7 @@ from nanobot.agent.tools.mcp import (
     MCPResourceWrapper,
     MCPToolWrapper,
 )
+from nanobot.agent.tools.mcp_metadata import MCPServerInfo
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool, _redact_url_for_log
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
@@ -52,7 +53,7 @@ async def test_mcp_reconnect_failure_obeys_private_log_policy(
     )
     wrapper = MCPToolWrapper(session, "sample", SimpleNamespace(
         name="search", description="synthetic", inputSchema={},
-    ))
+    ), server_info=MCPServerInfo("sample"))
     registry = ToolRegistry()
     registry.register(wrapper)
     provider = MCPProvider({"sample": MCPServerConfig(command="synthetic-mcp")}, registry)
@@ -136,7 +137,7 @@ async def test_mcp_private_errors_exclude_exception_payloads(
     )
     error = ValueError(_SECRET)
     if kind in {"tool", "render", "retry"}:
-        tool = MCPToolWrapper(session, "test", definition)
+        tool = MCPToolWrapper(session, "test", definition, server_info=MCPServerInfo("test"))
         if kind == "render":
             session.call_tool = AsyncMock(return_value=SimpleNamespace(content=[]))
             monkeypatch.setattr(tool, "_render_call_result", MagicMock(side_effect=error))

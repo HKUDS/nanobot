@@ -25,6 +25,7 @@ from nanobot.security.workspace_access import (
     build_workspace_scope,
     reset_workspace_scope,
 )
+from nanobot.session.manager import SessionPolicy
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -128,6 +129,42 @@ async def test_subagent_respects_disabled_cli_apps_in_model_tools(tmp_path, proj
     tool_names = {definition["function"]["name"] for definition in definitions}
     assert "read_file" in tool_names
     assert "run_cli_app" not in tool_names
+
+
+async def test_subagent_direct_tools_keep_parent_restrictions_and_project_scope(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "project-note.txt").touch()
+    private = tmp_path / "private"
+    private.mkdir()
+    (private / "private-note.txt").touch()
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[
+            ToolCallRequest(id="inside", name="list_dir", arguments={"path": "."}),
+            ToolCallRequest(id="outside", name="list_dir", arguments={"path": str(private)}),
+            ToolCallRequest(id="denied", name="read_file", arguments={"path": "project-note.txt"}),
+        ]),
+        LLMResponse(content="done"),
+    ])
+    manager = SubagentManager(
+        workspace=tmp_path, bus=MessageBus(), max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
+    )
+    await manager.run_inline(
+        task="Inspect the project", session_key="test:restricted",
+        runtime=_runtime(provider), workspace_scope=build_workspace_scope(project, "restricted"),
+        session_policy=SessionPolicy(disabled_tools=frozenset({"read_file", "web_fetch"})),
+    )
+    initial, final = provider.chat_stream_with_retry.await_args_list
+    names = {t["function"]["name"] for t in initial.kwargs["tools"]}
+    assert {"list_dir", "edit_file"} <= names
+    assert {"tool_search", "call_tool", "read_file", "web_fetch", "read_session", "subagent"}.isdisjoint(names)
+    assert initial.kwargs["tools"] == final.kwargs["tools"]
+    replies = {m["tool_call_id"]: m["content"] for m in final.kwargs["messages"] if m["role"] == "tool"}
+    assert "not found" in replies["denied"]
+    assert "project-note.txt" in replies["inside"]
+    assert replies["outside"].startswith("Error") and "private-note.txt" not in replies["outside"]
 
 
 def test_subagent_inherits_cli_app_runtime_settings(tmp_path):

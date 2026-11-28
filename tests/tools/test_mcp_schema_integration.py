@@ -8,6 +8,7 @@ from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import Field
 
 from nanobot.agent.tools.mcp import MCPToolWrapper
+from nanobot.agent.tools.mcp_metadata import MCPServerInfo
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 
 
@@ -35,7 +36,7 @@ async def test_fastmcp_decimal_and_unicode_constraints(tool_name, valid, invalid
         assert not direct.isError
         assert calls == [valid]
         registry = ToolRegistry()
-        wrapper = MCPToolWrapper(client, "compatibility", definition)
+        wrapper = MCPToolWrapper(client, "compatibility", definition, server_info=MCPServerInfo("compatibility"))
         registry.register(wrapper)
         arguments = {"value": valid}
 

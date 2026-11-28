@@ -13,6 +13,7 @@ from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result, with_tool_error_hint
+from nanobot.agent.tools.tool_search import discovery_target
 from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.runtime import (
     repeated_external_lookup_error,
@@ -79,7 +80,8 @@ async def execute_tool_calls(
     tool_results: list[ToolCallResult | None] = [None] * len(tool_calls)
 
     async def execute(index: int, tool_call: ToolCallRequest) -> None:
-        call_context = replace(context, tool_calls=[tool_call], tool_results=[], tool_events=[])
+        _, event_call = discovery_target(tools, tool_call)
+        call_context = replace(context, tool_calls=[event_call], tool_results=[], tool_events=[])
         try:
             await hook.on_tool_execution_event(call_context)
             result, event = await _execute_tool_call_inner(
@@ -88,7 +90,7 @@ async def execute_tool_calls(
             )
         except asyncio.CancelledError:
             cancelled = replace(call_context, tool_results=["Tool execution cancelled"], tool_events=[{
-                "name": tool_call.name, "status": "error", "detail": "cancelled",
+                "name": event_call.name, "status": "error", "detail": "cancelled",
             }])
             # Give immediate consumers a terminal event, but do not wait for a
             # blocked consumer during cancellation. Own and drain the attempt.
@@ -133,14 +135,15 @@ async def execute_tool_calls(
 
 
 async def _execute_tool_call_inner(
-    tools: ToolRegistry,
-    tool_call: ToolCallRequest,
+    run_tools: ToolRegistry,
+    wire_call: ToolCallRequest,
     external_lookup_counts: dict[str, int],
     workspace_violation_counts: dict[str, int],
     hook: AgentHook,
     context: AgentHookContext,
     read_results: Callable[[], dict[str, str]],
 ) -> tuple[Any, dict[str, str]]:
+    tools, tool_call = discovery_target(run_tools, wire_call)
     lookup_error = repeated_external_lookup_error(
         tool_call.name,
         tool_call.arguments,
@@ -183,10 +186,17 @@ async def _execute_tool_call_inner(
             return handled
         return payload, event
 
+    # Capture the discovered wrapper; direct calls keep their normal prepare/execute contract.
+    binding = tools.get(tool_call.name) if tools is not run_tools else None
     await hook.before_execute_tool(context, tool_call, tool, params)
     try:
         with file_read_context(tool_call.id, read_results):
-            if tool is not None:
+            # The hook can yield through a reconnect or permission change. Don't invoke
+            # a retired wrapper, or transfer its authorization to a new same-name tool.
+            current, _ = discovery_target(run_tools, wire_call)
+            if current is not tools or (binding is not None and tools.get(tool_call.name) is not binding):
+                result = ToolResult.error("Tool availability changed before execution. Check the available tools again.")
+            elif tool is not None:
                 result = await tool.execute(**params)
             else:
                 result = await tools.execute(tool_call.name, params)
@@ -321,8 +331,8 @@ def _partition_tool_batches(
     batches: list[list[ToolCallRequest]] = []
     current: list[ToolCallRequest] = []
     for tool_call in tool_calls:
-        get_tool = cast(Callable[[str], Any] | None, getattr(tools, "get", None))
-        tool = get_tool(tool_call.name) if callable(get_tool) else None
+        effective_tools, effective_call = discovery_target(tools, tool_call)
+        tool = effective_tools.get(effective_call.name)
         can_batch = bool(tool and tool.concurrency_safe)
         if can_batch:
             current.append(tool_call)

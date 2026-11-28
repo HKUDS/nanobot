@@ -582,7 +582,7 @@ class AgentRunner:
                 async def settle_tool_results(completed: list[ToolCallResult]) -> None:
                     tool_events.extend(entry.event for entry in completed)
                     tools_used.extend(
-                        entry.tool_call.name for entry in completed
+                        entry.event["name"] for entry in completed
                         if entry.event.get("status") == "ok"
                     )
                     context.tool_results = [entry.result for entry in completed]

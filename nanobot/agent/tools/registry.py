@@ -33,6 +33,8 @@ class ToolRegistry:
     Allows dynamic registration and execution of tools.
     """
 
+    disabled_names: frozenset[str] = frozenset()
+
     def __init__(self):
         self._tools: dict[str, Tool] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
@@ -47,6 +49,9 @@ class ToolRegistry:
         self._tools.pop(name, None)
         self._cached_definitions = None
 
+    def excluding(self, disabled: frozenset[str]) -> ToolRegistry:
+        return _AllowedTools(self, disabled) if disabled - self.disabled_names else self
+
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
         return self._tools.get(name)
@@ -54,8 +59,9 @@ class ToolRegistry:
     def get_runtime_context_providers(self) -> list[RuntimeContextProvider]:
         """Return tool-owned providers in stable tool-name order."""
         providers: list[RuntimeContextProvider] = []
-        for name in sorted(self._tools):
-            provider = self._tools[name].runtime_context_provider()
+        for name in sorted(self.tool_names):
+            tool = self.get(name)
+            provider = tool.runtime_context_provider() if tool is not None else None
             if provider is not None:
                 providers.append(provider)
         return providers
@@ -71,7 +77,7 @@ class ToolRegistry:
             return None
         matches = [
             registered
-            for registered in self._tools
+            for registered in self.tool_names
             if self._lookup_key(registered) == key
         ]
         if len(matches) == 1:
@@ -222,3 +228,30 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return self.has(name)
+
+
+class _AllowedTools(ToolRegistry):
+    """Session denials filter the live registry, not a copy of potentially retired MCP wrappers."""
+
+    def __init__(self, source: ToolRegistry, disabled: frozenset[str]) -> None:
+        super().__init__()
+        self._source = source
+        self.disabled_names = source.disabled_names | disabled
+        self._snapshot: list[dict[str, Any]] | None = None
+
+    def get(self, name: str) -> Tool | None:
+        return None if name in self.disabled_names else self._source.get(name)
+
+    @property
+    def tool_names(self) -> list[str]:
+        return [name for name in self._source.tool_names if name not in self.disabled_names]
+
+    def __len__(self) -> int:
+        return len(self.tool_names)
+
+    def get_definitions(self) -> list[dict[str, Any]]:
+        snapshot = self._source.get_definitions()
+        if snapshot is not self._snapshot or self._cached_definitions is None:
+            self._snapshot = snapshot
+            self._cached_definitions = [s for s in snapshot if self._schema_name(s) not in self.disabled_names]
+        return self._cached_definitions

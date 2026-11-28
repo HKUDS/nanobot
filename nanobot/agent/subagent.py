@@ -32,6 +32,7 @@ from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.tool_search import mcp_server_directory, tool_view
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -825,7 +826,10 @@ class SubagentManager:
             cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
         # Construct from the agent workspace; the bound scope below supplies the project cwd.
         tools = self._build_tools(tools_config=cfg, exec_owner_key=record.exec_owner_key)
+        tools = tool_view(tools, disabled=record.session.policy.disabled_tools)
         system_prompt = self._build_subagent_prompt(workspace=root)
+        if servers := mcp_server_directory(tools):
+            system_prompt += "\n\n" + render_template("agent/mcp_servers.md", servers=servers)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
             *record.session.get_history(),

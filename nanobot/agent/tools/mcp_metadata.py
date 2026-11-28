@@ -1,4 +1,4 @@
-"""Bounded, display-only metadata from an MCP initialize handshake."""
+"""Server directory and display metadata from an MCP initialize handshake."""
 
 from __future__ import annotations
 
@@ -12,6 +12,13 @@ from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from mcp.types import Icon
+
+
+@dataclass(frozen=True, slots=True)
+class MCPServerInfo:
+    name: str
+    description: str | None = None
+    instructions: str | None = None
 
 
 class MCPIcon(TypedDict):

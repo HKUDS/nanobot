@@ -8,6 +8,7 @@ import pytest
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.mcp import MCPToolWrapper
+from nanobot.agent.tools.mcp_metadata import MCPServerInfo
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 
 
@@ -48,7 +49,7 @@ def make_mcp_registry(schema):
     session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(content=[])))
     wrapper = MCPToolWrapper(session, "schema", SimpleNamespace(
         name="check", description="Check arguments", inputSchema=schema,
-    ))
+    ), server_info=MCPServerInfo("schema"))
     registry = ToolRegistry()
     registry.register(wrapper)
     return registry, wrapper, session

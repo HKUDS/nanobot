@@ -14,6 +14,7 @@ from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.agent.tools.loader import ToolLoader
+from nanobot.agent.tools.mcp_metadata import MCPServerInfo
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -58,7 +59,7 @@ async def test_mcp_arguments_can_be_corrected_without_rewriting_model_history(sc
     async with create_connected_server_and_client_session(server) as client:
         definition = (await client.list_tools()).tools[0]
         registry = ToolRegistry()
-        tool = MCPToolWrapper(client, "test", definition)
+        tool = MCPToolWrapper(client, "test", definition, server_info=MCPServerInfo("test"))
         registry.register(tool)
         schemas_before = json.dumps(registry.get_definitions())
         call = ToolCallRequest(id="nested", name=tool.name, arguments={"value": emitted})

@@ -10,6 +10,7 @@ from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools import sessions as session_tools
+from nanobot.agent.tools.mcp_metadata import MCPServerInfo
 from nanobot.apps.cli import utils as cli_app_utils
 from nanobot.context_sources import record_source, system_source_scope
 from nanobot.runtime_context import (
@@ -92,6 +93,7 @@ class ContextBuilder:
         workspace: Path | None = None,
         include_memory: bool = True,
         has_cron: bool = True,
+        mcp_servers: tuple[MCPServerInfo, ...] = (),
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
@@ -135,6 +137,9 @@ class ContextBuilder:
             )
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary, track_source=True))
+
+        if mcp_servers:
+            parts.append(render_template("agent/mcp_servers.md", servers=mcp_servers, track_source=True))
 
         if session_summary and not is_empty_summary(session_summary["text"]):
             parts.append(f"[Archived Context Summary]\n\n{session_summary['text']}")
@@ -275,6 +280,7 @@ class ContextBuilder:
         workspace: Path | None = None,
         include_memory: bool = True,
         has_cron: bool = True,
+        mcp_servers: tuple[MCPServerInfo, ...] = (),
     ) -> list[dict[str, Any]]:
         """Build a model transcript while preserving the fresh-turn boundary."""
         root = workspace or self.workspace
@@ -286,6 +292,7 @@ class ContextBuilder:
                     workspace=root,
                     include_memory=include_memory,
                     has_cron=has_cron,
+                    mcp_servers=mcp_servers,
                 )
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},

@@ -36,6 +36,7 @@ from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.runtime_control import AgentRuntimeControl
+from nanobot.agent.tools.tool_search import mcp_server_directory, tool_view
 from nanobot.agent.turn_delivery import (
     TurnDelivery,
     TurnDeliveryFactory,
@@ -336,7 +337,7 @@ class AgentLoop:
             store=self.context.memory,
             sessions=self.sessions,
             build_messages=self._build_compaction_messages,
-            get_tool_definitions=self.tools.get_definitions,
+            get_tool_definitions=lambda: tool_view(self.tools).get_definitions(),
             resolve_prompt_context=PersistedPromptContextResolver(
                 workspace_scopes=self.workspace_scopes,
             ),
@@ -600,13 +601,12 @@ class AgentLoop:
         session_summary: SessionSummary | None = None,
         workspace: Path | None = None,
     ) -> list[dict[str, Any]]:
-        return self.context.build_messages(
-            history=history,
-            current_message=current_message,
+        return self.context.build_transcript(
+            TranscriptInput(history=history, current_message=current_message, session_summary=session_summary),
             channel=channel,
-            session_summary=session_summary,
             workspace=workspace,
             has_cron=self.tools.has("cron"),
+            mcp_servers=mcp_server_directory(tool_view(self.tools)),
         )
 
     def register_runtime_context_provider(
@@ -1104,14 +1104,19 @@ class AgentLoop:
             session_metadata=_prompt_scope_metadata(session.metadata) if session is not None else None,
         )
         include_memory = session is None or session.policy.persist
-        effective_tools = tools if tools is not None else self.tools
-        has_cron = effective_tools.has("cron")
+        allowed_tools = tools if tools is not None else self.tools
+        has_cron = allowed_tools.has("cron")
+        effective_tools = tool_view(
+            allowed_tools,
+            disabled=session.policy.disabled_tools if session is not None else frozenset(),
+        )
         transcript_builder = partial(
             self.context.build_transcript,
             channel=request_ctx.channel,
             workspace=effective_scope.project_path,
             include_memory=include_memory,
             has_cron=has_cron,
+            mcp_servers=mcp_server_directory(effective_tools),
         )
         if initial_message is not None and turn_continuation.internal_continuation_inbound(initial_message.metadata):
             build_transcript = transcript_builder
@@ -1173,7 +1178,7 @@ class AgentLoop:
                 queue=pending_queue,
                 prepare=partial(
                     self._prepare_injected_input,
-                    request=request_ctx, runtime=runtime, session=session, tools=effective_tools,
+                    request=request_ctx, runtime=runtime, session=session, tools=allowed_tools,
                 ),
                 consume=execution_scope.consume_inputs if execution_scope is not None else None,
                 session_key=session.key if session is not None else None,
@@ -1969,12 +1974,7 @@ class AgentLoop:
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools if ctx.tools is not None else self.tools
         if session.policy.disabled_tools:
-            restricted = ToolRegistry()
-            for name in tools.tool_names:
-                tool = tools.get(name)
-                if name not in session.policy.disabled_tools and tool:
-                    restricted.register(tool)
-            tools = restricted
+            tools = tools.excluding(session.policy.disabled_tools)
         ctx.tools = tools
 
         if ctx.kind is TurnKind.SYSTEM:
