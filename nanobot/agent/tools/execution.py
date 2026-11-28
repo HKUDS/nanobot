@@ -186,7 +186,8 @@ async def _execute_tool_call_inner(
             return handled
         return payload, event
 
-    binding = tools.get(tool_call.name) if tool is not None else None
+    # Capture the discovered wrapper; direct calls keep their normal prepare/execute contract.
+    binding = tools.get(tool_call.name) if tools is not run_tools else None
     await hook.before_execute_tool(context, tool_call, tool, params)
     try:
         with file_read_context(tool_call.id, read_results):
